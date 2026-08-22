@@ -17,6 +17,10 @@
    a diff in `examples/` during a refactor chunk is a signal the abstraction leaked.
 4. **Deliberate omissions are stated.** Each chunk lists what it does _not_ do, so review can tell
    "not yet" from "overlooked".
+5. **Nothing outstanding is left without a destination.** A chunk that lands short of its own
+   description says so and names the chunk that finishes the job. "Its own decision" and "later" are
+   not destinations — an item with no chunk number is an item that will be dropped, and chunks 6–8
+   are what that looks like in practice.
 
 ---
 
@@ -229,9 +233,9 @@ The OQ-5 commitment made real: a built-in enum (deadzone, scale, negate, swizzle
   `dt`, so a stateful modifier cannot be written and the trait signature is a breaking change away
   from allowing one. Conditions need the same scratch, which is why this lands with them.
 - **Outstanding → chunk 17:** no `Reflect`, so a custom modifier cannot round-trip (R5.6, R17.5).
-- **Outstanding → its own decision:** "normalize" is still missing from R5.2's list, deliberately.
-  R5.9 now splits the two meanings the one word was hiding; whichever names are chosen, neither may
-  be the bare word, and one of the two rescales.
+- **Outstanding → chunk 17:** "normalize" is still missing from R5.2's list, deliberately. R5.9
+  now splits the two meanings the one word was hiding; whichever names are chosen, neither may be
+  the bare word, and one of the two rescales.
 
 ### 8. Gamepad and the deadzone chain **[PARTIAL]**
 
@@ -265,8 +269,30 @@ Worked example A is complete after this: KBM and gamepad, both bound, one contex
 
 ## Phase III — what is wrong now
 
-Two chunks, both fixing things that are broken today rather than adding capability. Neither is
-optional and both are load-bearing for everything after.
+Three chunks, all fixing things that are broken today rather than adding capability. None is
+optional and all are load-bearing for everything after.
+
+### 24. Housekeeping
+
+The findings from the chunk 5–8 review that belong to no feature, swept before the feature set grows
+over them. Small, and each is a foundation the later chunks stand on.
+
+- **Doctests do not execute.** `dynamic_linking` on the `bevy` dev-dependency breaks the merged
+  doctest binary, so every `///` example compiles but none runs. The public documentation is part of
+  the deliverable, and right now none of it is verified. Fixing it means making `dynamic_linking`
+  opt-in, at the cost of slower example builds — a tradeoff to make deliberately rather than inherit.
+- **An orphan trybuild fixture.** `tests/ui/fail/missing_attrs.rs` and its `.stderr` exist but are
+  not registered in `tests/derive.rs`, so the case they cover is untested. Register or delete.
+- **Module organization.** `InputContextState`, `Actions`, `ActionMapPlugin` and `add_context` live
+  in `player.rs`, which Design §11 reserves for device pairing and control schemes — and which will
+  actually need that space at chunk 22. §11 lists "state" under `action/`; the plugin wants a home
+  of its own. Moving them while the call sites are few costs nothing; moving them after §15's work
+  lands costs a merge.
+
+- **Verified by:** the existing suite, unchanged. This chunk adds no behaviour, so a behavioural
+  diff is a mistake.
+- **Why first:** ground rule 1 wants one reviewable change per chunk, and these would otherwise
+  arrive as noise inside chunks that are about something else.
 
 ### 9. Tick domains and the windowed drain
 
@@ -301,8 +327,19 @@ pair.
   (R14.2).
 - **Unblocks:** R2.9, which Design §5.1 records as unsatisfiable while a binding declares no source
   kind of its own — nothing currently rejects a mouse delta bound to a directional action.
+- **Also settles §2, which this completes rather than merely extends:** R2.2's conversion table is
+  now required to be *decided* in the requirements rather than left to whoever wrote the code first,
+  and it currently is not — a 1D value becomes 2D by copying itself into both components, so a
+  half-pressed trigger reads as a diagonal. Intent is also never checked at bind time (R2.8), and
+  `Vec3` claims every intent including `Button`. Fixing the source shape without these leaves the
+  three-property model two-thirds enforced.
 - **Verified by:** unit tests over the (intent × output × source shape) matrix; a D-pad and WASD
-  proven interchangeable against one composite.
+  proven interchangeable against one composite; a binding whose intent the source cannot serve
+  rejected with a diagnostic.
+- **Also lays the groundwork for R4.9:** a control class is defined over the properties a control
+  declares, not over a list of control identifiers — which is the same declaration this chunk adds
+  for source channel shape, generalized one step. Getting it here means a third-party device kind
+  (R11.2) joins a class the day its backend ships, with no registry to be added to.
 - **Why before Blasteroids:** analog thrust on a trigger is the motivating case, and it is the one
   control that makes an asteroids ship feel like anything.
 
@@ -357,6 +394,24 @@ The single-pass consumption algorithm (R8.3); chords beating their component bin
 - **Gates the rebinding UI.** R19.3 requires conflict detection to use *the same* arbitration rules
   the runtime applies, so there is nothing to check a candidate binding against until this exists.
 
+### 25. Control classes and class bindings
+
+The binding half of R4.9, which chunk 20 only needs as a filter. A binding may target a class; the
+plan grows the second list Design §4.1 describes, consulted when the per-control index does not
+claim an event.
+
+- **Not doing:** focus integration. Nothing in-tree binds a class until a focused widget does, so
+  this chunk lands the mechanism and its tests, and text input follows when D4 does.
+- **Verify `CharacterInput` empirically, do not reason about it.** `KeyboardInput.text` looks like
+  the answer, but IME composition arrives on a separate `bevy_window::Ime` channel and whether key
+  events still carry text during composition is winit- and platform-specific. This deserves the
+  treatment §14's gamepad findings got: measure it, on a real IME, and write down what was actually
+  observed. It is the one predicate in the crate a developer is being told to trust rather than
+  read (R4.9), so it had better be right.
+- **Review surface:** whether R4.10's non-enumerability criterion held. If the set of classes grew
+  past a handful while being written, the criterion was abandoned and the case for a closed set goes
+  with it.
+
 ---
 
 ## Phase VI — the parts a solo developer trips over
@@ -382,6 +437,13 @@ asserted one at a time. Unknown controls, shape mismatches a conversion cannot f
 bindings, contradictory consume flags (R4.8). Plus `Reflect` on modifiers and conditions so
 third-party ones round-trip (R5.6, R17.5), and the derive's duplicate-key error — declaring `path`
 twice currently picks one silently, which for a serialized identity is the worst available outcome.
+
+Also the **runtime** half of R24.4, which the crate currently fails: reading an unbound action
+panics, and so does reading a context that has zero or several instances. R24.4 names both as
+failures that befall a player rather than a developer, so both must return errors.
+
+And R5.9's two `normalize` operations, which need naming before either can be written — one clamps
+to unit length, the other remaps a range and therefore falls under D6's one-rescaling-stage rule.
 
 - **Review surface:** error text, judged as the deliverable it is. R24.4 now distinguishes runtime
   failures (must return errors) from app-build ones (may panic, must be actionable).
@@ -418,6 +480,13 @@ default at every scope (R19.4).
   capture across the scheme, so the button that opens the rebinding screen cannot be rebound away
   nor quietly shadowed by something else. Whether a reachability guarantee sits above that is the
   open half.
+- **Capture reads L1 directly** (R19.1). It is a query over the input frame — "the first event
+  matching this intent, this shape, not excluded, not reserved" — rather than a binding, because
+  what it reports is a control identity that a binding would have thrown away. That also means an
+  evaluator that never runs cannot fire a gameplay action, which is R19.5 for free.
+- **Introduces the shape half of R4.9's class vocabulary** — any-button, any-analog, any-directional
+  — as the filter's language. Exclusion lists and reserved controls use the same vocabulary, so
+  there is one way of naming a set of controls rather than three.
 - **Verified by:** capturing from the **gamepad**, not only the keyboard, which is the case that
   finds the mistakes.
 
@@ -473,7 +542,7 @@ table because Blasteroids needs them.
 | Prompts and glyph ids (§18)                       | asset-pipeline questions this document does not touch                      |
 | Source and authority backends (D3)                | one working in-tree path to generalize _from_                              |
 | Netcode injection and rollback (§10)              | chunk 9, plus a testbed that actually rolls back                           |
-| Focus integration (D4, D5)                        | chunks 13 and 14, which define what claiming a control means               |
+| Focus integration (D4, D5), and with it text input | chunks 13, 14 and 25 — priority, arbitration, and class bindings are what claiming a control means |
 | **Guardian migration**                            | porting guardian from bevy 0.16.1 to 0.20-dev — four versions, its own job |
 
 Guardian is worth restating: it is on **bevy 0.16.1** with `bevy_enhanced_input 0.12`, and we target

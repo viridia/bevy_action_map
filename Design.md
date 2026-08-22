@@ -242,6 +242,31 @@ sharing one binding set hold one plan and ten small state tables. It is invalida
 mutation, device-class changes that affect resolution, and rebinding — never by activation, which only
 flips `active`.
 
+### 4.1 Where class bindings do not fit
+
+The per-control arbitration index above assumes every binding names a control to be indexed under.
+A class binding (R4.9) does not, and the obvious repair — expand a class to its member controls at
+compile time — is unavailable for the class that matters most: "character-producing" is a function
+of keyboard layout and live IME state, so its membership is not known when the plan is built
+(R12.6).
+
+So the plan carries **two** structures, and evaluation consults them in order:
+
+1. the per-control index, walked as §5 describes; then
+2. a short list of class bindings, tested against the event when no indexed binding claimed it.
+
+Two consequences follow, and the second is counter-intuitive enough to be worth stating outright:
+
+- The class list is short by construction, because R4.10 admits a class only where the set is not
+  enumerable. If it ever grows long enough to matter per-frame, that is evidence the criterion has
+  been abandoned rather than evidence the structure needs optimizing.
+- **A class binding is maximally unspecific, so §5's clash rule works against it.** `Ctrl+S` beats
+  "any character key" on chord length, and so does a plain `W` bound in the same context. A class
+  binding therefore never wins by specificity — it wins only by sitting in a higher-priority
+  context, which is exactly how a focused text field is meant to claim the keyboard (R8.2, D4).
+  That the arbitration order also lets a text field's own `Ctrl+S` binding out-rank its character
+  class is not a special case; it is the same rule, doing the right thing twice.
+
 ---
 
 ## 5. Evaluation pipeline

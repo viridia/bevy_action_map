@@ -369,7 +369,8 @@ modifiers). Steam moves the whole binding layer out of the game.
   _specific device instance_ (player 2's pad) — see §14.
 - **R4.4 (SHOULD)** Semantic control aliases (`Submit`, `Cancel`, `MenuLeft`) that resolve per device
   class, so UI code binds once. This is Unity's "usages" and Steam's action-set convention; it is also
-  what makes console confirm-button region swaps (§18.R18.7) tractable.
+  what makes console confirm-button region swaps (§18.R18.7) tractable. An alias resolves to _one_
+  control per device class; R4.9 is the same idea where the answer is a set.
 - **R4.5 (MUST)** Per-binding modifiers and conditions (§5, §6), not only per-action — the same action
   needs different deadzones for stick vs. mouse.
 - **R4.6 (MUST)** Bindings are data: constructible at runtime, serializable, diffable against
@@ -379,6 +380,41 @@ modifiers). Steam moves the whole binding layer out of the game.
   invisible to players until a slot says otherwise.
 - **R4.8 (MUST)** Building or mutating bindings must produce actionable errors (unknown control,
   shape mismatch, duplicate) rather than silently doing nothing.
+- **R4.9 (MUST)** A binding may target a **control class** — a named set of controls — as well as a
+  single control or a composite. §8.R8.4 and §12.R12.6 both require a focused text field to claim
+  character-producing keys "as a class, without the app author enumerating them"; this is the
+  mechanism that satisfies them, and the same vocabulary serves capture filtering (§19.R19.1),
+  exclusion lists (R19.2), and reserved controls (OQ-10).
+
+  Three properties, each ruling out an implementation that looks obvious:
+
+  - **Classes are defined by the properties a control declares, never by enumerating controls.** A
+    class means "every control whose declared shape is button-like", not a list of `KeyCode` and
+    `GamepadButton` variants. This is what lets §11.R11.2's third-party device kinds join a class
+    the day their backend ships, rather than requiring a registry they would have to be added to.
+  - **Membership may depend on the event, not only on the control.** "Character-producing" cannot be
+    a static set of keys: a dead key produces nothing until the following key decides what it
+    becomes, and an IME composition consumes keys that produce no text until it commits (R12.6). The
+    predicate must see the event.
+  - **The set of classes is closed**, and third parties do not define new ones. This is a deliberate
+    reversal of the extensibility this document grants modifiers (R5.6) and conditions (R6.6), for a
+    reason those do not share: a class over text input is a correctness trap. An author writing one
+    by hand will get AZERTY, dead keys, and IME wrong and will never learn it, because the QA pass
+    that types Japanese does not exist (R24.8). Where a mechanism is a footgun rather than a
+    convenience, the crate owns it.
+- **R4.10 (MUST)** A control class must be justified by **non-enumerability**: it exists only where a
+  developer could not reasonably write the set out. "Character-producing keys" qualifies, because the
+  set is a function of layout and IME state. "Any button-shaped control" qualifies, because the
+  device set is open (R11.2). Arrow keys do not — there are four of them, and binding them
+  individually is clearer than a class that hides which ones. Modifiers do not either; R12.3's
+  left/right/either distinction belongs to the chord mechanism.
+
+  Stating the criterion is what keeps a closed set defensible. Without it the set accretes
+  conveniences until it is a query language nobody chose to design, and the argument for closing it
+  in the first place evaporates.
+
+  _If a case later demands an open set, the additive answer is the hybrid R5.6 already uses for
+  modifiers — a closed enum plus one `Custom` variant — not a registry retrofitted underneath._
 
 ---
 
@@ -513,7 +549,7 @@ PassThrough actions, first-match for others.
 - **R8.4 (MUST)** Interop with focus/UI: per D4 (§22), a focused widget claims controls by activating
   a context, and normal context priority does the rest — there is no separate suppression mechanism.
   A focused text field must be able to claim character-producing keys as a class, without the app
-  author enumerating them.
+  author enumerating them — see R4.9 for the mechanism.
 - **R8.5 (SHOULD)** A diagnostic that answers "why did action X not fire" by naming the consumer /
   clash / inactive context (§22).
 - **R8.6 (SHOULD)** Conflicts must be _detectable statically_ for rebinding UI (§19), i.e. the same
@@ -641,7 +677,8 @@ unmodeled.
 - **R12.5 (MUST)** OS key-repeat events (`KeyboardInput::repeat`) must be distinguishable and excluded
   by default from press-edge conditions, while remaining available for text/navigation repeat.
 - **R12.6 (MUST)** Text entry: a focused text field must be able to claim character-producing keys as
-  a class via D4's focus-activated context (§22), rather than through a bespoke suppression mode. Must
+  a class (R4.9) via D4's focus-activated context (§22), rather than through a bespoke suppression
+  mode. Must
   cover the cases where a keypress is not one character: **IME composition**, where Chinese, Japanese,
   and Korean input builds a character over several keystrokes that must not reach gameplay bindings;
   **dead keys**, where a key such as `´` produces nothing until the following key decides what it
@@ -958,6 +995,13 @@ curves ([IGA file][steam-iga]).
 - **R19.1 (MUST)** Interactive capture ("press a key now") that reports the control that would be
   bound and can be canceled. Capture must be filtered by the target slot's intent and shape (§2.R2.7),
   so a slot expecting a button only accepts buttons.
+
+  **Capture reads L1 directly; it is not a binding.** What it reports is a control _identity_, which
+  a binding would have discarded on the way to producing a value — recovering it afterwards would
+  mean promoting R2.6's source tag to a `MUST` purely to undo a loss capture caused. Reading the
+  input frame also makes R19.5 structural: an evaluator that never runs cannot fire a gameplay
+  action. The filter is expressed in R4.9's class vocabulary, so capture, exclusion lists (R19.2),
+  and reserved controls share one way of naming a set of controls rather than three.
 - **R19.2 (MUST)** Exclusion lists during capture (do not capture `Escape`, mouse position, or the UI's
   own navigation controls) so the rebinding UI remains operable.
 - **R19.3 (MUST)** Conflict detection against the same arbitration rules used at runtime (§8.R8.6),
