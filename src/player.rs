@@ -21,7 +21,7 @@ use crate::plan::Plan;
 /// A context instance owns the compiled bindings for a context and the current state for each
 /// action in that context. In an app, one instance usually belongs to one player or gameplay role.
 /// In tests and replays, it lets you drive the same context without a full `World`.
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource)]
 pub struct ContextInstance<C> {
     pub(crate) plan: Plan<C>,
     pub(crate) actions: Vec<ActionState>,

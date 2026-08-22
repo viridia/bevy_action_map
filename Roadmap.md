@@ -46,6 +46,15 @@ punctuation or phrasing in comments.
 **Prefer sketches over applied refactors.** Small, staged, individually reviewable edits — which is
 the same principle as Ground rule 1, applied within a chunk rather than across chunks.
 
+**Comments should be addressed to the right audience**. _Doc comments_ are meant for public-facing documentation, targeted at game developers who want to use the
+crate. These needs to explain basic concepts, usage examples, and in some cases,
+educate the user as to why a function or type is important. They should not explain how the implementation works. It should not reference roadmap stages, design decisions, or numbered requirements, or in general discuss the development status of the project - users don't care about this.
+
+_Internal comments_ are meant for people working on the crate, the author, maintainers, and agents who need to understand the code. This can explain
+theories of operation and call out subtleties; if necessary it can go into
+detail about an algorithm or data structure. However, it should avoid explaining
+basic information that any bevy maintainer or rust programmer would already know.
+
 ---
 
 ## Cross-cutting: the timestamp shim
@@ -168,7 +177,7 @@ Intent-driven conversion between shapes.
   source-agnostic across its four parts and chunk 8 inherits D-pad support with no hat-handling
   path at all.
 
-### 7. Modifiers
+### 7. Modifiers **[COMPLETED]**
 
 The OQ-5 commitment made real: a built-in enum (deadzone, scale, negate, swizzle, clamp, curve) plus
 `Custom(Box<dyn Modifier>)`, and the binding-combinator API of §9.4.

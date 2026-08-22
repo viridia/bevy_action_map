@@ -12,7 +12,7 @@ use crate::binding::BindingSpec;
 // This is a dense binding list plus a slot map from action id to binding index.
 // We build it once when the context is declared, then share it with the
 // evaluator so lookups stay O(1) without rebuilding per frame.
-#[derive(Clone, Debug, Default)]
+#[derive(Default)]
 pub struct Plan<C> {
     bindings: Vec<BindingSpec>,
     slot_by_action: BTreeMap<ActionId, usize>,
