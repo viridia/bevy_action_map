@@ -20,6 +20,34 @@
 
 ---
 
+## House style
+
+This crate is a candidate for eventual upstream inclusion, and game developers as a class are
+sensitive to text that reads as machine-authored — a contribution that reads that way invites
+controversy independently of whether the code is correct. So the standard is: **the code should read
+as though a maintainer of the surrounding codebase wrote it.**
+
+**Comments.** Internal comments are terse. Don't explain what a maintainer already knows — ECS
+semantics, borrow rules, standard Bevy behavior. Comment the non-obvious decision: the thing that
+would break if someone changed it. One or two lines, not a block explaining the mechanism.
+
+**Doc comments are the exception.** Verbosity is welcome on `pub` items. This is a library whose
+public documentation is part of the deliverable (R24.6), so doc comments can be full and
+explanatory in a way internal comments must not be.
+
+**Analysis belongs in the review conversation, not the source file.** The reasoning that produced a
+design — why an alternative was rejected, what the tradeoff was — goes in the chunk's discussion.
+When it genuinely needs to persist, it goes in [Design.md](./Design.md) or the requirements, both of
+which are built for it. What it must not do is accumulate as prose in the code.
+
+**Avoid the tells:** restating what the code says, hedging, enumerating the obvious, unusual
+punctuation or phrasing in comments.
+
+**Prefer sketches over applied refactors.** Small, staged, individually reviewable edits — which is
+the same principle as Ground rule 1, applied within a chunk rather than across chunks.
+
+---
+
 ## Cross-cutting: the timestamp shim
 
 §2 of the design drains a timestamped event queue by time window. Bevy's input events carry no

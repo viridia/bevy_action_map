@@ -1,0 +1,11 @@
+[package]
+name = "padprobe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+gilrs = "0.11.2"
+
+# Its own workspace root, so it stays detached when the parent becomes a workspace (Roadmap chunk 1).
+[workspace]

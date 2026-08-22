@@ -1,16 +1,34 @@
-[package]
-name = "bevy_action_map"
+[workspace]
+members = ["macros"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/viridia/bevy_action_map"
+
+# Public documentation is part of the deliverable, so an undocumented `pub` item is a warning.
+[workspace.lints.rust]
+missing_docs = "warn"
+
+[package]
+name = "bevy_action_map"
 description = "Input action mapping for Bevy: bindings, contexts, devices, and binding presentation"
 keywords = ["bevy", "input", "gamepad", "keybindings"]
 categories = ["game-development"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
 
 # Depend on Bevy subcrates rather than the umbrella: this crate is a candidate for eventual
 # upstream inclusion, and R24.2 asks for a minimal dependency surface. Examples pull the full
 # `bevy` via dev-dependencies instead.
 [dependencies]
+bevy_action_map_macros = { path = "macros", version = "0.1.0" }
 bevy_app = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
 bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
 bevy_input = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
@@ -42,6 +60,11 @@ std = [
   "serde?/std",
 ]
 
+# glam takes its math backend from a feature, and `std` is the one it gets by default. A `no_std`
+# build has to name a replacement or glam refuses to compile at all, so check that configuration as
+# `--no-default-features --features libm`.
+libm = ["bevy_math/libm"]
+
 # Input sources, mirroring bevy_input's own feature layout.
 keyboard = ["bevy_input/keyboard"]
 mouse = ["bevy_input/mouse"]
@@ -65,6 +88,10 @@ focus = ["dep:bevy_input_focus"]
 
 # Deliberately absent: a `scene`/BSN feature. Transitions are plain `EntityEvent`s, so `bsn!`
 # attaches observers with no adapter and no dependency either way (R22.15, R22.17).
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["-Zunstable-options", "--generate-link-to-definition", "--cfg", "docsrs"]
 
 [profile.dev]
 opt-level = 1

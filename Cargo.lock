@@ -468,6 +468,7 @@ name = "bevy_action_map"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_action_map_macros",
  "bevy_app",
  "bevy_ecs",
  "bevy_input",
@@ -476,6 +477,15 @@ dependencies = [
  "bevy_platform",
  "bevy_reflect",
  "serde",
+]
+
+[[package]]
+name = "bevy_action_map_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
