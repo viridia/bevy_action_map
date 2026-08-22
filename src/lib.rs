@@ -59,6 +59,10 @@ pub mod prelude {
     pub use crate::action::{
         ActionId, ActionOutput, ActionValue, InputAction, InputContext, Intent, TickDomain,
     };
+    pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
+
+    #[cfg(feature = "keyboard")]
+    pub use crate::frame::{InputFramePlugin, sample_keyboard_input};
 }
 
 pub use bevy_action_map_macros::{InputAction, InputContext};

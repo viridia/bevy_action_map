@@ -149,7 +149,8 @@ fn parse_action_args(
         output.ok_or_else(|| Error::new(missing_attr_span, "missing #[action(output = ...)]"))?;
     let intent =
         intent.ok_or_else(|| Error::new(missing_attr_span, "missing #[action(intent = ...)]"))?;
-    let path = path.ok_or_else(|| Error::new(missing_attr_span, "missing #[action(path = ...)]"))?;
+    let path =
+        path.ok_or_else(|| Error::new(missing_attr_span, "missing #[action(path = ...)]"))?;
 
     Ok(ActionArgs {
         output,
@@ -191,7 +192,8 @@ fn parse_context_args(
 
     let tick =
         tick.ok_or_else(|| Error::new(missing_attr_span, "missing #[context(tick = ...)]"))?;
-    let path = path.ok_or_else(|| Error::new(missing_attr_span, "missing #[context(path = ...)]"))?;
+    let path =
+        path.ok_or_else(|| Error::new(missing_attr_span, "missing #[context(path = ...)]"))?;
 
     Ok(ContextArgs {
         tick,

@@ -1,7 +1,7 @@
 # Incremental build plan: `bevy_action_map`
 
 > This document orders the work described in [Design.md](./Design.md) into chunks small enough to
-> review individually. It is a *sequence*, not a schedule — there are no dates, and any chunk may be
+> review individually. It is a _sequence_, not a schedule — there are no dates, and any chunk may be
 > revised or reordered once the one before it has been read.
 
 ## Ground rules
@@ -13,9 +13,9 @@
    get either a headless `App` test or a runnable example. No chunk lands whose only justification is
    "the next one needs it".
 3. **The examples are the acceptance test.** From chunk 4 onward there is always something to run.
-   When a later chunk is an internal change, the criterion is that *the examples do not change* —
+   When a later chunk is an internal change, the criterion is that _the examples do not change_ —
    a diff in `examples/` during a refactor chunk is a signal the abstraction leaked.
-4. **Deliberate omissions are stated.** Each chunk lists what it does *not* do, so review can tell
+4. **Deliberate omissions are stated.** Each chunk lists what it does _not_ do, so review can tell
    "not yet" from "overlooked".
 
 ---
@@ -58,13 +58,13 @@ Chunk 3 introduces a `Timestamp` newtype and one function that produces it. Unti
 function returns a monotonically increasing sequence number tagged with the frame it arrived in.
 Consequences, which should be documented in the module and not papered over:
 
-| Property | Under the shim | Requirement |
-| --- | --- | --- |
-| Ordering within a frame | exact | R9.7 |
-| No lost edges across a 0-tick frame | holds | R9.3 |
-| No duplicated edges across a 3-tick frame | holds | R9.4 |
-| Delta magnitude conserved across windows | holds | R9.5 |
-| Sub-frame timing accuracy | **degraded to frame granularity** | R9.8 |
+| Property                                  | Under the shim                    | Requirement |
+| ----------------------------------------- | --------------------------------- | ----------- |
+| Ordering within a frame                   | exact                             | R9.7        |
+| No lost edges across a 0-tick frame       | holds                             | R9.3        |
+| No duplicated edges across a 3-tick frame | holds                             | R9.4        |
+| Delta magnitude conserved across windows  | holds                             | R9.5        |
+| Sub-frame timing accuracy                 | **degraded to frame granularity** | R9.8        |
 
 Everything downstream reads `Timestamp` and never `Instant`, so #9087 lands as a change to one
 function plus the removal of a caveat. Gamepad stays frame-quantized regardless until gilrs polling
@@ -77,7 +77,7 @@ is rewritten (§11), so mixed fidelity across sources is permanent for now, not 
 The goal of Phase I is not features. It is to get a runnable end-to-end path as early as possible so
 that the ergonomics (R24.6) can be judged from real code while they are still cheap to change.
 
-### 1. Workspace and module skeleton
+### 1. Workspace and module skeleton **[COMPLETED]**
 
 Convert the directory into a two-crate workspace: `bevy_action_map` and `bevy_action_map_macros`
 (Rust forces the second; it is re-exported so users never name it). Create the module tree from §11
@@ -89,7 +89,7 @@ as empty modules carrying their doc comments, plus a `prelude`.
   than after code is spread across it.
 - **Size:** manifests plus ~100 lines of doc comments.
 
-### 2. Action identity, value, and intent
+### 2. Action identity, value, and intent **[COMPLETED]**
 
 `ActionValue`, `Intent`, `ActionId` and its interning registry, the `InputAction` trait, the
 `ActionOutput` conversions. Pure data — no ECS, no `bevy_app`, no macros. Test impls are written by
@@ -100,14 +100,14 @@ hand.
   legal for which `Output`, and how each coercion behaves.
 - **Review surface:** the intent-vs-shape split (R2.7–R2.9, D1) is load-bearing for everything that
   follows and costs nothing to change here.
-- **Must handle from the start (R2.10):** *source channel shape* is a third independent property. The
+- **Must handle from the start (R2.10):** _source channel shape_ is a third independent property. The
   motivating case is real and measured — an analog gamepad trigger arrives on a **button** channel
   with a fractional value, so `Analog1`-intent-from-button-shaped-source is not an edge case to bolt
   on later. Building the conversion matrix on (intent × output) alone and adding source shape
   afterwards would be a rewrite of exactly the code this chunk exists to get right.
 - **Size:** ~300 lines and a test module.
 
-### 3. Derive macros
+### 3. Derive macros **[COMPLETED]**
 
 `#[derive(InputAction)]` and `#[derive(InputContext)]`, generating what §9.3 describes.
 
@@ -119,7 +119,7 @@ hand.
   every example twice.
 - **Size:** ~250 lines plus fixtures.
 
-### 4. Input frame (L1), keyboard only
+### 4. Input frame, keyboard only **[COMPLETED]**
 
 The `RawEvent` enum, the timestamped queue, an `InputFrame` resource, and a sampling system in
 `PreUpdate` reading `MessageReader<KeyboardInput>`. The timestamp shim above lives here.
@@ -127,8 +127,8 @@ The `RawEvent` enum, the timestamped queue, an `InputFrame` resource, and a samp
 - **Not doing:** mouse, gamepad, touch; per-player routing; device identity; any windowed drain.
 - **Verified by:** headless `App` tests that write synthetic `KeyboardInput` messages and assert queue
   contents and order.
-- **Review surface:** the shape of L1 as a standalone layer (R0.1) — this is what would eventually
-  become `bevy_input_frame` if the split in §11 ever pays for itself.
+- **Review surface:** the shape of the input frame as a standalone layer (R0.1) — this is what
+  would eventually become `bevy_input_frame` if the split in §11 ever pays for itself.
 - **Size:** ~350 lines.
 
 ### 5. First end-to-end slice — button actions, one context, polling ← **the gate**
@@ -163,9 +163,10 @@ Intent-driven conversion between shapes.
 - **Verified by:** unit tests on composite resolution; `examples/move_and_jump.rs` — worked example A
   minus gamepad.
 - **Review surface:** the named-parts model (D7) in its first concrete form.
-- **Worth more than it looks:** the D-pad reaches L1 as four buttons and never as an axis pair
-  (R14.3), so this one composite covers gamepad D-pads too. Build it to be source-agnostic across its
-  four parts and chunk 8 inherits D-pad support with no hat-handling path at all.
+- **Worth more than it looks:** the D-pad reaches the input frame as four buttons and never as an
+  axis pair (R14.3), so this one composite covers gamepad D-pads too. Build it to be
+  source-agnostic across its four parts and chunk 8 inherits D-pad support with no hat-handling
+  path at all.
 
 ### 7. Modifiers
 
@@ -259,19 +260,19 @@ The single-pass consumption algorithm (R8.3); chords beating their component bin
 
 Not in scope for the sequence above, and each needs its own design pass before it needs code:
 
-| Area | Gated on |
-| --- | --- |
-| Device identity, pairing, local multiplayer (§15) | a real second device to test against |
-| Presentation, prompts, glyph ids (§18) | asset-pipeline questions this document does not touch |
-| Rebinding UI, mappable slots, tunables, presets (D7) | chunks 6–8, which define what a slot *is* |
-| Persistence of overrides (§17) | the binding model settling |
-| Source and authority backends (D3) | one working in-tree path to generalize *from* |
-| Netcode injection and rollback (§10) | chunk 9, plus a testbed that actually rolls back |
-| **Guardian migration** | porting guardian from bevy 0.16.1 to 0.20-dev — four versions, its own job |
+| Area                                                 | Gated on                                                                   |
+| ---------------------------------------------------- | -------------------------------------------------------------------------- |
+| Device identity, pairing, local multiplayer (§15)    | a real second device to test against                                       |
+| Presentation, prompts, glyph ids (§18)               | asset-pipeline questions this document does not touch                      |
+| Rebinding UI, mappable slots, tunables, presets (D7) | chunks 6–8, which define what a slot _is_                                  |
+| Persistence of overrides (§17)                       | the binding model settling                                                 |
+| Source and authority backends (D3)                   | one working in-tree path to generalize _from_                              |
+| Netcode injection and rollback (§10)                 | chunk 9, plus a testbed that actually rolls back                           |
+| **Guardian migration**                               | porting guardian from bevy 0.16.1 to 0.20-dev — four versions, its own job |
 
 Guardian is worth restating: it is on **bevy 0.16.1** with `bevy_enhanced_input 0.12`, and we target
 main. The migration is a genuine goal, but it is a port plus a rewrite, and doing both at once would
-confuse "action_map is wrong" with "0.20 moved this". Examples first; guardian when Phase II is done
-and there is something worth migrating *to*.
+confuse "action*map is wrong" with "0.20 moved this". Examples first; guardian when Phase II is done
+and there is something worth migrating \_to*.
 
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087
