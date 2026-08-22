@@ -82,6 +82,7 @@ pub mod prelude {
     };
     // `InputContextBuilder` is deliberately absent: `add_context` hands one to a closure, so its
     // type is inferred and never written. Import it from `binding` to name it in a signature.
+    pub use crate::binding::DeadZone;
     #[cfg(feature = "keyboard")]
     pub use crate::binding::DirectionalKeys;
     #[cfg(feature = "gamepad")]

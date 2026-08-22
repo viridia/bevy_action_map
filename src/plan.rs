@@ -34,6 +34,21 @@ impl<C> Plan<C> {
         let mut compiled = Vec::with_capacity(bindings.len());
 
         for binding in bindings {
+            // Stretching a value onto a new range means any later threshold stops corresponding to
+            // a physical control position, so the stages of a deadzone chain only compose while at
+            // most one of them does it.
+            let rescaling = binding
+                .modifiers
+                .iter()
+                .filter(|modifier| modifier.rescales())
+                .count();
+            assert!(
+                rescaling <= 1,
+                "binding for {} chains {rescaling} rescaling modifiers; at most one may rescale, \
+                 so all but one need `without_rescale`",
+                binding.path
+            );
+
             let slot = *slot_by_action.entry(binding.action).or_insert_with(|| {
                 slot_intents.push(binding.intent);
                 slot_intents.len() - 1

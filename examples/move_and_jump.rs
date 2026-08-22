@@ -34,7 +34,9 @@ fn main() {
             KeyCode::KeyA,
             KeyCode::KeyD,
         ));
-        context.bind::<Move, _>(Stick::Left).deadzone(0.15);
+        context
+            .bind::<Move, _>(Stick::Left)
+            .dead_zone(DeadZone::radial(0.15));
         context.bind::<Jump, _>(KeyCode::Space);
         context.bind::<Jump, _>(GamepadButton::South);
     });
@@ -42,7 +44,7 @@ fn main() {
         context.bind_mouse_motion::<Look>();
         context
             .bind::<Look, _>(Stick::Right)
-            .deadzone(0.12)
+            .dead_zone(DeadZone::radial(0.12))
             .curve(1.8);
     });
     // The player owns the on-foot bindings; the camera looks around on its own.

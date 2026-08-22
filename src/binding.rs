@@ -45,8 +45,10 @@ impl DirectionalKeys {
 pub(crate) struct BindingSpec {
     pub(crate) action: ActionId,
     // Carried from the action type at bind time: the plan keys state by `ActionId`, which does not
-    // reach back to the type, and folding several bindings into one action needs the intent.
+    // reach back to the type, and folding several bindings into one action needs the intent. The
+    // path is here so plan-build diagnostics can name the action a mistake is in.
     pub(crate) intent: Intent,
+    pub(crate) path: &'static str,
     pub(crate) source: BindingSource,
     pub(crate) modifiers: Vec<BindingModifier>,
 }
@@ -114,16 +116,100 @@ impl BindingSourceSpec<Vec2> for Stick {
     }
 }
 
+/// How a deadzone measures the region it removes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeadZoneShape {
+    /// One circular region around centre, measured on the vector as a whole.
+    ///
+    /// This is what a stick wants. A stick pushed diagonally sits the same distance from centre as
+    /// one pushed straight, so measuring the whole vector treats every direction alike.
+    Radial,
+    /// An independent band on each axis.
+    ///
+    /// Right where the axes mean unrelated things — a throttle and a rudder on one device — and
+    /// wrong for a stick, where it produces the classic square-cornered response: the diagonals
+    /// stay live at deflections where the cardinal directions have already gone dead.
+    PerAxis,
+}
+
+/// The region around centre that reads as no input.
+///
+/// Every physical control rests slightly off centre, and a deadzone is what stops that from
+/// reading as intent. Choose the [shape](DeadZoneShape) that matches the control, and decide
+/// whether what remains is stretched back over the full range.
+///
+/// ```rust
+/// use bevy_action_map::binding::DeadZone;
+///
+/// // The usual case: ignore the first 15% of a stick's travel, and let the rest still reach 1.0.
+/// let stick = DeadZone::radial(0.15);
+///
+/// // A trimming pass that must not disturb what a later deadzone measures.
+/// let trim = DeadZone::radial(0.05).without_rescale();
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DeadZone {
+    /// How the region is measured.
+    pub shape: DeadZoneShape,
+    /// How far the region extends from centre, as a fraction of full deflection.
+    pub lower: f32,
+    /// Whether what survives is stretched back over the full range.
+    ///
+    /// With rescaling on, a control just past the deadzone reads near zero and full deflection
+    /// still reads 1.0, which is what makes a deadzone feel like nothing was taken away. It is
+    /// almost always what you want, and it is the default.
+    ///
+    /// Turn it off when something later in the chain measures the same quantity. Stretching the
+    /// range means a threshold further along no longer corresponds to any particular physical
+    /// position, so at most one deadzone acting on a value may rescale.
+    pub rescale: bool,
+}
+
+impl DeadZone {
+    /// Removes a circular region around centre, rescaling what remains.
+    pub const fn radial(lower: f32) -> Self {
+        Self {
+            shape: DeadZoneShape::Radial,
+            lower,
+            rescale: true,
+        }
+    }
+
+    /// Removes an independent band on each axis, rescaling what remains.
+    pub const fn per_axis(lower: f32) -> Self {
+        Self {
+            shape: DeadZoneShape::PerAxis,
+            lower,
+            rescale: true,
+        }
+    }
+
+    /// Removes the region without stretching what remains back over the full range.
+    pub const fn without_rescale(mut self) -> Self {
+        self.rescale = false;
+        self
+    }
+}
+
 /// A modifier that transforms one source value before it is written to an action.
 pub trait Modifier: Send + Sync + 'static {
     /// Applies the modifier to a runtime value.
     fn apply(&self, value: ActionValue) -> ActionValue;
+
+    /// Whether this modifier stretches its input onto a different range.
+    ///
+    /// At most one modifier acting on a value may do this, because a later stage's threshold stops
+    /// corresponding to a physical position once an earlier one has rescaled. Say `true` here if
+    /// yours does, and a binding that stacks two will be rejected when its context is declared.
+    fn rescales(&self) -> bool {
+        false
+    }
 }
 
 /// Built-in modifiers that can be chained onto a binding.
 pub enum BindingModifier {
-    /// Suppresses small values near zero and rescales the remainder.
-    Deadzone(f32),
+    /// Suppresses values near centre, per [`DeadZone`].
+    DeadZone(DeadZone),
     /// Multiplies the value by a scalar.
     Scale(f32),
     /// Flips the sign or boolean sense of the value.
@@ -147,13 +233,22 @@ impl BindingModifier {
     /// Applies this modifier to a runtime value.
     pub fn apply(&self, value: ActionValue) -> ActionValue {
         match self {
-            Self::Deadzone(radius) => apply_deadzone(value, *radius),
+            Self::DeadZone(dead_zone) => apply_dead_zone(value, *dead_zone),
             Self::Scale(scale) => apply_scale(value, *scale),
             Self::Negate => apply_negate(value),
             Self::Swizzle => apply_swizzle(value),
             Self::Clamp { min, max } => apply_clamp(value, *min, *max),
             Self::Curve(power) => apply_curve(value, *power),
             Self::Custom(modifier) => modifier.apply(value),
+        }
+    }
+
+    /// Whether this modifier stretches its input onto a different range.
+    pub fn rescales(&self) -> bool {
+        match self {
+            Self::DeadZone(dead_zone) => dead_zone.rescale,
+            Self::Custom(modifier) => modifier.rescales(),
+            _ => false,
         }
     }
 }
@@ -169,9 +264,13 @@ impl<'a, C> BindingHandle<'a, C> {
         self.builder.bindings[self.index].modifiers.push(modifier);
     }
 
-    /// Adds a deadzone modifier.
-    pub fn deadzone(mut self, radius: f32) -> Self {
-        self.push_modifier(BindingModifier::Deadzone(radius));
+    /// Adds a deadzone.
+    ///
+    /// ```ignore
+    /// context.bind::<Move, _>(Stick::Left).dead_zone(DeadZone::radial(0.15));
+    /// ```
+    pub fn dead_zone(mut self, dead_zone: DeadZone) -> Self {
+        self.push_modifier(BindingModifier::DeadZone(dead_zone));
         self
     }
 
@@ -232,6 +331,7 @@ impl<C> InputContextBuilder<C> {
         self.bindings.push(BindingSpec {
             action: A::id(),
             intent: A::INTENT,
+            path: A::PATH,
             source,
             modifiers: Vec::new(),
         });
@@ -283,28 +383,65 @@ impl<C> InputContextBuilder<C> {
     }
 }
 
-fn apply_deadzone(value: ActionValue, radius: f32) -> ActionValue {
-    match value {
-        ActionValue::Bool(value) => ActionValue::Bool(value),
-        ActionValue::Axis1(value) => {
-            let magnitude = value.abs();
-            if magnitude <= radius {
-                ActionValue::Axis1(0.0)
-            } else {
-                let scaled = (magnitude - radius) / (1.0 - radius);
-                ActionValue::Axis1(value.signum() * scaled)
-            }
+fn apply_dead_zone(value: ActionValue, dead_zone: DeadZone) -> ActionValue {
+    match (value, dead_zone.shape) {
+        // A deadzone measures distance from centre, which a boolean does not have.
+        (ActionValue::Bool(value), _) => ActionValue::Bool(value),
+
+        // One axis has only one distance to measure, so both shapes agree on it.
+        (ActionValue::Axis1(value), _) => ActionValue::Axis1(dead_zone_scalar(value, dead_zone)),
+
+        (ActionValue::Axis2(value), DeadZoneShape::Radial) => {
+            ActionValue::Axis2(dead_zone_radial(value, value.length(), dead_zone))
         }
-        ActionValue::Axis2(value) => {
-            let magnitude = value.length();
-            if magnitude <= radius {
-                ActionValue::Axis2(Vec2::ZERO)
-            } else {
-                let scaled = (magnitude - radius) / (1.0 - radius);
-                ActionValue::Axis2(value.normalize() * scaled)
-            }
+        (ActionValue::Axis3(value), DeadZoneShape::Radial) => {
+            ActionValue::Axis3(dead_zone_radial(value, value.length(), dead_zone))
         }
-        ActionValue::Axis3(value) => ActionValue::Axis3(value),
+
+        (ActionValue::Axis2(value), DeadZoneShape::PerAxis) => ActionValue::Axis2(Vec2::new(
+            dead_zone_scalar(value.x, dead_zone),
+            dead_zone_scalar(value.y, dead_zone),
+        )),
+        (ActionValue::Axis3(value), DeadZoneShape::PerAxis) => {
+            ActionValue::Axis3(bevy_math::Vec3::new(
+                dead_zone_scalar(value.x, dead_zone),
+                dead_zone_scalar(value.y, dead_zone),
+                dead_zone_scalar(value.z, dead_zone),
+            ))
+        }
+    }
+}
+
+/// Removes `lower` from a distance, optionally stretching what remains back over the full range.
+fn dead_zone_remainder(magnitude: f32, dead_zone: DeadZone) -> f32 {
+    let remainder = magnitude - dead_zone.lower;
+    if dead_zone.rescale {
+        // A deadzone at or above full deflection leaves nothing to stretch.
+        remainder / (1.0 - dead_zone.lower).max(f32::EPSILON)
+    } else {
+        remainder
+    }
+}
+
+fn dead_zone_scalar(value: f32, dead_zone: DeadZone) -> f32 {
+    let magnitude = value.abs();
+    if magnitude <= dead_zone.lower {
+        0.0
+    } else {
+        value.signum() * dead_zone_remainder(magnitude, dead_zone)
+    }
+}
+
+fn dead_zone_radial<V>(value: V, magnitude: f32, dead_zone: DeadZone) -> V
+where
+    V: core::ops::Mul<f32, Output = V> + Default,
+{
+    if magnitude <= dead_zone.lower {
+        V::default()
+    } else {
+        // Scale the vector rather than normalizing it: direction is preserved exactly, and a
+        // magnitude that survived the test above cannot be zero.
+        value * (dead_zone_remainder(magnitude, dead_zone) / magnitude)
     }
 }
 
@@ -346,14 +483,28 @@ fn apply_clamp(value: ActionValue, min: f32, max: f32) -> ActionValue {
     }
 }
 
+// The curve shapes distance from centre, not each axis on its own. Shaping the axes separately
+// bends the direction a stick is pointing: a 45° push has both components raised to the power,
+// which moves the result off the diagonal.
 fn apply_curve(value: ActionValue, power: f32) -> ActionValue {
     match value {
         ActionValue::Bool(value) => ActionValue::Bool(value),
         ActionValue::Axis1(value) => {
             ActionValue::Axis1(value.signum() * bevy_math::ops::powf(value.abs(), power))
         }
-        ActionValue::Axis2(value) => ActionValue::Axis2(value.signum() * value.abs().powf(power)),
-        ActionValue::Axis3(value) => ActionValue::Axis3(value.signum() * value.abs().powf(power)),
+        ActionValue::Axis2(value) => ActionValue::Axis2(curve_radial(value, value.length(), power)),
+        ActionValue::Axis3(value) => ActionValue::Axis3(curve_radial(value, value.length(), power)),
+    }
+}
+
+fn curve_radial<V>(value: V, magnitude: f32, power: f32) -> V
+where
+    V: core::ops::Mul<f32, Output = V> + Default,
+{
+    if magnitude == 0.0 {
+        V::default()
+    } else {
+        value * (bevy_math::ops::powf(magnitude, power) / magnitude)
     }
 }
 
@@ -402,7 +553,7 @@ mod tests {
     fn built_in_modifiers_are_pure_functions() {
         let cases = [
             (
-                BindingModifier::Deadzone(0.25),
+                BindingModifier::DeadZone(DeadZone::radial(0.25)),
                 ActionValue::Axis1(0.1),
                 ActionValue::Axis1(0.0),
             ),
@@ -459,7 +610,7 @@ mod tests {
             .bind::<DummyButton, _>(KeyCode::Space)
             .scale(2.0)
             .negate()
-            .deadzone(0.1);
+            .dead_zone(DeadZone::radial(0.1));
 
         let bindings = builder.finish();
         assert_eq!(bindings.len(), 1);
@@ -471,7 +622,7 @@ mod tests {
         assert!(matches!(bindings[0].modifiers[1], BindingModifier::Negate));
         assert!(matches!(
             bindings[0].modifiers[2],
-            BindingModifier::Deadzone(0.1)
+            BindingModifier::DeadZone(_)
         ));
     }
 
@@ -492,5 +643,81 @@ mod tests {
             bindings[1].source,
             BindingSource::GamepadStick(Stick::Left)
         ));
+    }
+
+    fn dead_zoned(dead_zone: DeadZone, value: Vec2) -> Vec2 {
+        match BindingModifier::DeadZone(dead_zone).apply(ActionValue::Axis2(value)) {
+            ActionValue::Axis2(value) => value,
+            other => panic!("expected Axis2, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_radial_dead_zone_treats_every_direction_alike() {
+        let dead_zone = DeadZone::radial(0.5);
+
+        // A diagonal push of the same length as a cardinal one is inside the zone too. A per-axis
+        // zone of the same size would let this through.
+        let diagonal = Vec2::splat(core::f32::consts::FRAC_1_SQRT_2 * 0.4);
+        assert_eq!(dead_zoned(dead_zone, diagonal), Vec2::ZERO);
+        assert_eq!(dead_zoned(dead_zone, Vec2::new(0.4, 0.0)), Vec2::ZERO);
+
+        // Direction survives the zone unchanged; only the distance is remapped.
+        let out = dead_zoned(dead_zone, Vec2::new(0.75, 0.0));
+        assert!((out.x - 0.5).abs() < 1e-6, "{out:?}");
+        assert_eq!(out.y, 0.0);
+    }
+
+    #[test]
+    fn a_per_axis_dead_zone_measures_each_axis_on_its_own() {
+        let dead_zone = DeadZone::per_axis(0.5);
+
+        // The axis past the threshold survives while the one inside it does not.
+        let out = dead_zoned(dead_zone, Vec2::new(0.75, 0.25));
+        assert!((out.x - 0.5).abs() < 1e-6, "{out:?}");
+        assert_eq!(out.y, 0.0);
+    }
+
+    #[test]
+    fn rescaling_restores_full_range_and_declining_it_does_not() {
+        let rescaled = dead_zoned(DeadZone::radial(0.2), Vec2::new(1.0, 0.0));
+        assert!((rescaled.x - 1.0).abs() < 1e-6, "{rescaled:?}");
+
+        // Without rescaling the zone is subtracted and nothing is stretched, so full deflection
+        // reads short by exactly the zone.
+        let kept = dead_zoned(DeadZone::radial(0.2).without_rescale(), Vec2::new(1.0, 0.0));
+        assert!((kept.x - 0.8).abs() < 1e-6, "{kept:?}");
+    }
+
+    #[test]
+    fn a_dead_zone_applies_in_three_dimensions() {
+        let value = ActionValue::Axis3(bevy_math::Vec3::new(0.1, 0.1, 0.1));
+        assert_eq!(
+            BindingModifier::DeadZone(DeadZone::radial(0.5)).apply(value),
+            ActionValue::Axis3(bevy_math::Vec3::ZERO)
+        );
+    }
+
+    #[test]
+    fn a_curve_shapes_distance_without_bending_direction() {
+        let diagonal = Vec2::splat(core::f32::consts::FRAC_1_SQRT_2 * 0.5);
+        let curved = match BindingModifier::Curve(2.0).apply(ActionValue::Axis2(diagonal)) {
+            ActionValue::Axis2(value) => value,
+            other => panic!("expected Axis2, got {other:?}"),
+        };
+
+        assert!((curved.length() - 0.25).abs() < 1e-6, "{curved:?}");
+        assert!(
+            (curved.x - curved.y).abs() < 1e-6,
+            "still on the diagonal: {curved:?}"
+        );
+    }
+
+    #[test]
+    fn only_a_deliberately_rescaling_modifier_reports_that_it_does() {
+        assert!(BindingModifier::DeadZone(DeadZone::radial(0.1)).rescales());
+        assert!(!BindingModifier::DeadZone(DeadZone::radial(0.1).without_rescale()).rescales());
+        assert!(!BindingModifier::Scale(2.0).rescales());
+        assert!(!BindingModifier::Custom(Box::new(DoubleAxis)).rescales());
     }
 }

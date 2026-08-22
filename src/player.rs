@@ -307,9 +307,9 @@ mod tests {
     };
     use bevy_math::Vec2;
 
-    use crate::binding::DirectionalKeys;
     #[cfg(feature = "gamepad")]
     use crate::binding::Stick;
+    use crate::binding::{DeadZone, DirectionalKeys};
     use crate::frame::InputFrame;
     #[cfg(feature = "gamepad")]
     use bevy_input::gamepad::{
@@ -481,7 +481,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<OnFoot, _>(|context| {
-            context.bind::<Move, _>(Stick::Left).deadzone(0.2);
+            context
+                .bind::<Move, _>(Stick::Left)
+                .dead_zone(DeadZone::radial(0.2));
             context.bind::<Jump, _>(GamepadButton::South);
             context.bind::<Look, _>(Stick::Right);
         });
@@ -729,6 +731,33 @@ mod tests {
             Phase::Ongoing
         );
         assert!(world.get::<InputContextState<OnFoot>>(second).is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "at most one may rescale")]
+    fn stacking_two_rescaling_dead_zones_is_rejected() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook, _>(|context| {
+            context
+                .bind_mouse_motion::<Look>()
+                .dead_zone(DeadZone::radial(0.05))
+                .dead_zone(DeadZone::radial(0.15));
+        });
+    }
+
+    #[test]
+    fn a_trimming_dead_zone_composes_with_a_rescaling_one() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook, _>(|context| {
+            context
+                .bind_mouse_motion::<Look>()
+                .dead_zone(DeadZone::radial(0.05).without_rescale())
+                .dead_zone(DeadZone::radial(0.15));
+        });
+        app.world_mut().spawn(FreeLook);
+        app.update();
     }
 
     #[test]

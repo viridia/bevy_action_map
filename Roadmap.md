@@ -20,6 +20,16 @@
 
 ---
 
+## Commit Messages
+
+To be compatible with Bevy's AI policy (not just the policy but the discussions that preceded it):
+
+Commit messages should not say "Co-authored by" an LLM. Rather, it should
+have a section "LLM Usage Disclosure", which briefly explains the role the
+LLM played in crafting the commit.
+
+---
+
 ## House style
 
 This crate is a candidate for eventual upstream inclusion, and game developers as a class are

@@ -1189,8 +1189,11 @@ These are the forks where the choice cascades; everything else is comparatively 
 
 4. ~~**OQ-4 — Deadzone ownership**~~ _Resolved as **D6** (§14): consume raw, own all three stages —
    calibration (per unit), design (per binding), preference (per player) — with at most one rescaling
-   stage. Open sub-question: whether stage 1 calibration ships with auto-detection of the rest
-   envelope in v1 or only a manual calibration API (R14.11)._
+   stage. Sub-question also resolved: stage 1 ships with a **manual calibration API plus a sampling
+   helper the app drives during an explicit calibration step**, not background auto-detection —
+   detection running while a stick is deflected would learn that position as centre, and hardware
+   that misreports (see the README) would poison it silently. Stage 2 is the stage that rescales
+   (Design §8.1)._
 5. **OQ-5 — Modifier/condition extensibility mechanism** (§5.R5.6/§6.R6.6): trait objects vs. reflected
    registry — trades ergonomics against serializability and determinism.
 6. **OQ-6 — Fixed/render dual state** (§9.R9.2): two parallel states, or one state with per-tick edge

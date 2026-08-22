@@ -419,6 +419,36 @@ steady state (R23.2). Conditions get the identical treatment.
 Note `rescale` on `DeadZone`: D6 permits at most one rescaling stage, and making it explicit per
 modifier is what lets calibration, design, and preference deadzones compose (R5.3).
 
+### 8.1 The deadzone stages, and which one exists
+
+D6 splits the deadzone into three stages because three parties have a claim on it and they are
+answering different questions (Requirements §14). Only the middle one is built:
+
+| Stage | Where it runs | Rescales | Status |
+| --- | --- | --- | --- |
+| **1 · Calibration** — this unit's true centre and rest envelope | L1→L2, before the modifier chain | no | not built |
+| **2 · Design** — what shape and curve the mechanic wants | the binding's modifier chain | **yes**, by default | **built** |
+| **3 · Preference** — the player's comfort adjustment | modulates stage 2 | no | not built |
+
+Stage 2 is the one that rescales, and that assignment is not arbitrary. Rescaling is what makes a
+deadzone feel like nothing was taken away — full deflection still reads 1.0 — and stage 2 is the only
+stage whose threshold the player never sees a number for. If stage 1 rescaled instead, the
+developer's `0.15` would stop denoting a physical stick position, which is precisely the failure D6's
+one-rescaling-stage rule exists to prevent.
+
+The rule is enforced where a plan is compiled: a binding whose chain stacks two rescaling modifiers
+is rejected when its context is declared, naming the action. `Modifier::rescales` carries the same
+obligation across to third-party modifiers, defaulting to `false` so that only a modifier that
+deliberately stretches its range has to say so.
+
+**Not yet answered by stage 2 alone.** Calibration is per device *unit* — drift is a wear
+characteristic — so it needs the evaluator to stop merging every pad into one axis map, and
+persistence needs the stable device identity of R11.5. Stage 3 needs the per-player scope of §15.
+Both are the next chunk. Per OQ-4's sub-question, stage 1 will ship with a **manual calibration API
+plus a sampling helper the app drives during an explicit "hold the stick still" step**, not
+background auto-detection: a stick deflected while detection is running would be learned as centre,
+and the misbehaving hardware in the README would poison it outright.
+
 ---
 
 ## 9. Developer experience
