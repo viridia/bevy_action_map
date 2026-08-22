@@ -69,6 +69,14 @@ fn expand_input_action(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
             type Output = #output;
             const INTENT: ::bevy_action_map::action::Intent = ::bevy_action_map::action::Intent::#intent;
             const PATH: &'static str = #path;
+
+            fn id() -> ::bevy_action_map::action::ActionId {
+                // Rust has no generic statics, so the cache cannot live on the trait's default
+                // method — but this impl is concrete, so it can hold one.
+                static ID: ::bevy_action_map::action::ActionIdCache =
+                    ::bevy_action_map::action::ActionIdCache::new();
+                ID.get_or_intern(#path)
+            }
         }
     })
 }

@@ -44,6 +44,7 @@
 
 use alloc::vec::Vec;
 use bevy_math::{Vec2, Vec3};
+use bevy_platform::sync::atomic::{AtomicU32, Ordering};
 use core::fmt;
 
 #[cfg(feature = "bevy_reflect")]
@@ -344,6 +345,10 @@ pub trait InputAction: Send + Sync + 'static {
     const PATH: &'static str;
 
     /// Returns the registered id for this action type.
+    ///
+    /// The derive overrides this with a cached version, so reading an action costs an atomic load
+    /// rather than a registry lookup. A hand-written impl gets the uncached path unless it does the
+    /// same — see [`ActionIdCache`].
     fn id() -> ActionId {
         intern_action(Self::PATH)
     }
@@ -357,6 +362,9 @@ struct ActionRegistry {
 
 static ACTION_REGISTRY: bevy_platform::sync::OnceLock<bevy_platform::sync::Mutex<ActionRegistry>> =
     bevy_platform::sync::OnceLock::new();
+
+/// The index [`ActionIdCache`] uses to mean "not resolved yet", and therefore never a real id.
+const UNRESOLVED: u32 = u32::MAX;
 
 fn intern_action(path: &'static str) -> ActionId {
     let mut registry = ACTION_REGISTRY
@@ -373,13 +381,63 @@ fn intern_action(path: &'static str) -> ActionId {
     }
 
     let index = registry.next_id;
-    registry.next_id = registry
-        .next_id
-        .checked_add(1)
-        .expect("action registry exhausted u32 ids");
+    assert!(index < UNRESOLVED, "action registry exhausted u32 ids");
+    registry.next_id = index + 1;
     let id = ActionId(index);
     registry.entries.push((path, id));
     id
+}
+
+/// Remembers the [`ActionId`] for one action so it is resolved once rather than on every read.
+///
+/// The derive generates one of these per action and you will not normally name it. Reach for it
+/// only if you are writing an `InputAction` impl by hand and want reads to cost the same as a
+/// derived one:
+///
+/// ```rust
+/// use bevy_action_map::action::{ActionId, ActionIdCache, InputAction, Intent};
+///
+/// struct Jump;
+///
+/// impl InputAction for Jump {
+///     type Output = bool;
+///     const INTENT: Intent = Intent::Button;
+///     const PATH: &'static str = "gameplay.jump";
+///
+///     fn id() -> ActionId {
+///         static ID: ActionIdCache = ActionIdCache::new();
+///         ID.get_or_intern(Self::PATH)
+///     }
+/// }
+/// ```
+pub struct ActionIdCache(AtomicU32);
+
+impl ActionIdCache {
+    /// Creates an empty cache, to be stored in a `static` alongside one action's impl.
+    pub const fn new() -> Self {
+        Self(AtomicU32::new(UNRESOLVED))
+    }
+
+    /// Returns the id for `path`, registering it the first time and reusing it after.
+    pub fn get_or_intern(&self, path: &'static str) -> ActionId {
+        // Relaxed is enough: nothing is published through this value. It is either the sentinel or
+        // the right id, and two threads racing both resolve the same path to the same number, so
+        // the worst case is interning once more than necessary.
+        match self.0.load(Ordering::Relaxed) {
+            UNRESOLVED => {
+                let id = intern_action(path);
+                self.0.store(id.index(), Ordering::Relaxed);
+                id
+            }
+            index => ActionId(index),
+        }
+    }
+}
+
+impl Default for ActionIdCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -411,6 +469,40 @@ mod tests {
         assert_eq!(Jump::id(), Jump::id());
         assert_ne!(Jump::id(), Look::id());
         assert_eq!(Jump::id().index(), Jump::id().index());
+    }
+
+    #[test]
+    fn a_cached_id_agrees_with_the_registry_and_stays_put() {
+        static ID: ActionIdCache = ActionIdCache::new();
+
+        // The first call resolves through the registry; later ones must not disagree with it.
+        let first = ID.get_or_intern(Jump::PATH);
+        assert_eq!(first, intern_action(Jump::PATH));
+        assert_eq!(first, ID.get_or_intern(Jump::PATH));
+        assert_eq!(first, Jump::id());
+    }
+
+    #[test]
+    fn separate_caches_for_separate_paths_do_not_collide() {
+        static FIRST: ActionIdCache = ActionIdCache::new();
+        static SECOND: ActionIdCache = ActionIdCache::new();
+
+        assert_ne!(
+            FIRST.get_or_intern("tests::CacheA"),
+            SECOND.get_or_intern("tests::CacheB")
+        );
+    }
+
+    #[test]
+    fn a_derived_action_caches_its_id() {
+        #[derive(crate::InputAction)]
+        #[action(path = "tests.derived_cache", output = bool, intent = Button)]
+        struct Derived;
+
+        // Whatever the derive generated has to agree with the registry, or a plan compiled from
+        // one and read through the other would silently address the wrong slot.
+        assert_eq!(Derived::id(), intern_action("tests.derived_cache"));
+        assert_eq!(Derived::id(), Derived::id());
     }
 
     #[test]

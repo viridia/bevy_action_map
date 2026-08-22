@@ -289,6 +289,18 @@ over them. Small, and each is a foundation the later chunks stand on.
   of its own. Moving them while the call sites are few costs nothing; moving them after §15's work
   lands costs a merge.
 
+- **Resolving an action id took a mutex and a linear scan on every read**, which R23.2 now names
+  explicitly. Rust has no generic statics, so the cache cannot sit on the trait's default method —
+  but the derive emits a concrete impl, and a concrete impl can hold a `static`. Steady state is a
+  relaxed atomic load and a compare. The registry's mutex remains for the first resolution of each
+  action, which happens at plugin build because `bind::<A>()` already calls `A::id()`, so it never
+  appears in a frame.
+
+  Two notes for whoever touches this again. The atomic comes from `bevy_platform::sync::atomic`,
+  not `core` — `bevy_ecs` routes its own through there so the polyfill for platforms without atomic
+  support keeps working, and matching it costs nothing. And the per-type cache is only sound
+  because `ActionId` is process-global; Bevy cannot do the same for `ComponentId`, which is
+  per-`World`.
 - **Verified by:** the existing suite, unchanged. This chunk adds no behaviour, so a behavioural
   diff is a mistake.
 - **Why first:** ground rule 1 wants one reviewable change per chunk, and these would otherwise
@@ -521,8 +533,7 @@ without being able to reduce it below what the hardware needs.
 ### 10. The compiled plan and slot allocation
 
 Replace the plan's `BTreeMap` with the `Vec<u16>` action→slot map, the dirty bitset, and the
-`Scratch` table's allocation. Also retires the mutex and linear scan that `ActionId::of` currently
-performs on every read, which R23.2 now names explicitly.
+`Scratch` table's allocation.
 
 - **Success criterion: `examples/` does not change.** A diff there means the abstraction leaked.
 - **Why last:** it is an optimization of a shape we now understand, and it is the only chunk that
