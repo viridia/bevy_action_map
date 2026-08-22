@@ -306,7 +306,7 @@ over them. Small, and each is a foundation the later chunks stand on.
 - **Why first:** ground rule 1 wants one reviewable change per chunk, and these would otherwise
   arrive as noise inside chunks that are about something else.
 
-### 9. Tick domains and the windowed drain
+### 9. Tick domains and the windowed drain **[PARTIAL]**
 
 Retire events by **window** instead of clearing the frame each sample. `tick = Render` drains
 `[last frame, now]`; `tick = Fixed` drains its own tick's window. Accumulated deltas split across
@@ -325,6 +325,24 @@ between a game that drops shots and one that does not.
   snapshot (R10.3, R23.2). The drain and that storage are one problem.
 - **Review surface:** the queue as the design's central bet (Design §2). It is the crate's stated
   advantage over LWIM and BEI, and until this lands it is prose.
+- **Delivered:** retirement moved from sample time to after fixed evaluation, which is the moment
+  every consumer has read — render-tick contexts drained in `PreUpdate` earlier in the same frame,
+  fixed-tick ones just now. Each context carries a cursor and reads only what arrived since it last
+  looked, seeded at spawn so a context added mid-session does not react to input that predates it
+  (R7.5). The queue is capped and counts what it drops, so a stall degrades visibly rather than
+  without bound.
+- **Under the shim, a window is a frame.** Timestamps are frame-granular, so a frame's events
+  cannot be meaningfully split across three fixed ticks — the first tick to run takes them all and
+  the rest see nothing new. That conserves delta magnitude (R9.5) and fires an edge exactly once
+  (R9.4) without pretending to a precision the timestamps do not have. Real per-tick splitting
+  arrives with bevy#9087, and changes this one policy rather than the mechanism.
+- **Outstanding → chunk 12:** an action that fires *and* completes inside one window is still only
+  observable as its final phase, because a polling reader has one `Phase` to report. Design §5 is
+  explicit that R3.3 is satisfied by the transition log rather than by polling, so the L1 half of
+  R9.3 is done — the events reach the tick that wants them — and the L2 half lands with the log.
+- **Outstanding → netcode (deferred table):** held device state is still `BTreeSet`/`HashMap` on the
+  context, so it is neither `Copy` nor cheap to snapshot (R10.3). Draining incrementally removed the
+  bug that mattered; making it snapshot-able is rollback's problem and wants rollback's testbed.
 
 ### 15. Source channel shape
 

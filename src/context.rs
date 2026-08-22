@@ -26,6 +26,7 @@ use bevy_platform::sync::Arc;
 use crate::action::{ActionOutput, ActionState, InputAction, InputContext, Phase, TickDomain};
 use crate::binding::InputContextBuilder;
 use crate::eval::evaluate_context;
+use crate::frame::{InputFrame, Timestamp};
 use crate::plan::Plan;
 use crate::{ActionMapPlugin, ActionMapSystems};
 #[cfg(feature = "gamepad")]
@@ -52,6 +53,9 @@ pub(crate) struct InputContextPlan<C> {
 pub struct InputContextState<C> {
     pub(crate) plan: Arc<Plan<C>>,
     pub(crate) actions: Vec<ActionState>,
+    // The last event this context has read. Seeded at spawn rather than left empty, so a context
+    // added mid-session starts from the present instead of replaying whatever is still queued.
+    pub(crate) read_through: Option<Timestamp>,
     #[cfg(feature = "keyboard")]
     pub(crate) held_buttons: BTreeSet<bevy_input::keyboard::KeyCode>,
     #[cfg(feature = "gamepad")]
@@ -62,12 +66,13 @@ pub struct InputContextState<C> {
 }
 
 impl<C> InputContextState<C> {
-    pub(crate) fn new(plan: Arc<Plan<C>>) -> Self {
+    pub(crate) fn new(plan: Arc<Plan<C>>, read_through: Option<Timestamp>) -> Self {
         let actions = alloc::vec![ActionState::default(); plan.slot_count()];
 
         Self {
             plan,
             actions,
+            read_through,
             #[cfg(feature = "keyboard")]
             held_buttons: BTreeSet::new(),
             #[cfg(feature = "gamepad")]
@@ -194,7 +199,13 @@ fn attach_context_state<C: InputContext + Component>(
         return;
     };
 
-    let state = InputContextState::<C>::new(plan.plan.clone());
+    let plan = plan.plan.clone();
+    // Whatever is already queued happened before this context existed, so it is not this
+    // context's input to react to (R7.5).
+    let read_through = world
+        .get_resource::<InputFrame>()
+        .and_then(InputFrame::latest);
+    let state = InputContextState::<C>::new(plan, read_through);
     world.commands().entity(context.entity).insert(state);
 }
 
@@ -740,6 +751,116 @@ mod tests {
         });
         app.world_mut().spawn(FreeLook);
         app.update();
+    }
+
+    #[derive(Resource, Default)]
+    struct FireCount(u32);
+
+    fn count_jump_fires(
+        input: Actions<OnFoot>,
+        mut count: bevy_ecs::system::ResMut<'_, FireCount>,
+    ) {
+        if input.fired::<Jump>() {
+            count.0 += 1;
+        }
+    }
+
+    fn jump_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot, _>(|context| {
+            context.bind::<Jump, _>(KeyCode::Space);
+        });
+        app.world_mut().spawn(OnFoot);
+        app.init_resource::<FireCount>();
+        app.add_systems(FixedUpdate, count_jump_fires);
+        app
+    }
+
+    #[test]
+    fn one_press_fires_once_however_many_fixed_ticks_run() {
+        let mut app = jump_app();
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        for _ in 0..3 {
+            run_fixed_tick(&mut app);
+        }
+
+        // Three ticks over one press. Re-reading the queue each tick would fire three times.
+        assert_eq!(app.world().resource::<FireCount>().0, 1);
+    }
+
+    #[test]
+    fn a_press_survives_a_frame_with_no_fixed_tick() {
+        let mut app = jump_app();
+
+        // Two rendered frames go by with the simulation never stepping.
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<FireCount>().0, 0);
+
+        // The press was queued, not discarded, so the tick that finally runs still sees it.
+        run_fixed_tick(&mut app);
+        assert_eq!(app.world().resource::<FireCount>().0, 1);
+    }
+
+    #[test]
+    fn a_delta_is_delivered_once_across_several_fixed_ticks() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot, _>(|context| {
+            context.bind_mouse_motion::<Look>();
+        });
+        let context = app.world_mut().spawn(OnFoot).id();
+
+        app.world_mut().write_message(MouseMotion {
+            delta: Vec2::new(9.0, 0.0),
+        });
+        app.update();
+
+        let mut total = Vec2::ZERO;
+        for _ in 0..3 {
+            run_fixed_tick(&mut app);
+            total += app
+                .world()
+                .get::<InputContextState<OnFoot>>(context)
+                .unwrap()
+                .value::<Look>();
+        }
+
+        // A delta is a displacement, so seeing it in three windows would move the camera three
+        // times as far as the mouse actually moved.
+        assert_eq!(total, Vec2::new(9.0, 0.0));
+    }
+
+    #[test]
+    fn a_context_does_not_react_to_input_that_predates_it() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot, _>(|context| {
+            context.bind::<Jump, _>(KeyCode::Space);
+        });
+
+        // Space goes down and stays queued while no context exists to read it.
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+
+        let late = app.world_mut().spawn(OnFoot).id();
+        run_fixed_tick(&mut app);
+
+        assert_eq!(
+            app.world()
+                .get::<InputContextState<OnFoot>>(late)
+                .unwrap()
+                .phase::<Jump>(),
+            Phase::Idle,
+            "a context should not fire for input that happened before it existed"
+        );
     }
 
     #[test]

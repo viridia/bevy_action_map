@@ -31,7 +31,14 @@ impl<C: InputContext> InputContextState<C> {
     pub(crate) fn apply_frame(&mut self, frame: &InputFrame) {
         let mut mouse_delta = Vec2::ZERO;
 
-        for event in frame.events() {
+        // Only what has arrived since this context last looked. Re-reading the whole queue is what
+        // made one mouse delta count three times across three fixed ticks.
+        let unread = frame.events_after(self.read_through);
+        if let Some(last) = unread.last() {
+            self.read_through = Some(last.timestamp);
+        }
+
+        for event in unread {
             match &event.event {
                 #[cfg(feature = "keyboard")]
                 RawEvent::Keyboard(KeyboardInput {
