@@ -28,11 +28,14 @@ use bevy_reflect::Reflect;
 #[cfg(feature = "serialize")]
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 use bevy_app::{App, Plugin, PreUpdate};
-#[cfg(feature = "keyboard")]
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 use bevy_ecs::message::MessageReader;
 use bevy_ecs::prelude::Resource;
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 use bevy_ecs::schedule::IntoScheduleConfigs;
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 use bevy_input::InputSystems;
 #[cfg(feature = "gamepad")]
 use bevy_input::gamepad::RawGamepadEvent;
@@ -71,11 +74,15 @@ impl Timestamp {
 }
 
 /// A raw input event captured into the frame queue.
+// Variants are gated by the feature that supplies their payload type, not by the feature that
+// samples them: motion is a bare `Vec2`, so it stays, which also keeps this enum inhabited when
+// every source feature is off and spares every `match` on it a catch-all arm.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawEvent {
     /// A keyboard event sampled from Bevy's keyboard message stream.
+    #[cfg(feature = "keyboard")]
     Keyboard(KeyboardInput),
     /// Mouse motion sampled from Bevy's mouse message stream.
     MouseMotion(Vec2),
@@ -143,7 +150,7 @@ impl InputFrame {
 
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 /// Samples keyboard, mouse, and gamepad messages into the input frame queue.
-pub fn sample_keyboard_input(
+pub fn sample_input(
     mut frame: bevy_ecs::system::ResMut<InputFrame>,
     #[cfg(feature = "keyboard")] mut keyboard_inputs: MessageReader<KeyboardInput>,
     #[cfg(feature = "mouse")] mut mouse_motion_inputs: MessageReader<MouseMotion>,
@@ -174,8 +181,12 @@ pub struct InputFramePlugin;
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 impl Plugin for InputFramePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<InputFrame>()
-            .add_systems(PreUpdate, sample_keyboard_input.after(InputSystems));
+        app.init_resource::<InputFrame>().add_systems(
+            PreUpdate,
+            sample_input
+                .in_set(crate::ActionMapSystems::Sample)
+                .after(InputSystems),
+        );
 
         #[cfg(feature = "keyboard")]
         {

@@ -7,21 +7,24 @@ use bevy_action_map::prelude::*;
 #[action(path = "gameplay.jump", output = bool, intent = Button)]
 struct Jump;
 
-#[derive(bevy_action_map::InputContext)]
+#[derive(bevy_action_map::InputContext, Component)]
 #[context(path = "gameplay.on_foot", tick = Render)]
 struct OnFoot;
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, InputFramePlugin, ActionMapPlugin))
+        .add_plugins((DefaultPlugins, ActionMapPlugin))
         .add_context::<OnFoot, _>(|context| {
-            context.bind::<Jump>(KeyCode::Space);
+            context.bind::<Jump, _>(KeyCode::Space);
+        })
+        .add_systems(Startup, |mut commands: Commands| {
+            commands.spawn(OnFoot);
         })
         .add_systems(Update, print_jump)
         .run();
 }
 
-fn print_jump(input: Actions<'_, OnFoot>) {
+fn print_jump(input: Actions<OnFoot>) {
     if input.fired::<Jump>() {
         println!("Jump fired");
     }

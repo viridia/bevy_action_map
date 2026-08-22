@@ -140,7 +140,7 @@ pub struct ActionId(u32);
 pub trait InputAction: Send + Sync + 'static {
     type Output: ActionOutput;          // bool, f32, Vec2, Vec3 — the value's *shape*
     const INTENT: Intent;               // what it *means* (R2.7) — see below
-    const PATH: &'static str;           // "my_game::Move" — overridable (R1.5)
+    const PATH: &'static str;           // "gameplay.move" — declared, required (D8)
     fn id() -> ActionId;                // interned, cached
 }
 
@@ -178,14 +178,41 @@ pub trait InputContext: Send + Sync + 'static {
 }
 ```
 
-A **context instance** owns the state for one activation of a context — global, per player, or per
-test harness, with identical storage in all three (R23.6). Inside an `App` an instance lives in a
-component on an entity, which is what gives observers a target (§9.6); a "global" context is simply an
-instance on a plugin-spawned entity. The struct itself holds no ECS references, so a test or replay
+### 3.1 Naming actions and contexts (D8, R1.8)
+
+`PATH` is required on every action and context, and it is the string that ends up in the player's
+settings file. R1.8 asks for one convention; this is it.
+
+```
+<namespace>.<name>
+gameplay.jump          menu.confirm           vehicle.flight.throttle
+```
+
+| Rule | |
+| --- | --- |
+| Separator | `.` — never `::`, `/`, or a bare word |
+| Case | `snake_case` throughout; no capitals, no hyphens |
+| Segments | at least two: a namespace and a name. Intermediate segments group freely |
+| Namespace | for an application, the functional area (`gameplay`, `menu`, `vehicle`). For a library, its crate name (`bevy_action_map.ui.submit`), which is what keeps R1.5's collisions away now that the compiler no longer prevents them |
+| Contexts | the same scheme, in the same namespace as the actions they bind |
+
+Two habits worth stating because the failure they prevent is silent:
+
+- **The path does not have to match the Rust type, and should not be updated to follow it.** `Move`
+  may become `MoveOnFoot` and relocate to another module; `gameplay.move` stays. That freedom is the
+  entire point of declaring it (D8).
+- **Changing a path is a save-data migration**, on the same footing as any other schema change
+  (§17.R17.3). Renaming one is not a refactor; it orphans every binding a player has saved against it,
+  and R17.2 will report those as unresolved rather than fail the load.
+
+An **`InputContextState`** owns the state for one activation of a context — global, per player, or
+per test harness, with identical storage in all three (R23.6). Inside an `App` it lives in a
+component on an entity, which is what gives observers a target (§9.6); a "global" context is simply
+one on a plugin-spawned entity. The struct itself holds no ECS references, so a test or replay
 harness can drive one directly without a `World` (R0.3):
 
 ```rust
-pub struct ContextInstance {
+pub struct InputContextState {
     plan: Arc<Plan>,          // shared; rebuilt only when bindings change
     actions: Vec<ActionState>,// dense, indexed by plan slot
     scratch: Vec<Scratch>,    // dense, indexed by plan slot
@@ -241,6 +268,32 @@ active and whose chord is satisfied claims the control; if it is marked `consume
 control stops. `Ctrl+S` precedes `S` in the list because its chord is longer, so it wins without any
 special-casing (R8.1), and the whole thing is order-independent with respect to system scheduling
 (R8.3).
+
+### 5.1 Folding several bindings into one action
+
+Arbitration above decides which binding claims a *control*. A separate question, and the one R4.1
+forces, is what happens when several bindings survive and all feed the *same action* — `Jump` on both
+Space and South, `Move` on both WASD and the left stick. State is allocated per action rather than per
+binding, so their contributions have to be folded into one value, and summing is the wrong default:
+adding a stick position to a key press produces a value with no meaning.
+
+The action's declared **intent** (R2.7) is exactly the property that decides the rule, which is the
+first place intent does load-bearing work rather than describing:
+
+| Intent | Fold | Why |
+| --- | --- | --- |
+| `Button`, `Analog1`, `Directional2` | strongest contribution wins | These are presses and positions. Two half-deflected sticks are not a full deflection, and either of two jump buttons should jump exactly once. |
+| `Delta2` | contributions are summed | A delta is a displacement already expressed per frame, so two devices moving at once should move the action by both. |
+
+Ties keep the earlier contribution, so declaration order is the documented tiebreak. The plan groups
+bindings by slot at compile time, which makes the fold one pass over a sorted list with no per-frame
+allocation (R23.2).
+
+**What this does not yet satisfy.** R2.9 asks that mixing intents be made *impossible*, not merely
+defined. Keying the fold off the action's intent stops the units error *between* actions, but a
+binding still declares no intent of its own — the source-channel shape of R2.10 is not modeled — so
+nothing yet rejects a mouse-delta source bound to a `Directional2` action. That check belongs with
+R2.10's source-shape work.
 
 **Nothing user-defined runs inside the evaluator.** Evaluation writes state and appends to a
 **transition log** — every phase change, in order. Observers and effects are dispatched by a separate
@@ -317,11 +370,11 @@ indexes, no hashing (R23.5).
 
 ```rust
 #[derive(InputContext)]
-#[context(tick = Fixed)]     // gameplay: simulation rate
+#[context(path = "gameplay.on_foot", tick = Fixed)]     // gameplay: simulation rate
 struct OnFoot;
 
 #[derive(InputContext)]
-#[context(tick = Render)]    // camera look: frame rate
+#[context(path = "gameplay.free_look", tick = Render)]  // camera look: frame rate
 struct FreeLook;
 ```
 
@@ -378,12 +431,12 @@ Everything needed to move, look, and jump on both device classes:
 use bevy::prelude::*;
 use bevy_action_map::prelude::*;
 
-#[derive(InputAction)] #[action(output = Vec2, intent = Directional2)] struct Move;
-#[derive(InputAction)] #[action(output = Vec2, intent = Delta2)]        struct Look;
-#[derive(InputAction)] #[action(output = bool, intent = Button)]        struct Jump;
+#[derive(InputAction)] #[action(path = "gameplay.move", output = Vec2, intent = Directional2)] struct Move;
+#[derive(InputAction)] #[action(path = "gameplay.look", output = Vec2, intent = Delta2)]        struct Look;
+#[derive(InputAction)] #[action(path = "gameplay.jump", output = bool, intent = Button)]        struct Jump;
 
-#[derive(InputContext)] #[context(tick = Fixed)]  struct OnFoot;
-#[derive(InputContext)] #[context(tick = Render)] struct FreeLook;
+#[derive(InputContext)] #[context(path = "gameplay.on_foot",   tick = Fixed)]  struct OnFoot;
+#[derive(InputContext)] #[context(path = "gameplay.free_look", tick = Render)] struct FreeLook;
 
 fn main() {
     App::new()
@@ -452,12 +505,14 @@ hold conditions are testable without sleeping (R21.2).
 ### 9.3 What the derives generate
 
 ```rust
-#[derive(InputAction)] #[action(output = Vec2, intent = Directional2)] struct Move;
+#[derive(InputAction)] #[action(path = "gameplay.move", output = Vec2, intent = Directional2)] struct Move;
 ```
-expands to an `InputAction` impl carrying `type Output = Vec2`, `INTENT`, the type path as `PATH`, and a cached
-interned `id()`, plus registration in the type registry so persistence and external backends can
-resolve it by name (R1.7). Attributes cover the rest of R1.6 — `name`, `category`, `consume`. Note
-that rebindability is deliberately *not* here: it belongs to a slot, not an action (§9.6).
+expands to an `InputAction` impl carrying `type Output = Vec2`, `INTENT`, the declared `PATH`, and a
+cached interned `id()`, plus registration in the type registry so persistence and external backends
+can resolve it by name (R1.7). `path` is required and unchecked against the Rust type (D8), so §3.1's
+convention is what keeps it collision-free. Attributes cover the rest of R1.6 — `name`, `category`,
+`consume`. Note that rebindability is deliberately *not* here: it belongs to a slot, not an action
+(§9.6).
 
 ### 9.4 Binding combinators
 
@@ -524,12 +579,19 @@ against it.
 
 ```rust
 #[derive(InputContext, Component)]
-#[context(tick = Fixed)]
+#[context(path = "gameplay.on_foot", tick = Fixed)]
 struct OnFoot;
 ```
 
 A component lifecycle hook on insertion resolves the plan and allocates the state tables, so no
 registration call stands between spawning an entity and its input working.
+
+One ordering constraint falls out of this and is worth stating, because it is a property of Bevy
+rather than a choice: a hook can only be attached to a component type while no entity carries it
+yet, so **a context must be declared before anything spawns into it**. Declaration is an app-build
+step and spawning is a runtime one, so the constraint is invisible in normal use — but it does rule
+out introducing a new context type mid-session, and it means the diagnostic for getting it backwards
+has to name `add_context` rather than leaving Bevy's own assertion to explain itself.
 
 ```rust
 // Imperative

@@ -8,12 +8,14 @@ use core::marker::PhantomData;
 
 #[cfg(feature = "gamepad")]
 use bevy_input::gamepad::GamepadButton;
+#[cfg(feature = "keyboard")]
 use bevy_input::keyboard::KeyCode;
 use bevy_math::Vec2;
 
-use crate::action::{ActionId, ActionValue, InputAction};
+use crate::action::{ActionId, ActionValue, InputAction, Intent};
 
 /// Named parts for a 2D directional composite.
+#[cfg(feature = "keyboard")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DirectionalKeys {
     /// The key that contributes positive Y.
@@ -26,6 +28,7 @@ pub struct DirectionalKeys {
     pub right: KeyCode,
 }
 
+#[cfg(feature = "keyboard")]
 impl DirectionalKeys {
     /// Creates a directional composite from the four movement keys.
     pub const fn new(up: KeyCode, down: KeyCode, left: KeyCode, right: KeyCode) -> Self {
@@ -41,6 +44,9 @@ impl DirectionalKeys {
 /// One authored binding in the first end-to-end slice.
 pub(crate) struct BindingSpec {
     pub(crate) action: ActionId,
+    // Carried from the action type at bind time: the plan keys state by `ActionId`, which does not
+    // reach back to the type, and folding several bindings into one action needs the intent.
+    pub(crate) intent: Intent,
     pub(crate) source: BindingSource,
     pub(crate) modifiers: Vec<BindingModifier>,
 }
@@ -49,8 +55,10 @@ pub(crate) struct BindingSpec {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BindingSource {
     /// A keyboard key.
+    #[cfg(feature = "keyboard")]
     Button(KeyCode),
     /// A four-key directional composite.
+    #[cfg(feature = "keyboard")]
     Directional2(DirectionalKeys),
     /// Mouse motion.
     MouseMotion,
@@ -78,12 +86,14 @@ pub trait BindingSourceSpec<Output> {
     fn into_binding_source(self) -> BindingSource;
 }
 
+#[cfg(feature = "keyboard")]
 impl BindingSourceSpec<bool> for KeyCode {
     fn into_binding_source(self) -> BindingSource {
         BindingSource::Button(self)
     }
 }
 
+#[cfg(feature = "keyboard")]
 impl BindingSourceSpec<Vec2> for DirectionalKeys {
     fn into_binding_source(self) -> BindingSource {
         BindingSource::Directional2(self)
@@ -150,7 +160,7 @@ impl BindingModifier {
 
 /// A chainable handle for the binding that was just declared.
 pub struct BindingHandle<'a, C> {
-    builder: &'a mut ContextBuilder<C>,
+    builder: &'a mut InputContextBuilder<C>,
     index: usize,
 }
 
@@ -203,12 +213,12 @@ impl<'a, C> BindingHandle<'a, C> {
 }
 
 /// Builder used by [`crate::player::ActionMapAppExt::add_context`].
-pub struct ContextBuilder<C> {
+pub struct InputContextBuilder<C> {
     bindings: Vec<BindingSpec>,
     _marker: PhantomData<C>,
 }
 
-impl<C> Default for ContextBuilder<C> {
+impl<C> Default for InputContextBuilder<C> {
     fn default() -> Self {
         Self {
             bindings: Vec::new(),
@@ -217,10 +227,11 @@ impl<C> Default for ContextBuilder<C> {
     }
 }
 
-impl<C> ContextBuilder<C> {
-    fn push_binding(&mut self, action: ActionId, source: BindingSource) -> BindingHandle<'_, C> {
+impl<C> InputContextBuilder<C> {
+    fn push_binding<A: InputAction>(&mut self, source: BindingSource) -> BindingHandle<'_, C> {
         self.bindings.push(BindingSpec {
-            action,
+            action: A::id(),
+            intent: A::INTENT,
             source,
             modifiers: Vec::new(),
         });
@@ -232,12 +243,22 @@ impl<C> ContextBuilder<C> {
     }
 
     /// Binds an action to a source value.
+    ///
+    /// An action may be bound more than once — a keyboard key and a gamepad button, a stick and
+    /// the movement keys. Every binding for an action contributes to the same value, combined
+    /// according to the action's [`Intent`]:
+    ///
+    /// - `Button`, `Analog1` and `Directional2` take the **strongest** contribution, so pushing the
+    ///   stick further wins over tapping a key, and either of two buttons fires the action. Equal
+    ///   contributions resolve in the order the bindings were declared.
+    /// - `Delta2` **sums** its contributions, because a delta is a displacement and two devices
+    ///   moving at once should move the action by both.
     pub fn bind<A, S>(&mut self, source: S) -> BindingHandle<'_, C>
     where
         A: InputAction,
         S: BindingSourceSpec<A::Output>,
     {
-        self.push_binding(A::id(), source.into_binding_source())
+        self.push_binding::<A>(source.into_binding_source())
     }
 
     /// Binds a 2D action to mouse motion.
@@ -245,15 +266,16 @@ impl<C> ContextBuilder<C> {
     where
         A: InputAction<Output = Vec2>,
     {
-        self.push_binding(A::id(), BindingSource::MouseMotion)
+        self.push_binding::<A>(BindingSource::MouseMotion)
     }
 
     /// Binds a 2D action to four named directional keys.
+    #[cfg(feature = "keyboard")]
     pub fn bind_directional<A>(&mut self, keys: DirectionalKeys) -> BindingHandle<'_, C>
     where
         A: InputAction<Output = Vec2>,
     {
-        self.push_binding(A::id(), BindingSource::Directional2(keys))
+        self.push_binding::<A>(BindingSource::Directional2(keys))
     }
 
     pub(crate) fn finish(self) -> Vec<BindingSpec> {
@@ -327,7 +349,9 @@ fn apply_clamp(value: ActionValue, min: f32, max: f32) -> ActionValue {
 fn apply_curve(value: ActionValue, power: f32) -> ActionValue {
     match value {
         ActionValue::Bool(value) => ActionValue::Bool(value),
-        ActionValue::Axis1(value) => ActionValue::Axis1(value.signum() * value.abs().powf(power)),
+        ActionValue::Axis1(value) => {
+            ActionValue::Axis1(value.signum() * bevy_math::ops::powf(value.abs(), power))
+        }
         ActionValue::Axis2(value) => ActionValue::Axis2(value.signum() * value.abs().powf(power)),
         ActionValue::Axis3(value) => ActionValue::Axis3(value.signum() * value.abs().powf(power)),
     }
@@ -427,9 +451,10 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "keyboard")]
     #[test]
     fn binding_builders_collect_modifiers_in_order() {
-        let mut builder = ContextBuilder::<()>::default();
+        let mut builder = InputContextBuilder::<()>::default();
         builder
             .bind::<DummyButton, _>(KeyCode::Space)
             .scale(2.0)
@@ -453,7 +478,7 @@ mod tests {
     #[cfg(feature = "gamepad")]
     #[test]
     fn gamepad_source_values_bind_through_the_same_pipeline() {
-        let mut builder = ContextBuilder::<()>::default();
+        let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<DummyButton, _>(GamepadButton::South);
         builder.bind::<DummyVec2, _>(Stick::Left);
 

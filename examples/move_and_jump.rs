@@ -16,17 +16,17 @@ struct Look;
 #[action(path = "gameplay.jump", output = bool, intent = Button)]
 struct Jump;
 
-#[derive(bevy_action_map::InputContext)]
+#[derive(bevy_action_map::InputContext, Component)]
 #[context(path = "gameplay.on_foot", tick = Fixed)]
 struct OnFoot;
 
-#[derive(bevy_action_map::InputContext)]
+#[derive(bevy_action_map::InputContext, Component)]
 #[context(path = "gameplay.free_look", tick = Render)]
 struct FreeLook;
 
 fn main() {
     let mut app = App::new();
-    app.add_plugins((DefaultPlugins, InputFramePlugin, ActionMapPlugin));
+    app.add_plugins((DefaultPlugins, ActionMapPlugin));
     app.add_context::<OnFoot, _>(|context| {
         context.bind_directional::<Move>(DirectionalKeys::new(
             KeyCode::KeyW,
@@ -45,13 +45,18 @@ fn main() {
             .deadzone(0.12)
             .curve(1.8);
     });
+    // The player owns the on-foot bindings; the camera looks around on its own.
+    app.add_systems(Startup, |mut commands: Commands| {
+        commands.spawn(OnFoot);
+        commands.spawn(FreeLook);
+    });
     app.add_systems(FixedUpdate, move_player);
     app.add_systems(Update, look_camera);
 
     app.run();
 }
 
-fn move_player(input: Actions<'_, OnFoot>, mut position: Local<Vec3>) {
+fn move_player(input: Actions<OnFoot>, mut position: Local<Vec3>) {
     let movement = input.value::<Move>();
     *position += Vec3::new(movement.x, 0.0, movement.y);
 
@@ -60,7 +65,7 @@ fn move_player(input: Actions<'_, OnFoot>, mut position: Local<Vec3>) {
     }
 }
 
-fn look_camera(input: Actions<'_, FreeLook>) {
+fn look_camera(input: Actions<FreeLook>) {
     let delta = input.value::<Look>();
     if delta != Vec2::ZERO {
         info!("Look delta: {delta:?}");

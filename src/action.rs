@@ -4,7 +4,7 @@
 //! bindings can find controls that produce a compatible value.
 //!
 //! Give the action a stable, user-chosen path with `#[action(path = "...")]`. That string is
-//! what settings files and other serialized data should store.
+//! what settings files and other serialized data store.
 //!
 //! ```rust
 //! use bevy_action_map::prelude::*;
@@ -15,6 +15,32 @@
 //!
 //! assert_eq!(Jump::INTENT, Intent::Button);
 //! ```
+//!
+//! # Choosing a path
+//!
+//! The path is required rather than derived from the Rust type, because it outlives your code: it
+//! is a key in your players' saved settings, and it should not change when you rename a struct or
+//! move it to a different module.
+//!
+//! Write it as `namespace.name`, all lowercase, with `snake_case` segments separated by dots:
+//!
+//! ```text
+//! gameplay.jump          menu.confirm           vehicle.flight.throttle
+//! ```
+//!
+//! Use at least two segments. The first names the area the action belongs to — `gameplay`, `menu`,
+//! `vehicle` for a game; your crate's own name if you are a library contributing actions other
+//! crates will use alongside their own. Add intermediate segments to group as you see fit. Contexts
+//! follow the same scheme and share the namespace of the actions they bind.
+//!
+//! Two consequences to plan for:
+//!
+//! - **The path is free to differ from the type name, and should stay put when the type moves.**
+//!   Renaming `Move` to `MoveOnFoot` or relocating it costs you nothing as long as the path is
+//!   unchanged.
+//! - **Changing a path is a save-data change, not a refactor.** Every binding a player has
+//!   customized is stored against the old string, so plan a migration the same way you would for
+//!   any other change to a save format.
 
 use alloc::vec::Vec;
 use bevy_math::{Vec2, Vec3};

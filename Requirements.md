@@ -112,18 +112,31 @@ serialization.
 
 ```rust
 #[derive(InputAction)]
-#[action(output = Vec2, name = "Move", category = "Movement")]
+#[action(path = "gameplay.move", output = Vec2, name = "Move", category = "Movement")]
 struct Move;
 ```
 
-This gives an open set (R1.2), free namespacing from the module path (R1.5), and — the real payoff —
-compile-time-checked typed reads: `actions.get::<Move>() -> Vec2`, not `ActionValue` plus a runtime
-shape check.
+This gives an open set (R1.2), namespacing (R1.5), and — the real payoff — compile-time-checked
+typed reads: `actions.get::<Move>() -> Vec2`, not `ActionValue` plus a runtime shape check.
 
 **Runtime identity.** `TypeId` is not stable across builds, so it cannot be the serialized identity.
-The derive therefore registers a stable name (the reflected type path), and the runtime identity is an
-interned `ActionId`. The type is a compile-time _handle_ to an id, not the id itself — a distinction
-forced by serialization regardless of any view on dynamic actions.
+The derive therefore registers a stable name, and the runtime identity is an interned `ActionId`. The
+type is a compile-time _handle_ to an id, not the id itself — a distinction forced by serialization
+regardless of any view on dynamic actions.
+
+**The stable name is declared, not derived (D8).** The obvious source for it is the reflected type
+path, which costs the author nothing. That is the wrong default here, and the reason is what the name
+is _for_: it is a key in the player's settings file, and it has to outlive every refactor of the code
+that declares it. A derived path makes the name a function of where the type happens to live, so
+moving `Move` into a submodule, renaming the module, or splitting a crate silently invalidates every
+saved binding — a data-loss bug with no compile error and no runtime error, discovered by players
+after the patch ships.
+
+Declaring the path makes the identifier a deliberate, reviewable choice with the same stability
+obligations as any other serialized key, and severs it from Rust's module structure so that
+refactoring is free. The cost is one required attribute per declaration, paid once. Because a
+declared name is no longer namespaced by construction, R1.5's collision-avoidance now rests on a
+convention rather than on the compiler, which is what R1.8 exists to supply.
 
 **On data-declared actions.** Declaring actions as types rules out creating them at runtime, which
 raises the question of whether mods, scripting, or data-driven binding files need to mint their own.
@@ -142,8 +155,9 @@ the territory.
 Conclusion: dynamic declaration is **not a v1 feature**. The door stays open at essentially zero cost
 because R1.1 already forces the id to be decoupled from the type.
 
-- **R1.1 (MUST)** Serialized action identity is the stable reflected type path, never `TypeId` and
-  never a bare `Entity`.
+- **R1.1 (MUST)** _(D8)_ Serialized action identity is an author-declared path string, never `TypeId`,
+  never a bare `Entity`, and never derived from the Rust type path. The derive must require it rather
+  than defaulting, so that no action can acquire a serialized identity nobody chose.
 - **R1.2 (MUST)** The action set must be open: two independent crates can define actions that coexist
   in one context with no coordinating enum. _(Satisfied by D1.)_
 - **R1.3 (MUST)** The runtime representation is an interned `ActionId`, obtainable from a type
@@ -152,16 +166,23 @@ because R1.1 already forces the id to be decoupled from the type.
   nonetheless accept `ActionId` rather than a type parameter wherever they do not need the type, so
   that adding it later is additive.
 - **R1.4 (MUST)** `ActionId` must be `Reflect`, `Hash`, `Eq`, and `Copy`.
-- **R1.5 (SHOULD)** Namespacing to avoid collisions between crates. _(Free from the type path; the
-  derive must allow overriding it, since renaming a Rust type would otherwise silently invalidate
-  every saved binding and every external backend's action name — see §17.R17.2, R1.7.)_
+- **R1.5 (SHOULD)** Namespacing to avoid collisions between crates. _(Under D8 this is a property of
+  the declared path rather than of the type path, so it is carried by the naming convention in R1.8
+  rather than enforced by the compiler.)_
 - **R1.6 (MUST)** The derive must be able to express, at minimum: output shape and intent (§2.R2.3,
   R2.7), human-readable name and category for rebinding UI (§19.R19.6), and default consume behavior
   (§8.R8.2). Rebindability is _not_ on the action — it is a property of a declared slot (§19.R19.10),
   since one action can have several bindings of which only some are player-mappable.
 - **R1.7 (MUST)** Action names must be expressible in an external backend's namespace (Steam IGA
-  action names are authored in a separate file and must match exactly), which is why R1.5's override
-  is a requirement rather than a nicety.
+  action names are authored in a separate file and must match exactly), which is a second reason the
+  path is declared rather than derived (D8): the author has to be able to spell the name the backend
+  expects.
+- **R1.8 (MUST)** _(D8)_ Because declared paths are unchecked strings, the crate must publish a
+  naming convention for them and follow it throughout its own documentation, examples, and tests. The
+  convention must cover the separator, the case, and how a crate namespaces the actions it
+  contributes, and must state the stability obligation: a path is a serialized key, so changing one
+  breaks saved bindings and is a breaking change to be migrated (§17.R17.3), whereas renaming or
+  relocating the Rust type is not.
 
 ---
 
@@ -1117,6 +1138,7 @@ produce APIs in which the simplest case stops being simple.
 | **D5** | **Interception is static only.** A focus-activated context claims a control before dispatch; a widget never decides at handling time whether to let an input fall through. | §8, §22           |
 | **D6** | **We own the whole deadzone chain**, consuming Bevy's _raw_ gamepad events, and model it as three separate stages rather than one negotiated number.                       | §5, §11, §14      |
 | **D7** | **The player-facing model is separate from the binding model**: players see opt-in _mappable slots_, _named tunables_, and _presets_; modifiers and composites stay developer-only. | §2, §4, §5, §19, §20 |
+| **D8** | **Serialized identity is a declared path, not the Rust type path**, and the derive requires it — a saved binding must not depend on where a type lives. Namespacing moves to the naming convention (R1.8). | §1, §17, §18 |
 
 There is deliberately no decision here about how action state is stored, or about whether actions are
 entities. That is a design question for the next phase, not a requirement; §23 states the properties

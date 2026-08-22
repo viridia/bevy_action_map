@@ -2,36 +2,38 @@
 //!
 //! The evaluator resolves bindings and emits a transition log for later dispatch.
 
-use alloc::vec;
-
-use bevy_ecs::prelude::{Res, ResMut};
+use bevy_ecs::component::Component;
+use bevy_ecs::prelude::{Query, Res};
 #[cfg(feature = "gamepad")]
 use bevy_input::gamepad::{GamepadAxis, RawGamepadEvent};
+#[cfg(feature = "keyboard")]
 use bevy_input::{ButtonState, keyboard::KeyboardInput};
-use bevy_math::Vec2;
+use bevy_math::{Vec2, Vec3};
 
-use crate::action::{ActionValue, InputContext, Phase};
+use crate::action::{ActionValue, InputContext, Intent, Phase};
 use crate::binding::BindingSource;
 #[cfg(feature = "gamepad")]
 use crate::binding::Stick;
 use crate::frame::{InputFrame, RawEvent};
-use crate::player::ContextInstance;
+use crate::player::InputContextState;
 
-/// Applies the current input frame to one context's state.
-pub fn evaluate_context<C: InputContext>(
+/// Applies the current input frame to every instance of one context.
+pub fn evaluate_context<C: InputContext + Component>(
     frame: Res<'_, InputFrame>,
-    mut state: ResMut<'_, ContextInstance<C>>,
+    mut states: Query<'_, '_, &mut InputContextState<C>>,
 ) {
-    state.apply_frame(&frame);
+    for mut state in &mut states {
+        state.apply_frame(&frame);
+    }
 }
 
-impl<C: InputContext> ContextInstance<C> {
+impl<C: InputContext> InputContextState<C> {
     pub(crate) fn apply_frame(&mut self, frame: &InputFrame) {
-        let mut matched = vec![false; self.actions.len()];
         let mut mouse_delta = Vec2::ZERO;
 
         for event in frame.events() {
             match &event.event {
+                #[cfg(feature = "keyboard")]
                 RawEvent::Keyboard(KeyboardInput {
                     key_code, state, ..
                 }) => match state {
@@ -59,63 +61,143 @@ impl<C: InputContext> ContextInstance<C> {
             }
         }
 
-        for (slot, binding) in self.plan.bindings().iter().enumerate() {
-            matched[slot] = true;
-            let action_state = &mut self.actions[slot];
-            let value = match binding.source {
-                BindingSource::Button(key_code) => {
-                    ActionValue::Bool(self.held_buttons.contains(&key_code))
-                }
-                BindingSource::Directional2(keys) => {
-                    let x = axis_from_buttons(
-                        self.held_buttons.contains(&keys.left),
-                        self.held_buttons.contains(&keys.right),
-                    );
-                    let y = axis_from_buttons(
-                        self.held_buttons.contains(&keys.down),
-                        self.held_buttons.contains(&keys.up),
-                    );
-                    ActionValue::Axis2(Vec2::new(x, y))
-                }
-                BindingSource::MouseMotion => ActionValue::Axis2(mouse_delta),
-                #[cfg(feature = "gamepad")]
-                BindingSource::GamepadButton(button) => {
-                    let pressed = self
-                        .held_gamepad_buttons
-                        .get(&button)
-                        .copied()
-                        .unwrap_or(0.0)
-                        >= 0.5;
-                    ActionValue::Bool(pressed)
-                }
-                #[cfg(feature = "gamepad")]
-                BindingSource::GamepadStick(stick) => {
-                    ActionValue::Axis2(gamepad_stick_value(&self.held_gamepad_axes, stick))
-                }
-            };
+        // Field-level borrows: the fold reads the device state and the plan while writing actions.
+        let Self {
+            plan,
+            actions,
+            #[cfg(feature = "keyboard")]
+            held_buttons,
+            #[cfg(feature = "gamepad")]
+            held_gamepad_buttons,
+            #[cfg(feature = "gamepad")]
+            held_gamepad_axes,
+            ..
+        } = self;
 
-            let value = apply_modifiers(value, &binding.modifiers);
-            update_action_state(action_state, value);
-        }
+        let bindings = plan.bindings();
+        let mut index = 0;
+        while index < bindings.len() {
+            let slot = bindings[index].slot;
+            let intent = plan.intent_for_slot(slot);
+            let mut combined = None;
 
-        for (slot, action_state) in self.actions.iter_mut().enumerate() {
-            if matched[slot] {
-                continue;
+            // Bindings are grouped by slot, so this inner walk is one action's contributions.
+            while index < bindings.len() && bindings[index].slot == slot {
+                let binding = &bindings[index];
+                let value = match binding.source {
+                    #[cfg(feature = "keyboard")]
+                    BindingSource::Button(key_code) => {
+                        ActionValue::Bool(held_buttons.contains(&key_code))
+                    }
+                    #[cfg(feature = "keyboard")]
+                    BindingSource::Directional2(keys) => {
+                        let x = axis_from_buttons(
+                            held_buttons.contains(&keys.left),
+                            held_buttons.contains(&keys.right),
+                        );
+                        let y = axis_from_buttons(
+                            held_buttons.contains(&keys.down),
+                            held_buttons.contains(&keys.up),
+                        );
+                        ActionValue::Axis2(Vec2::new(x, y))
+                    }
+                    BindingSource::MouseMotion => ActionValue::Axis2(mouse_delta),
+                    #[cfg(feature = "gamepad")]
+                    BindingSource::GamepadButton(button) => {
+                        let pressed =
+                            held_gamepad_buttons.get(&button).copied().unwrap_or(0.0) >= 0.5;
+                        ActionValue::Bool(pressed)
+                    }
+                    #[cfg(feature = "gamepad")]
+                    BindingSource::GamepadStick(stick) => {
+                        ActionValue::Axis2(gamepad_stick_value(held_gamepad_axes, stick))
+                    }
+                };
+
+                let value = apply_modifiers(value, &binding.modifiers);
+                combined = Some(match combined {
+                    Some(previous) => combine(previous, value, intent),
+                    None => value,
+                });
+                index += 1;
             }
 
-            action_state.phase = match action_state.value {
-                ActionValue::Bool(true) => Phase::Ongoing,
-                ActionValue::Bool(false) => Phase::Idle,
-                ActionValue::Axis1(value) if value != 0.0 => Phase::Ongoing,
-                ActionValue::Axis1(_) => Phase::Idle,
-                ActionValue::Axis2(value) if value != Vec2::ZERO => Phase::Ongoing,
-                ActionValue::Axis2(_) => Phase::Idle,
-                ActionValue::Axis3(_) => Phase::Idle,
-            };
+            if let Some(value) = combined {
+                update_action_state(&mut actions[slot], value);
+            }
         }
     }
 }
 
+/// Folds one more binding's contribution into an action's value.
+///
+/// A delta is a displacement, so two of them add. Everything else is a position or a press, where
+/// adding would be a units error: the strongest contribution wins instead, and ties keep the
+/// earlier one so that declaration order decides.
+fn combine(accumulated: ActionValue, contribution: ActionValue, intent: Intent) -> ActionValue {
+    match intent {
+        Intent::Delta2 => sum(accumulated, contribution),
+        Intent::Button | Intent::Analog1 | Intent::Directional2 => {
+            if magnitude(contribution) > magnitude(accumulated) {
+                contribution
+            } else {
+                accumulated
+            }
+        }
+    }
+}
+
+fn magnitude(value: ActionValue) -> f32 {
+    match value {
+        ActionValue::Bool(value) => {
+            if value {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        ActionValue::Axis1(value) => value.abs(),
+        ActionValue::Axis2(value) => value.length(),
+        ActionValue::Axis3(value) => value.length(),
+    }
+}
+
+/// Adds two contributions, widening to whichever shape carries more components.
+fn sum(accumulated: ActionValue, contribution: ActionValue) -> ActionValue {
+    let total = widen(accumulated) + widen(contribution);
+    match rank(accumulated).max(rank(contribution)) {
+        0 => ActionValue::Bool(total != Vec3::ZERO),
+        1 => ActionValue::Axis1(total.x),
+        2 => ActionValue::Axis2(total.truncate()),
+        _ => ActionValue::Axis3(total),
+    }
+}
+
+fn rank(value: ActionValue) -> u8 {
+    match value {
+        ActionValue::Bool(_) => 0,
+        ActionValue::Axis1(_) => 1,
+        ActionValue::Axis2(_) => 2,
+        ActionValue::Axis3(_) => 3,
+    }
+}
+
+fn widen(value: ActionValue) -> Vec3 {
+    match value {
+        ActionValue::Bool(value) => {
+            if value {
+                Vec3::ONE
+            } else {
+                Vec3::ZERO
+            }
+        }
+        ActionValue::Axis1(value) => Vec3::new(value, 0.0, 0.0),
+        ActionValue::Axis2(value) => value.extend(0.0),
+        ActionValue::Axis3(value) => value,
+    }
+}
+
+#[cfg(feature = "keyboard")]
 fn axis_from_buttons(negative: bool, positive: bool) -> f32 {
     match (negative, positive) {
         (true, false) => -1.0,
