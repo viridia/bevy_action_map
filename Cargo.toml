@@ -45,6 +45,7 @@ serde = { version = "1", default-features = false, features = [
 bevy = { git = "https://github.com/bevyengine/bevy.git", features = [
   "dynamic_linking",
 ] }
+trybuild = "1.0"
 
 [features]
 default = ["std", "bevy_reflect", "keyboard", "mouse", "gamepad"]

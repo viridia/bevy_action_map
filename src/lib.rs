@@ -8,8 +8,21 @@
 //! actions back in your systems. It covers device data, input frames, action mapping, and the
 //! player-facing presentation layer.
 //!
-//! Start with [`action`] to define your actions, then wire them up through [`binding`] and
-//! [`plan`]. Use [`present`] and [`rebind`] when you want to show players what is bound.
+//! Start with [`action`] to define your actions and contexts, then wire them up through
+//! [`binding`] and [`plan`]. Use [`present`] and [`rebind`] when you want to show players what is
+//! bound.
+//!
+//! ```rust
+//! use bevy_action_map::prelude::*;
+//!
+//! #[derive(bevy_action_map::InputAction)]
+//! #[action(path = "gameplay.jump", output = bool, intent = Button)]
+//! struct Jump;
+//!
+//! #[derive(bevy_action_map::InputContext)]
+//! #[context(path = "gameplay.on_foot", tick = Fixed)]
+//! struct OnFoot;
+//! ```
 
 #[cfg(feature = "std")]
 extern crate std;
@@ -43,5 +56,9 @@ pub mod focus;
 ///
 /// This includes the most common types in this crate, re-exported for your convenience.
 pub mod prelude {
-    pub use crate::action::{ActionId, ActionOutput, ActionValue, InputAction, Intent};
+    pub use crate::action::{
+        ActionId, ActionOutput, ActionValue, InputAction, InputContext, Intent, TickDomain,
+    };
 }
+
+pub use bevy_action_map_macros::{InputAction, InputContext};

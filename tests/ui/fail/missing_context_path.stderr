@@ -1,0 +1,5 @@
+error: missing #[context(path = ...)]
+ --> tests/ui/fail/missing_context_path.rs:3:8
+  |
+3 | struct MissingContextPath;
+  |        ^^^^^^^^^^^^^^^^^^

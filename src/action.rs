@@ -2,6 +2,19 @@
 //!
 //! Declare an action as a Rust type, choose the value shape it returns, and give it an intent so
 //! bindings can find controls that produce a compatible value.
+//!
+//! Give the action a stable, user-chosen path with `#[action(path = "...")]`. That string is
+//! what settings files and other serialized data should store.
+//!
+//! ```rust
+//! use bevy_action_map::prelude::*;
+//!
+//! #[derive(bevy_action_map::InputAction)]
+//! #[action(path = "gameplay.jump", output = bool, intent = Button)]
+//! struct Jump;
+//!
+//! assert_eq!(Jump::INTENT, Intent::Button);
+//! ```
 
 use alloc::vec::Vec;
 use bevy_math::{Vec2, Vec3};
@@ -76,6 +89,17 @@ pub enum ActionValue {
     Axis3(Vec3),
 }
 
+/// The tick domain a context runs in.
+#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TickDomain {
+    /// Run once per rendered frame.
+    Render,
+    /// Run once per fixed simulation tick.
+    Fixed,
+}
+
 impl ActionValue {
     /// Converts this value into a typed output when the shape matches.
     ///
@@ -115,6 +139,9 @@ impl From<Vec3> for ActionValue {
 }
 
 /// A value shape an action can produce.
+///
+/// This is the production side of the match: it says what the action yields, and which intents are
+/// sensible consumers for that shape.
 pub trait ActionOutput: Copy + Send + Sync + 'static {
     /// Intents that can consume this output shape.
     const INTENTS: &'static [Intent];
@@ -124,6 +151,32 @@ pub trait ActionOutput: Copy + Send + Sync + 'static {
 
     /// Converts the runtime representation back into the typed value.
     fn from_action_value(value: ActionValue) -> Option<Self>;
+}
+
+/// A declared gameplay context.
+///
+/// Derive this on a unit struct and choose the tick domain where it should be evaluated.
+///
+/// Give the context a stable, user-chosen path with `#[context(path = "...")]`.
+///
+/// ```rust
+/// use bevy_action_map::prelude::*;
+///
+/// #[derive(bevy_action_map::InputContext)]
+/// #[context(path = "gameplay.on_foot", tick = Fixed)]
+/// struct OnFoot;
+///
+/// assert_eq!(OnFoot::TICK, TickDomain::Fixed);
+/// ```
+pub trait InputContext: Send + Sync + 'static {
+    /// The tick domain this context runs in.
+    const TICK: TickDomain;
+
+    /// The evaluation priority of this context.
+    const PRIORITY: i32;
+
+    /// Stable path used to identify the context across runs.
+    const PATH: &'static str;
 }
 
 impl ActionOutput for bool {

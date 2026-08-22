@@ -1,0 +1,5 @@
+error: missing #[action(path = ...)]
+ --> tests/ui/fail/missing_action_path.rs:3:8
+  |
+3 | struct MissingActionPath;
+  |        ^^^^^^^^^^^^^^^^^

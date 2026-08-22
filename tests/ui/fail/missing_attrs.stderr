@@ -1,0 +1,5 @@
+error: missing #[action(output = ...)]
+ --> tests/ui/fail/missing_attrs.rs:2:8
+  |
+2 | struct MissingArgs;
+  |        ^^^^^^^^^^^
