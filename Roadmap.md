@@ -91,6 +91,26 @@ is rewritten (§11), so mixed fidelity across sources is permanent for now, not 
 
 ---
 
+## Where this stands
+
+Chunk numbers are **stable identities, not positions**. Ground rule 1 lets a chunk be reordered once
+the one before it has been read, and several have been; the phase headings below carry the sequence
+so that "chunk 8" still means what it meant in the discussion that produced it.
+
+The target the remaining sequence aims at is **Blasteroids** — an asteroids-like game in primitive
+shapes, playable on keyboard or gamepad, eventually with a rebinding screen built on
+`bevy_ui_widgets` and operable from the controller. It is not a phase of its own. It arrives early,
+badly, and grows a capability per chunk, because ground rule 3 wants something runnable at every
+step and a real game is a better acceptance test than a synthetic one.
+
+| | |
+| --- | --- |
+| **Works today** | Actions and contexts as types; keyboard, mouse and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers. |
+| **Known wrong today** | L1 clears per frame rather than draining by window, so edges inside one frame are lost and deltas repeat across fixed ticks (chunk 9). An analog trigger cannot drive an analog action (chunk 15). |
+| **Never built** | Conditions, transition events, multiple contexts, arbitration, the whole player-facing model. |
+
+---
+
 ## Phase I — walking skeleton
 
 The goal of Phase I is not features. It is to get a runnable end-to-end path as early as possible so
@@ -150,7 +170,7 @@ The `RawEvent` enum, the timestamped queue, an `InputFrame` resource, and a samp
   would eventually become `bevy_input_frame` if the split in §11 ever pays for itself.
 - **Size:** ~350 lines.
 
-### 5. First end-to-end slice — button actions, one context, polling ← **the gate**
+### 5. First end-to-end slice — button actions, one context, polling **[COMPLETED]**
 
 Bindings from a single key to a `bool` action; `ActionState` with `Phase`; a context component
 holding a `Vec<ActionState>`; the polling accessor. Storage is **deliberately naive** — a plain map
@@ -165,6 +185,12 @@ from `ActionId` to slot — because chunk 10 replaces it and the point here is t
   the deliberate cheapness of everything under the accessor is what makes it affordable to throw the
   API away and try again. If the declaration/read ergonomics feel wrong, this is where we find out.
 - **Size:** ~400 lines plus the example.
+- **In the event:** the gate was passed late. The chunk was written but its example did not compile
+  and its `App` tests failed, which went unnoticed because chunks 6–8 were built on top regardless.
+  Two structural defects surfaced when it was finally run: context state was a singleton resource
+  (R0.3), and slots were allocated per binding rather than per action, so a second binding on an
+  action silently disabled the first (R4.1). Both are fixed. The lesson is ground rule 2's, and it
+  is why the phases below state a verification that must actually be executed rather than intended.
 
 ---
 
@@ -173,7 +199,7 @@ from `ActionId` to slot — because chunk 10 replaces it and the point here is t
 Phase II completes worked examples A and B from §9. Each chunk here adds one axis of capability and
 extends an example to exercise it.
 
-### 6. Axis sources and composites **[COMPLETED]**
+### 6. Axis sources and composites **[PARTIAL]**
 
 Mouse motion and buttons; the 2D composite (four keys → `Vec2`) with **named parts**, since named
 parts are what a rebinding UI must present (R19.9) and getting them wrong late is expensive.
@@ -186,8 +212,11 @@ Intent-driven conversion between shapes.
   axis pair (R14.3), so this one composite covers gamepad D-pads too. Build it to be
   source-agnostic across its four parts and chunk 8 inherits D-pad support with no hat-handling
   path at all.
+- **Outstanding → chunk 15:** the composite was *not* built source-agnostic. `DirectionalKeys` holds
+  four `KeyCode`s, so a D-pad cannot drive it and chunk 8 inherited nothing. This is the paragraph
+  above going unheeded, and it costs a type change rather than a parameter.
 
-### 7. Modifiers **[COMPLETED]**
+### 7. Modifiers **[PARTIAL]**
 
 The OQ-5 commitment made real: a built-in enum (deadzone, scale, negate, swizzle, clamp, curve) plus
 `Custom(Box<dyn Modifier>)`, and the binding-combinator API of §9.4.
@@ -196,8 +225,15 @@ The OQ-5 commitment made real: a built-in enum (deadzone, scale, negate, swizzle
   testable without an `App`.
 - **Review surface:** whether the combinator chain reads well at the call site, and whether the
   built-in set is the right closed set.
+- **Outstanding → chunk 11:** `Modifier::apply` takes only a value. R5.4 and R5.5 need scratch and
+  `dt`, so a stateful modifier cannot be written and the trait signature is a breaking change away
+  from allowing one. Conditions need the same scratch, which is why this lands with them.
+- **Outstanding → chunk 17:** no `Reflect`, so a custom modifier cannot round-trip (R5.6, R17.5).
+- **Outstanding → its own decision:** "normalize" is still missing from R5.2's list, deliberately.
+  R5.9 now splits the two meanings the one word was hiding; whichever names are chosen, neither may
+  be the bare word, and one of the two rescales.
 
-### 8. Gamepad and the deadzone chain **[COMPLETED]**
+### 8. Gamepad and the deadzone chain **[PARTIAL]**
 
 Consumption of `RawGamepadEvent` (bypassing Bevy's own per-axis deadzone), and D6's three-stage chain
 — calibration, design, preference — with the invariant that at most one stage rescales.
@@ -213,85 +249,249 @@ Worked example A is complete after this: KBM and gamepad, both bound, one contex
   carrying `f32`; backends also synthesize press/release at their own threshold. R14.2 requires our
   threshold and hysteresis, so consume the value and ignore the synthesized edge.
 - **Also produces:** the upstream bug report on the `Gamepad::analog` / event divergence (§11).
+- **Delivered:** `RawGamepadEvent` consumption, and D6's **design stage** — radial and per-axis
+  shapes, an explicit `rescale` flag, and the one-rescaling-stage rule enforced at plan build
+  (R5.2, R5.3, R14.4).
+- **Outstanding → chunk 22:** stages 1 and 3. Calibration is per device *unit*, and the evaluator
+  still merges every pad into one axis map, so it needs per-device keying first. Per OQ-4 it ships
+  as a manual API plus an app-driven sampling step, not background detection.
+- **Outstanding → chunk 22:** R14.9's warning when `GamepadSettings` is not left at pass-through,
+  which is a MUST and currently silent.
+- **Outstanding → chunk 15:** the trigger threshold is hard-coded at 0.5 with no hysteresis, which
+  is the opposite of what the note above asked for.
 
-### 9. Tick domains and the windowed drain
-
-`tick = Render` / `tick = Fixed` on contexts; evaluation once per context in its own domain; the
-accessor type split that makes reading the wrong domain a compile error (R9.2). Under the shim,
-windows partition by frame sequence.
-
-`examples/fixed_timestep.rs`: the §2 sequence diagram made observable — a counter that must not lose
-or double-count edges across 0-tick and 3-tick frames.
-
-- **Verified by:** `App` tests that drive `FixedUpdate` zero, one, and three times in a frame and
-  assert exact edge counts. These are the tests that prove R9.3/R9.4/R9.5.
-- **Why before conditions:** conditions consume a clock and a window. Establishing both first avoids
-  writing conditions against render time and then redoing them.
-
-### 10. The compiled plan and slot allocation
-
-Replace chunk 5's naive storage with §4 and §6: plan compilation, slot assignment, the `Vec<u16>`
-action→slot map, the dirty bitset, the `Scratch` table's allocation (but not yet its users).
-
-- **Success criterion: `examples/` does not change.** A diff there means the abstraction leaked.
-- **Why this late:** it is an optimization of a shape we now understand, designed against real
-  bindings rather than imagined ones. Landing it early would have meant designing the plan and the
-  API it serves at the same time.
-- **Risk:** if the naive storage from chunk 5 has quietly leaked into the public API, this chunk is
-  larger than planned. Mitigated by keeping storage behind the accessor from chunk 5 onward.
-
-### 11. Conditions and the `Scratch` table
-
-Press, release, hold, tap, multi-tap, chord progress; `elapsed` and `progress`; the transition log.
-Each condition claims a fixed-size scratch slot from the plan.
-
-- **Verified by:** unit tests driving synthetic time; the R6.1 catalogue is directly a test list.
-- **Review surface:** whether the 24-byte scratch record really covers every condition, which the
-  design asserts and this chunk proves or refutes.
 
 ---
 
-## Phase III — multiple contexts
+## Phase III — what is wrong now
+
+Two chunks, both fixing things that are broken today rather than adding capability. Neither is
+optional and both are load-bearing for everything after.
+
+### 9. Tick domains and the windowed drain
+
+Retire events by **window** instead of clearing the frame each sample. `tick = Render` drains
+`[last frame, now]`; `tick = Fixed` drains its own tick's window. Accumulated deltas split across
+the windows they span. The timestamp shim above is already in place for exactly this.
+
+Blasteroids arrives in chunk 16 and is an integrating physics sim, so this is the difference
+between a game that drops shots and one that does not.
+
+- **Not doing:** conditions, real timestamps (that is bevy#9087), per-device windows.
+- **Verified by:** `App` tests driving `FixedUpdate` zero, one and three times in a frame, asserting
+  exact edge counts and conserved delta magnitude. These are the tests that prove R9.3/R9.4/R9.5,
+  and both currently fail: a press and release inside one frame is never seen at all, and one 9.0
+  delta read across three fixed ticks totals 27.0.
+- **Also fixes:** held state currently lives in the context as a `BTreeSet`/`HashMap` rebuilt by
+  replaying events, which is why deltas repeat and why the state is neither `Copy` nor cheap to
+  snapshot (R10.3, R23.2). The drain and that storage are one problem.
+- **Review surface:** the queue as the design's central bet (Design §2). It is the crate's stated
+  advantage over LWIM and BEI, and until this lands it is prose.
+
+### 15. Source channel shape
+
+R2.10's third property, which chunk 2 was warned to build in from the start and did not. A source's
+channel shape is independent of both the action's intent and its output: an analog trigger arrives
+on a **button** channel carrying a fraction, and a D-pad arrives as **four buttons**, never an axis
+pair.
+
+- **Delivers:** `BindingSourceSpec` keyed on more than output, so `LeftTrigger2` can drive an
+  `Analog1` action; composite parts that accept any button-shaped source, so a D-pad drives the same
+  composite as WASD (R14.3); trigger button-view derived from our own threshold with hysteresis
+  (R14.2).
+- **Unblocks:** R2.9, which Design §5.1 records as unsatisfiable while a binding declares no source
+  kind of its own — nothing currently rejects a mouse delta bound to a directional action.
+- **Verified by:** unit tests over the (intent × output × source shape) matrix; a D-pad and WASD
+  proven interchangeable against one composite.
+- **Why before Blasteroids:** analog thrust on a trigger is the motivating case, and it is the one
+  control that makes an asteroids ship feel like anything.
+
+---
+
+## Phase IV — Blasteroids, first playable
+
+### 16. Blasteroids
+
+`examples/blasteroids/` — an asteroids-like game in primitive shapes. Thrust, rotate, fire, and
+death; asteroids that split. Keyboard **and** gamepad bound to the same actions, which is the
+arrangement that silently broke before chunk 5's repair.
+
+- **Not doing:** menus, rebinding, persistence, sound, score. Those arrive as later chunks extend it.
+- **Verified by:** playing it, on both schemes, with the Xbox pad over Bluetooth per the README.
+- **Review surface:** **R24.6 and the audience commitment**, judged from a real game rather than a
+  snippet. If binding a complete control scheme is not short, this is where that shows. Count the
+  lines of input code a solo developer would have had to write.
+- **Why here:** everything before it is claimed to work and only partly demonstrated. A game is a
+  harsher test than an example that prints.
+
+---
+
+## Phase V — multiple contexts
+
+Blasteroids grows a pause menu, which is what forces all three of these.
 
 ### 12. Transition events and observers
 
 `Fired<A>`, `Started<A>`, `Completed<A>` as generic `EntityEvent`s targeting the context entity;
 dispatch from the transition log. §9.6's observer surface.
 
-- **Verified by:** observer-based `App` tests; an example using `bsn!` to attach an observer
-  declaratively (§9.6.1), which is the R22.15/R22.17 claim under test.
-- **Review surface:** the generic-`EntityEvent` bet (the `FocusedInput<M>` precedent). If generic
-  events prove awkward in practice, better to learn it here than after layering depends on them.
+- **Verified by:** observer-based `App` tests; Blasteroids firing on an observer rather than a poll;
+  an example using `bsn!` to attach one declaratively (§9.6.1), which is the R22.15/R22.17 claim
+  under test.
+- **Review surface:** the generic-`EntityEvent` bet. The context entity it targets now exists, which
+  it did not when this chunk was written.
 
 ### 13. Context priority, layering, and activation
 
 Multiple context instances, priority ordering, activation and deactivation lifecycle, and what
-happens to in-flight state when a context deactivates mid-hold.
+happens to in-flight state when a context deactivates mid-hold (R7.4, R7.5).
+
+- **Verified by:** Blasteroids pausing and resuming without the pause key re-triggering on the way
+  out — the "pressing E to close a menu instantly re-triggers Interact" bug class, from the game side.
 
 ### 14. Arbitration and consumption
 
 The single-pass consumption algorithm (R8.3); chords beating their component bindings; the
 "why didn't this fire" diagnostic query (§9.5's third tier).
 
+- **Gates the rebinding UI.** R19.3 requires conflict detection to use *the same* arbitration rules
+  the runtime applies, so there is nothing to check a candidate binding against until this exists.
+
+---
+
+## Phase VI — the parts a solo developer trips over
+
+Both chunks here are what R24.8 turned from polish into obligation: the long tail cannot verify what
+it does not own, so mistakes have to be caught rather than discovered in QA that nobody is running.
+
+### 11. Conditions and the `Scratch` table
+
+Press, release, hold, tap, multi-tap, chord progress; `elapsed` and `progress`; the transition log.
+Each condition claims a fixed-size scratch slot from the plan. Carries chunk 7's outstanding
+modifier signature, since scratch and `dt` are the same addition.
+
+- **Verified by:** unit tests driving synthetic time; the R6.1 catalogue is directly a test list.
+- **Review surface:** whether the 24-byte scratch record really covers every condition, which the
+  design asserts and this chunk proves or refutes.
+- **In Blasteroids:** hyperspace on a double-tap, and hold-to-thrust.
+
+### 17. The diagnostics tier
+
+§9.5's middle tier, which does not exist: plan-build failures collected and reported rather than
+asserted one at a time. Unknown controls, shape mismatches a conversion cannot fix, duplicate
+bindings, contradictory consume flags (R4.8). Plus `Reflect` on modifiers and conditions so
+third-party ones round-trip (R5.6, R17.5), and the derive's duplicate-key error — declaring `path`
+twice currently picks one silently, which for a serialized identity is the worst available outcome.
+
+- **Review surface:** error text, judged as the deliverable it is. R24.4 now distinguishes runtime
+  failures (must return errors) from app-build ones (may panic, must be actionable).
+
+### 18. Derive completion
+
+`category` and `consume` on the action (R1.6), and type-registry registration so persistence and
+external backends can resolve an action by name (R1.7). Small, and needed by chunk 19.
+
+---
+
+## Phase VII — the player-facing model
+
+D7 made real. This is the half of the crate a player ever sees, and per the audience commitment it
+must stay additive: a game that declares none of it keeps working exactly as before (R19.13, R24.7).
+
+### 19. Mappable slots and localization keys
+
+Slots as the unit of rebinding, one per composite part (R19.9, R19.10). Name keys derived from the
+action path plus the part name, with an override, and a fallback renderer so a game with no
+localization layer still reads sensibly (R19.14, R19.13).
+
+- **Review surface:** whether declaring a whole context's buttons mappable is genuinely one line.
+  The audience commitment says where a default trades away accessibility the accessible path must be
+  cheap, and slots being opt-in is exactly that trade (R20.1).
+
+### 20. Interactive capture, conflicts, and reserved controls
+
+Capture filtered by the target slot's intent and shape (R19.1); exclusion lists (R19.2); conflict
+detection against chunk 14's real arbitration rules with a policy the app selects (R19.3); reset to
+default at every scope (R19.4).
+
+- **Settles OQ-10.** A binding declared *reserved* takes no slot **and** its control is refused by
+  capture across the scheme, so the button that opens the rebinding screen cannot be rebound away
+  nor quietly shadowed by something else. Whether a reachability guarantee sits above that is the
+  open half.
+- **Verified by:** capturing from the **gamepad**, not only the keyboard, which is the case that
+  finds the mistakes.
+
+### 21. The rebinding screen
+
+In Blasteroids: a `bevy_ui_widgets` table of slots grouped by action category, a button per row that
+enters capture, and the whole screen operable from the controller.
+
+- **Review surface:** the rebinding API judged from a real consumer. If a UI author needs to reach
+  past the slot list into this crate's internals, D7 has leaked.
+
+### 23. Persistence of overrides
+
+A rebind that does not survive a restart is a demo, not a feature. Diff against defaults, unknown
+entries reported rather than dropped, a version field (R17.1–R17.3).
+
+---
+
+## Phase VIII — settling
+
+Nothing here changes what the crate can do.
+
+### 22. The deadzone chain, stages 1 and 3
+
+Calibration and preference, completing D6. Needs the evaluator to stop merging every pad into one
+axis map, which is a defect in its own right. Manual calibration API plus an app-driven sampling
+step per OQ-4; R14.9's pass-through warning; the preference stage modulating the design stage
+without being able to reduce it below what the hardware needs.
+
+- **Persistence of calibration** stays blocked on R11.5's stable device identity.
+
+### 10. The compiled plan and slot allocation
+
+Replace the plan's `BTreeMap` with the `Vec<u16>` action→slot map, the dirty bitset, and the
+`Scratch` table's allocation. Also retires the mutex and linear scan that `ActionId::of` currently
+performs on every read, which R23.2 now names explicitly.
+
+- **Success criterion: `examples/` does not change.** A diff there means the abstraction leaked.
+- **Why last:** it is an optimization of a shape we now understand, and it is the only chunk that
+  adds nothing a player or a developer can see.
+
 ---
 
 ## Deliberately deferred
 
-Not in scope for the sequence above, and each needs its own design pass before it needs code:
+Still out of scope for the sequence above. Rebinding, persistence and presentation have left this
+table because Blasteroids needs them.
 
-| Area                                                 | Gated on                                                                   |
-| ---------------------------------------------------- | -------------------------------------------------------------------------- |
-| Device identity, pairing, local multiplayer (§15)    | a real second device to test against                                       |
-| Presentation, prompts, glyph ids (§18)               | asset-pipeline questions this document does not touch                      |
-| Rebinding UI, mappable slots, tunables, presets (D7) | chunks 6–8, which define what a slot _is_                                  |
-| Persistence of overrides (§17)                       | the binding model settling                                                 |
-| Source and authority backends (D3)                   | one working in-tree path to generalize _from_                              |
-| Netcode injection and rollback (§10)                 | chunk 9, plus a testbed that actually rolls back                           |
-| **Guardian migration**                               | porting guardian from bevy 0.16.1 to 0.20-dev — four versions, its own job |
+| Area                                              | Gated on                                                                   |
+| ------------------------------------------------- | -------------------------------------------------------------------------- |
+| Device identity and pairing (§11, §15)            | a real second device to test against                                       |
+| Local multiplayer (§15)                           | the above                                                                  |
+| Prompts and glyph ids (§18)                       | asset-pipeline questions this document does not touch                      |
+| Source and authority backends (D3)                | one working in-tree path to generalize _from_                              |
+| Netcode injection and rollback (§10)              | chunk 9, plus a testbed that actually rolls back                           |
+| Focus integration (D4, D5)                        | chunks 13 and 14, which define what claiming a control means               |
+| **Guardian migration**                            | porting guardian from bevy 0.16.1 to 0.20-dev — four versions, its own job |
 
 Guardian is worth restating: it is on **bevy 0.16.1** with `bevy_enhanced_input 0.12`, and we target
 main. The migration is a genuine goal, but it is a port plus a rewrite, and doing both at once would
-confuse "action*map is wrong" with "0.20 moved this". Examples first; guardian when Phase II is done
-and there is something worth migrating \_to*.
+confuse "action_map is wrong" with "0.20 moved this". Blasteroids first; guardian when there is
+something worth migrating _to_.
+
+---
+
+## Documents that follow the code
+
+Not chunks, because they document a moving target and want to be written once it stops moving.
+
+- **README rewrite** — a user-facing introduction, feature list, and quickstart. Best written after
+  chunk 16, when its examples can be lifted from a real game rather than invented, and after chunk
+  19, when the feature list stops growing in the player-facing direction.
+- **Comparison with LWIM and bevy_enhanced_input** (R22.6) — the migration path the ecosystem will
+  ask for. Wants chunks 11 and 14 done, since conditions and arbitration are where the three crates
+  genuinely differ rather than merely differ in spelling.
 
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

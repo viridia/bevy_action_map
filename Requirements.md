@@ -20,8 +20,51 @@ easily-deferred ones are not:
 | | |
 | -------------------------- | ------------------------------------------------------------------------------------------------ |
 | Layers owned               | Raw→action mapping, device abstraction, binding presentation. **Not** focus/event dispatch.      |
-| Audience                   | Upstream-Bevy candidate: `no_std` where feasible, minimal deps, `Reflect`, upstream conventions. |
+| Codebase conventions       | Upstream-Bevy candidate: `no_std` where feasible, minimal deps, `Reflect`, upstream conventions. |
+| Users served               | Both funded studios and the solo long tail — see [Who this is for](#who-this-is-for).            |
 | First-class (not deferred) | Local multiplayer / device pairing; netcode determinism.                                         |
+
+## Who this is for
+
+Two constituencies, and the design has to hold both at once. Most of the tensions in this document
+are really this one tension wearing different clothes, so it is worth stating plainly rather than
+rediscovering it per section.
+
+**Funded studios** need the ceiling. Localization, device pairing, control schemes, rollback
+determinism, external binding backends, console certification behaviour — a crate that cannot
+express these is one a studio replaces, and replacing an input layer late is expensive. They have
+budget for setup, staff for QA, and translators. Configuration is not what they are short of.
+
+**The long tail** — solo developers, jam entries, two-person teams — is the larger constituency by
+count and is short of exactly what the studio has. No localization budget. One controller on the
+desk, and per §14 possibly a controller that lies about itself. No QA pass. No time to read
+twenty-four sections of requirements before moving a character. What they cannot tolerate is a
+floor: setup that must be completed before anything works at all.
+
+**The commitment is that the ceiling must not raise the floor.** Every mechanism in this document
+that exists for the studio must be _additive_ — absent until declared, with defaulted behaviour that
+is correct when it is absent. A solo developer should be able to bind WASD and ship, never having
+learned that mappable slots, control schemes, or localization keys exist, and a studio should be able
+to reach all three without leaving the crate.
+
+Three consequences, each of which this document already obeys in places and should obey everywhere:
+
+- **Additive, never prerequisite.** Slots (R19.10), tunables and presets (R19.13), localization keys
+  (R19.14), pairing (§15), and persistence (§17) are declarations a game opts into. None may become
+  a step you must perform before an action fires.
+- **Defaults must be right without being tested.** The long tail cannot verify what it does not
+  own — a second gamepad, a Steam Deck, an AZERTY keyboard, a right-to-left locale. So a default
+  that is merely _reasonable_ is not good enough; it has to be the one that survives hardware and
+  locales the author never sees. This is also why the diagnostic tiers of §4.R4.8 matter more here
+  than they would in a crate aimed only at studios: a mistake caught at build time is one the solo
+  developer does not need a QA department to find.
+- **Accessibility must not be what falls off the bottom.** This is the place the commitment is
+  hardest to keep, and it deserves the scrutiny. Making rebinding opt-in (R19.10) is right for the
+  jam entry's effort budget and wrong for its players, since the likely outcome is a game with zero
+  remappable controls (§20.R20.1). The resolution is not to flip the default — that would ship
+  unintended rebinding surfaces — but to make the accessible path *cheap*: declaring a whole
+  context's buttons mappable should be one line, not one line per action. Where a default trades
+  away accessibility, the obligation is to shorten the accessible path, not to accept the trade.
 
 ## Orientation: if you have used LWIM or bevy_enhanced_input
 
@@ -72,7 +115,10 @@ outside the mapping pipeline, presentation must not assume our binding tables ex
 must be delegable to the backend's own UI.
 
 - **R0.1 (MUST)** Each layer is usable without the layers above it. L1 alone must be a usable
-  "normalized input snapshot" API; L2 must be drivable from a hand-constructed L1 frame.
+  normalized input API; L2 must be drivable from a hand-constructed L1 frame. _(Amended after
+  implementation: this said "input snapshot", and §9's timing requirements turn out to be
+  unsatisfiable by a snapshot — a press and release inside one frame collapse to nothing. L1 is a
+  timestamped queue drained by window (Design §2), and the wording should not suggest otherwise.)_
 - **R0.2 (MUST)** L2 must not read `ButtonInput`/`Axis`/raw `Message`s directly; it consumes only L1.
   This is the single most important structural rule — determinism (§10), testing (§21), replay, and
   external binding backends all depend on it.
@@ -170,9 +216,15 @@ because R1.1 already forces the id to be decoupled from the type.
   the declared path rather than of the type path, so it is carried by the naming convention in R1.8
   rather than enforced by the compiler.)_
 - **R1.6 (MUST)** The derive must be able to express, at minimum: output shape and intent (§2.R2.3,
-  R2.7), human-readable name and category for rebinding UI (§19.R19.6), and default consume behavior
+  R2.7), a **category** for grouping in a rebinding UI (§19.R19.6), and default consume behavior
   (§8.R8.2). Rebindability is _not_ on the action — it is a property of a declared slot (§19.R19.10),
   since one action can have several bindings of which only some are player-mappable.
+
+  _(Amended after implementation, resolving OQ-9: this required a human-readable **name** here as
+  well, and R19.9 required the same field on a slot. The slot wins — a composite settles it, since
+  `Move` has four slots and the player must be shown "Move Forward", never "Move". The category
+  stays here, because four movement slots share one category and repeating it per slot is four
+  chances to disagree. Both are localization keys per R19.14, not display text.)_
 - **R1.7 (MUST)** Action names must be expressible in an external backend's namespace (Steam IGA
   action names are authored in a separate file and must match exactly), which is a second reason the
   path is declared rather than derived (D8): the author has to be able to spell the name the backend
@@ -208,13 +260,35 @@ kinds feed one action (R2.9, §13.R13.2).
 
 - **R2.1 (MUST)** Support bool, 1D, 2D, 3D value shapes in one runtime value type.
 - **R2.2 (MUST)** Dimension conversion rules must be explicit, documented, and total (what a bool
-  becomes as `Axis2D`, what an `Axis2D` becomes as bool — magnitude vs. per-axis threshold).
+  becomes as `Axis2D`, what an `Axis2D` becomes as bool — magnitude vs. per-axis threshold), and the
+  **specific rule for each pair must be settled here rather than left to the implementation**.
+  _(Strengthened after implementation: requiring only that the rules be documented meant they got
+  decided by whoever wrote the conversion first, and one of them — a 1D value becoming 2D by
+  copying itself into both components, so a half-pressed trigger reads as a diagonal — is a choice
+  nobody would defend if asked. A requirement that a decision be written down is not a decision.)_
 - **R2.3 (MUST)** Each action declares its output shape in its derive (D1); a binding whose natural
   shape differs is either converted per R2.2 or rejected with a clear diagnostic. Because the shape is
   an associated type, typed reads must be checked at compile time — binding a `Vec2` action and
   reading it as `bool` should not compile, rather than failing a runtime shape check.
-- **R2.4 (SHOULD)** Distinguish _value_ actions (continuous, arbitrated) from _pass-through_ actions
-  (every contributing source visible, no arbitration) — needed for "any of N sticks" and for debug UI.
+- **R2.4 (WITHDRAWN)** ~~Distinguish _value_ actions (continuous, arbitrated) from _pass-through_
+  actions (every contributing source visible, no arbitration).~~ Withdrawn after implementation.
+
+  The requirement came from Unity, where an action's bound controls are normally _disambiguated_ —
+  the one with the greatest magnitude becomes the driving control and the rest are ignored — and
+  `PassThrough` is the opt-out that reports every control separately. Its motivating cases are
+  device-shaped rather than value-shaped: telling which of four pads pressed Start, reading sixteen
+  MIDI knobs bound to one action, and showing every contributor in a debug overlay.
+
+  All three are answered better elsewhere in this document, and by mechanisms that already have to
+  exist. Which device produced an input is the router's business (§15.R15.3) and the join flow's
+  (R15.4), both of which scope by device rather than flagging an action. Per-source visibility for
+  debugging is R22.2's inspector dump, which reads the plan's reverse index. And a value that
+  remembers where it came from is R2.6.
+
+  What is left once those are removed is a second storage shape — N live values per action instead
+  of one — carried on every action so that a few can use it. That cost is real and the benefit is
+  covered, so pass-through is not a distinction this model should carry. If a case appears that
+  genuinely needs it, it should arrive as its own requirement with that case attached.
 - **R2.5 (SHOULD)** Values must not be normalized/clamped implicitly; clamping is an explicit modifier
   so that e.g. mouse deltas and analog sticks can share a pipeline (§5).
 - **R2.6 (MAY)** Carry a "source" tag on the value (which device/binding produced it) for prompts and
@@ -323,9 +397,21 @@ subtle trap: a "smoothing" modifier is a stateful filter and must therefore be r
 
 - **R5.1 (MUST)** An ordered, per-binding modifier chain with documented, deterministic evaluation order.
 - **R5.2 (MUST)** Built-ins at minimum: negate, swizzle/reorder axes, scale/sensitivity, clamp,
-  normalize, radial (circular) deadzone, per-axis deadzone, response curve (exponent/piecewise). See
+  radial (circular) deadzone, per-axis deadzone, response curve (exponent/piecewise). See
   ["Doing Thumbstick Dead Zones Right"][deadzone-article] for why the radial/axial distinction is not
   cosmetic.
+
+  _(Amended after implementation: "normalize" was listed here and has been split out as R5.9,
+  because the word names two incompatible operations and the list gave no way to tell which was
+  meant.)_
+- **R5.9 (MUST)** Both meanings of "normalize" must be available and must not share a name:
+  - **clamp to unit length** — scale a vector down if it exceeds magnitude 1, leave it otherwise.
+    This is what keeps a composite of four keys from exceeding a stick's reach on the diagonal.
+  - **remap a range** — map an input range onto 0..1, the sense Unity's `Normalize` processor uses.
+
+  Naming one of them `Normalize` invites the other. Whichever names are chosen, neither may be the
+  bare word. Note the second rescales and so is bound by D6's one-rescaling-stage rule (R5.3), while
+  the first does not.
 - **R5.3 (MUST)** Deadzone semantics must be explicit about rescaling — whether output is remapped to
   0..1 after the inner radius is removed (almost always desired; frequently gotten wrong). Per D6
   (§14) at most one stage in the deadzone stack may rescale, so a deadzone modifier must be able to
@@ -336,8 +422,11 @@ subtle trap: a "smoothing" modifier is a stateful filter and must therefore be r
   variable frame rate for the same simulated time.
 - **R5.6 (MUST)** Third-party modifiers must be registerable without forking the crate, and must
   round-trip through serialization via the type registry.
-- **R5.7 (SHOULD)** Modifiers must be pure functions of (input, state, dt) with no world access, so
-  they can run during rollback resimulation.
+- **R5.7 (MUST)** Modifiers must be pure functions of (input, state, dt) with no world access, so
+  they can run during rollback resimulation. _(Raised from `SHOULD` after implementation: §10.R10.2
+  makes purity of the whole mapping step a `MUST`, and a modifier runs inside that step. A `SHOULD`
+  here let a conforming implementation admit an impure modifier that would break a `MUST` there.
+  The same reasoning applies to conditions via R6.6.)_
 - **R5.8 (MUST)** Modifiers are a **developer-facing** mechanism and must never be surfaced directly in
   a player-facing UI. Negate, swizzle, and curve are adapters for fitting a source to an action, not
   choices a player can meaningfully make. Where a modifier parameter should be player-adjustable, it is
@@ -446,8 +535,13 @@ same problem for events in [bevy#7691][bevy-7691].
 
 - **R9.1 (MUST)** Define one canonical sampling point (in `PreUpdate`, ordered after
   `bevy_input::InputSystems`) that produces the L1 input frame.
-- **R9.2 (MUST)** Provide both a render-rate action state and a fixed-rate action state, with clearly
-  distinct APIs so a user cannot accidentally read the wrong one.
+- **R9.2 (MUST)** Render-rate and fixed-rate action state must both be available, and reading the
+  wrong one must not be an easy mistake. _(Reworded after implementation. The original said "provide
+  both a render-rate action state and a fixed-rate action state", which presumes two states per
+  context; the design instead gives each context one state and a declared tick domain (Design §7),
+  so an action needed at both rates is declared in two contexts. That satisfies what this
+  requirement is for — the rates are distinct and not silently interchangeable — by a route the
+  original wording forbids. The requirement is about the guarantee, not the layout.)_
 - **R9.3 (MUST)** Edges must not be lost when `FixedUpdate` runs zero times in a frame — a press and
   release inside one frame must still be observable by fixed-rate consumers.
 - **R9.4 (MUST)** Edges must not be duplicated when `FixedUpdate` runs multiple times — a single press
@@ -873,8 +967,9 @@ curves ([IGA file][steam-iga]).
 - **R19.4 (MUST)** Reset to default per binding, per action, per context, and globally.
 - **R19.5 (MUST)** Rebinding must not require the game to be running its normal contexts, and must not
   fire gameplay actions while capturing.
-- **R19.6 (SHOULD)** Rebinding must respect R4.7 (non-rebindable bindings) and expose a
-  human-facing name/category per action for the UI to group by.
+- **R19.6 (SHOULD)** Rebinding must respect R4.7 (non-rebindable bindings) and expose a name per
+  _slot_ and a category per _action_ (R1.6, R19.9) for the UI to label and group by. Both are
+  localization keys (R19.14).
 - **R19.7 (SHOULD)** Rebind per control scheme independently (§17.R17.4).
 - **R19.8 (MUST)** _(D3)_ When a backend is authoritative for an action, rebinding must delegate to
   that backend's own UI (Steam's [`ShowBindingPanel`][steam-isteaminput]) rather than presenting our capture flow. The
@@ -885,8 +980,8 @@ curves ([IGA file][steam-iga]).
 
 - **R19.9 (MUST)** The unit of rebinding is a **mappable slot**, not a binding. For a composite, each
   _part_ is its own slot — "move forward" is a slot, `Move` is not — so the composite is never exposed
-  to the player. A slot carries a display name, a category for grouping, the intent and shape it
-  accepts (R19.1), and the control scheme it belongs to.
+  to the player. A slot carries a **name key** (R19.14), the intent and shape it accepts (R19.1), and
+  the control scheme it belongs to. Its category comes from the action it belongs to (R1.6).
 - **R19.10 (MUST)** Slots are **opt-in by the developer**. An action with bindings has zero mappable
   slots until some are declared. This supersedes the weaker framing in R4.7: rebindability is not a
   flag hiding a binding from the UI, it is the presence or absence of a slot.
@@ -902,6 +997,31 @@ curves ([IGA file][steam-iga]).
   ships a sensible starting point per control scheme.
 - **R19.13 (SHOULD)** A game that offers no rebinding UI at all must still work: slots, tunables, and
   presets are additive declarations, never a precondition for binding an action.
+- **R19.14 (MUST)** Every player-visible name this crate carries — slot names (R19.9), action
+  categories (R1.6), tunable and preset names (R19.11, R19.12) — is a **localization key, not display
+  text**. Rendering it is the app's business, exactly as R18.3 already requires for the control half
+  of a rebinding row.
+
+  Without this the rebinding screen is half-localized: R18.3 makes "Space" and "A button"
+  translatable while the "Move Forward" beside them is a literal baked into the binding declaration.
+  A localized game would have to shadow every one of those strings with a lookup of its own, which
+  is the table the crate was supposed to provide.
+
+  Consequences, since they constrain the design rather than describe it:
+
+  - **A key inherits D8's stability problem.** It appears in files outside the code — a translation
+    catalogue rather than a save — and renaming one silently drops the game back to fallback text
+    with no compile error. Keys need the same deliberate, convention-governed treatment as action
+    paths (R1.8), and the convention should cover both.
+  - **A key SHOULD be derivable rather than declared twice.** A slot's natural key is its action's
+    path plus its part name — `gameplay.move` plus `forward` — and both already exist and are
+    already stable. Note this does _not_ reopen D8: what D8 rejected was deriving identity from the
+    Rust module path, which tracks code structure. Deriving from an author-declared path does not,
+    because the thing being derived from is itself stable by declaration. An explicit override must
+    remain available.
+  - **A game with no localization layer must still read sensibly** (R19.13). A fallback renderer
+    turning a key into presentable text is required, so that shipping a translation catalogue is
+    never the price of seeing a readable rebinding screen.
 
 ---
 
@@ -1082,7 +1202,11 @@ properties that constrain the state layout left open in OQ-3.
 
 - **R23.1 (MUST)** Per-frame cost proportional to _active_ bindings, not to all defined actions ×
   entities.
-- **R23.2 (MUST)** No allocation in the steady-state hot path.
+- **R23.2 (MUST)** No allocation **and no synchronization** in the steady-state hot path.
+  _(Broadened after implementation: the original said "no allocation", and the first real violation
+  found was neither an allocation nor cheaper than one — resolving an action's id took a mutex and a
+  linear scan on every read. A lock on a per-frame path is worse than an allocation, and a rule that
+  names only allocation does not catch it.)_
 - **R23.3 (MUST)** Context activation/deactivation must not cause structural ECS churn proportional to
   the number of actions — activating a context should not spawn, despawn, insert, or remove per
   action. A layout that does so must show the cost is acceptable at the action counts in §23.R23.1.
@@ -1119,12 +1243,30 @@ produce APIs in which the simplest case stops being simple.
 - **R24.3 (MUST)** All public data types `Reflect` where Bevy's conventions require it.
 - **R24.4 (MUST)** Fallible operations return Bevy-style results/errors, not panics; misconfiguration is
   a first-class error case with actionable messages (§4.R4.8).
+
+  _(Qualified after implementation, which turned up two failure kinds this conflated.)_ **Runtime**
+  failures — a device gone, an unresolved binding, an action read that finds nothing — must return
+  errors, never panic, because they befall a player rather than a developer. **App-build** failures
+  — a context declared twice, bindings that cannot compile, a chain that violates a documented
+  invariant — may panic, and generally should: they are unreachable in a shipped build, they are
+  Bevy's own convention for plugin setup, and an error returned from a builder chain tends to be
+  dropped. The obligation that applies to both is the actionable message.
 - **R24.5 (SHOULD)** Follow current Bevy event conventions: buffered `Message` + `MessageReader` for
   streams, `Event`/observers for per-entity notification. (Bevy 0.20-dev has completed this split; the
   crate must not be written against the old `EventReader` model.)
-- **R24.6 (SHOULD)** The common case must be short — binding WASD to a movement action should be a few
+- **R24.6 (MUST)** The common case must be short — binding WASD to a movement action should be a few
   lines. Comprehensiveness (this document) must not produce a system that requires 40 lines for the
-  trivial case; an ergonomic façade over the general model is a requirement, not a nicety.
+  trivial case; an ergonomic façade over the general model is a requirement, not a nicety. _(Raised
+  from `SHOULD`: this is the enforceable half of [Who this is for](#who-this-is-for), and a `SHOULD`
+  makes the constituency it protects optional.)_
+- **R24.7 (MUST)** Every mechanism that exists for a funded studio must be **additive**: absent until
+  declared, and with defaulted behaviour that is correct in its absence. Nothing in §15, §17, §18,
+  §19, or R19.14 may become a step a game must perform before an action fires. A new requirement
+  that fails this test is a finding, not a feature.
+- **R24.8 (MUST)** Defaults must be correct on hardware, layouts, and locales the author cannot test
+  — a second gamepad, a controller that misreports itself (§14), AZERTY, a right-to-left locale.
+  Where correctness cannot be defaulted, the mistake must be caught by a diagnostic (§4.R4.8) rather
+  than left to a QA pass the author does not have.
 
 ---
 
@@ -1196,8 +1338,12 @@ These are the forks where the choice cascades; everything else is comparatively 
    (Design §8.1)._
 5. **OQ-5 — Modifier/condition extensibility mechanism** (§5.R5.6/§6.R6.6): trait objects vs. reflected
    registry — trades ergonomics against serializability and determinism.
-6. **OQ-6 — Fixed/render dual state** (§9.R9.2): two parallel states, or one state with per-tick edge
-   accounting. Affects every gameplay-facing API.
+6. ~~**OQ-6 — Fixed/render dual state**~~ _Resolved as **tick domains** (Design §7): neither of the
+   two options offered. A context declares its domain and is evaluated exactly once, in that domain,
+   so there is one state per context rather than two per context or one with per-tick accounting.
+   The cost is that an action wanted at both rates is declared in two contexts. R9.2 has been
+   reworded accordingly — see Implementation feedback. Remaining sub-question: enforcement is not
+   airtight, because Bevy gives a `SystemParam` no way to know its own schedule (Design §12)._
 7. ~~**OQ-7 — Where UI suppression lives**~~ _Resolved as **D4** (§22): neither — there is no
    suppression mechanism. Dispatch-to-focus becomes an action effect, and focus type activates
    contexts, so interception falls out of ordinary context priority. Sub-question also resolved as
@@ -1207,6 +1353,49 @@ These are the forks where the choice cascades; everything else is comparatively 
    presentation concern. New open sub-question: whether an authority backend's actions participate in
    §10 determinism at all, since Steam's action state is not reproducible from our input frames and so
    cannot be resimulated during rollback._
+9. ~~**OQ-9 — Where the player-facing name and category live**~~ _Resolved: the **slot owns the name,
+   the action owns the category**. A composite settles the first — `Move` has four slots and the
+   player must be shown "Move Forward", never "Move" — and repetition settles the second, since four
+   movement slots share one category and hanging it on each is four chances to disagree._
+
+   _Resolving it turned up a larger point, now **R19.14**: neither field is display text. Both are
+   **localization keys**, because R18.3 already requires the control half of a rebinding row to be
+   localizable and leaving the action half as a baked literal would half-localize one screen. This
+   also relieves R1.6 — the derive is back to five fields, three of them required, which is no
+   longer the "configuration language" Design §12 warned about._
+
+---
+
+## Implementation feedback
+
+Amendments made after building §§1–8 of the roadmap, recorded so that the reasoning is not lost and
+so a reviewer can tell a considered change from drift. Each is annotated in place.
+
+| Requirement | Change | Why |
+| --- | --- | --- |
+| R0.1 | "input snapshot" → "input API" | A snapshot cannot satisfy §9; L1 is a queue. |
+| R2.2 | Conversions must be settled here, not merely documented | Left open, they were decided by accident in code. |
+| R2.4 | **Withdrawn** | Pass-through's cases are device-scoped and answered by §15 and R22.2. |
+| R5.2 / R5.9 | "normalize" split out and disambiguated | The word names two incompatible operations. |
+| R5.7 | `SHOULD` → `MUST` | R10.2 makes the enclosing step's purity a `MUST`. |
+| R9.2 | Reworded to describe the guarantee, not the layout | The design gives one state per context per domain, which the original wording forbade. |
+| R23.2 | Adds "no synchronization" | The first real violation was a lock, not an allocation. |
+| R24.4 | Distinguishes runtime from app-build failure | Panicking during plugin setup is right, and the rule forbade it. |
+| R1.6 / R19.6 / R19.9 | Name moves to the slot, category stays on the action | Both claimed the same two fields (OQ-9). |
+| R19.14 | **New** — player-visible names are localization keys | R18.3 localized half a rebinding row and left the other half a baked literal. |
+| Scope | **New** — [Who this is for](#who-this-is-for) | The studio/long-tail tension drives most decisions here and was never named, so it was being rediscovered per section. |
+| R24.6 | `SHOULD` → `MUST`, plus new R24.7 and R24.8 | The enforceable half of that commitment; a `SHOULD` made one constituency optional. |
+
+**Requirements that earned their keep**, worth defending if they are questioned upstream:
+
+- **R0.2** (L2 reads only L1) is the one that makes everything else work. Determinism, headless
+  tests, replay, and external backends are the same mechanism because of it, and every test in the
+  crate exists because a synthesized frame is indistinguishable from a real one.
+- **R0.3** (no singleton resource) caught a real defect rather than describing one: the first
+  implementation put context state in a resource, and the requirement is what identified that as
+  structural rather than stylistic.
+- **R4.1** (an action may have N bindings) sounds too obvious to write down, and was violated in a
+  way that silently disabled the keyboard half of the crate's own worked example.
 
 ---
 

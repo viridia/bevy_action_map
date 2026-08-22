@@ -680,19 +680,16 @@ is three additive declarations over bindings that already exist.
 ```rust
 .add_context(OnFoot, |c| {
     c.bind::<Move>(Wasd)
-        // one slot per composite part — "Move" itself is never rebindable (R19.9)
-        .mappable_parts(Scheme::Kbm, [
-            ("move_fwd",  "Move Forward"),
-            ("move_back", "Move Backward"),
-            ("move_left", "Strafe Left"),
-            ("move_right","Strafe Right"),
-        ]);
+        // One slot per composite part — "Move" itself is never rebindable (R19.9). Each part
+        // names itself; its localization key is the action's path plus that name, so
+        // `gameplay.move.forward` needs no second string to keep in sync (R19.14).
+        .mappable_parts(Scheme::Kbm, ["forward", "back", "left", "right"]);
 
-    c.bind::<Move>(Stick::Left.deadzone(Radial(0.15)))
+    c.bind::<Move>(Stick::Left.dead_zone(DeadZone::radial(0.15)))
         // sticks are not per-slot rebindable; they get a tunable instead (R19.11)
         .tunable("deadzone", DeadzoneAmount, 0.0..=0.5);
 
-    c.bind::<Jump>(KeyCode::Space).mappable(Scheme::Kbm, "jump", "Jump");
+    c.bind::<Jump>(KeyCode::Space).mappable(Scheme::Kbm);
     c.bind::<Jump>(GamepadButton::South);   // no slot: not player-rebindable
 });
 ```
@@ -701,15 +698,24 @@ A rebinding UI then needs no knowledge of this crate's internals:
 
 ```rust
 for slot in rebinding.slots(Scheme::Kbm) {
-    // slot.display_name  -> "Move Forward"
-    // slot.category      -> "Movement"
-    // slot.current       -> Some(KeyCode::KeyW)
-    // slot.accepts       -> Intent::Button  (filters what capture will take, R19.1)
+    // slot.name_key  -> "gameplay.move.forward"   — a key, not text (R19.14)
+    // slot.category  -> "gameplay.movement"       — from the action (R1.6)
+    // slot.current   -> Some(KeyCode::KeyW)
+    // slot.accepts   -> Intent::Button            — filters what capture will take (R19.1)
+
+    let label = i18n.get(slot.name_key)          // the app's localization layer...
+        .unwrap_or_else(|| slot.fallback_label()); // ...or readable text without one (R19.13)
 }
 for t in rebinding.tunables(Scheme::Gamepad) {
-    // t.name/display, and a typed range the UI renders as a slider or checkbox
+    // t.name_key, and a typed range the UI renders as a slider or checkbox
 }
 ```
+
+The keys are the whole player-facing vocabulary, and none of them is a string this crate renders.
+That is what keeps R18.3's "no hard-coded English" honest across a whole rebinding row rather than
+only the control column — and it is why `mappable_parts` takes part names rather than labels: a
+label would be a second string to translate, sitting in the binding declaration where no translator
+will look for it.
 
 Three properties worth noting:
 
@@ -877,9 +883,9 @@ exists, the split is speculative, and the module layout above makes it a move ra
    evaluator — but this means an effect fired during a resimulated tick is discarded, so an action
    whose *only* observable result is an effect is invisible to rollback. Correct for UI dispatch;
    worth confirming no gameplay action wants to work that way.
-2. **Tick domains vs. R9.2.** §7 satisfies "clearly distinct APIs" but by a route R9.2 did not
-   anticipate — it assumed two states for one context, not one state per context. R9.2 should probably
-   be reworded to describe the domain model.
+2. ~~**Tick domains vs. R9.2.**~~ _Resolved: R9.2 has been reworded to state the guarantee — the two
+   rates are available and not silently interchangeable — rather than the two-states-per-context
+   layout it originally presumed, and OQ-6 is closed in favour of tick domains._
 3. **Schedule enforcement is not airtight.** `Actions<OnFoot>` where `OnFoot` is `Fixed` *should* be
    unreadable from `Update`, but Bevy offers no clean way for a `SystemParam` to know its schedule.
    The fallback is a plugin-time validation pass plus a debug assert — good enough to catch mistakes
