@@ -59,11 +59,11 @@ pub mod focus;
 /// This includes the most common types in this crate, re-exported for your convenience.
 pub mod prelude {
     pub use crate::action::{
-        ActionId, ActionOutput, ActionState, ActionValue, InputAction, InputContext, Intent,
-        Phase, TickDomain,
+        ActionId, ActionOutput, ActionState, ActionValue, InputAction, InputContext, Intent, Phase,
+        TickDomain,
     };
+    pub use crate::binding::{ContextBuilder, DirectionalKeys};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
-    pub use crate::binding::ContextBuilder;
     pub use crate::player::{ActionMapAppExt, ActionMapPlugin, Actions, ContextInstance};
 
     #[cfg(feature = "keyboard")]

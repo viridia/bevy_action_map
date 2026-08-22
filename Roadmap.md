@@ -154,7 +154,7 @@ from `ActionId` to slot — because chunk 10 replaces it and the point here is t
 Phase II completes worked examples A and B from §9. Each chunk here adds one axis of capability and
 extends an example to exercise it.
 
-### 6. Axis sources and composites
+### 6. Axis sources and composites **[COMPLETED]**
 
 Mouse motion and buttons; the 2D composite (four keys → `Vec2`) with **named parts**, since named
 parts are what a rebinding UI must present (R19.9) and getting them wrong late is expensive.

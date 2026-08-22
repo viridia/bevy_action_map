@@ -13,7 +13,7 @@ Read them in this order:
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [Requirements.md](./Requirements.md) | 204 numbered requirements across 24 areas, with prior art from LWIM, bevy_enhanced_input, Unreal, Unity, Steam Input, and Godot. Settled decisions are tagged `(D1)`…`(D7)`; requirements are `R<section>.<n>`. |
 | [Design.md](./Design.md)             | How the requirements are to be satisfied: architecture, data flow, object model, evaluation pipeline, and the developer-experience surface. Commits to positions on the open questions.                         |
-| [Roadmap.md](./Roadmap.md)           | The build order — 14 steps in three phases, each meant to be reviewable on its own. **Start here to write code.**                                                                                               |
+| [Roadmap.md](./Roadmap.md)           | The build order for the crate. **Start here to write code.**                                                                                                                                                    |
 
 ## Layout
 

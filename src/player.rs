@@ -4,7 +4,7 @@
 //! the same bindings and the same action reads, but separate state for different players,
 //! different replays, or different test setups.
 
-use alloc::vec::Vec;
+use alloc::{collections::BTreeSet, vec::Vec};
 use core::marker::PhantomData;
 
 use bevy_app::{App, Plugin, PreUpdate};
@@ -25,6 +25,7 @@ use crate::plan::Plan;
 pub struct ContextInstance<C> {
     pub(crate) plan: Plan<C>,
     pub(crate) actions: Vec<ActionState>,
+    pub(crate) held_buttons: BTreeSet<bevy_input::keyboard::KeyCode>,
     _marker: PhantomData<C>,
 }
 
@@ -39,6 +40,7 @@ impl<C> ContextInstance<C> {
         Self {
             plan,
             actions,
+            held_buttons: BTreeSet::new(),
             _marker: PhantomData,
         }
     }
@@ -158,7 +160,11 @@ mod tests {
     use bevy_ecs::prelude::Resource;
     use bevy_input::{
         ButtonState, InputPlugin, keyboard::Key, keyboard::KeyCode, keyboard::KeyboardInput,
+        mouse::MouseMotion,
     };
+    use bevy_math::Vec2;
+
+    use crate::binding::DirectionalKeys;
 
     #[derive(InputAction)]
     #[action(path = "tests.jump", output = bool, intent = Button)]
@@ -216,5 +222,79 @@ mod tests {
         let probe = app.world().resource::<Probe>();
         assert!(!probe.value);
         assert_eq!(probe.phase, Phase::Completed);
+    }
+
+    #[derive(InputAction)]
+    #[action(path = "tests.move", output = Vec2, intent = Directional2)]
+    struct Move;
+
+    #[derive(InputAction)]
+    #[action(path = "tests.look", output = Vec2, intent = Delta2)]
+    struct Look;
+
+    #[derive(InputContext)]
+    #[context(path = "tests.free_look", tick = Render)]
+    struct FreeLook;
+
+    #[derive(Resource, Default)]
+    struct MotionProbe {
+        movement: Vec2,
+        look: Vec2,
+    }
+
+    fn probe_motion(
+        input: Actions<'_, FreeLook>,
+        mut probe: bevy_ecs::system::ResMut<'_, MotionProbe>,
+    ) {
+        probe.movement = input.value::<Move>();
+        probe.look = input.value::<Look>();
+    }
+
+    #[test]
+    fn directional_composites_and_mouse_motion_stay_live_across_frames() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, crate::frame::InputFramePlugin, ActionMapPlugin));
+        app.add_context::<FreeLook, _>(|context| {
+            context.bind_directional::<Move>(DirectionalKeys::new(
+                KeyCode::KeyW,
+                KeyCode::KeyS,
+                KeyCode::KeyA,
+                KeyCode::KeyD,
+            ));
+            context.bind_mouse_motion::<Look>();
+        });
+        app.init_resource::<MotionProbe>();
+        app.add_systems(Update, probe_motion);
+
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::KeyW,
+            logical_key: Key::Character("w".into()),
+            state: ButtonState::Pressed,
+            text: Some("w".into()),
+            repeat: false,
+            window: bevy_ecs::entity::Entity::PLACEHOLDER,
+        });
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::KeyD,
+            logical_key: Key::Character("d".into()),
+            state: ButtonState::Pressed,
+            text: Some("d".into()),
+            repeat: false,
+            window: bevy_ecs::entity::Entity::PLACEHOLDER,
+        });
+        app.world_mut().write_message(MouseMotion {
+            delta: Vec2::new(4.0, -1.5),
+        });
+        app.update();
+
+        let probe = app.world().resource::<MotionProbe>();
+        assert_eq!(probe.movement, Vec2::new(1.0, 1.0));
+        assert_eq!(probe.look, Vec2::new(4.0, -1.5));
+
+        app.update();
+
+        let probe = app.world().resource::<MotionProbe>();
+        assert_eq!(probe.movement, Vec2::new(1.0, 1.0));
+        assert_eq!(probe.look, Vec2::ZERO);
     }
 }

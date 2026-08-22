@@ -5,8 +5,8 @@
 //! the frame. That makes input easier to replay, easier to test, and easier to feed into later
 //! mapping stages.
 //!
-//! Right now it only samples keyboard input, but the queue is already shaped so higher layers can
-//! replay it later.
+//! Right now it samples keyboard input and mouse motion, but the queue is already shaped so higher
+//! layers can replay it later.
 //!
 //! ```rust
 //! use bevy::prelude::*;
@@ -20,6 +20,7 @@
 //! ```
 
 use alloc::vec::Vec;
+use bevy_math::Vec2;
 
 #[cfg(feature = "bevy_reflect")]
 use bevy_reflect::Reflect;
@@ -27,13 +28,16 @@ use bevy_reflect::Reflect;
 #[cfg(feature = "serialize")]
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "keyboard")]
 use bevy_app::{App, Plugin, PreUpdate};
+#[cfg(feature = "keyboard")]
+use bevy_ecs::message::MessageReader;
 use bevy_ecs::prelude::Resource;
+use bevy_ecs::schedule::IntoScheduleConfigs;
+use bevy_input::InputSystems;
 #[cfg(feature = "keyboard")]
-use bevy_ecs::{message::MessageReader, schedule::IntoScheduleConfigs};
-#[cfg(feature = "keyboard")]
-use bevy_input::{InputSystems, keyboard::KeyboardInput};
+use bevy_input::keyboard::KeyboardInput;
+#[cfg(feature = "mouse")]
+use bevy_input::mouse::MouseMotion;
 
 /// A monotonically increasing timestamp tagged with the sampling frame that produced it.
 // Bevy's input events do not carry a stable order or a frame tag, so this wrapper gives us one
@@ -67,16 +71,18 @@ impl Timestamp {
 /// A raw input event captured into the frame queue.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum RawEvent {
     /// A keyboard event sampled from Bevy's keyboard message stream.
     Keyboard(KeyboardInput),
+    /// Mouse motion sampled from Bevy's mouse message stream.
+    MouseMotion(Vec2),
 }
 
 /// A raw input event paired with the timestamp it was sampled under.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TimedRawEvent {
     /// When this event was sampled.
     pub timestamp: Timestamp,
@@ -91,7 +97,7 @@ pub struct TimedRawEvent {
 /// messages, which is easier to replay, easier to test, and a better handoff to the mapping layer.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
-#[derive(Clone, Debug, Default, PartialEq, Eq, Resource)]
+#[derive(Clone, Debug, Default, PartialEq, Resource)]
 pub struct InputFrame {
     events: Vec<TimedRawEvent>,
     frame: u64,
@@ -130,29 +136,45 @@ impl InputFrame {
     }
 }
 
-#[cfg(feature = "keyboard")]
-/// Samples keyboard messages into the input frame queue.
+#[cfg(any(feature = "keyboard", feature = "mouse"))]
+/// Samples keyboard and mouse messages into the input frame queue.
 pub fn sample_keyboard_input(
     mut frame: bevy_ecs::system::ResMut<InputFrame>,
-    mut keyboard_inputs: MessageReader<KeyboardInput>,
+    #[cfg(feature = "keyboard")] mut keyboard_inputs: MessageReader<KeyboardInput>,
+    #[cfg(feature = "mouse")] mut mouse_motion_inputs: MessageReader<MouseMotion>,
 ) {
     frame.clear();
     frame.begin_sample();
+    #[cfg(feature = "keyboard")]
     for event in keyboard_inputs.read() {
         frame.record(RawEvent::Keyboard(event.clone()));
     }
+
+    #[cfg(feature = "mouse")]
+    for event in mouse_motion_inputs.read() {
+        frame.record(RawEvent::MouseMotion(event.delta));
+    }
 }
 
-#[cfg(feature = "keyboard")]
-/// Plugin that installs the keyboard-only input frame sampler.
+#[cfg(any(feature = "keyboard", feature = "mouse"))]
+/// Plugin that installs the keyboard and mouse input frame sampler.
 pub struct InputFramePlugin;
 
-#[cfg(feature = "keyboard")]
+#[cfg(any(feature = "keyboard", feature = "mouse"))]
 impl Plugin for InputFramePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InputFrame>()
-            .add_message::<KeyboardInput>()
             .add_systems(PreUpdate, sample_keyboard_input.after(InputSystems));
+
+        #[cfg(feature = "keyboard")]
+        {
+            app.add_message::<KeyboardInput>();
+        }
+
+        #[cfg(feature = "mouse")]
+        {
+            app.add_message::<MouseMotion>();
+        }
     }
 }
 
@@ -189,11 +211,24 @@ mod tests {
         assert_eq!(frame.events()[1].timestamp, second);
     }
 
-    #[cfg(feature = "keyboard")]
     #[test]
-    fn plugin_samples_keyboard_messages_into_the_frame_queue() {
+    fn records_mouse_motion_events() {
+        let mut frame = InputFrame::default();
+        frame.begin_sample();
+
+        let timestamp = frame.record(RawEvent::MouseMotion(Vec2::new(2.0, -3.0)));
+
+        assert_eq!(timestamp, Timestamp::new(1, 0));
+        assert!(
+            matches!(frame.events()[0].event, RawEvent::MouseMotion(delta) if delta == Vec2::new(2.0, -3.0))
+        );
+    }
+
+    #[cfg(any(feature = "keyboard", feature = "mouse"))]
+    #[test]
+    fn plugin_samples_keyboard_and_mouse_messages_into_the_frame_queue() {
         use bevy_app::App;
-        use bevy_input::{ButtonState, InputPlugin, keyboard::Key};
+        use bevy_input::{ButtonState, InputPlugin, keyboard::Key, mouse::MouseMotion};
 
         let mut app = App::new();
         app.add_plugins((InputPlugin, InputFramePlugin));
@@ -206,11 +241,15 @@ mod tests {
             repeat: false,
             window: bevy_ecs::entity::Entity::PLACEHOLDER,
         });
+        app.world_mut().write_message(MouseMotion {
+            delta: bevy_math::Vec2::new(1.5, -2.0),
+        });
         app.update();
 
         let frame = app.world().resource::<InputFrame>();
-        assert_eq!(frame.events().len(), 1);
+        assert_eq!(frame.events().len(), 2);
         assert_eq!(frame.events()[0].timestamp, Timestamp::new(1, 0));
+        assert_eq!(frame.events()[1].timestamp, Timestamp::new(1, 1));
 
         app.world_mut().write_message(KeyboardInput {
             key_code: bevy_input::keyboard::KeyCode::KeyA,
