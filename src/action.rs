@@ -100,6 +100,51 @@ pub enum TickDomain {
     Fixed,
 }
 
+/// The current phase of one action.
+#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Phase {
+    /// The action is inactive.
+    #[default]
+    Idle,
+    /// The action is held or otherwise ongoing.
+    Ongoing,
+    /// The action became active this tick.
+    Fired,
+    /// The action ended this tick after being active.
+    Completed,
+    /// The action was abandoned before completing.
+    Canceled,
+}
+
+/// The state we keep for one action inside a context.
+#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ActionState {
+    /// The current value for the action.
+    pub value: ActionValue,
+    /// The current phase for the action.
+    pub phase: Phase,
+}
+
+impl Default for ActionState {
+    fn default() -> Self {
+        Self {
+            value: ActionValue::Bool(false),
+            phase: Phase::Idle,
+        }
+    }
+}
+
+impl ActionState {
+    /// Creates a state from a value and phase.
+    pub const fn new(value: ActionValue, phase: Phase) -> Self {
+        Self { value, phase }
+    }
+}
+
 impl ActionValue {
     /// Converts this value into a typed output when the shape matches.
     ///

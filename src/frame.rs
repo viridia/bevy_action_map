@@ -136,6 +136,7 @@ pub fn sample_keyboard_input(
     mut frame: bevy_ecs::system::ResMut<InputFrame>,
     mut keyboard_inputs: MessageReader<KeyboardInput>,
 ) {
+    frame.clear();
     frame.begin_sample();
     for event in keyboard_inputs.read() {
         frame.record(RawEvent::Keyboard(event.clone()));
@@ -222,7 +223,7 @@ mod tests {
         app.update();
 
         let frame = app.world().resource::<InputFrame>();
-        assert_eq!(frame.events().len(), 2);
-        assert_eq!(frame.events()[1].timestamp, Timestamp::new(2, 0));
+        assert_eq!(frame.events().len(), 1);
+        assert_eq!(frame.events()[0].timestamp, Timestamp::new(2, 0));
     }
 }

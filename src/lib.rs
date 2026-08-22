@@ -24,6 +24,8 @@
 //! struct OnFoot;
 //! ```
 
+extern crate self as bevy_action_map;
+
 #[cfg(feature = "std")]
 extern crate std;
 
@@ -57,9 +59,12 @@ pub mod focus;
 /// This includes the most common types in this crate, re-exported for your convenience.
 pub mod prelude {
     pub use crate::action::{
-        ActionId, ActionOutput, ActionValue, InputAction, InputContext, Intent, TickDomain,
+        ActionId, ActionOutput, ActionState, ActionValue, InputAction, InputContext, Intent,
+        Phase, TickDomain,
     };
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
+    pub use crate::binding::ContextBuilder;
+    pub use crate::player::{ActionMapAppExt, ActionMapPlugin, Actions, ContextInstance};
 
     #[cfg(feature = "keyboard")]
     pub use crate::frame::{InputFramePlugin, sample_keyboard_input};
