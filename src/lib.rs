@@ -8,9 +8,9 @@
 //! actions back in your systems. It covers device data, input frames, action mapping, and the
 //! player-facing presentation layer.
 //!
-//! Start with [`action`] to define your actions and contexts, then wire them up through
-//! [`binding`] and [`plan`]. Use [`present`] and [`rebind`] when you want to show players what is
-//! bound.
+//! Start with [`action`] to define your actions and contexts, declare what drives them with
+//! [`binding`], and put a context on an entity with [`context`]. Use [`present`] and [`rebind`]
+//! when you want to show players what is bound.
 //!
 //! ```rust
 //! use bevy_action_map::prelude::*;
@@ -40,6 +40,7 @@ pub mod frame;
 // L2
 pub mod action;
 pub mod binding;
+pub mod context;
 pub mod eval;
 pub mod plan;
 pub mod player;
@@ -71,15 +72,39 @@ pub enum ActionMapSystems {
     Evaluate,
 }
 
+/// The plugin entry point for the mapping layer.
+///
+/// Add this alongside your other plugins, then declare contexts with
+/// [`add_context`](context::ActionMapAppExt::add_context). It installs the input frame sampler if
+/// you have not added [`InputFramePlugin`](frame::InputFramePlugin) yourself, and orders context
+/// evaluation after sampling so a system reading actions never sees a stale frame.
+pub struct ActionMapPlugin;
+
+impl bevy_app::Plugin for ActionMapPlugin {
+    fn build(&self, app: &mut bevy_app::App) {
+        use bevy_ecs::schedule::IntoScheduleConfigs;
+
+        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+        if !app.is_plugin_added::<frame::InputFramePlugin>() {
+            app.add_plugins(frame::InputFramePlugin);
+        }
+
+        app.configure_sets(
+            bevy_app::PreUpdate,
+            ActionMapSystems::Evaluate.after(ActionMapSystems::Sample),
+        );
+    }
+}
+
 /// The action-map prelude.
 ///
 /// This includes the most common types in this crate, re-exported for your convenience.
 pub mod prelude {
-    pub use crate::ActionMapSystems;
     pub use crate::action::{
         ActionId, ActionOutput, ActionState, ActionValue, InputAction, InputContext, Intent, Phase,
         TickDomain,
     };
+    pub use crate::{ActionMapPlugin, ActionMapSystems};
     // `InputContextBuilder` is deliberately absent: `add_context` hands one to a closure, so its
     // type is inferred and never written. Import it from `binding` to name it in a signature.
     pub use crate::binding::DeadZone;
@@ -87,8 +112,8 @@ pub mod prelude {
     pub use crate::binding::DirectionalKeys;
     #[cfg(feature = "gamepad")]
     pub use crate::binding::Stick;
+    pub use crate::context::{ActionMapAppExt, Actions, InputContextState};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
-    pub use crate::player::{ActionMapAppExt, ActionMapPlugin, Actions, InputContextState};
 
     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
     pub use crate::frame::{InputFramePlugin, sample_input};

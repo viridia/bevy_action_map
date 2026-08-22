@@ -799,8 +799,9 @@ bevy_action_map/
   src/
     device/     L0  registry, persistent identity, capabilities, calibration
     frame/      L1  input frame, event queue, sampling, per-player routing
-    action/         identity, value, intent, state              (D1, R2.7)
+    action/         identity, value, intent, action state       (D1, R2.7)
     binding/        binding model, modifiers, conditions        (OQ-5)
+    context/        declaring a context, its per-entity state   (§3, R22.14)
     plan/           compilation, arbitration order, reverse index
     eval/           evaluator, transition log                   (§5)
     player/         device pairing, control schemes             (§15)
@@ -813,6 +814,12 @@ bevy_action_map_macros/   #[derive(InputAction)], #[derive(InputContext)]
 
 The macro crate is not a design choice — Rust requires proc macros to live in their own crate. It is
 re-exported so users never name it.
+
+`context/` was not in the first draft of this tree, which listed context state under `action/`. It
+earned its own module once contexts became components with a lifecycle hook, a shared plan resource
+and a `SystemParam` over them: that is a concept with a surface, not a struct. Keeping it out of
+`player/` matters more than it looks, because `player/` is reserved for the device pairing of §15 and
+will need the space.
 
 **Features**, mirroring `bevy_input`:
 

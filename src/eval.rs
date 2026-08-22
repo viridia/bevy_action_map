@@ -14,8 +14,8 @@ use crate::action::{ActionValue, InputContext, Intent, Phase};
 use crate::binding::BindingSource;
 #[cfg(feature = "gamepad")]
 use crate::binding::Stick;
+use crate::context::InputContextState;
 use crate::frame::{InputFrame, RawEvent};
-use crate::player::InputContextState;
 
 /// Applies the current input frame to every instance of one context.
 pub fn evaluate_context<C: InputContext + Component>(
