@@ -1,0 +1,73 @@
+[package]
+name = "bevy_action_map"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Input action mapping for Bevy: bindings, contexts, devices, and binding presentation"
+keywords = ["bevy", "input", "gamepad", "keybindings"]
+categories = ["game-development"]
+
+# Depend on Bevy subcrates rather than the umbrella: this crate is a candidate for eventual
+# upstream inclusion, and R24.2 asks for a minimal dependency surface. Examples pull the full
+# `bevy` via dev-dependencies instead.
+[dependencies]
+bevy_app = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
+bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
+bevy_input = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
+bevy_math = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
+bevy_platform = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
+bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", default-features = false, optional = true }
+bevy_input_focus = { git = "https://github.com/bevyengine/bevy.git", default-features = false, optional = true }
+serde = { version = "1", default-features = false, features = [
+  "alloc",
+  "derive",
+], optional = true }
+
+[dev-dependencies]
+bevy = { git = "https://github.com/bevyengine/bevy.git", features = [
+  "dynamic_linking",
+] }
+
+[features]
+default = ["std", "bevy_reflect", "keyboard", "mouse", "gamepad"]
+
+# The core mapping layer is no_std-capable (R24.1, R16.6).
+std = [
+  "bevy_app/std",
+  "bevy_ecs/std",
+  "bevy_input/std",
+  "bevy_math/std",
+  "bevy_platform/std",
+  "bevy_reflect?/std",
+  "serde?/std",
+]
+
+# Input sources, mirroring bevy_input's own feature layout.
+keyboard = ["bevy_input/keyboard"]
+mouse = ["bevy_input/mouse"]
+gamepad = ["bevy_input/gamepad"]
+touch = ["bevy_input/touch"]
+
+# Runtime reflection. Required to serialize custom modifiers/conditions (R5.6, R17.5).
+bevy_reflect = [
+  "dep:bevy_reflect",
+  "bevy_app/bevy_reflect",
+  "bevy_ecs/bevy_reflect",
+  "bevy_input/bevy_reflect",
+  "bevy_math/bevy_reflect",
+]
+
+# Persistence of binding overrides and input frames (§17, R10.1).
+serialize = ["dep:serde", "bevy_input/serialize", "bevy_math/serialize"]
+
+# bevy_input_focus integration: focus-activated contexts, dispatch effects (D4, R22.10).
+focus = ["dep:bevy_input_focus"]
+
+# Deliberately absent: a `scene`/BSN feature. Transitions are plain `EntityEvent`s, so `bsn!`
+# attaches observers with no adapter and no dependency either way (R22.15, R22.17).
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
