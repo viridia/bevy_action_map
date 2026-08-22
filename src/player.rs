@@ -7,14 +7,16 @@
 use alloc::{collections::BTreeSet, vec::Vec};
 use core::marker::PhantomData;
 
-use bevy_app::{App, Plugin, PreUpdate};
+use bevy_app::{App, FixedUpdate, Plugin, Update};
 use bevy_ecs::prelude::{Res, Resource};
-use bevy_ecs::{schedule::IntoScheduleConfigs, system::SystemParam};
+use bevy_ecs::system::SystemParam;
 
-use crate::action::{ActionOutput, ActionState, InputAction, InputContext, Phase};
+use crate::action::{ActionOutput, ActionState, InputAction, InputContext, Phase, TickDomain};
 use crate::binding::ContextBuilder;
 use crate::eval::evaluate_context;
 use crate::plan::Plan;
+#[cfg(feature = "gamepad")]
+use bevy_platform::collections::HashMap;
 
 /// The live state for one declared context.
 ///
@@ -26,6 +28,10 @@ pub struct ContextInstance<C> {
     pub(crate) plan: Plan<C>,
     pub(crate) actions: Vec<ActionState>,
     pub(crate) held_buttons: BTreeSet<bevy_input::keyboard::KeyCode>,
+    #[cfg(feature = "gamepad")]
+    pub(crate) held_gamepad_buttons: HashMap<bevy_input::gamepad::GamepadButton, f32>,
+    #[cfg(feature = "gamepad")]
+    pub(crate) held_gamepad_axes: HashMap<bevy_input::gamepad::GamepadAxis, f32>,
     _marker: PhantomData<C>,
 }
 
@@ -41,6 +47,10 @@ impl<C> ContextInstance<C> {
             plan,
             actions,
             held_buttons: BTreeSet::new(),
+            #[cfg(feature = "gamepad")]
+            held_gamepad_buttons: HashMap::default(),
+            #[cfg(feature = "gamepad")]
+            held_gamepad_axes: HashMap::default(),
             _marker: PhantomData,
         }
     }
@@ -143,10 +153,12 @@ impl ActionMapAppExt for App {
 
         let plan = Plan::from_bindings(builder.finish());
         self.insert_resource(ContextInstance::<C>::new(plan));
-        self.add_systems(
-            PreUpdate,
-            evaluate_context::<C>.after(crate::frame::sample_keyboard_input),
-        );
+
+        if C::TICK == TickDomain::Render {
+            self.add_systems(Update, evaluate_context::<C>);
+        } else {
+            self.add_systems(FixedUpdate, evaluate_context::<C>);
+        }
         self
     }
 }
@@ -165,6 +177,13 @@ mod tests {
     use bevy_math::Vec2;
 
     use crate::binding::DirectionalKeys;
+    #[cfg(feature = "gamepad")]
+    use crate::binding::Stick;
+    #[cfg(feature = "gamepad")]
+    use bevy_input::gamepad::{
+        GamepadAxis, GamepadButton, RawGamepadAxisChangedEvent, RawGamepadButtonChangedEvent,
+        RawGamepadEvent,
+    };
 
     #[derive(InputAction)]
     #[action(path = "tests.jump", output = bool, intent = Button)]
@@ -190,7 +209,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, crate::frame::InputFramePlugin, ActionMapPlugin));
         app.add_context::<OnFoot, _>(|context| {
-            context.bind::<Jump>(KeyCode::Space);
+            context.bind::<Jump, _>(KeyCode::Space);
         });
         app.init_resource::<Probe>();
         app.add_systems(Update, probe_jump);
@@ -250,6 +269,26 @@ mod tests {
         probe.look = input.value::<Look>();
     }
 
+    #[cfg(feature = "gamepad")]
+    #[derive(Resource, Default)]
+    struct GamepadProbe {
+        movement: Vec2,
+        look: Vec2,
+        jump: bool,
+        jump_phase: Phase,
+    }
+
+    #[cfg(feature = "gamepad")]
+    fn probe_gamepad(
+        input: Actions<'_, OnFoot>,
+        mut probe: bevy_ecs::system::ResMut<'_, GamepadProbe>,
+    ) {
+        probe.movement = input.value::<Move>();
+        probe.look = input.value::<Look>();
+        probe.jump = input.value::<Jump>();
+        probe.jump_phase = input.phase::<Jump>();
+    }
+
     #[test]
     fn directional_composites_and_mouse_motion_stay_live_across_frames() {
         let mut app = App::new();
@@ -296,5 +335,97 @@ mod tests {
         let probe = app.world().resource::<MotionProbe>();
         assert_eq!(probe.movement, Vec2::new(1.0, 1.0));
         assert_eq!(probe.look, Vec2::ZERO);
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn raw_gamepad_events_drive_sticks_and_buttons() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, crate::frame::InputFramePlugin, ActionMapPlugin));
+        app.add_context::<OnFoot, _>(|context| {
+            context.bind::<Move, _>(Stick::Left).deadzone(0.2);
+            context.bind::<Jump, _>(GamepadButton::South);
+            context.bind::<Look, _>(Stick::Right);
+        });
+        app.init_resource::<GamepadProbe>();
+        app.add_systems(Update, probe_gamepad);
+
+        app.world_mut()
+            .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
+                bevy_ecs::entity::Entity::PLACEHOLDER,
+                GamepadAxis::LeftStickX,
+                0.0,
+            )));
+        app.world_mut()
+            .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
+                bevy_ecs::entity::Entity::PLACEHOLDER,
+                GamepadAxis::LeftStickY,
+                0.5,
+            )));
+        app.world_mut()
+            .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
+                bevy_ecs::entity::Entity::PLACEHOLDER,
+                GamepadAxis::RightStickX,
+                -0.5,
+            )));
+        app.world_mut()
+            .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
+                bevy_ecs::entity::Entity::PLACEHOLDER,
+                GamepadAxis::RightStickY,
+                0.25,
+            )));
+        app.world_mut()
+            .write_message(RawGamepadEvent::Button(RawGamepadButtonChangedEvent::new(
+                bevy_ecs::entity::Entity::PLACEHOLDER,
+                GamepadButton::South,
+                1.0,
+            )));
+        app.update();
+
+        let probe = app.world().resource::<GamepadProbe>();
+        assert_eq!(probe.movement, Vec2::new(0.0, 0.375));
+        assert_eq!(probe.look, Vec2::new(-0.5, 0.25));
+        assert!(probe.jump);
+        assert_eq!(probe.jump_phase, Phase::Fired);
+
+        app.update();
+
+        let probe = app.world().resource::<GamepadProbe>();
+        assert_eq!(probe.movement, Vec2::new(0.0, 0.375));
+        assert_eq!(probe.look, Vec2::new(-0.5, 0.25));
+        assert!(probe.jump);
+        assert_eq!(probe.jump_phase, Phase::Ongoing);
+    }
+
+    #[test]
+    fn fixed_tick_contexts_are_sampled_in_fixed_update() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, crate::frame::InputFramePlugin, ActionMapPlugin));
+        app.add_context::<OnFoot, _>(|context| {
+            context.bind::<Jump, _>(KeyCode::Space);
+        });
+        app.init_resource::<Probe>();
+        app.add_systems(FixedUpdate, probe_jump);
+
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::Space,
+            logical_key: Key::Space,
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: bevy_ecs::entity::Entity::PLACEHOLDER,
+        });
+
+        app.update();
+
+        let probe = app.world().resource::<Probe>();
+        assert!(!probe.value);
+        assert_eq!(probe.phase, Phase::Idle);
+
+        app.world_mut().run_schedule(bevy_app::FixedUpdate);
+
+        let probe = app.world().resource::<Probe>();
+        assert!(probe.value);
+        assert_eq!(probe.phase, Phase::Fired);
     }
 }

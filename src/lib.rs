@@ -62,6 +62,8 @@ pub mod prelude {
         ActionId, ActionOutput, ActionState, ActionValue, InputAction, InputContext, Intent, Phase,
         TickDomain,
     };
+    #[cfg(feature = "gamepad")]
+    pub use crate::binding::Stick;
     pub use crate::binding::{ContextBuilder, DirectionalKeys};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
     pub use crate::player::{ActionMapAppExt, ActionMapPlugin, Actions, ContextInstance};

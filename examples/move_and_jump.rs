@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use bevy_action_map::prelude::*;
-use bevy_input::keyboard::KeyCode;
+use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
 #[derive(bevy_action_map::InputAction)]
 #[action(path = "gameplay.move", output = Vec2, intent = Directional2)]
@@ -34,10 +34,16 @@ fn main() {
             KeyCode::KeyA,
             KeyCode::KeyD,
         ));
-        context.bind::<Jump>(KeyCode::Space);
+        context.bind::<Move, _>(Stick::Left).deadzone(0.15);
+        context.bind::<Jump, _>(KeyCode::Space);
+        context.bind::<Jump, _>(GamepadButton::South);
     });
     app.add_context::<FreeLook, _>(|context| {
         context.bind_mouse_motion::<Look>();
+        context
+            .bind::<Look, _>(Stick::Right)
+            .deadzone(0.12)
+            .curve(1.8);
     });
     app.add_systems(FixedUpdate, move_player);
     app.add_systems(Update, look_camera);

@@ -6,6 +6,8 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::marker::PhantomData;
 
+#[cfg(feature = "gamepad")]
+use bevy_input::gamepad::GamepadButton;
 use bevy_input::keyboard::KeyCode;
 use bevy_math::Vec2;
 
@@ -45,10 +47,61 @@ pub(crate) struct BindingSpec {
 
 /// The binding source used by the first interactive stage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BindingSource {
+pub enum BindingSource {
+    /// A keyboard key.
     Button(KeyCode),
+    /// A four-key directional composite.
     Directional2(DirectionalKeys),
+    /// Mouse motion.
     MouseMotion,
+    /// A gamepad button.
+    #[cfg(feature = "gamepad")]
+    GamepadButton(GamepadButton),
+    /// A left or right gamepad stick.
+    #[cfg(feature = "gamepad")]
+    GamepadStick(Stick),
+}
+
+/// The left or right stick on a gamepad.
+#[cfg(feature = "gamepad")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stick {
+    /// The left stick.
+    Left,
+    /// The right stick.
+    Right,
+}
+
+/// A source value that can be turned into a binding source for a particular action output.
+pub trait BindingSourceSpec<Output> {
+    /// Converts this source value into the internal binding representation.
+    fn into_binding_source(self) -> BindingSource;
+}
+
+impl BindingSourceSpec<bool> for KeyCode {
+    fn into_binding_source(self) -> BindingSource {
+        BindingSource::Button(self)
+    }
+}
+
+impl BindingSourceSpec<Vec2> for DirectionalKeys {
+    fn into_binding_source(self) -> BindingSource {
+        BindingSource::Directional2(self)
+    }
+}
+
+#[cfg(feature = "gamepad")]
+impl BindingSourceSpec<bool> for GamepadButton {
+    fn into_binding_source(self) -> BindingSource {
+        BindingSource::GamepadButton(self)
+    }
+}
+
+#[cfg(feature = "gamepad")]
+impl BindingSourceSpec<Vec2> for Stick {
+    fn into_binding_source(self) -> BindingSource {
+        BindingSource::GamepadStick(self)
+    }
 }
 
 /// A modifier that transforms one source value before it is written to an action.
@@ -178,12 +231,13 @@ impl<C> ContextBuilder<C> {
         }
     }
 
-    /// Binds a boolean action to one keyboard key.
-    pub fn bind<A>(&mut self, key_code: KeyCode) -> BindingHandle<'_, C>
+    /// Binds an action to a source value.
+    pub fn bind<A, S>(&mut self, source: S) -> BindingHandle<'_, C>
     where
-        A: InputAction<Output = bool>,
+        A: InputAction,
+        S: BindingSourceSpec<A::Output>,
     {
-        self.push_binding(A::id(), BindingSource::Button(key_code))
+        self.push_binding(A::id(), source.into_binding_source())
     }
 
     /// Binds a 2D action to mouse motion.
@@ -300,6 +354,15 @@ mod tests {
         const PATH: &'static str = "tests::DummyButton";
     }
 
+    struct DummyVec2;
+
+    impl InputAction for DummyVec2 {
+        type Output = Vec2;
+
+        const INTENT: crate::action::Intent = crate::action::Intent::Directional2;
+        const PATH: &'static str = "tests::DummyVec2";
+    }
+
     struct DoubleAxis;
 
     impl Modifier for DoubleAxis {
@@ -368,7 +431,7 @@ mod tests {
     fn binding_builders_collect_modifiers_in_order() {
         let mut builder = ContextBuilder::<()>::default();
         builder
-            .bind::<DummyButton>(KeyCode::Space)
+            .bind::<DummyButton, _>(KeyCode::Space)
             .scale(2.0)
             .negate()
             .deadzone(0.1);
@@ -384,6 +447,25 @@ mod tests {
         assert!(matches!(
             bindings[0].modifiers[2],
             BindingModifier::Deadzone(0.1)
+        ));
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn gamepad_source_values_bind_through_the_same_pipeline() {
+        let mut builder = ContextBuilder::<()>::default();
+        builder.bind::<DummyButton, _>(GamepadButton::South);
+        builder.bind::<DummyVec2, _>(Stick::Left);
+
+        let bindings = builder.finish();
+        assert_eq!(bindings.len(), 2);
+        assert!(matches!(
+            bindings[0].source,
+            BindingSource::GamepadButton(GamepadButton::South)
+        ));
+        assert!(matches!(
+            bindings[1].source,
+            BindingSource::GamepadStick(Stick::Left)
         ));
     }
 }

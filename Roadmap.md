@@ -187,7 +187,7 @@ The OQ-5 commitment made real: a built-in enum (deadzone, scale, negate, swizzle
 - **Review surface:** whether the combinator chain reads well at the call site, and whether the
   built-in set is the right closed set.
 
-### 8. Gamepad and the deadzone chain
+### 8. Gamepad and the deadzone chain **[COMPLETED]**
 
 Consumption of `RawGamepadEvent` (bypassing Bevy's own per-axis deadzone), and D6's three-stage chain
 — calibration, design, preference — with the invariant that at most one stage rescales.

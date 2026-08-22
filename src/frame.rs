@@ -34,6 +34,8 @@ use bevy_ecs::message::MessageReader;
 use bevy_ecs::prelude::Resource;
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_input::InputSystems;
+#[cfg(feature = "gamepad")]
+use bevy_input::gamepad::RawGamepadEvent;
 #[cfg(feature = "keyboard")]
 use bevy_input::keyboard::KeyboardInput;
 #[cfg(feature = "mouse")]
@@ -77,6 +79,9 @@ pub enum RawEvent {
     Keyboard(KeyboardInput),
     /// Mouse motion sampled from Bevy's mouse message stream.
     MouseMotion(Vec2),
+    /// A raw gamepad event sampled before Bevy's per-axis deadzone processing.
+    #[cfg(feature = "gamepad")]
+    Gamepad(RawGamepadEvent),
 }
 
 /// A raw input event paired with the timestamp it was sampled under.
@@ -136,12 +141,13 @@ impl InputFrame {
     }
 }
 
-#[cfg(any(feature = "keyboard", feature = "mouse"))]
-/// Samples keyboard and mouse messages into the input frame queue.
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+/// Samples keyboard, mouse, and gamepad messages into the input frame queue.
 pub fn sample_keyboard_input(
     mut frame: bevy_ecs::system::ResMut<InputFrame>,
     #[cfg(feature = "keyboard")] mut keyboard_inputs: MessageReader<KeyboardInput>,
     #[cfg(feature = "mouse")] mut mouse_motion_inputs: MessageReader<MouseMotion>,
+    #[cfg(feature = "gamepad")] mut gamepad_inputs: MessageReader<RawGamepadEvent>,
 ) {
     frame.clear();
     frame.begin_sample();
@@ -154,13 +160,18 @@ pub fn sample_keyboard_input(
     for event in mouse_motion_inputs.read() {
         frame.record(RawEvent::MouseMotion(event.delta));
     }
+
+    #[cfg(feature = "gamepad")]
+    for event in gamepad_inputs.read() {
+        frame.record(RawEvent::Gamepad(event.clone()));
+    }
 }
 
-#[cfg(any(feature = "keyboard", feature = "mouse"))]
-/// Plugin that installs the keyboard and mouse input frame sampler.
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+/// Plugin that installs the keyboard, mouse, and gamepad input frame sampler.
 pub struct InputFramePlugin;
 
-#[cfg(any(feature = "keyboard", feature = "mouse"))]
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 impl Plugin for InputFramePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InputFrame>()
@@ -174,6 +185,11 @@ impl Plugin for InputFramePlugin {
         #[cfg(feature = "mouse")]
         {
             app.add_message::<MouseMotion>();
+        }
+
+        #[cfg(feature = "gamepad")]
+        {
+            app.add_message::<RawGamepadEvent>();
         }
     }
 }
@@ -224,45 +240,80 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "keyboard", feature = "mouse"))]
+    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
     #[test]
-    fn plugin_samples_keyboard_and_mouse_messages_into_the_frame_queue() {
+    fn plugin_samples_keyboard_mouse_and_gamepad_messages_into_the_frame_queue() {
         use bevy_app::App;
-        use bevy_input::{ButtonState, InputPlugin, keyboard::Key, mouse::MouseMotion};
+        use bevy_input::{ButtonState, InputPlugin, mouse::MouseMotion};
 
         let mut app = App::new();
         app.add_plugins((InputPlugin, InputFramePlugin));
 
-        app.world_mut().write_message(KeyboardInput {
-            key_code: bevy_input::keyboard::KeyCode::KeyA,
-            logical_key: Key::Character("a".into()),
-            state: ButtonState::Pressed,
-            text: Some("a".into()),
-            repeat: false,
-            window: bevy_ecs::entity::Entity::PLACEHOLDER,
-        });
+        #[cfg(feature = "keyboard")]
+        {
+            use bevy_input::keyboard::Key;
+
+            app.world_mut().write_message(KeyboardInput {
+                key_code: bevy_input::keyboard::KeyCode::KeyA,
+                logical_key: Key::Character("a".into()),
+                state: ButtonState::Pressed,
+                text: Some("a".into()),
+                repeat: false,
+                window: bevy_ecs::entity::Entity::PLACEHOLDER,
+            });
+        }
+
         app.world_mut().write_message(MouseMotion {
             delta: bevy_math::Vec2::new(1.5, -2.0),
         });
+        #[cfg(feature = "gamepad")]
+        app.world_mut()
+            .write_message(bevy_input::gamepad::RawGamepadEvent::Axis(
+                bevy_input::gamepad::RawGamepadAxisChangedEvent::new(
+                    bevy_ecs::entity::Entity::PLACEHOLDER,
+                    bevy_input::gamepad::GamepadAxis::LeftStickX,
+                    0.75,
+                ),
+            ));
         app.update();
 
         let frame = app.world().resource::<InputFrame>();
-        assert_eq!(frame.events().len(), 2);
+        assert_eq!(
+            frame.events().len(),
+            if cfg!(feature = "keyboard") && cfg!(feature = "gamepad") {
+                3
+            } else if cfg!(feature = "keyboard") || cfg!(feature = "gamepad") {
+                2
+            } else {
+                1
+            }
+        );
         assert_eq!(frame.events()[0].timestamp, Timestamp::new(1, 0));
+        #[cfg(any(feature = "keyboard", feature = "gamepad"))]
         assert_eq!(frame.events()[1].timestamp, Timestamp::new(1, 1));
 
-        app.world_mut().write_message(KeyboardInput {
-            key_code: bevy_input::keyboard::KeyCode::KeyA,
-            logical_key: Key::Character("a".into()),
-            state: ButtonState::Released,
-            text: Some("a".into()),
-            repeat: false,
-            window: bevy_ecs::entity::Entity::PLACEHOLDER,
-        });
+        #[cfg(feature = "keyboard")]
+        {
+            use bevy_input::keyboard::Key;
+
+            app.world_mut().write_message(KeyboardInput {
+                key_code: bevy_input::keyboard::KeyCode::KeyA,
+                logical_key: Key::Character("a".into()),
+                state: ButtonState::Released,
+                text: Some("a".into()),
+                repeat: false,
+                window: bevy_ecs::entity::Entity::PLACEHOLDER,
+            });
+        }
+
         app.update();
 
         let frame = app.world().resource::<InputFrame>();
-        assert_eq!(frame.events().len(), 1);
+        assert_eq!(
+            frame.events().len(),
+            if cfg!(feature = "keyboard") { 1 } else { 0 }
+        );
+        #[cfg(feature = "keyboard")]
         assert_eq!(frame.events()[0].timestamp, Timestamp::new(2, 0));
     }
 }
