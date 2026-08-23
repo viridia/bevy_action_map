@@ -422,6 +422,9 @@ pub trait ActionOutput: Copy + Send + Sync + 'static {
     /// Intents that can consume this output shape.
     const INTENTS: &'static [Intent];
 
+    /// The value this shape has when nobody is touching the control.
+    const REST: Self;
+
     /// Converts the typed value into the runtime representation.
     fn into_action_value(self) -> ActionValue;
 
@@ -457,6 +460,7 @@ pub trait InputContext: Send + Sync + 'static {
 
 impl ActionOutput for bool {
     const INTENTS: &'static [Intent] = &[Intent::Button];
+    const REST: Self = false;
 
     fn into_action_value(self) -> ActionValue {
         ActionValue::Bool(self)
@@ -469,6 +473,7 @@ impl ActionOutput for bool {
 
 impl ActionOutput for f32 {
     const INTENTS: &'static [Intent] = &[Intent::Button, Intent::Analog1];
+    const REST: Self = 0.0;
 
     fn into_action_value(self) -> ActionValue {
         ActionValue::Axis1(self)
@@ -481,6 +486,7 @@ impl ActionOutput for f32 {
 
 impl ActionOutput for Vec2 {
     const INTENTS: &'static [Intent] = &[Intent::Directional2, Intent::Delta2];
+    const REST: Self = Vec2::ZERO;
 
     fn into_action_value(self) -> ActionValue {
         ActionValue::Axis2(self)
@@ -493,6 +499,7 @@ impl ActionOutput for Vec2 {
 
 impl ActionOutput for Vec3 {
     const INTENTS: &'static [Intent] = &[Intent::Directional2, Intent::Delta2];
+    const REST: Self = Vec3::ZERO;
 
     fn into_action_value(self) -> ActionValue {
         ActionValue::Axis3(self)

@@ -478,6 +478,8 @@ dependencies = [
  "bevy_reflect",
  "bevy_state",
  "bevy_time",
+ "bevy_utils",
+ "log",
  "serde",
  "trybuild",
 ]

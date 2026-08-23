@@ -42,6 +42,12 @@ serde = { version = "1", default-features = false, features = [
   "alloc",
   "derive",
 ], optional = true }
+# The logging facade `bevy_input` uses, rather than `bevy_log`: that crate installs a
+# `tracing-subscriber` and is `std`-only, while this is `no_std` and pulls nothing in behind it.
+log = { version = "0.4", default-features = false }
+# For `once!`, which is the `no_std` half of `bevy_log::warn_once!`. Already in the graph beneath
+# `bevy_ecs`, so it costs a line here and nothing to build.
+bevy_utils = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
 
 [dev-dependencies]
 bevy = { git = "https://github.com/bevyengine/bevy.git", features = [
@@ -62,6 +68,7 @@ std = [
   "bevy_state?/std",
   "bevy_time/std",
   "bevy_reflect?/std",
+  "bevy_utils/std",
   "serde?/std",
 ]
 

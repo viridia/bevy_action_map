@@ -13,6 +13,10 @@
 //! with a game state, [`active_if`](InputContextBuilder::active_if) for one that follows any other
 //! run condition, or [`activate`](InputContextState::activate) and
 //! [`deactivate`](InputContextState::deactivate) to drive one instance yourself.
+//!
+//! Read the actions back with [`Actions`] where there is one instance of the context, and with
+//! [`ActionsQuery`] where there may be several — one per player, or none at all because whatever
+//! carried it was destroyed.
 
 #[cfg(feature = "keyboard")]
 use alloc::collections::BTreeSet;
@@ -103,7 +107,7 @@ pub struct InputContextState<C> {
     _marker: PhantomData<C>,
 }
 
-impl<C> InputContextState<C> {
+impl<C: InputContext> InputContextState<C> {
     pub(crate) fn new(plan: Arc<Plan<C>>, read_through: Option<Timestamp>) -> Self {
         let slots = plan.slot_count();
         let scratch_slots = plan.scratch_count();
@@ -128,32 +132,69 @@ impl<C> InputContextState<C> {
         }
     }
 
-    fn action_state<A>(&self) -> &ActionState
+    fn action_state<A>(&self) -> Option<&ActionState>
     where
         A: InputAction,
     {
-        let slot = self
-            .plan
-            .slot_for_action(A::id())
-            .expect("action has not been bound in this context");
-        &self.actions[slot]
+        let slot = self.plan.slot_for_action(A::id())?;
+        Some(&self.actions[slot])
+    }
+
+    /// Whether this context binds an action at all.
+    ///
+    /// Reading an unbound action is not an error — it reads as though nobody is touching the
+    /// control — so this is here for code that would rather ask than infer it from a rest value.
+    pub fn is_bound<A>(&self) -> bool
+    where
+        A: InputAction,
+    {
+        self.plan.slot_for_action(A::id()).is_some()
     }
 
     /// Reads the typed action value.
+    ///
+    /// An action this context does not bind reads as though untouched — `false`, `0.0`, or a zero
+    /// vector, depending on the action's output — and says so in the log once. Use
+    /// [`try_value`](Self::try_value) where the difference matters.
     pub fn value<A>(&self) -> A::Output
     where
         A: InputAction,
         A::Output: ActionOutput,
     {
-        A::Output::from_action_value(self.action_state::<A>().value)
+        match self.action_state::<A>() {
+            Some(state) => A::Output::from_action_value(state.value),
+            None => {
+                self.warn_unbound::<A>();
+                A::Output::REST
+            }
+        }
+    }
+
+    /// Reads the typed action value, or `None` when this context does not bind the action.
+    pub fn try_value<A>(&self) -> Option<A::Output>
+    where
+        A: InputAction,
+        A::Output: ActionOutput,
+    {
+        self.action_state::<A>()
+            .map(|state| A::Output::from_action_value(state.value))
     }
 
     /// Returns the current phase for an action.
+    ///
+    /// An action this context does not bind is always [`Idle`](Phase::Idle), on the same terms as
+    /// [`value`](Self::value).
     pub fn phase<A>(&self) -> Phase
     where
         A: InputAction,
     {
-        self.action_state::<A>().phase
+        match self.action_state::<A>() {
+            Some(state) => state.phase,
+            None => {
+                self.warn_unbound::<A>();
+                Phase::Idle
+            }
+        }
     }
 
     /// Returns `true` when the action was pressed this tick.
@@ -162,6 +203,25 @@ impl<C> InputContextState<C> {
         A: InputAction<Output = bool>,
     {
         self.phase::<A>() == Phase::Fired
+    }
+
+    /// Says once that an action was read here but never bound here.
+    ///
+    /// Once rather than every time because the caller is a system, and a system that reads the
+    /// wrong action reads it every tick. Which action and which context is the whole of the
+    /// mistake, so both are named, along with what this context does bind — the answer is usually
+    /// visible in that list, as a neighbouring action or the same action in another context.
+    #[cold]
+    fn warn_unbound<A>(&self)
+    where
+        A: InputAction,
+    {
+        bevy_utils::once!(log::warn!(
+            "`{}` is not bound in `{}`, so it reads as though untouched. Bound here: {}.",
+            A::PATH,
+            C::PATH,
+            BoundPaths(self.plan.bound_paths()),
+        ));
     }
 
     /// Explains why an action is not firing.
@@ -291,6 +351,24 @@ impl<C> InputContextState<C> {
     }
 }
 
+/// Formats a context's bound action paths for a diagnostic, without building a string to do it.
+struct BoundPaths<'a>(&'a [&'static str]);
+
+impl core::fmt::Display for BoundPaths<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.0.is_empty() {
+            return f.write_str("nothing — this context binds no actions at all");
+        }
+        for (index, path) in self.0.iter().enumerate() {
+            if index > 0 {
+                f.write_str(", ")?;
+            }
+            f.write_str(path)?;
+        }
+        Ok(())
+    }
+}
+
 /// Zero, in whatever shape the value already had.
 fn rest_like(value: crate::action::ActionValue) -> crate::action::ActionValue {
     use crate::action::ActionValue;
@@ -349,35 +427,105 @@ pub enum Obstacle {
     NoInput,
 }
 
-/// System parameter for polling a context's actions.
+/// System parameter for polling the actions of a context with exactly one instance.
 ///
-/// Most games have one instance of a given context, and [`value`](Self::value),
-/// [`phase`](Self::phase) and [`fired`](Self::fired) read it directly. When a context is per-player
-/// there will be several, and [`get`](Self::get) reads the one belonging to an entity you name
-/// while [`iter`](Self::iter) walks them all.
+/// Most games have one of a given context — one on-foot context, one menu context — and this reads
+/// it directly: [`value`](Self::value), [`phase`](Self::phase) and [`fired`](Self::fired) need no
+/// entity, because there is only one it could mean.
+///
+/// **A system taking this does not run unless exactly one entity carries the context.** No
+/// instance yet, the entity despawned, or several at once, and the system is skipped for that run
+/// rather than failing — the same rule Bevy's [`Single`] follows, and for the same reason: a system
+/// about the player's ship has nothing to do while there is no ship.
+///
+/// Use [`ActionsQuery`] instead where a context is per-player, or where the system has work to do
+/// whether or not an instance exists.
+///
+/// [`Single`]: bevy_ecs::system::Single
 #[derive(SystemParam)]
 pub struct Actions<'w, 's, C: InputContext + Component> {
-    states: Query<'w, 's, (Entity, &'static InputContextState<C>)>,
+    state: bevy_ecs::system::Single<'w, 's, (Entity, &'static InputContextState<C>)>,
     consumed: bevy_ecs::system::Res<'w, crate::eval::ConsumedControls>,
 }
 
 impl<C: InputContext + Component> Actions<'_, '_, C> {
-    /// Returns the only instance of this context.
-    ///
-    /// # Panics
-    ///
-    /// Panics unless exactly one entity carries this context. Use [`get`](Self::get) when a
-    /// context is per-player and several instances exist at once.
-    pub fn single(&self) -> &InputContextState<C> {
-        match self.states.single() {
-            Ok((_, state)) => state,
-            Err(error) => panic!(
-                "`Actions<{}>` expected exactly one context instance: {error}",
-                C::PATH
-            ),
-        }
+    /// Returns the entity carrying this context.
+    pub fn entity(&self) -> Entity {
+        self.state.0
     }
 
+    /// Returns the state of the one instance.
+    pub fn state(&self) -> &InputContextState<C> {
+        self.state.1
+    }
+
+    /// Reads the typed action value.
+    ///
+    /// See [`InputContextState::value`] for what an unbound action reads as.
+    pub fn value<A>(&self) -> A::Output
+    where
+        A: InputAction,
+        A::Output: ActionOutput,
+    {
+        self.state().value::<A>()
+    }
+
+    /// Reads the typed action value, or `None` when this context does not bind the action.
+    pub fn try_value<A>(&self) -> Option<A::Output>
+    where
+        A: InputAction,
+        A::Output: ActionOutput,
+    {
+        self.state().try_value::<A>()
+    }
+
+    /// Returns the current phase for an action.
+    pub fn phase<A>(&self) -> Phase
+    where
+        A: InputAction,
+    {
+        self.state().phase::<A>()
+    }
+
+    /// Returns `true` when the action was pressed this tick.
+    pub fn fired<A>(&self) -> bool
+    where
+        A: InputAction<Output = bool>,
+    {
+        self.state().fired::<A>()
+    }
+
+    /// Explains why an action is not firing.
+    ///
+    /// See [`InputContextState::why_not`].
+    pub fn why_not<A>(&self) -> Obstacle
+    where
+        A: InputAction,
+    {
+        self.state().why_not::<A>(&self.consumed)
+    }
+}
+
+/// System parameter for polling every instance of a context.
+///
+/// For a context that is per-player, or any other case where there is not exactly one: unlike
+/// [`Actions`], a system taking this runs whether or not any instance exists, and reads them by
+/// entity with [`get`](Self::get) or all at once with [`iter`](Self::iter).
+///
+/// ```ignore
+/// fn drive(all: ActionsQuery<Piloting>, ships: Query<&mut Transform>) {
+///     for (player, input) in all.iter() {
+///         let turn = input.value::<Turn>();
+///     }
+/// }
+/// ```
+#[derive(SystemParam)]
+pub struct ActionsQuery<'w, 's, C: InputContext + Component> {
+    states: Query<'w, 's, (Entity, &'static InputContextState<C>)>,
+    consumed: bevy_ecs::system::Res<'w, crate::eval::ConsumedControls>,
+}
+
+impl<C: InputContext + Component> ActionsQuery<'_, '_, C> {
     /// Returns the instance carried by an entity, if it has one.
     pub fn get(&self, entity: Entity) -> Option<&InputContextState<C>> {
         self.states.get(entity).ok().map(|(_, state)| state)
@@ -388,39 +536,29 @@ impl<C: InputContext + Component> Actions<'_, '_, C> {
         self.states.iter()
     }
 
-    /// Reads the typed action value from the only instance of this context.
-    pub fn value<A>(&self) -> A::Output
-    where
-        A: InputAction,
-        A::Output: ActionOutput,
-    {
-        self.single().value::<A>()
+    /// How many entities carry this context.
+    pub fn len(&self) -> usize {
+        self.states.iter().len()
     }
 
-    /// Returns the current phase for an action on the only instance of this context.
-    pub fn phase<A>(&self) -> Phase
-    where
-        A: InputAction,
-    {
-        self.single().phase::<A>()
+    /// Whether no entity carries this context.
+    pub fn is_empty(&self) -> bool {
+        self.states.is_empty()
     }
 
-    /// Returns `true` when the action was pressed this tick, on the only instance of this context.
-    pub fn fired<A>(&self) -> bool
-    where
-        A: InputAction<Output = bool>,
-    {
-        self.single().fired::<A>()
-    }
-
-    /// Explains why an action on the only instance of this context is not firing.
+    /// Explains why an action is not firing on one instance.
+    ///
+    /// Returns [`Obstacle::Unbound`] when the entity carries no such context, since from the call
+    /// site that is indistinguishable from an action nobody bound.
     ///
     /// See [`InputContextState::why_not`].
-    pub fn why_not<A>(&self) -> Obstacle
+    pub fn why_not<A>(&self, entity: Entity) -> Obstacle
     where
         A: InputAction,
     {
-        self.single().why_not::<A>(&self.consumed)
+        self.get(entity).map_or(Obstacle::Unbound, |state| {
+            state.why_not::<A>(&self.consumed)
+        })
     }
 }
 
@@ -1390,6 +1528,161 @@ mod tests {
             context.active_if(resource_exists::<AtTheControls>);
             context.active_if(resource_exists::<Probe>);
         });
+    }
+
+    /// The case R24.4 names as a runtime failure rather than a developer mistake: the entity
+    /// carrying the context is gone, because whatever it belonged to was destroyed. The system
+    /// that reads it stands down for the run instead of bringing the game down with it.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_reader_is_skipped_rather_than_broken_when_its_context_is_gone() {
+        let mut app = jump_app();
+        let player = app
+            .world_mut()
+            .query_filtered::<Entity, bevy_ecs::prelude::With<OnFoot>>()
+            .single(app.world())
+            .expect("one context instance");
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        run_fixed_tick(&mut app);
+        assert_eq!(app.world().resource::<FireCount>().0, 1);
+
+        // The ship dies mid-game. Reading its actions is now a question with no answer.
+        app.world_mut().despawn(player);
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Released));
+        app.update();
+        run_fixed_tick(&mut app);
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<FireCount>().0,
+            1,
+            "the reader was skipped, so it counted nothing further"
+        );
+    }
+
+    /// The other half of the same rule. Two instances is not one, so a reader that named no entity
+    /// has no answer either — and guessing one of them would be worse than standing down.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_reader_is_skipped_when_several_instances_exist() {
+        let mut app = jump_app();
+        app.world_mut().spawn(OnFoot);
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        assert_eq!(app.world().resource::<FireCount>().0, 0);
+    }
+
+    /// And what to use instead: the query form runs regardless and reads each instance by entity.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn the_query_form_reads_every_instance() {
+        #[derive(Resource, Default)]
+        struct Jumping(usize, usize);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        let first = app.world_mut().spawn(OnFoot).id();
+        let second = app.world_mut().spawn(OnFoot).id();
+        app.init_resource::<Jumping>();
+        app.add_systems(
+            FixedUpdate,
+            move |all: ActionsQuery<OnFoot>, mut count: bevy_ecs::system::ResMut<'_, Jumping>| {
+                count.0 = all
+                    .iter()
+                    .filter(|(_, state)| state.value::<Jump>())
+                    .count();
+                count.1 = all.len();
+                // Reading one by name is the same answer as reading it in the walk.
+                assert_eq!(
+                    all.get(first).map(InputContextState::value::<Jump>),
+                    Some(all.iter().next().unwrap().1.value::<Jump>())
+                );
+                assert!(all.get(second).is_some());
+            },
+        );
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        let count = app.world().resource::<Jumping>();
+        assert_eq!((count.0, count.1), (2, 2));
+    }
+
+    /// R24.4's other runtime failure: an action read where it was never bound. It reads as though
+    /// nobody is touching the control, rather than taking the game down over a mistake that is the
+    /// developer's and not the player's.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn an_unbound_action_reads_as_untouched() {
+        #[derive(InputAction)]
+        #[action(path = "tests.unbound", output = f32, intent = Analog1)]
+        struct NeverBound;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        let player = app.world_mut().spawn(OnFoot).id();
+        app.update();
+
+        let state = app
+            .world()
+            .get::<InputContextState<OnFoot>>(player)
+            .expect("the context is on the entity");
+
+        assert!(state.is_bound::<Jump>());
+        assert!(!state.is_bound::<NeverBound>());
+
+        // Reading it is not fatal, and it reads as rest for its own shape.
+        assert_eq!(state.value::<NeverBound>(), 0.0);
+        assert_eq!(state.phase::<NeverBound>(), Phase::Idle);
+
+        // And the difference is available to code that wants it.
+        assert_eq!(state.try_value::<NeverBound>(), None);
+        assert_eq!(state.try_value::<Jump>(), Some(false));
+
+        // The diagnostic still distinguishes the two, which is what it is for.
+        assert_eq!(
+            state.why_not::<NeverBound>(app.world().resource()),
+            Obstacle::Unbound
+        );
+    }
+
+    /// The list in that warning is the useful half of it — the answer is usually a neighbouring
+    /// action or the same one in another context — so it is worth knowing it reads as a sentence.
+    #[test]
+    fn the_unbound_warning_lists_what_is_bound() {
+        use alloc::format;
+
+        assert_eq!(
+            format!("{}", BoundPaths(&["dead_zone.turn", "dead_zone.fire"])),
+            "dead_zone.turn, dead_zone.fire"
+        );
+        assert_eq!(
+            format!("{}", BoundPaths(&["dead_zone.turn"])),
+            "dead_zone.turn"
+        );
+        assert_eq!(
+            format!("{}", BoundPaths(&[])),
+            "nothing — this context binds no actions at all"
+        );
     }
 
     /// R8.2, in the words the requirement uses: a menu consumes `Escape` so the game behind it does

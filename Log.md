@@ -541,4 +541,60 @@ convincing case in front of it. `active_in_state` always requires the reset, the
 `activate_including_held` variant of it being the thing this chunk deliberately did not ship. If
 that reads wrong in the hand, the variant is what answers it.
 
+
+---
+
+## Phase VI — the parts a solo developer trips over
+
+### Chunk 17a: runtime failures
+
+Chunk 17 was three chunks wearing one number, so it was split before it was written: 17a is the two
+runtime panics, 17b the plan-build diagnostics it is named for, 17c the `Reflect` and `normalize`
+items that were riding along because 17 was the open chunk when they were found. This is the first
+half.
+
+**Two panics, and only one of them was really about errors.** R24.4 says a failure that befalls a
+player must return an error rather than panic, and the crate had two that did not: reading an action
+the context never bound, and reading a context that had zero or several instances. They read like
+one problem and are not.
+
+The second has an answer that is better than an error, and Bevy had already written it. `Single<T>`
+does not fail when the world has no match — it reports `SystemParamValidationError::skipped` and the
+system does not run for that tick. That is exactly right for the motivating case: the ship is dead,
+so the system that flies it has nothing to do, and neither a panic nor a `Result` at the call site
+describes that as well as simply not running. `Actions<C>` is now a `Single` over the context state,
+which the `SystemParam` derive propagates for free — it forwards each field's error with `skipped`
+intact — and the many-instance case moved to a new `ActionsQuery<C>` with `get`/`iter`. Bevy's own
+`Query`/`Single` pairing, with the short name on the common case.
+
+**Every existing test and example compiled unchanged**, which is the ground-rule-3 signal: Dead
+Zone's `fly` still reads `input.value::<Turn>()` and now simply stops running when there is no ship.
+
+The first panic did want a value, and the value is rest — `false`, `0.0`, `Vec2::ZERO` by shape,
+with a warning logged once per context-and-action pair rather than per tick, naming both and listing
+what the context does bind. That list is the useful half: the action being read is usually a
+neighbour of the one that was meant, or the same action in a context that does bind it. `try_value`
+and `is_bound` are there for code that wants the distinction, and `why_not` already answered
+`Obstacle::Unbound` for anyone asking deliberately.
+
+**Two small dependencies, both already in the graph.** `log` for the warning, which is what
+`bevy_input` uses — `bevy_log` is `std`-only and installs a `tracing-subscriber`, so its
+`warn_once!` was not worth the weight. And `bevy_utils` for `once!`, the `no_std` half of that macro.
+The flag it expands to is a static in the function body, so a generic function warns once per
+instantiation, which is what makes "once per context-and-action" fall out rather than needing a
+registry.
+
+**The fix made a different failure quieter, and that debt is written onto 17b.** Zero instances used
+to panic: the wrong failure, but a loud one. It is now silent, and silence is indistinguishable at
+the call site from chunk 13's never-spawned bug — the one that cost a debugging session in Dead
+Zone's own pause menu. BSN gives the same silence a second door, since an `on(...)` handler on an
+entity that does not carry the context also never fires and never complains. Both are now recorded
+against 17b, which is the chunk that has to tell a dead ship apart from a context nobody spawned.
+
+**R3.7 had no destination after all.** The second grooming recorded it as homed in chunk 17, but
+chunk 17's description never mentioned it — so the home existed only in this log, and splitting the
+chunk would have dropped it silently. It is now chunk 35. Worth noting because it is the exact
+failure ground rule 5 exists to prevent, and it survived a grooming pass by hiding in the gap
+between two documents that each assumed the other held it.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

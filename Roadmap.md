@@ -118,7 +118,7 @@ step and a real game is a better acceptance test than a synthetic one.
 
 ## What has landed
 
-Seventeen chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
+Eighteen chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
 fell short of its own description; this table is only an index, and the sequence below is what
 remains.
 
@@ -141,6 +141,7 @@ remains.
 | 11 | Conditions and the scratch table | done; forgiveness windows → 34 |
 | 14 | Arbitration and consumption | done; chords on *actions* → 33 |
 | 32 | Activation by run condition | done, out of order |
+| 17a | Runtime failures (R24.4) | done; the silence it creates → 17b |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -177,20 +178,13 @@ claim an event.
 What R24.8 turned from polish into obligation: the long tail cannot verify what it does not own, so
 mistakes have to be caught rather than discovered in QA that nobody is running.
 
-### 17. The diagnostics tier
+### 17b. Plan-build diagnostics
 
 §9.5's middle tier, which does not exist: plan-build failures collected and reported rather than
 asserted one at a time. Unknown controls, shape mismatches a conversion cannot fix, duplicate
-bindings, contradictory consume flags (R4.8). Plus `Reflect` on modifiers and conditions so
-third-party ones round-trip (R5.6, R17.5), and the derive's duplicate-key error — declaring `path`
-twice currently picks one silently, which for a serialized identity is the worst available outcome.
-
-Also the **runtime** half of R24.4, which the crate currently fails: reading an unbound action
-panics, and so does reading a context that has zero or several instances. R24.4 names both as
-failures that befall a player rather than a developer, so both must return errors.
-
-And R5.9's two `normalize` operations, which need naming before either can be written — one clamps
-to unit length, the other remaps a range and therefore falls under D6's one-rescaling-stage rule.
+bindings, contradictory consume flags (R4.8). Plus the derive's duplicate-key error — declaring
+`path` twice currently picks one silently, which for a serialized identity is the worst available
+outcome.
 
 - **Inherited from chunk 15:** the intent-versus-channel mismatch is an `assert!` at plan build
   rather than a collected diagnostic, alongside the rescaling check it sits next to.
@@ -201,8 +195,25 @@ to unit length, the other remaps a range and therefore falls under D6's one-resc
   per-player context legitimately arrives later — but a **state-driven** context whose state is
   current and whose instance count is zero is a much narrower signal, and one worth saying out
   loud.
+- **Inherited from chunk 17a, and it made this one more urgent.** Reading a context with no
+  instance used to panic, which was the wrong failure but a loud one. It now skips the system
+  silently, per Bevy's own rule for `Single`. That is right for the case it was built for — the
+  ship is dead, so the system that flies it has nothing to do — and it is indistinguishable at the
+  call site from the never-spawned bug above. The signal is what tells the two apart.
+- **Inherited from chunk 17a: BSN gives the same silence a second door.** An `on(...)` handler
+  attached to an entity that does not carry the context compiles, spawns, and never fires. The
+  crate now advertises that pattern, so it owns the diagnostic for getting it wrong.
 - **Review surface:** error text, judged as the deliverable it is. R24.4 distinguishes runtime
   failures (must return errors) from app-build ones (may panic, must be actionable).
+
+### 17c. Reflect, and the two normalizes
+
+`Reflect` on modifiers and conditions so third-party ones round-trip (R5.6, R17.5). Plus R5.9's two
+`normalize` operations, which need naming before either can be written — one clamps to unit length,
+the other remaps a range and therefore falls under D6's one-rescaling-stage rule.
+
+- **Why separate:** neither is a diagnostic, and both were riding in 17 because it was the open
+  chunk when they were found.
 
 ### 18. Derive completion
 
@@ -420,6 +431,20 @@ cheat codes.
 - **Both fit the scratch record** as Design §6 predicted, so this is a condition each, not a
   redesign.
 - **Carried from chunk 11.**
+
+### 35. Disabling an action
+
+R3.7: an action switched off without being unbound, and switched back on without firing for a
+control the player was already holding — the same require-reset the context lifecycle already has,
+one level down.
+
+- **Why it exists as its own chunk.** The second grooming recorded it as homed in chunk 17, but
+  chunk 17's description never mentioned it, so splitting that chunk would have dropped it. A
+  `MUST` whose only record of a destination was in the log is exactly what ground rule 5 forbids.
+- **Not a diagnostic**, which is why it does not belong in what 17 became.
+- **The mechanism is probably already there.** `require_reset` is per slot and `StateFlags` has
+  room; what is missing is the public verb and what it means for a disabled action's in-flight
+  state — cancel, on the same terms as deactivating a context, is the answer to beat.
 
 ### 28. Docs that run
 

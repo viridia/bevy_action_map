@@ -149,7 +149,7 @@ pub mod prelude {
     // `MouseMove` is ungated because `BindingSource::MouseMotion` is.
     pub use crate::binding::{ButtonThreshold, Control, DeadZone, MouseMove};
     pub use crate::condition::{Condition, ConditionKind, Verdict};
-    pub use crate::context::{ActionMapAppExt, Actions, InputContextState, Obstacle};
+    pub use crate::context::{ActionMapAppExt, Actions, ActionsQuery, InputContextState, Obstacle};
     pub use crate::event::{Canceled, Completed, Fired, Started};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
     // The derives share their names with the traits above, which is fine — a derive macro and a

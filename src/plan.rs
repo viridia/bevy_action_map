@@ -62,6 +62,9 @@ pub struct Plan<C> {
     slot_intents: Vec<Intent>,
     // Parallel to `slot_intents`: how a transition on this slot becomes a typed event.
     slot_dispatch: Vec<Dispatch>,
+    // Parallel again: the declared path of the action holding this slot, kept for the diagnostics
+    // that have to name an action rather than identify one.
+    slot_paths: Vec<&'static str>,
     slot_by_action: BTreeMap<ActionId, usize>,
     scratch_count: usize,
     has_chords: bool,
@@ -73,6 +76,7 @@ impl<C> Plan<C> {
     pub(crate) fn from_bindings(bindings: Vec<BindingSpec>) -> Self {
         let mut slot_intents: Vec<Intent> = Vec::new();
         let mut slot_dispatch: Vec<Dispatch> = Vec::new();
+        let mut slot_paths: Vec<&'static str> = Vec::new();
         let mut slot_by_action = BTreeMap::new();
         let mut compiled = Vec::with_capacity(bindings.len());
         let mut scratch_count = 0;
@@ -123,6 +127,7 @@ impl<C> Plan<C> {
             let slot = *slot_by_action.entry(binding.action).or_insert_with(|| {
                 slot_intents.push(binding.intent);
                 slot_dispatch.push(binding.dispatch);
+                slot_paths.push(binding.path);
                 slot_intents.len() - 1
             });
 
@@ -155,6 +160,7 @@ impl<C> Plan<C> {
             bindings: compiled,
             slot_intents,
             slot_dispatch,
+            slot_paths,
             slot_by_action,
             scratch_count,
             has_chords,
@@ -191,5 +197,10 @@ impl<C> Plan<C> {
 
     pub(crate) fn slot_for_action(&self, action: ActionId) -> Option<usize> {
         self.slot_by_action.get(&action).copied()
+    }
+
+    /// The declared paths of every action this context binds, in slot order.
+    pub(crate) fn bound_paths(&self) -> &[&'static str] {
+        &self.slot_paths
     }
 }
