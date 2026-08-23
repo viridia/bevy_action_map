@@ -313,7 +313,7 @@ mod tests {
 
     #[cfg(feature = "gamepad")]
     use crate::binding::Stick;
-    use crate::binding::{ButtonThreshold, DeadZone, DirectionalButtons, MouseMove};
+    use crate::binding::{AxisButtons, ButtonThreshold, DeadZone, DirectionalButtons, MouseMove};
     use crate::frame::InputFrame;
     #[cfg(feature = "gamepad")]
     use bevy_input::gamepad::{
@@ -537,6 +537,51 @@ mod tests {
         assert_eq!(probe.travel, 0.8);
         assert!(probe.pressed);
         assert_eq!(probe.phase, Phase::Fired);
+    }
+
+    /// Two keys pushing one number in opposite directions. Holding both has to cancel: a turn
+    /// control that spun one way because that key was declared first would be a bug the player
+    /// could feel.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn two_buttons_make_a_signed_axis_that_cancels() {
+        #[derive(InputAction)]
+        #[action(path = "tests.turn_keys", output = f32, intent = Analog1)]
+        struct TurnKeys;
+
+        #[derive(Resource, Default)]
+        struct TurnProbe(f32);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook, _>(|context| {
+            context.bind::<TurnKeys>(AxisButtons::ad());
+        });
+        app.world_mut().spawn(FreeLook);
+        app.init_resource::<TurnProbe>();
+        app.add_systems(
+            Update,
+            |input: Actions<FreeLook>, mut probe: bevy_ecs::system::ResMut<'_, TurnProbe>| {
+                probe.0 = input.value::<TurnKeys>();
+            },
+        );
+
+        let key = |app: &mut App, code: KeyCode, character: &'static str, state: ButtonState| {
+            app.world_mut()
+                .write_message(press(code, Key::Character(character.into()), state));
+        };
+
+        key(&mut app, KeyCode::KeyD, "d", ButtonState::Pressed);
+        app.update();
+        assert_eq!(app.world().resource::<TurnProbe>().0, 1.0);
+
+        key(&mut app, KeyCode::KeyA, "a", ButtonState::Pressed);
+        app.update();
+        assert_eq!(app.world().resource::<TurnProbe>().0, 0.0, "both held");
+
+        key(&mut app, KeyCode::KeyD, "d", ButtonState::Released);
+        app.update();
+        assert_eq!(app.world().resource::<TurnProbe>().0, -1.0);
     }
 
     /// A stick never rests at exactly zero, so a button action driven by one has to ask the

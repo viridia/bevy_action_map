@@ -9,7 +9,7 @@
 //! ```rust
 //! use bevy_action_map::prelude::*;
 //!
-//! #[derive(bevy_action_map::InputAction)]
+//! #[derive(InputAction)]
 //! #[action(path = "gameplay.jump", output = bool, intent = Button)]
 //! struct Jump;
 //!
@@ -388,7 +388,7 @@ pub trait ActionOutput: Copy + Send + Sync + 'static {
 /// ```rust
 /// use bevy_action_map::prelude::*;
 ///
-/// #[derive(bevy_action_map::InputContext)]
+/// #[derive(InputContext)]
 /// #[context(path = "gameplay.on_foot", tick = Fixed)]
 /// struct OnFoot;
 ///

@@ -49,6 +49,57 @@ impl From<GamepadButton> for ButtonControl {
     }
 }
 
+/// Two buttons that together make a signed axis.
+///
+/// Turning left and right, leaning, strafing, cycling a list — a great many controls are a pair of
+/// buttons pushing one number in opposite directions, and there is no single control that reports
+/// that way. Holding both is the same as holding neither.
+///
+/// ```ignore
+/// context.bind::<Turn>(AxisButtons::ad());
+/// context.bind::<Turn>(GamepadAxis::LeftStickX);
+/// ```
+///
+/// Note what the second line is doing: a stick axis already reports signed, so it needs no
+/// composite. Both bindings feed the same action, and the player uses whichever they reach for.
+#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AxisButtons {
+    /// The button that drives the axis negative.
+    pub negative: ButtonControl,
+    /// The button that drives it positive.
+    pub positive: ButtonControl,
+}
+
+#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+impl AxisButtons {
+    /// Creates an axis from the two buttons that drive it either way.
+    pub fn new(negative: impl Into<ButtonControl>, positive: impl Into<ButtonControl>) -> Self {
+        Self {
+            negative: negative.into(),
+            positive: positive.into(),
+        }
+    }
+
+    /// The `A` and `D` keys.
+    #[cfg(feature = "keyboard")]
+    pub const fn ad() -> Self {
+        Self {
+            negative: ButtonControl::Key(KeyCode::KeyA),
+            positive: ButtonControl::Key(KeyCode::KeyD),
+        }
+    }
+
+    /// The left and right arrow keys.
+    #[cfg(feature = "keyboard")]
+    pub const fn left_right() -> Self {
+        Self {
+            negative: ButtonControl::Key(KeyCode::ArrowLeft),
+            positive: ButtonControl::Key(KeyCode::ArrowRight),
+        }
+    }
+}
+
 /// Four buttons that together make a direction.
 ///
 /// A direction never arrives from the hardware as a direction. WASD is four keys and a D-pad is
@@ -159,6 +210,9 @@ pub enum BindingSource {
     /// A keyboard key.
     #[cfg(feature = "keyboard")]
     Button(KeyCode),
+    /// A two-button signed axis composite.
+    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+    Axis1(AxisButtons),
     /// A four-button directional composite.
     #[cfg(any(feature = "keyboard", feature = "gamepad"))]
     Directional2(DirectionalButtons),
@@ -181,7 +235,9 @@ impl BindingSource {
         match self {
             #[cfg(feature = "keyboard")]
             Self::Button(_) => ChannelShape::Button,
-            // Four buttons, but a direction by the time anything binds to it.
+            // Buttons, but an axis and a direction by the time anything binds to them.
+            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            Self::Axis1(_) => ChannelShape::Axis1,
             #[cfg(any(feature = "keyboard", feature = "gamepad"))]
             Self::Directional2(_) => ChannelShape::Axis2,
             Self::MouseMotion => ChannelShape::Delta2,
@@ -225,6 +281,13 @@ pub trait BindingSourceSpec {
 impl BindingSourceSpec for KeyCode {
     fn into_binding_source(self) -> BindingSource {
         BindingSource::Button(self)
+    }
+}
+
+#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+impl BindingSourceSpec for AxisButtons {
+    fn into_binding_source(self) -> BindingSource {
+        BindingSource::Axis1(self)
     }
 }
 

@@ -15,11 +15,11 @@
 //! ```rust
 //! use bevy_action_map::prelude::*;
 //!
-//! #[derive(bevy_action_map::InputAction)]
+//! #[derive(InputAction)]
 //! #[action(path = "gameplay.jump", output = bool, intent = Button)]
 //! struct Jump;
 //!
-//! #[derive(bevy_action_map::InputContext)]
+//! #[derive(InputContext)]
 //! #[context(path = "gameplay.on_foot", tick = Fixed)]
 //! struct OnFoot;
 //! ```
@@ -109,14 +109,18 @@ pub mod prelude {
     pub use crate::{ActionMapPlugin, ActionMapSystems};
     // `InputContextBuilder` is deliberately absent: `add_context` hands one to a closure, so its
     // type is inferred and never written. Import it from `binding` to name it in a signature.
-    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
-    pub use crate::binding::DirectionalButtons;
     #[cfg(feature = "gamepad")]
     pub use crate::binding::Stick;
+    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+    pub use crate::binding::{AxisButtons, DirectionalButtons};
     // `MouseMove` is ungated because `BindingSource::MouseMotion` is.
     pub use crate::binding::{ButtonThreshold, DeadZone, MouseMove};
     pub use crate::context::{ActionMapAppExt, Actions, InputContextState};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
+    // The derives share their names with the traits above, which is fine — a derive macro and a
+    // trait live in different namespaces. Without these, a glob import of this prelude gives you
+    // the trait and leaves `#[derive(InputAction)]` unresolved.
+    pub use bevy_action_map_macros::{InputAction, InputContext};
 
     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
     pub use crate::frame::{InputFramePlugin, sample_input};

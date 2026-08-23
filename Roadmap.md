@@ -101,7 +101,7 @@ Chunk numbers are **stable identities, not positions**. Ground rule 1 lets a chu
 the one before it has been read, and several have been; the phase headings below carry the sequence
 so that "chunk 8" still means what it meant in the discussion that produced it.
 
-The target the remaining sequence aims at is **Blasteroids** — an asteroids-like game in primitive
+The target the remaining sequence aims at is **Dead Zone** — an asteroids-like game in primitive
 shapes, playable on keyboard or gamepad, eventually with a rebinding screen built on
 `bevy_ui_widgets` and operable from the controller. It is not a phase of its own. It arrives early,
 badly, and grows a capability per chunk, because ground rule 3 wants something runnable at every
@@ -313,7 +313,7 @@ Retire events by **window** instead of clearing the frame each sample. `tick = R
 `[last frame, now]`; `tick = Fixed` drains its own tick's window. Accumulated deltas split across
 the windows they span. The timestamp shim above is already in place for exactly this.
 
-Blasteroids arrives in chunk 16 and is an integrating physics sim, so this is the difference
+Dead Zone arrives in chunk 16 and is an integrating physics sim, so this is the difference
 between a game that drops shots and one that does not.
 
 - **Not doing:** conditions, real timestamps (that is bevy#9087), per-device windows.
@@ -371,7 +371,7 @@ pair.
   declares, not over a list of control identifiers — which is the same declaration this chunk adds
   for source channel shape, generalized one step. Getting it here means a third-party device kind
   (R11.2) joins a class the day its backend ships, with no registry to be added to.
-- **Why before Blasteroids:** analog thrust on a trigger is the motivating case, and it is the one
+- **Why before Dead Zone:** analog thrust on a trigger is the motivating case, and it is the one
   control that makes an asteroids ship feel like anything.
 - **Delivered:** `ChannelShape` as the third property, declared by every source and checked against
   the action's intent at plan build. A trigger drives an analog action with its travel and a button
@@ -390,13 +390,19 @@ pair.
 
 ---
 
-## Phase IV — Blasteroids, first playable
+## Phase IV — Dead Zone, first playable
 
-### 16. Blasteroids
+### 16. Dead Zone **[PARTIAL]**
 
-`examples/blasteroids/` — an asteroids-like game in primitive shapes. Thrust, rotate, fire, and
+`examples/dead_zone/` — an asteroids-like game in primitive shapes. Thrust, rotate, fire, and
 death; asteroids that split. Keyboard **and** gamepad bound to the same actions, which is the
 arrangement that silently broke before chunk 5's repair.
+
+**A directory, not a file.** Cargo picks up `examples/<name>/main.rs` with no manifest entry, and a
+game large enough to be a fair test is large enough that a single file would bury the input code —
+which is the part anyone reading this example came for. Splitting it also puts the thing under review
+in one place: `actions.rs` holds every action, context and binding, and the rest of the directory is
+ordinary game code that reads them. If that file is not short, this chunk has found what it came for.
 
 - **Not doing:** menus, rebinding, persistence, sound, score. Those arrive as later chunks extend it.
 - **Verified by:** playing it, on both schemes, with the Xbox pad over Bluetooth per the README.
@@ -405,19 +411,35 @@ arrangement that silently broke before chunk 5's repair.
   lines of input code a solo developer would have had to write.
 - **Why here:** everything before it is claimed to work and only partly demonstrated. A game is a
   harsher test than an example that prints.
+- **Delivered:** thrust, turn, fire and hyperspace on keyboard and pad, verified by playing it on
+  both. 455 lines, of which `actions.rs` is 68 and the control scheme itself is 24 — which is the
+  number this chunk existed to produce.
+- **It found two gaps in the crate before it was playable**, both fixed here rather than recorded,
+  because neither had a workaround an ordinary user would find.
+  - There was no way to say "two keys make a signed axis" — a 2D composite existed and a 1D one did
+    not, and `.negate()` on a key inverts the *press*, so binding `A` with it did nothing at all.
+    `AxisButtons` is the missing sibling, and holding both keys cancels rather than letting
+    declaration order win.
+  - The prelude exported the `InputAction` **trait** but not the derive of the same name, so a glob
+    import left `#[derive(InputAction)]` unresolved. Both existing examples had quietly worked
+    around it by spelling the path in full, which is why it went unseen.
+- **Outstanding → chunk 16 itself:** there is no ship-to-asteroid collision, so the player cannot
+  die. It is the same distance check `shatter_on_hit` already does.
+- **Outstanding → chunk 11:** hyperspace is a plain button. It wants a double-tap, which is a
+  condition.
 
 ---
 
 ## Phase V — multiple contexts
 
-Blasteroids grows a pause menu, which is what forces all three of these.
+Dead Zone grows a pause menu, which is what forces all three of these.
 
 ### 12. Transition events and observers
 
 `Fired<A>`, `Started<A>`, `Completed<A>` as generic `EntityEvent`s targeting the context entity;
 dispatch from the transition log. §9.6's observer surface.
 
-- **Verified by:** observer-based `App` tests; Blasteroids firing on an observer rather than a poll;
+- **Verified by:** observer-based `App` tests; Dead Zone firing on an observer rather than a poll;
   an example using `bsn!` to attach one declaratively (§9.6.1), which is the R22.15/R22.17 claim
   under test.
 - **Review surface:** the generic-`EntityEvent` bet. The context entity it targets now exists, which
@@ -428,7 +450,7 @@ dispatch from the transition log. §9.6's observer surface.
 Multiple context instances, priority ordering, activation and deactivation lifecycle, and what
 happens to in-flight state when a context deactivates mid-hold (R7.4, R7.5).
 
-- **Verified by:** Blasteroids pausing and resuming without the pause key re-triggering on the way
+- **Verified by:** Dead Zone pausing and resuming without the pause key re-triggering on the way
   out — the "pressing E to close a menu instantly re-triggers Interact" bug class, from the game side.
 
 ### 14. Arbitration and consumption
@@ -473,7 +495,7 @@ modifier signature, since scratch and `dt` are the same addition.
 - **Verified by:** unit tests driving synthetic time; the R6.1 catalogue is directly a test list.
 - **Review surface:** whether the 24-byte scratch record really covers every condition, which the
   design asserts and this chunk proves or refutes.
-- **In Blasteroids:** hyperspace on a double-tap, and hold-to-thrust.
+- **In Dead Zone:** hyperspace on a double-tap, and hold-to-thrust.
 - **Inherited from chunk 15: the rate-to-delta conversion R2.9 requires.** Chunk 15 made binding a
   stick to a `Delta2` action an error, which is right — a position is a rate and a mouse delta is a
   displacement, and summing them is the units error R13.2 names. But mouse-and-stick look is the
@@ -543,7 +565,7 @@ default at every scope (R19.4).
 
 ### 21. The rebinding screen
 
-In Blasteroids: a `bevy_ui_widgets` table of slots grouped by action category, a button per row that
+In Dead Zone: a `bevy_ui_widgets` table of slots grouped by action category, a button per row that
 enters capture, and the whole screen operable from the controller.
 
 - **Review surface:** the rebinding API judged from a real consumer. If a UI author needs to reach
@@ -567,7 +589,10 @@ axis map, which is a defect in its own right. Manual calibration API plus an app
 step per OQ-4; R14.9's pass-through warning; the preference stage modulating the design stage
 without being able to reduce it below what the hardware needs.
 
-- **Persistence of calibration** stays blocked on R11.5's stable device identity.
+- **Now downstream of chunk 26.** Per-device keying is exactly what routing has to introduce, so
+  this chunk should follow it rather than build a second way of telling two pads apart.
+- **Persistence of calibration** stays blocked on R11.5's stable device identity, which needs two
+  units of the same kind to be worth testing.
 
 ### 10. The compiled plan and slot allocation
 
@@ -580,15 +605,59 @@ Replace the plan's `BTreeMap` with the `Vec<u16>` action→slot map, the dirty b
 
 ---
 
+## Phase IX — the second example
+
+Dead Zone is one player reading one set of bindings. Everything in §15 is invisible to it, because
+with a single player there is no question of *which* device drove an action — and a model that never
+has to answer that question has not been tested on the thing it was designed for.
+
+### 26. Device routing and the join flow
+
+§15 made real: an input frame event carries the device it came from, a context entity can be paired
+to a device, and an unpaired device drives nothing. Plus the join gesture — an app-driven query for
+"a device that just pressed something and is not yet claimed" (R15.4), which is the same read of L1
+that capture uses in chunk 20.
+
+- **The gate here was miscounted.** This sat under "deliberately deferred, gated on a real second
+  device", but a keyboard is a device: one pad plus a keyboard is two, and a mixed-scheme pair is the
+  arrangement most likely to expose a routing bug, since the two do not share a code path. What
+  genuinely needs two units of the *same kind* is per-device identity and calibration, which is
+  chunk 22's problem and stays deferred.
+- **Verified by:** two context entities driven at once, each deaf to the other's device — a test
+  that fails loudly today, because every context reads the whole frame. It must pass with **either**
+  pairing, and the two are not the same test. A pad and a keyboard exercise the mixed case, where
+  the two devices share no code path and a routing bug cannot hide behind symmetry. Two pads of the
+  same model exercise identity, where kind tells you nothing and only the device handle
+  distinguishes them — which is the case that decides whether the handle is carried far enough.
+- **Review surface:** whether pairing is a property of the context entity or a filter on the plan.
+  The entity already carries the state, so it is the obvious home, but that puts a device handle in
+  a component that has so far been pure.
+
+### 27. Split Friction
+
+`examples/split_friction/` — a split-screen game in the shape of Gauntlet: two players, top-down,
+shared world, one viewport each.
+
+- **Not doing:** rebinding. Dead Zone covers that, and a second UI would make this example about
+  something other than the thing it is here to show.
+- **What it is here to show:** the **device selection screen**. Two slots, each waiting for a device
+  to claim it; press anything on a pad or a key on the keyboard and that slot is yours. This is the
+  first flow in the crate where the player picks the device rather than the developer, and it is the
+  one part of §15 a developer cannot get right by reading a doc comment.
+- **Verified by:** playing it, with the pad on one slot and the keyboard on the other, then swapping
+  them.
+
+---
+
 ## Deliberately deferred
 
 Still out of scope for the sequence above. Rebinding, persistence and presentation have left this
-table because Blasteroids needs them.
+table because Dead Zone needs them; device routing and local multiplayer have left it because
+Split Friction does, and because the gate turned out to be met already.
 
 | Area                                              | Gated on                                                                   |
 | ------------------------------------------------- | -------------------------------------------------------------------------- |
-| Device identity and pairing (§11, §15)            | a real second device to test against                                       |
-| Local multiplayer (§15)                           | the above                                                                  |
+| Persistent device identity and calibration (§11)  | two units of the *same kind*, which pad-plus-keyboard does not give         |
 | Prompts and glyph ids (§18)                       | asset-pipeline questions this document does not touch                      |
 | Source and authority backends (D3)                | one working in-tree path to generalize _from_                              |
 | Netcode injection and rollback (§10)              | chunk 9, plus a testbed that actually rolls back                           |
@@ -597,7 +666,7 @@ table because Blasteroids needs them.
 
 Guardian is worth restating: it is on **bevy 0.16.1** with `bevy_enhanced_input 0.12`, and we target
 main. The migration is a genuine goal, but it is a port plus a rewrite, and doing both at once would
-confuse "action_map is wrong" with "0.20 moved this". Blasteroids first; guardian when there is
+confuse "action_map is wrong" with "0.20 moved this". Dead Zone first; guardian when there is
 something worth migrating _to_.
 
 ---

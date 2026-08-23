@@ -3,11 +3,11 @@
 use bevy::prelude::*;
 use bevy_action_map::prelude::*;
 
-#[derive(bevy_action_map::InputAction)]
+#[derive(InputAction)]
 #[action(path = "gameplay.jump", output = bool, intent = Button)]
 struct Jump;
 
-#[derive(bevy_action_map::InputContext, Component)]
+#[derive(InputContext, Component)]
 #[context(path = "gameplay.on_foot", tick = Render)]
 struct OnFoot;
 

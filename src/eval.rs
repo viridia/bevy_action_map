@@ -118,6 +118,11 @@ impl<C: InputContext> InputContextState<C> {
                         ActionValue::Bool(held_buttons.contains(&key_code))
                     }
                     #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+                    BindingSource::Axis1(parts) => ActionValue::Axis1(axis_from_buttons(
+                        is_pressed(parts.negative),
+                        is_pressed(parts.positive),
+                    )),
+                    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
                     BindingSource::Directional2(parts) => {
                         // Four keys and a D-pad reach an action through this same arm, which is
                         // the whole point of the composite.

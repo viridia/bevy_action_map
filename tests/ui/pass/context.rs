@@ -1,4 +1,6 @@
-#[derive(bevy_action_map::InputContext)]
+use bevy_action_map::prelude::*;
+
+#[derive(InputContext)]
 #[context(path = "gameplay.on_foot", tick = Fixed, priority = 7)]
 struct OnFoot;
 

@@ -4,23 +4,23 @@ use bevy::prelude::*;
 use bevy_action_map::prelude::*;
 use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
-#[derive(bevy_action_map::InputAction)]
+#[derive(InputAction)]
 #[action(path = "gameplay.move", output = Vec2, intent = Directional2)]
 struct Move;
 
-#[derive(bevy_action_map::InputAction)]
+#[derive(InputAction)]
 #[action(path = "gameplay.look", output = Vec2, intent = Delta2)]
 struct Look;
 
-#[derive(bevy_action_map::InputAction)]
+#[derive(InputAction)]
 #[action(path = "gameplay.jump", output = bool, intent = Button)]
 struct Jump;
 
-#[derive(bevy_action_map::InputContext, Component)]
+#[derive(InputContext, Component)]
 #[context(path = "gameplay.on_foot", tick = Fixed)]
 struct OnFoot;
 
-#[derive(bevy_action_map::InputContext, Component)]
+#[derive(InputContext, Component)]
 #[context(path = "gameplay.free_look", tick = Render)]
 struct FreeLook;
 

@@ -1,6 +1,6 @@
 use bevy_action_map::prelude::*;
 
-#[derive(bevy_action_map::InputAction)]
+#[derive(InputAction)]
 #[action(path = "gameplay.jump", output = bool, intent = Button)]
 struct Jump;
 

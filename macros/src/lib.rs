@@ -2,17 +2,21 @@
 //!
 //! Use them like this:
 //!
-//! ```rust
+//! ```ignore
 //! use bevy_action_map::prelude::*;
 //!
-//! #[derive(bevy_action_map::InputAction)]
+//! #[derive(InputAction)]
 //! #[action(path = "gameplay.jump", output = bool, intent = Button)]
 //! struct Jump;
 //!
-//! #[derive(bevy_action_map::InputContext)]
+//! #[derive(InputContext)]
 //! #[context(path = "gameplay.on_foot", tick = Fixed)]
 //! struct OnFoot;
 //! ```
+//!
+//! Not compiled: what the macros expand to names `bevy_action_map`, and this crate cannot depend on
+//! the one that re-exports it. The same example is checked for real in that crate's own docs and in
+//! `tests/ui/pass`.
 
 #![forbid(unsafe_code)]
 
