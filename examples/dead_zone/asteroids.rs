@@ -33,68 +33,59 @@ impl Size {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct Asteroid;
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Startup, spawn_field);
+    app.add_systems(Startup, starting_rocks.spawn());
     app.add_systems(FixedUpdate, shatter_on_hit.in_set(Simulating));
 }
 
-fn spawn_field(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-) {
-    for _ in 0..6 {
-        // Kept away from the middle so the ship does not start inside a rock.
-        let edge = Vec2::new(
-            (rand_unit() * 2.0 - 1.0) * HALF_EXTENT.x,
-            (rand_unit() * 2.0 - 1.0) * HALF_EXTENT.y,
-        );
-        let position = if edge.length() < 160.0 {
-            edge.normalize_or(Vec2::X) * 160.0
-        } else {
-            edge
-        };
-        spawn_asteroid(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            Size::Large,
-            position,
-            drift(),
-        );
-    }
+/// The opening spread of rocks: a `SceneList` rather than a `Scene`, because these are six sibling
+/// entities and not one object with parts.
+///
+/// A `Vec` of scenes is itself a `SceneList`, so the loop that used to spawn is now a loop that
+/// builds.
+fn starting_rocks() -> impl SceneList {
+    (0..6)
+        .map(|_| {
+            // Kept away from the middle so the ship does not start inside a rock.
+            let edge = Vec2::new(
+                (rand_unit() * 2.0 - 1.0) * HALF_EXTENT.x,
+                (rand_unit() * 2.0 - 1.0) * HALF_EXTENT.y,
+            );
+            let position = if edge.length() < 160.0 {
+                edge.normalize_or(Vec2::X) * 160.0
+            } else {
+                edge
+            };
+            asteroid(Size::Large, position, drift())
+        })
+        .collect::<Vec<_>>()
 }
 
 fn shatter_on_hit(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
     asteroids: Query<(Entity, &Transform, &Size), With<Asteroid>>,
     bullets: Query<(Entity, &Transform), With<Bullet>>,
 ) {
     for (bullet, bullet_at) in bullets.iter() {
-        for (asteroid, asteroid_at, size) in asteroids.iter() {
-            let hit = bullet_at.translation.distance(asteroid_at.translation) < size.radius();
+        for (rock, rock_at, size) in asteroids.iter() {
+            let hit = bullet_at.translation.distance(rock_at.translation) < size.radius();
             if !hit {
                 continue;
             }
 
             commands.entity(bullet).try_despawn();
-            commands.entity(asteroid).try_despawn();
+            commands.entity(rock).try_despawn();
 
             if let Some(smaller) = size.smaller() {
                 for _ in 0..2 {
-                    spawn_asteroid(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
+                    commands.spawn_scene(asteroid(
                         smaller,
-                        asteroid_at.translation.truncate(),
+                        rock_at.translation.truncate(),
                         drift() * 1.6,
-                    );
+                    ));
                 }
             }
             break;
@@ -102,24 +93,28 @@ fn shatter_on_hit(
     }
 }
 
-fn spawn_asteroid(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<ColorMaterial>,
-    size: Size,
-    position: Vec2,
-    velocity: Vec2,
-) {
-    commands.spawn((
-        Asteroid,
-        size,
-        Mesh2d(meshes.add(RegularPolygon::new(size.radius(), 7))),
-        MeshMaterial2d(materials.add(Color::srgb(0.45, 0.45, 0.5))),
-        Transform::from_translation(position.extend(0.0))
-            .with_rotation(Quat::from_rotation_z(rand_unit() * TAU)),
-        Velocity(velocity),
-        Wraps,
-    ));
+/// One rock, as a scene.
+///
+/// The same function serves the opening field and every shatter after it — which is the point of a
+/// scene being a value: `starting_rocks` collects six of these into a list, and `shatter_on_hit`
+/// hands two at a time straight to `spawn_scene`.
+fn asteroid(size: Size, position: Vec2, velocity: Vec2) -> impl Scene {
+    bsn! {
+        Asteroid
+        // `Size` is a runtime value rather than a variant written into the block, so it goes in as
+        // a template value. Naming the variant directly — `Size::Large` — would work too.
+        template_value(size)
+        Mesh2d(asset_value(RegularPolygon::new(size.radius(), 7)))
+        MeshMaterial2d::<ColorMaterial>(asset_value(Color::srgb(0.45, 0.45, 0.5)))
+        // A patch, so the two fields that matter are set and `scale` keeps its default. This is why
+        // the builder chain (`from_translation(..).with_rotation(..)`) is no longer needed.
+        Transform {
+            translation: {position.extend(0.0)},
+            rotation: {Quat::from_rotation_z(rand_unit() * TAU)},
+        }
+        Velocity({velocity})
+        Wraps
+    }
 }
 
 fn drift() -> Vec2 {

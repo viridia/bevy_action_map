@@ -3,12 +3,19 @@
 //! This is deliberately the whole of the input layer. If you want to know what Dead Zone does with
 //! `bevy_action_map`, this file is it; everything else in the directory is ordinary game code that
 //! reads these actions and never mentions a key or a button.
+//!
+//! Contexts are spawned from here too, and each one is a scene that carries both the context
+//! component and the observers for its actions — see [`shell`]. A context is a component and a
+//! transition is an entity event aimed at whatever carries it, so a `bsn!` block can hold the
+//! entity, its controls, and its reactions together instead of scattering them across a spawn, an
+//! `add_observer` call, and a comment explaining how the two relate.
 
 use bevy::prelude::*;
 use bevy_action_map::prelude::*;
 use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
-use crate::pause::Game;
+use crate::pause::{self, Game};
+use crate::ship::RELOAD;
 
 /// How hard the engine is burning, from 0 to 1.
 ///
@@ -52,7 +59,7 @@ pub struct Pause;
 ///
 /// Fixed tick, because the ship integrates its own velocity and a frame-rate-dependent burn would
 /// make the game play differently on different machines.
-#[derive(InputContext, Component)]
+#[derive(InputContext, Component, Default, Clone)]
 #[context(path = "dead_zone.flying", tick = Fixed)]
 pub struct Flying;
 
@@ -65,7 +72,7 @@ pub struct Flying;
 ///
 /// Render tick, because these answer at the frame rate rather than the simulation rate, and while
 /// the game is paused there is no simulation to answer at.
-#[derive(InputContext, Component)]
+#[derive(InputContext, Component, Default, Clone)]
 #[context(path = "dead_zone.shell", tick = Render)]
 pub struct Shell;
 
@@ -92,8 +99,12 @@ pub fn plugin(app: &mut App) {
         controls.bind::<Turn>(AxisButtons::ad());
         controls.bind::<Turn>(AxisButtons::left_right());
 
-        controls.bind::<Fire>(GamepadButton::South);
-        controls.bind::<Fire>(KeyCode::Space);
+        // `pulse` fires the action again every interval for as long as the button is down, so
+        // holding fire is a stream of separate `Fired`s rather than one long one — which is what
+        // lets `shoot` be an observer with no timer of its own. The interval is the ship's rate of
+        // fire, which is the one game number the input layer has to know.
+        controls.bind::<Fire>(GamepadButton::South).pulse(RELOAD);
+        controls.bind::<Fire>(KeyCode::Space).pulse(RELOAD);
 
         // Hold the throttle for three quarters of a second and it opens up. `Started` fires the
         // moment the burn begins, so the exhaust can show it building before it arrives.
@@ -118,13 +129,23 @@ pub fn plugin(app: &mut App) {
         controls.bind::<Pause>(GamepadButton::Start);
     });
 
-    app.add_systems(Startup, spawn_shell);
+    app.add_systems(Startup, shell.spawn());
 }
 
-/// The always-on controls have to belong to something, the same as the ship's do.
+/// The always-on controls, as a scene: the context, and what listens to it.
 ///
-/// Nothing else is on this entity: a context that is not attached to a player or a world object is
-/// still attached to an entity, because that is what an observer targets.
-fn spawn_shell(mut commands: Commands) {
-    commands.spawn(Shell);
+/// This is the arrangement worth copying. A context is an ordinary component, and a transition is
+/// an [`EntityEvent`] aimed at the entity carrying that component — so the entity, the context on
+/// it, and the observers for the context's actions all belong in one `bsn!` block. Everything about
+/// who hears escape is these four lines. Nothing is registered against the app, and there is no
+/// second place that has to be kept in step with this one.
+///
+/// A context that is not attached to a player or a world object is still attached to an entity,
+/// because that is what an observer targets. Adding [`Pause`] to a settings screen later means
+/// adding a line here, not wiring an observer somewhere else and remembering why.
+fn shell() -> impl Scene {
+    bsn! {
+        Shell
+        on(pause::toggle)
+    }
 }

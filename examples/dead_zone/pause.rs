@@ -20,15 +20,14 @@ pub enum Game {
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Simulating;
 
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 struct PausedBanner;
 
 pub fn plugin(app: &mut App) {
     app.init_state::<Game>();
     app.configure_sets(Update, Simulating.run_if(in_state(Game::Playing)));
     app.configure_sets(FixedUpdate, Simulating.run_if(in_state(Game::Playing)));
-    app.add_observer(toggle);
-    app.add_systems(OnEnter(Game::Paused), show_banner);
+    app.add_systems(OnEnter(Game::Paused), banner.spawn());
     app.add_systems(OnExit(Game::Paused), hide_banner);
 }
 
@@ -36,25 +35,39 @@ pub fn plugin(app: &mut App) {
 ///
 /// An observer rather than a polled system: the press is a single event, and polling for it from
 /// `Update` would see the same `Fired` twice on a frame where no fixed tick ran.
-fn toggle(_: On<Fired<Pause>>, game: Res<State<Game>>, mut next: ResMut<NextState<Game>>) {
+///
+/// It is attached by [`actions::shell`](crate::actions::shell), which spawns the context this
+/// listens to, rather than registered globally with `App::add_observer`. That is why this is
+/// `pub(crate)`: the reaction is written next to the context whose action it answers, and pausing
+/// is otherwise entirely this file's business.
+pub(crate) fn toggle(
+    _: On<Fired<Pause>>,
+    game: Res<State<Game>>,
+    mut next: ResMut<NextState<Game>>,
+) {
     next.set(match game.get() {
         Game::Playing => Game::Paused,
         Game::Paused => Game::Playing,
     });
 }
 
-fn show_banner(mut commands: Commands) {
-    commands.spawn((
-        PausedBanner,
-        Text::new("PAUSED"),
-        TextFont::from_font_size(48.0),
+/// The banner, as a scene.
+///
+/// `.spawn()` is normally reserved for `Startup`, but `OnEnter` is the same kind of schedule for
+/// this purpose: it runs once each time the game is paused, and spawns one banner when it does.
+fn banner() -> impl Scene {
+    bsn! {
+        PausedBanner
+        Text::new("PAUSED")
+        TextFont { font_size: 48.0_f32 }
+        // A patch: only the three fields that differ are named, and the rest of `Node` keeps its
+        // defaults without a `..default()` to say so.
         Node {
             position_type: PositionType::Absolute,
             top: Val::Percent(42.0),
             left: Val::Percent(40.0),
-            ..default()
-        },
-    ));
+        }
+    }
 }
 
 fn hide_banner(mut commands: Commands, banner: Query<Entity, With<PausedBanner>>) {

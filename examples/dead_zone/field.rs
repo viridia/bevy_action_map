@@ -1,4 +1,8 @@
 //! The playfield: its size, and the wrapping that makes it a torus.
+//!
+//! Everything here is spawned from a `bsn!` block somewhere, which is why each component derives
+//! `Default` and `Clone`: that pair is what BSN asks of a component before it will let you write
+//! the type's name in a scene.
 
 use bevy::prelude::*;
 
@@ -8,15 +12,15 @@ use crate::pause::Simulating;
 pub const HALF_EXTENT: Vec2 = Vec2::new(640.0, 360.0);
 
 /// Anything that leaves one edge of the field and comes back on the other.
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct Wraps;
 
 /// A velocity in world units per second.
-#[derive(Component, Default, Deref, DerefMut)]
+#[derive(Component, Default, Clone, Deref, DerefMut)]
 pub struct Velocity(pub Vec2);
 
 /// How long an entity has left before it removes itself.
-#[derive(Component, Deref, DerefMut)]
+#[derive(Component, Default, Clone, Deref, DerefMut)]
 pub struct Lifetime(pub Timer);
 
 pub fn plugin(app: &mut App) {

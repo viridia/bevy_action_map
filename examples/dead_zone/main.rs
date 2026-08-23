@@ -47,11 +47,16 @@ fn main() {
             asteroids::plugin,
             pause::plugin,
         ))
-        .add_systems(Startup, setup)
+        .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))
+        .add_systems(Startup, camera.spawn())
         .run();
 }
 
-fn setup(mut commands: Commands) {
-    commands.spawn(Camera2d);
-    commands.insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)));
+/// The camera, as a one-entity scene.
+///
+/// Every spawn in this example is written this way: a plain function returning `impl Scene`, and
+/// either `.spawn()` to make a `Startup` system out of it or `Commands::spawn_scene` to spawn one
+/// mid-game. `bsn!` is doing very little here, but the shape is the same at every size.
+fn camera() -> impl Scene {
+    bsn! { Camera2d }
 }
