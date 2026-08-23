@@ -115,10 +115,9 @@ outside the mapping pipeline, presentation must not assume our binding tables ex
 must be delegable to the backend's own UI.
 
 - **R0.1 (MUST)** Each layer is usable without the layers above it. L1 alone must be a usable
-  normalized input API; L2 must be drivable from a hand-constructed L1 frame. _(Amended after
-  implementation: this said "input snapshot", and §9's timing requirements turn out to be
-  unsatisfiable by a snapshot — a press and release inside one frame collapse to nothing. L1 is a
-  timestamped queue drained by window (Design §2), and the wording should not suggest otherwise.)_
+  normalized input API; L2 must be drivable from a hand-constructed L1 frame. _(L1 is a timestamped
+  queue drained by window (Design §2) and not a snapshot: §9's timing requirements are unsatisfiable
+  by a snapshot, in which a press and release inside one frame collapse to nothing.)_
 - **R0.2 (MUST)** L2 must not read `ButtonInput`/`Axis`/raw `Message`s directly; it consumes only L1.
   This is the single most important structural rule — determinism (§10), testing (§21), replay, and
   external binding backends all depend on it.
@@ -220,11 +219,10 @@ because R1.1 already forces the id to be decoupled from the type.
   (§8.R8.2). Rebindability is _not_ on the action — it is a property of a declared slot (§19.R19.10),
   since one action can have several bindings of which only some are player-mappable.
 
-  _(Amended after implementation, resolving OQ-9: this required a human-readable **name** here as
-  well, and R19.9 required the same field on a slot. The slot wins — a composite settles it, since
-  `Move` has four slots and the player must be shown "Move Forward", never "Move". The category
-  stays here, because four movement slots share one category and repeating it per slot is four
-  chances to disagree. Both are localization keys per R19.14, not display text.)_
+  _(The player-visible **name** belongs to the slot (R19.9) rather than here, because a composite
+  settles it: `Move` has four slots and the player must be shown "Move Forward", never "Move". The
+  category stays here, because four movement slots share one category and repeating it per slot is
+  four chances to disagree. Both are localization keys per R19.14, not display text.)_
 - **R1.7 (MUST)** Action names must be expressible in an external backend's namespace (Steam IGA
   action names are authored in a separate file and must match exactly), which is a second reason the
   path is declared rather than derived (D8): the author has to be able to spell the name the backend
@@ -261,10 +259,8 @@ kinds feed one action (R2.9, §13.R13.2).
 - **R2.1 (MUST)** Support bool, 1D, 2D, 3D value shapes in one runtime value type.
 - **R2.2 (MUST)** Dimension conversion rules must be explicit, documented, and total, and the
   **specific rule for each pair must be settled here rather than left to the implementation**.
-  _(Strengthened after implementation: requiring only that the rules be documented meant they got
-  decided by whoever wrote the conversion first, and one of them — a 1D value becoming 2D by
-  copying itself into both components, so a half-pressed trigger reads as a diagonal — is a choice
-  nobody would defend if asked. A requirement that a decision be written down is not a decision.)_
+  _(A requirement that a decision be written down is not a decision. Rules left to the
+  implementation get settled by whoever writes the first conversion, and are then hard to revisit.)_
 
   Two rules cover the table, and both come from the same principle: **a conversion may discard
   information, but must never invent any.**
@@ -292,24 +288,15 @@ kinds feed one action (R2.9, §13.R13.2).
   an associated type, typed reads must be checked at compile time — binding a `Vec2` action and
   reading it as `bool` should not compile, rather than failing a runtime shape check.
 - **R2.4 (WITHDRAWN)** ~~Distinguish _value_ actions (continuous, arbitrated) from _pass-through_
-  actions (every contributing source visible, no arbitration).~~ Withdrawn after implementation.
+  actions (every contributing source visible, no arbitration).~~
 
-  The requirement came from Unity, where an action's bound controls are normally _disambiguated_ —
-  the one with the greatest magnitude becomes the driving control and the rest are ignored — and
-  `PassThrough` is the opt-out that reports every control separately. Its motivating cases are
-  device-shaped rather than value-shaped: telling which of four pads pressed Start, reading sixteen
-  MIDI knobs bound to one action, and showing every contributor in a debug overlay.
+  Unity's distinction, whose motivating cases turn out to be device-shaped rather than value-shaped
+  and are answered elsewhere here: device scoping by §15.R15.3 and R15.4, per-source visibility by
+  R22.2's inspector dump, and a value that remembers its origin by R2.6. What remained was a second
+  storage shape carried by every action so that a few could use it. If a case appears that genuinely
+  needs it, it should arrive as its own requirement with that case attached.
+  ([Log](./Log.md#the-review-and-the-requirements-amendments-it-produced))
 
-  All three are answered better elsewhere in this document, and by mechanisms that already have to
-  exist. Which device produced an input is the router's business (§15.R15.3) and the join flow's
-  (R15.4), both of which scope by device rather than flagging an action. Per-source visibility for
-  debugging is R22.2's inspector dump, which reads the plan's reverse index. And a value that
-  remembers where it came from is R2.6.
-
-  What is left once those are removed is a second storage shape — N live values per action instead
-  of one — carried on every action so that a few can use it. That cost is real and the benefit is
-  covered, so pass-through is not a distinction this model should carry. If a case appears that
-  genuinely needs it, it should arrive as its own requirement with that case attached.
 - **R2.5 (SHOULD)** Values must not be normalized/clamped implicitly; clamping is an explicit modifier
   so that e.g. mouse deltas and analog sticks can share a pipeline (§5).
 - **R2.6 (MAY)** Carry a "source" tag on the value (which device/binding produced it) for prompts and
@@ -458,9 +445,8 @@ subtle trap: a "smoothing" modifier is a stateful filter and must therefore be r
   ["Doing Thumbstick Dead Zones Right"][deadzone-article] for why the radial/axial distinction is not
   cosmetic.
 
-  _(Amended after implementation: "normalize" was listed here and has been split out as R5.9,
-  because the word names two incompatible operations and the list gave no way to tell which was
-  meant.)_
+  _("normalize" is deliberately absent from this list. The word names two incompatible operations,
+  so it is split out and disambiguated as R5.9.)_
 - **R5.9 (MUST)** Both meanings of "normalize" must be available and must not share a name:
   - **clamp to unit length** — scale a vector down if it exceeds magnitude 1, leave it otherwise.
     This is what keeps a composite of four keys from exceeding a stick's reach on the diagonal.
@@ -480,10 +466,10 @@ subtle trap: a "smoothing" modifier is a stateful filter and must therefore be r
 - **R5.6 (MUST)** Third-party modifiers must be registerable without forking the crate, and must
   round-trip through serialization via the type registry.
 - **R5.7 (MUST)** Modifiers must be pure functions of (input, state, dt) with no world access, so
-  they can run during rollback resimulation. _(Raised from `SHOULD` after implementation: §10.R10.2
-  makes purity of the whole mapping step a `MUST`, and a modifier runs inside that step. A `SHOULD`
-  here let a conforming implementation admit an impure modifier that would break a `MUST` there.
-  The same reasoning applies to conditions via R6.6.)_
+  they can run during rollback resimulation. _(A `MUST` rather than a `SHOULD` because §10.R10.2
+  makes purity of the whole mapping step a `MUST` and a modifier runs inside that step: anything
+  weaker here would admit an impure modifier that breaks a `MUST` there. The same reasoning applies
+  to conditions via R6.6.)_
 - **R5.8 (MUST)** Modifiers are a **developer-facing** mechanism and must never be surfaced directly in
   a player-facing UI. Negate, swizzle, and curve are adapters for fitting a source to an action, not
   choices a player can meaningfully make. Where a modifier parameter should be player-adjustable, it is
@@ -593,11 +579,10 @@ same problem for events in [bevy#7691][bevy-7691].
 - **R9.1 (MUST)** Define one canonical sampling point (in `PreUpdate`, ordered after
   `bevy_input::InputSystems`) that produces the L1 input frame.
 - **R9.2 (MUST)** Render-rate and fixed-rate action state must both be available, and reading the
-  wrong one must not be an easy mistake. _(Reworded after implementation. The original said "provide
-  both a render-rate action state and a fixed-rate action state", which presumes two states per
-  context; the design instead gives each context one state and a declared tick domain (Design §7),
-  so an action needed at both rates is declared in two contexts. That satisfies what this
-  requirement is for — the rates are distinct and not silently interchangeable — by a route the
+  wrong one must not be an easy mistake. _(Stated as a guarantee rather than a layout. The design
+  gives each context one state and a declared tick domain (Design §7), so an action needed at both
+  rates is declared in two contexts. What matters is that the rates stay distinct and are not
+  silently interchangeable, which that satisfies by a route a
   original wording forbids. The requirement is about the guarantee, not the layout.)_
 - **R9.3 (MUST)** Edges must not be lost when `FixedUpdate` runs zero times in a frame — a press and
   release inside one frame must still be observable by fixed-rate consumers.
@@ -1268,10 +1253,8 @@ properties that constrain the state layout left open in OQ-3.
 - **R23.1 (MUST)** Per-frame cost proportional to _active_ bindings, not to all defined actions ×
   entities.
 - **R23.2 (MUST)** No allocation **and no synchronization** in the steady-state hot path.
-  _(Broadened after implementation: the original said "no allocation", and the first real violation
-  found was neither an allocation nor cheaper than one — resolving an action's id took a mutex and a
-  linear scan on every read. A lock on a per-frame path is worse than an allocation, and a rule that
-  names only allocation does not catch it.)_
+  _(Synchronization and not only allocation: a lock on a per-frame path is worse than an
+  allocation, and a rule naming only allocation does not catch it.)_
 - **R23.3 (MUST)** Context activation/deactivation must not cause structural ECS churn proportional to
   the number of actions — activating a context should not spawn, despawn, insert, or remove per
   action. A layout that does so must show the cost is acceptable at the action counts in §23.R23.1.
@@ -1309,7 +1292,7 @@ produce APIs in which the simplest case stops being simple.
 - **R24.4 (MUST)** Fallible operations return Bevy-style results/errors, not panics; misconfiguration is
   a first-class error case with actionable messages (§4.R4.8).
 
-  _(Qualified after implementation, which turned up two failure kinds this conflated.)_ **Runtime**
+  Two failure kinds live here and must not be conflated. **Runtime**
   failures — a device gone, an unresolved binding, an action read that finds nothing — must return
   errors, never panic, because they befall a player rather than a developer. **App-build** failures
   — a context declared twice, bindings that cannot compile, a chain that violates a documented
@@ -1407,7 +1390,7 @@ These are the forks where the choice cascades; everything else is comparatively 
    two options offered. A context declares its domain and is evaluated exactly once, in that domain,
    so there is one state per context rather than two per context or one with per-tick accounting.
    The cost is that an action wanted at both rates is declared in two contexts. R9.2 has been
-   reworded accordingly — see Implementation feedback. Remaining sub-question: enforcement is not
+   reworded accordingly. Remaining sub-question: enforcement is not
    airtight, because Bevy gives a `SystemParam` no way to know its own schedule (Design §12)._
 7. ~~**OQ-7 — Where UI suppression lives**~~ _Resolved as **D4** (§22): neither — there is no
    suppression mechanism. Dispatch-to-focus becomes an action effect, and focus type activates
@@ -1428,39 +1411,6 @@ These are the forks where the choice cascades; everything else is comparatively 
    localizable and leaving the action half as a baked literal would half-localize one screen. This
    also relieves R1.6 — the derive is back to five fields, three of them required, which is no
    longer the "configuration language" Design §12 warned about._
-
----
-
-## Implementation feedback
-
-Amendments made after building §§1–8 of the roadmap, recorded so that the reasoning is not lost and
-so a reviewer can tell a considered change from drift. Each is annotated in place.
-
-| Requirement | Change | Why |
-| --- | --- | --- |
-| R0.1 | "input snapshot" → "input API" | A snapshot cannot satisfy §9; L1 is a queue. |
-| R2.2 | Conversions must be settled here, not merely documented | Left open, they were decided by accident in code. |
-| R2.4 | **Withdrawn** | Pass-through's cases are device-scoped and answered by §15 and R22.2. |
-| R5.2 / R5.9 | "normalize" split out and disambiguated | The word names two incompatible operations. |
-| R5.7 | `SHOULD` → `MUST` | R10.2 makes the enclosing step's purity a `MUST`. |
-| R9.2 | Reworded to describe the guarantee, not the layout | The design gives one state per context per domain, which the original wording forbade. |
-| R23.2 | Adds "no synchronization" | The first real violation was a lock, not an allocation. |
-| R24.4 | Distinguishes runtime from app-build failure | Panicking during plugin setup is right, and the rule forbade it. |
-| R1.6 / R19.6 / R19.9 | Name moves to the slot, category stays on the action | Both claimed the same two fields (OQ-9). |
-| R19.14 | **New** — player-visible names are localization keys | R18.3 localized half a rebinding row and left the other half a baked literal. |
-| Scope | **New** — [Who this is for](#who-this-is-for) | The studio/long-tail tension drives most decisions here and was never named, so it was being rediscovered per section. |
-| R24.6 | `SHOULD` → `MUST`, plus new R24.7 and R24.8 | The enforceable half of that commitment; a `SHOULD` made one constituency optional. |
-
-**Requirements that earned their keep**, worth defending if they are questioned upstream:
-
-- **R0.2** (L2 reads only L1) is the one that makes everything else work. Determinism, headless
-  tests, replay, and external backends are the same mechanism because of it, and every test in the
-  crate exists because a synthesized frame is indistinguishable from a real one.
-- **R0.3** (no singleton resource) caught a real defect rather than describing one: the first
-  implementation put context state in a resource, and the requirement is what identified that as
-  structural rather than stylistic.
-- **R4.1** (an action may have N bindings) sounds too obvious to write down, and was violated in a
-  way that silently disabled the keyboard half of the crate's own worked example.
 
 ---
 

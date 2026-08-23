@@ -18,9 +18,10 @@
 4. **Deliberate omissions are stated.** Each chunk lists what it does _not_ do, so review can tell
    "not yet" from "overlooked".
 5. **Nothing outstanding is left without a destination.** A chunk that lands short of its own
-   description says so and names the chunk that finishes the job. "Its own decision" and "later" are
-   not destinations — an item with no chunk number is an item that will be dropped, and chunks 6–8
-   are what that looks like in practice.
+   description says so in the [work log](./Log.md), and the obligation is written onto the chunk
+   that finishes the job — so what a chunk owes is stated where someone will read it, rather than
+   having to be gathered from the chunks that incurred it. "Its own decision" and "later" are not
+   destinations: an item with no chunk number is an item that will be dropped.
 
 ---
 
@@ -115,318 +116,29 @@ step and a real game is a better acceptance test than a synthetic one.
 
 ---
 
-## Phase I — walking skeleton
+## What has landed
 
-The goal of Phase I is not features. It is to get a runnable end-to-end path as early as possible so
-that the ergonomics (R24.6) can be judged from real code while they are still cheap to change.
+Twelve chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
+fell short of its own description; this table is only an index, and the sequence below is what
+remains.
 
-### 1. Workspace and module skeleton **[COMPLETED]**
+| # | Chunk | State |
+| --- | --- | --- |
+| 1 | Workspace and module skeleton | done |
+| 2 | Action identity, value, and intent | done |
+| 3 | Derive macros | done |
+| 4 | Input frame, keyboard only | done |
+| 5 | First end-to-end slice | done, after repair |
+| 6 | Axis sources and composites | done, completed by 15 |
+| 7 | Modifiers | done; stateful modifiers → 11, `Reflect` → 17 |
+| 8 | Gamepad and the design-stage deadzone | done; stages 1 and 3 → 22 |
+| 24 | Housekeeping | done; doctests still deferred |
+| 9 | Tick domains and the windowed drain | done; the L2 half of R9.3 → 12 |
+| 15 | Source channel shape | done; rate-to-delta → 11 |
+| 16 | Dead Zone, first playable | playable; no death yet, hyperspace wants 11 |
 
-Convert the directory into a two-crate workspace: `bevy_action_map` and `bevy_action_map_macros`
-(Rust forces the second; it is re-exported so users never name it). Create the module tree from §11
-as empty modules carrying their doc comments, plus a `prelude`.
-
-- **Not doing:** any logic at all.
-- **Verified by:** `cargo check --all-features`, `cargo check --no-default-features`.
-- **Review surface:** whether the module tree in §11 is the right decomposition, judged now rather
-  than after code is spread across it.
-- **Size:** manifests plus ~100 lines of doc comments.
-
-### 2. Action identity, value, and intent **[COMPLETED]**
-
-`ActionValue`, `Intent`, `ActionId` and its interning registry, the `InputAction` trait, the
-`ActionOutput` conversions. Pure data — no ECS, no `bevy_app`, no macros. Test impls are written by
-hand.
-
-- **Not doing:** derive macros, state, storage.
-- **Verified by:** unit tests over the shape/intent conversion matrix — which `Intent` values are
-  legal for which `Output`, and how each coercion behaves.
-- **Review surface:** the intent-vs-shape split (R2.7–R2.9, D1) is load-bearing for everything that
-  follows and costs nothing to change here.
-- **Must handle from the start (R2.10):** _source channel shape_ is a third independent property. The
-  motivating case is real and measured — an analog gamepad trigger arrives on a **button** channel
-  with a fractional value, so `Analog1`-intent-from-button-shaped-source is not an edge case to bolt
-  on later. Building the conversion matrix on (intent × output) alone and adding source shape
-  afterwards would be a rewrite of exactly the code this chunk exists to get right.
-- **Size:** ~300 lines and a test module.
-
-### 3. Derive macros **[COMPLETED]**
-
-`#[derive(InputAction)]` and `#[derive(InputContext)]`, generating what §9.3 describes.
-
-- **Not doing:** binding syntax, anything that reads a plan.
-- **Verified by:** `trybuild` — both pass cases and compile-fail cases, since the error messages are
-  the deliverable as much as the expansion is.
-- **Review surface:** what a mistake looks like. §9.5's first diagnostic tier is entirely this chunk.
-- **Why this early:** D1 makes derives the primary declaration surface. Deferring them means writing
-  every example twice.
-- **Size:** ~250 lines plus fixtures.
-
-### 4. Input frame, keyboard only **[COMPLETED]**
-
-The `RawEvent` enum, the timestamped queue, an `InputFrame` resource, and a sampling system in
-`PreUpdate` reading `MessageReader<KeyboardInput>`. The timestamp shim above lives here.
-
-- **Not doing:** mouse, gamepad, touch; per-player routing; device identity; any windowed drain.
-- **Verified by:** headless `App` tests that write synthetic `KeyboardInput` messages and assert queue
-  contents and order.
-- **Review surface:** the shape of the input frame as a standalone layer (R0.1) — this is what
-  would eventually become `bevy_input_frame` if the split in §11 ever pays for itself.
-- **Size:** ~350 lines.
-
-### 5. First end-to-end slice — button actions, one context, polling **[COMPLETED]**
-
-Bindings from a single key to a `bool` action; `ActionState` with `Phase`; a context component
-holding a `Vec<ActionState>`; the polling accessor. Storage is **deliberately naive** — a plain map
-from `ActionId` to slot — because chunk 10 replaces it and the point here is the API above it.
-
-`examples/minimal.rs`: press Space, `Jump` fires, something prints.
-
-- **Not doing:** modifiers, conditions beyond implicit press/release, composites, multiple contexts,
-  observers, arbitration.
-- **Verified by:** the example, plus `App` tests asserting phase transitions across frames.
-- **Review surface:** **the whole developer experience.** This is the first chunk you can run, and
-  the deliberate cheapness of everything under the accessor is what makes it affordable to throw the
-  API away and try again. If the declaration/read ergonomics feel wrong, this is where we find out.
-- **Size:** ~400 lines plus the example.
-- **In the event:** the gate was passed late. The chunk was written but its example did not compile
-  and its `App` tests failed, which went unnoticed because chunks 6–8 were built on top regardless.
-  Two structural defects surfaced when it was finally run: context state was a singleton resource
-  (R0.3), and slots were allocated per binding rather than per action, so a second binding on an
-  action silently disabled the first (R4.1). Both are fixed. The lesson is ground rule 2's, and it
-  is why the phases below state a verification that must actually be executed rather than intended.
-
----
-
-## Phase II — the single-player slice
-
-Phase II completes worked examples A and B from §9. Each chunk here adds one axis of capability and
-extends an example to exercise it.
-
-### 6. Axis sources and composites **[PARTIAL]**
-
-Mouse motion and buttons; the 2D composite (four keys → `Vec2`) with **named parts**, since named
-parts are what a rebinding UI must present (R19.9) and getting them wrong late is expensive.
-Intent-driven conversion between shapes.
-
-- **Verified by:** unit tests on composite resolution; `examples/move_and_jump.rs` — worked example A
-  minus gamepad.
-- **Review surface:** the named-parts model (D7) in its first concrete form.
-- **Worth more than it looks:** the D-pad reaches the input frame as four buttons and never as an
-  axis pair (R14.3), so this one composite covers gamepad D-pads too. Build it to be
-  source-agnostic across its four parts and chunk 8 inherits D-pad support with no hat-handling
-  path at all.
-- **In the event:** the composite was *not* built source-agnostic. `DirectionalKeys` held four
-  `KeyCode`s, so a D-pad could not drive it and chunk 8 inherited nothing — the paragraph above
-  going unheeded. Chunk 15 fixed it, at the cost of a type change rather than the parameter it
-  would have been here.
-
-### 7. Modifiers **[PARTIAL]**
-
-The OQ-5 commitment made real: a built-in enum (deadzone, scale, negate, swizzle, clamp, curve) plus
-`Custom(Box<dyn Modifier>)`, and the binding-combinator API of §9.4.
-
-- **Verified by:** table-driven unit tests. Modifiers are pure functions; this chunk is nearly all
-  testable without an `App`.
-- **Review surface:** whether the combinator chain reads well at the call site, and whether the
-  built-in set is the right closed set.
-- **Outstanding → chunk 11:** `Modifier::apply` takes only a value. R5.4 and R5.5 need scratch and
-  `dt`, so a stateful modifier cannot be written and the trait signature is a breaking change away
-  from allowing one. Conditions need the same scratch, which is why this lands with them.
-- **Outstanding → chunk 17:** no `Reflect`, so a custom modifier cannot round-trip (R5.6, R17.5).
-- **Outstanding → chunk 17:** "normalize" is still missing from R5.2's list, deliberately. R5.9
-  now splits the two meanings the one word was hiding; whichever names are chosen, neither may be
-  the bare word, and one of the two rescales.
-
-### 8. Gamepad and the deadzone chain **[PARTIAL]**
-
-Consumption of `RawGamepadEvent` (bypassing Bevy's own per-axis deadzone), and D6's three-stage chain
-— calibration, design, preference — with the invariant that at most one stage rescales.
-
-Worked example A is complete after this: KBM and gamepad, both bound, one context.
-
-- **Review surface:** D6 is the most contested decision in the requirements. Here it stops being prose.
-- **Already de-risked:** `RawGamepadEvent` was verified to be genuinely raw — `bevy_gilrs` disables
-  gilrs's default filters (including its radial 0.1 deadzone) and re-applies only
-  `axis_dpad_to_button`, so no deadzone is applied anywhere below us on this path. D6's claim to own
-  the whole chain holds rather than fighting a hidden stage.
-- **Read the analog value, not the press.** Triggers arrive as `LeftTrigger2`/`RightTrigger2` buttons
-  carrying `f32`; backends also synthesize press/release at their own threshold. R14.2 requires our
-  threshold and hysteresis, so consume the value and ignore the synthesized edge.
-- **Also produces:** the upstream bug report on the `Gamepad::analog` / event divergence (§11).
-- **Delivered:** `RawGamepadEvent` consumption, and D6's **design stage** — radial and per-axis
-  shapes, an explicit `rescale` flag, and the one-rescaling-stage rule enforced at plan build
-  (R5.2, R5.3, R14.4).
-- **Outstanding → chunk 22:** stages 1 and 3. Calibration is per device *unit*, and the evaluator
-  still merges every pad into one axis map, so it needs per-device keying first. Per OQ-4 it ships
-  as a manual API plus an app-driven sampling step, not background detection.
-- **Outstanding → chunk 22:** R14.9's warning when `GamepadSettings` is not left at pass-through,
-  which is a MUST and currently silent.
-- **In the event:** the trigger threshold landed hard-coded at 0.5 with no hysteresis, the opposite
-  of what the note above asked for. Chunk 15 replaced it with `ButtonThreshold`.
-
-
----
-
-## Phase III — what is wrong now
-
-Three chunks, all fixing things that are broken today rather than adding capability. None is
-optional and all are load-bearing for everything after.
-
-### 24. Housekeeping
-
-The findings from the chunk 5–8 review that belong to no feature, swept before the feature set grows
-over them. Small, and each is a foundation the later chunks stand on.
-
-- **Doctests do not execute.** `dynamic_linking` on the `bevy` dev-dependency breaks the merged
-  doctest binary, so every `///` example compiles but none runs. The public documentation is part of
-  the deliverable, and right now none of it is verified. Fixing it means making `dynamic_linking`
-  opt-in, at the cost of slower example builds — a tradeoff to make deliberately rather than inherit.
-- **An orphan trybuild fixture.** `tests/ui/fail/missing_attrs.rs` and its `.stderr` exist but are
-  not registered in `tests/derive.rs`, so the case they cover is untested. Register or delete.
-- **Module organization.** `InputContextState`, `Actions`, `ActionMapPlugin` and `add_context` live
-  in `player.rs`, which Design §11 reserves for device pairing and control schemes — and which will
-  actually need that space at chunk 22. §11 lists "state" under `action/`; the plugin wants a home
-  of its own. Moving them while the call sites are few costs nothing; moving them after §15's work
-  lands costs a merge.
-
-- **Resolving an action id took a mutex and a linear scan on every read**, which R23.2 now names
-  explicitly. Rust has no generic statics, so the cache cannot sit on the trait's default method —
-  but the derive emits a concrete impl, and a concrete impl can hold a `static`. Steady state is a
-  relaxed atomic load and a compare. The registry's mutex remains for the first resolution of each
-  action, which happens at plugin build because `bind::<A>()` already calls `A::id()`, so it never
-  appears in a frame.
-
-  Two notes for whoever touches this again. The atomic comes from `bevy_platform::sync::atomic`,
-  not `core` — `bevy_ecs` routes its own through there so the polyfill for platforms without atomic
-  support keeps working, and matching it costs nothing. And the per-type cache is only sound
-  because `ActionId` is process-global; Bevy cannot do the same for `ComponentId`, which is
-  per-`World`.
-- **Verified by:** the existing suite, unchanged. This chunk adds no behaviour, so a behavioural
-  diff is a mistake.
-- **Why first:** ground rule 1 wants one reviewable change per chunk, and these would otherwise
-  arrive as noise inside chunks that are about something else.
-
-### 9. Tick domains and the windowed drain **[PARTIAL]**
-
-Retire events by **window** instead of clearing the frame each sample. `tick = Render` drains
-`[last frame, now]`; `tick = Fixed` drains its own tick's window. Accumulated deltas split across
-the windows they span. The timestamp shim above is already in place for exactly this.
-
-Dead Zone arrives in chunk 16 and is an integrating physics sim, so this is the difference
-between a game that drops shots and one that does not.
-
-- **Not doing:** conditions, real timestamps (that is bevy#9087), per-device windows.
-- **Verified by:** `App` tests driving `FixedUpdate` zero, one and three times in a frame, asserting
-  exact edge counts and conserved delta magnitude. These are the tests that prove R9.3/R9.4/R9.5,
-  and both currently fail: a press and release inside one frame is never seen at all, and one 9.0
-  delta read across three fixed ticks totals 27.0.
-- **Also fixes:** held state currently lives in the context as a `BTreeSet`/`HashMap` rebuilt by
-  replaying events, which is why deltas repeat and why the state is neither `Copy` nor cheap to
-  snapshot (R10.3, R23.2). The drain and that storage are one problem.
-- **Review surface:** the queue as the design's central bet (Design §2). It is the crate's stated
-  advantage over LWIM and BEI, and until this lands it is prose.
-- **Delivered:** retirement moved from sample time to after fixed evaluation, which is the moment
-  every consumer has read — render-tick contexts drained in `PreUpdate` earlier in the same frame,
-  fixed-tick ones just now. Each context carries a cursor and reads only what arrived since it last
-  looked, seeded at spawn so a context added mid-session does not react to input that predates it
-  (R7.5). The queue is capped and counts what it drops, so a stall degrades visibly rather than
-  without bound.
-- **Under the shim, a window is a frame.** Timestamps are frame-granular, so a frame's events
-  cannot be meaningfully split across three fixed ticks — the first tick to run takes them all and
-  the rest see nothing new. That conserves delta magnitude (R9.5) and fires an edge exactly once
-  (R9.4) without pretending to a precision the timestamps do not have. Real per-tick splitting
-  arrives with bevy#9087, and changes this one policy rather than the mechanism.
-- **Outstanding → chunk 12:** an action that fires *and* completes inside one window is still only
-  observable as its final phase, because a polling reader has one `Phase` to report. Design §5 is
-  explicit that R3.3 is satisfied by the transition log rather than by polling, so the L1 half of
-  R9.3 is done — the events reach the tick that wants them — and the L2 half lands with the log.
-- **Outstanding → netcode (deferred table):** held device state is still `BTreeSet`/`HashMap` on the
-  context, so it is neither `Copy` nor cheap to snapshot (R10.3). Draining incrementally removed the
-  bug that mattered; making it snapshot-able is rollback's problem and wants rollback's testbed.
-
-### 15. Source channel shape **[PARTIAL]**
-
-R2.10's third property, which chunk 2 was warned to build in from the start and did not. A source's
-channel shape is independent of both the action's intent and its output: an analog trigger arrives
-on a **button** channel carrying a fraction, and a D-pad arrives as **four buttons**, never an axis
-pair.
-
-- **Delivers:** `BindingSourceSpec` keyed on more than output, so `LeftTrigger2` can drive an
-  `Analog1` action; composite parts that accept any button-shaped source, so a D-pad drives the same
-  composite as WASD (R14.3); trigger button-view derived from our own threshold with hysteresis
-  (R14.2).
-- **Unblocks:** R2.9, which Design §5.1 records as unsatisfiable while a binding declares no source
-  kind of its own — nothing currently rejects a mouse delta bound to a directional action.
-- **Also settles §2, which this completes rather than merely extends:** R2.2's conversion table is
-  now required to be *decided* in the requirements rather than left to whoever wrote the code first,
-  and it currently is not — a 1D value becomes 2D by copying itself into both components, so a
-  half-pressed trigger reads as a diagonal. Intent is also never checked at bind time (R2.8), and
-  `Vec3` claims every intent including `Button`. Fixing the source shape without these leaves the
-  three-property model two-thirds enforced.
-- **Verified by:** unit tests over the (intent × output × source shape) matrix; a D-pad and WASD
-  proven interchangeable against one composite; a binding whose intent the source cannot serve
-  rejected with a diagnostic.
-- **Also lays the groundwork for R4.9:** a control class is defined over the properties a control
-  declares, not over a list of control identifiers — which is the same declaration this chunk adds
-  for source channel shape, generalized one step. Getting it here means a third-party device kind
-  (R11.2) joins a class the day its backend ships, with no registry to be added to.
-- **Why before Dead Zone:** analog thrust on a trigger is the motivating case, and it is the one
-  control that makes an asteroids ship feel like anything.
-- **Delivered:** `ChannelShape` as the third property, declared by every source and checked against
-  the action's intent at plan build. A trigger drives an analog action with its travel and a button
-  action with a hysteretic press, from one binding each. Composite parts became controls rather than
-  keys, so `DirectionalButtons::dpad()` and `::wasd()` drive one action identically (R14.3). R2.2's
-  table is settled in the requirements and implemented in one place, so widening no longer invents a
-  diagonal. Intent against output shape is now a **compile** error from the derive, with a trybuild
-  fixture holding the message.
-- **Outstanding → chunk 11:** hysteresis where a press is derived from something other than a single
-  button — a stick axis, a composite. The button channel keeps its own pressed state per control, but
-  a derived value has no control to hang that on, and the memory has to be per *binding* to survive
-  two bindings feeding one action. That is what the scratch table is. Until then those paths use a
-  plain threshold, which is right except at the boundary.
-- **Outstanding → chunk 17:** the intent/channel mismatch is an `assert!` at plan build rather than a
-  collected diagnostic, alongside the rescaling check it sits next to.
-
----
-
-## Phase IV — Dead Zone, first playable
-
-### 16. Dead Zone **[PARTIAL]**
-
-`examples/dead_zone/` — an asteroids-like game in primitive shapes. Thrust, rotate, fire, and
-death; asteroids that split. Keyboard **and** gamepad bound to the same actions, which is the
-arrangement that silently broke before chunk 5's repair.
-
-**A directory, not a file.** Cargo picks up `examples/<name>/main.rs` with no manifest entry, and a
-game large enough to be a fair test is large enough that a single file would bury the input code —
-which is the part anyone reading this example came for. Splitting it also puts the thing under review
-in one place: `actions.rs` holds every action, context and binding, and the rest of the directory is
-ordinary game code that reads them. If that file is not short, this chunk has found what it came for.
-
-- **Not doing:** menus, rebinding, persistence, sound, score. Those arrive as later chunks extend it.
-- **Verified by:** playing it, on both schemes, with the Xbox pad over Bluetooth per the README.
-- **Review surface:** **R24.6 and the audience commitment**, judged from a real game rather than a
-  snippet. If binding a complete control scheme is not short, this is where that shows. Count the
-  lines of input code a solo developer would have had to write.
-- **Why here:** everything before it is claimed to work and only partly demonstrated. A game is a
-  harsher test than an example that prints.
-- **Delivered:** thrust, turn, fire and hyperspace on keyboard and pad, verified by playing it on
-  both. 455 lines, of which `actions.rs` is 68 and the control scheme itself is 24 — which is the
-  number this chunk existed to produce.
-- **It found two gaps in the crate before it was playable**, both fixed here rather than recorded,
-  because neither had a workaround an ordinary user would find.
-  - There was no way to say "two keys make a signed axis" — a 2D composite existed and a 1D one did
-    not, and `.negate()` on a key inverts the *press*, so binding `A` with it did nothing at all.
-    `AxisButtons` is the missing sibling, and holding both keys cancels rather than letting
-    declaration order win.
-  - The prelude exported the `InputAction` **trait** but not the derive of the same name, so a glob
-    import left `#[derive(InputAction)]` unresolved. Both existing examples had quietly worked
-    around it by spelling the path in full, which is why it went unseen.
-- **Outstanding → chunk 16 itself:** there is no ship-to-asteroid collision, so the player cannot
-  die. It is the same distance check `shatter_on_hit` already does.
-- **Outstanding → chunk 11:** hyperspace is a plain button. It wants a double-tap, which is a
-  condition.
+Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
+than by the chunk that incurred it — so what a chunk must do is stated in one place.
 
 ---
 
@@ -444,6 +156,10 @@ dispatch from the transition log. §9.6's observer surface.
   under test.
 - **Review surface:** the generic-`EntityEvent` bet. The context entity it targets now exists, which
   it did not when this chunk was written.
+- **Inherited from chunk 9: the L2 half of R9.3.** An action that fires *and* completes inside one
+  window is observable only as its final phase, because a polling reader has one `Phase` to report.
+  The events reach the tick that wants them; Design §5 is explicit that R3.3 is satisfied by the
+  transition log rather than by polling, so the log is what finishes the job.
 
 ### 13. Context priority, layering, and activation
 
@@ -495,7 +211,13 @@ modifier signature, since scratch and `dt` are the same addition.
 - **Verified by:** unit tests driving synthetic time; the R6.1 catalogue is directly a test list.
 - **Review surface:** whether the 24-byte scratch record really covers every condition, which the
   design asserts and this chunk proves or refutes.
-- **In Dead Zone:** hyperspace on a double-tap, and hold-to-thrust.
+- **In Dead Zone:** hyperspace on a double-tap, and hold-to-thrust. Hyperspace is a plain button
+  press today, which is the whole of what chunk 16 could express.
+- **Inherited from chunk 15: hysteresis where a press is derived** from something other than a single
+  button — a stick axis, a composite. The button channel keeps its own pressed state per control, but
+  a derived value has no control to hang that on, and the memory has to be per *binding* to survive
+  two bindings feeding one action. That is what the scratch table is. Until then those paths use a
+  plain threshold, which is right except at the boundary.
 - **Inherited from chunk 15: the rate-to-delta conversion R2.9 requires.** Chunk 15 made binding a
   stick to a `Delta2` action an error, which is right — a position is a rate and a mouse delta is a
   displacement, and summing them is the units error R13.2 names. But mouse-and-stick look is the
@@ -518,7 +240,9 @@ failures that befall a player rather than a developer, so both must return error
 And R5.9's two `normalize` operations, which need naming before either can be written — one clamps
 to unit length, the other remaps a range and therefore falls under D6's one-rescaling-stage rule.
 
-- **Review surface:** error text, judged as the deliverable it is. R24.4 now distinguishes runtime
+- **Inherited from chunk 15:** the intent-versus-channel mismatch is an `assert!` at plan build
+  rather than a collected diagnostic, alongside the rescaling check it sits next to.
+- **Review surface:** error text, judged as the deliverable it is. R24.4 distinguishes runtime
   failures (must return errors) from app-build ones (may panic, must be actionable).
 
 ### 18. Derive completion
@@ -649,6 +373,27 @@ shared world, one viewport each.
 
 ---
 
+### 28. Docs that run
+
+The documentation half of R24.6, gathered into a chunk because ground rule 5 is right: the
+"documents that follow the code" list this replaced was explicitly not a chunk, which made it a list
+of things that would quietly never happen.
+
+- **Make the doctests execute.** `dynamic_linking` on the `bevy` dev-dependency breaks the merged
+  doctest binary, so every `///` example compiles but none runs, and the public documentation is
+  part of the deliverable. Fixing it means making `dynamic_linking` opt-in, at the cost of slower
+  example builds — a tradeoff to make deliberately rather than inherit. Carried from chunk 24.
+- **The README rewrite** — a user-facing introduction, feature list, and quickstart, with its
+  examples lifted from a real game rather than invented.
+- **Comparison with LWIM and `bevy_enhanced_input`** (R22.6) — the migration path the ecosystem will
+  ask for.
+- **Why last:** the first item can be done at any time and the other two document a moving target.
+  The README wants chunk 19, after which the feature list stops growing in the player-facing
+  direction; the comparison wants chunks 11 and 14, since conditions and arbitration are where the
+  three crates genuinely differ rather than differ in spelling.
+
+---
+
 ## Deliberately deferred
 
 Still out of scope for the sequence above. Rebinding, persistence and presentation have left this
@@ -660,7 +405,7 @@ Split Friction does, and because the gate turned out to be met already.
 | Persistent device identity and calibration (§11)  | two units of the *same kind*, which pad-plus-keyboard does not give         |
 | Prompts and glyph ids (§18)                       | asset-pipeline questions this document does not touch                      |
 | Source and authority backends (D3)                | one working in-tree path to generalize _from_                              |
-| Netcode injection and rollback (§10)              | chunk 9, plus a testbed that actually rolls back                           |
+| Netcode injection and rollback (§10)              | a testbed that actually rolls back; also wants held device state made snapshot-able (R10.3), which chunk 9 left as `BTreeSet`/`HashMap` |
 | Focus integration (D4, D5), and with it text input | chunks 13, 14 and 25 — priority, arbitration, and class bindings are what claiming a control means |
 | **Guardian migration**                            | porting guardian from bevy 0.16.1 to 0.20-dev — four versions, its own job |
 
@@ -670,16 +415,5 @@ confuse "action_map is wrong" with "0.20 moved this". Dead Zone first; guardian 
 something worth migrating _to_.
 
 ---
-
-## Documents that follow the code
-
-Not chunks, because they document a moving target and want to be written once it stops moving.
-
-- **README rewrite** — a user-facing introduction, feature list, and quickstart. Best written after
-  chunk 16, when its examples can be lifted from a real game rather than invented, and after chunk
-  19, when the feature list stops growing in the player-facing direction.
-- **Comparison with LWIM and bevy_enhanced_input** (R22.6) — the migration path the ecosystem will
-  ask for. Wants chunks 11 and 14 done, since conditions and arbitration are where the three crates
-  genuinely differ rather than merely differ in spelling.
 
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087
