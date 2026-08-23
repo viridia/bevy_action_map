@@ -33,6 +33,17 @@ Commit messages should not say "Co-authored by" an LLM. Rather, it should
 have a section "LLM Usage Disclosure", which briefly explains the role the
 LLM played in crafting the commit.
 
+Effectively all of the code here is LLM-authored to a human's direction, so the disclosure is a
+standing fact rather than a per-commit judgement. Unless a commit was unusual, one line does it:
+
+```
+LLM Usage Disclosure: implementation, tests and documentation written by
+Claude Opus 5; design decisions, review and acceptance by the author.
+```
+
+Say more only where a commit departs from that — where the model chose something the author would
+otherwise have decided, or where the author wrote the code and the model reviewed it.
+
 ---
 
 ## House style
@@ -118,7 +129,7 @@ step and a real game is a better acceptance test than a synthetic one.
 
 ## What has landed
 
-Eighteen chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
+Nineteen chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
 fell short of its own description; this table is only an index, and the sequence below is what
 remains.
 
@@ -142,6 +153,7 @@ remains.
 | 14 | Arbitration and consumption | done; chords on *actions* → 33 |
 | 32 | Activation by run condition | done, out of order |
 | 17a | Runtime failures (R24.4) | done; the silence it creates → 17b |
+| 17b | Plan-build diagnostics | done; unknown controls → 23, observers → 36 |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -203,8 +215,36 @@ outcome.
 - **Inherited from chunk 17a: BSN gives the same silence a second door.** An `on(...)` handler
   attached to an entity that does not carry the context compiles, spawns, and never fires. The
   crate now advertises that pattern, so it owns the diagnostic for getting it wrong.
+- **How it is demonstrated, since a correct game shows nothing.** A diagnostic fires when something
+  is wrong, so Dead Zone cannot exercise one without being broken on purpose. Three homes instead:
+  the message text pinned by tests, since 17b's deliverable *is* the text; `tests/ui/`, which
+  already holds the compile-time tier and gains the derive's duplicate-`path` case; and
+  `examples/diagnostics.rs`, a runnable catalogue that authors half a dozen wrong binding sets and
+  prints what the crate says about each.
+- **The catalogue forces validation to be callable without an `App`,** which is worth having on its
+  own: it is half of the offline check R8.6 and R19.3 need to test a binding a player has not
+  committed to yet. Only half — the clash rule itself stays inside the evaluator until chunk 19,
+  and this chunk should not go after it.
 - **Review surface:** error text, judged as the deliverable it is. R24.4 distinguishes runtime
   failures (must return errors) from app-build ones (may panic, must be actionable).
+
+### 36. The debug overlay
+
+R22.2, which until now no chunk claimed — an inspector-friendly dump of active contexts, bindings
+and action states, and a live overlay in Dead Zone driven by it. `why_not` appears in no example
+today, so the runtime diagnostic tier is tested and never seen.
+
+- **Why it is a chunk rather than a nicety.** R22.2 is a `SHOULD` whose only destination was an
+  assumption, which ground rule 5 says is an item that will be dropped. It is also the second such
+  item found in one sitting; see chunk 35.
+- **What it shows:** which contexts are active and at what priority, each action's phase and value,
+  and `why_not` for the action under the cursor — the five obstacles that look identical from a
+  call site.
+- **Why before rebinding rather than after.** When a rebind does not take, the question is whether
+  it was capture, conflict, or arbitration, and the overlay is what answers it. Building it after
+  chunk 31 means debugging chunk 31 without it.
+- **Not doing:** an editor integration. The requirement asks that the same data drive an overlay,
+  not that we ship an inspector.
 
 ### 17c. Reflect, and the two normalizes
 
@@ -324,6 +364,9 @@ entries reported rather than dropped, a version field (R17.1–R17.3).
 
 - **Intended vehicle: `bevy_settings`** — overrides live in a reflected resource carrying its
   derives, so the file format and its location are somebody else's problem.
+- **Inherited from chunk 17b: unknown controls.** R4.8 names them, and 17b could not write the
+  check — `Control` is a typed enum, so a control that does not exist cannot be spelled. A binding
+  read from a file can name one, which is where the check belongs.
 - **Check before committing to it:** R17.2 requires an entry that no longer resolves to be
   **reported rather than dropped**, which is what stops a renamed action silently discarding a
   player's rebind. A settings crate that deserializes and quietly ignores what it does not

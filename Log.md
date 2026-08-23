@@ -597,4 +597,48 @@ chunk would have dropped it silently. It is now chunk 35. Worth noting because i
 failure ground rule 5 exists to prevent, and it survived a grooming pass by hiding in the gap
 between two documents that each assumed the other held it.
 
+
+### Chunk 17b: plan-build diagnostics
+
+**The question that shaped the chunk was how to demonstrate it.** Ground rule 3 makes the examples
+the acceptance test, and a diagnostic fires when something is wrong — so a correct game cannot show
+one, and shipping a broken example to prove the point is not a trade worth making. Three homes
+instead: the message text pinned by tests, since the text is what is being delivered; `tests/ui/`,
+which already held the compile-time tier; and `examples/diagnostics.rs`, a catalogue that authors
+six wrong binding sets and prints what the crate says about each. Run it and read the output — that
+is the review surface, and it beats grepping a test file for string literals.
+
+Asking for the catalogue is what moved validation out of compilation. `Plan::from_bindings` no
+longer asserts anything; `diagnose` is a pure function over authored bindings, reachable as
+`InputContextBuilder::diagnostics()` with no `App` in sight, and `add_context` runs it and refuses a
+context that cannot work. That is half of the offline check R8.6 and R19.3 need — only half, and
+worth being exact about it: the *clash* rule is still a closure inside the evaluator reading held
+state, and extracting that is chunk 19's job. What this chunk establishes is that validating a
+binding set does not require installing it.
+
+**Severity, which was not in the plan.** Once the checks were collected rather than asserted, two of
+them turned out not to be fatal. A control bound twice does something — nothing, mostly, though for
+a delta action it doubles — and two bindings disagreeing about consuming one control is ambiguous
+rather than broken. Panicking over either would be a crate telling a developer their working game
+does not run. So a diagnostic carries a severity: errors refuse the context, warnings are logged
+and the context is built. The split falls exactly along "can this binding work at all".
+
+**Five checks, and one that could not be written.** R4.8 also names unknown controls, and there is
+no such case: `Control` is a typed enum, so a control that does not exist cannot be spelled. That
+changes when bindings arrive from a file, which is chunk 23, and it is recorded there rather than
+invented here.
+
+**The derive's duplicate key was a three-line fix with a wider blast radius than expected.** The
+roadmap named `path`, because a serialized identity silently taking the last of two values is the
+worst available outcome. But every key had the same hole, and one `set_once` helper closed all of
+them — with the span landing on the duplicate, so the compiler underlines the offending half.
+
+**Warning about a context nobody carries needed a guard, and the guard needed a test that could
+see the warning.** The first version warned as soon as a context was live with no instances, which
+is wrong: a context activated by entering a state, whose entity is spawned by that state's
+`OnEnter`, is empty at the moment we look — the enter schedules run after us. So the warning waits
+for a second consecutive empty run. That is a behaviour a test has to observe rather than infer, so
+this is the first test in the crate to install a `log` logger and count what came out. Removing the
+guard makes it fail on the right assertion, which is what was checked.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

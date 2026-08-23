@@ -889,6 +889,17 @@ impl<C> InputContextBuilder<C> {
         self.push_binding::<A>(source.into_binding_source())
     }
 
+    /// Reports everything wrong with the bindings declared so far.
+    ///
+    /// [`add_context`](crate::context::ActionMapAppExt::add_context) runs this for you and refuses
+    /// a context with an [`Error`](crate::plan::Severity::Error) in it, so you rarely need to call
+    /// it. Where it earns its place is checking bindings you have not installed — a set read from a
+    /// file, or one a player is part way through choosing — since it reads the bindings and nothing
+    /// else, and needs no `App`.
+    pub fn diagnostics(&self) -> Vec<crate::plan::BindingDiagnostic> {
+        crate::plan::diagnose(&self.bindings)
+    }
+
     pub(crate) fn finish(self) -> Vec<BindingSpec> {
         self.bindings
     }
@@ -1255,28 +1266,41 @@ mod tests {
 
     #[cfg(feature = "keyboard")]
     #[test]
-    #[should_panic(expected = "carries no direction")]
     fn a_lone_button_cannot_drive_a_directional_action() {
         let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<DummyVec2>(KeyCode::Space);
-        crate::plan::Plan::<()>::from_bindings(builder.finish());
+        assert_mismatch(&builder, ChannelShape::Button);
     }
 
     #[cfg(feature = "gamepad")]
     #[test]
-    #[should_panic(expected = "displacement that has already happened")]
     fn a_stick_cannot_stand_in_for_a_delta() {
         let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<DummyDelta2>(Stick::Right);
-        crate::plan::Plan::<()>::from_bindings(builder.finish());
+        assert_mismatch(&builder, ChannelShape::Axis2);
     }
 
     #[test]
-    #[should_panic(expected = "displacement that has already happened")]
     fn mouse_motion_cannot_stand_in_for_a_direction() {
         let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<DummyVec2>(MouseMove);
-        crate::plan::Plan::<()>::from_bindings(builder.finish());
+        assert_mismatch(&builder, ChannelShape::Delta2);
+    }
+
+    /// The three refusals above differ only in which control was offered, so they assert the same
+    /// way: the diagnostic names the intent that was asked for and the channel that cannot serve it,
+    /// and it is fatal rather than advisory.
+    #[track_caller]
+    fn assert_mismatch(builder: &InputContextBuilder<()>, shape: ChannelShape) {
+        use crate::plan::{DiagnosticKind, Severity};
+
+        let found = builder.diagnostics();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].severity(), Severity::Error);
+        let DiagnosticKind::IntentMismatch { shape: found, .. } = found[0].kind else {
+            panic!("expected an intent mismatch, got {:?}", found[0].kind);
+        };
+        assert_eq!(found, shape);
     }
 
     #[cfg(feature = "gamepad")]

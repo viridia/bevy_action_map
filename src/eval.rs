@@ -993,8 +993,9 @@ mod tests {
     /// The refusal that still stands: a displacement is not a rate, so there is nothing to
     /// integrate and asking for it is a mistake rather than a no-op.
     #[test]
-    #[should_panic(expected = "no rate here to integrate")]
     fn a_delta_control_cannot_be_read_as_a_rate() {
+        use crate::plan::{DiagnosticKind, Severity};
+
         struct Look;
 
         impl InputAction for Look {
@@ -1008,7 +1009,15 @@ mod tests {
         builder
             .bind::<Look>(crate::binding::MouseMove)
             .per_second(180.0);
-        Plan::<Flying>::from_bindings(builder.finish());
+
+        let found = builder.diagnostics();
+        assert_eq!(
+            found.first().map(|d| d.kind.clone()),
+            Some(DiagnosticKind::RateFromDelta {
+                shape: crate::action::ChannelShape::Delta2
+            })
+        );
+        assert_eq!(found[0].severity(), Severity::Error);
     }
 
     /// Each modifier gets its own memory. Two of a kind on one binding must not share, or the

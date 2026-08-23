@@ -157,17 +157,16 @@ fn parse_action_args(
     {
         attribute.parse_nested_meta(|meta| {
             if meta.path.is_ident("output") {
-                let value: Type = meta.value()?.parse()?;
-                output = Some(value);
-                Ok(())
+                set_once(&mut output, meta.value()?.parse::<Type>()?, &meta, "output")
             } else if meta.path.is_ident("intent") {
-                let value: Ident = meta.value()?.parse()?;
-                intent = Some(value);
-                Ok(())
+                set_once(
+                    &mut intent,
+                    meta.value()?.parse::<Ident>()?,
+                    &meta,
+                    "intent",
+                )
             } else if meta.path.is_ident("path") {
-                let value: LitStr = meta.value()?.parse()?;
-                path = Some(value);
-                Ok(())
+                set_once(&mut path, meta.value()?.parse::<LitStr>()?, &meta, "path")
             } else {
                 Err(meta.error("unsupported #[action(...)] argument"))
             }
@@ -188,6 +187,23 @@ fn parse_action_args(
     })
 }
 
+/// Takes a value for a key, or refuses a key that was already given.
+///
+/// Without this the last one silently wins. That is bad for any of them and worst for `path`,
+/// which is the key a player's saved bindings are stored against.
+fn set_once<T>(
+    slot: &mut Option<T>,
+    value: T,
+    meta: &syn::meta::ParseNestedMeta<'_>,
+    key: &str,
+) -> Result<()> {
+    if slot.is_some() {
+        return Err(meta.error(format!("`{key}` is given more than once")));
+    }
+    *slot = Some(value);
+    Ok(())
+}
+
 fn parse_context_args(
     attributes: &[Attribute],
     missing_attr_span: proc_macro2::Span,
@@ -202,17 +218,16 @@ fn parse_context_args(
     {
         attribute.parse_nested_meta(|meta| {
             if meta.path.is_ident("tick") {
-                let value: Ident = meta.value()?.parse()?;
-                tick = Some(value);
-                Ok(())
+                set_once(&mut tick, meta.value()?.parse::<Ident>()?, &meta, "tick")
             } else if meta.path.is_ident("priority") {
-                let value: LitInt = meta.value()?.parse()?;
-                priority = Some(value);
-                Ok(())
+                set_once(
+                    &mut priority,
+                    meta.value()?.parse::<LitInt>()?,
+                    &meta,
+                    "priority",
+                )
             } else if meta.path.is_ident("path") {
-                let value: LitStr = meta.value()?.parse()?;
-                path = Some(value);
-                Ok(())
+                set_once(&mut path, meta.value()?.parse::<LitStr>()?, &meta, "path")
             } else {
                 Err(meta.error("unsupported #[context(...)] argument"))
             }

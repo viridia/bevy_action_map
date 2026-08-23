@@ -1,0 +1,5 @@
+error: `path` is given more than once
+ --> tests/ui/fail/duplicate_action_path.rs:6:10
+  |
+6 | #[action(path = "gameplay.leap")]
+  |          ^^^^^^^^^^^^^^^^^^^^^^

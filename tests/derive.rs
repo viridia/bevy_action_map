@@ -9,4 +9,6 @@ fn derives_compile() {
     test_cases.compile_fail("tests/ui/fail/missing_action_path.rs");
     test_cases.compile_fail("tests/ui/fail/missing_context_path.rs");
     test_cases.compile_fail("tests/ui/fail/intent_output_mismatch.rs");
+    test_cases.compile_fail("tests/ui/fail/duplicate_action_path.rs");
+    test_cases.compile_fail("tests/ui/fail/duplicate_context_tick.rs");
 }

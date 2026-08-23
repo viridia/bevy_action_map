@@ -603,7 +603,23 @@ pub(crate) type Activation = alloc::boxed::Box<dyn FnOnce(&mut App)>;
 fn apply_active<C: InputContext + Component>(
     bevy_ecs::system::In(live): bevy_ecs::system::In<bool>,
     contexts: Query<'_, '_, &mut InputContextState<C>>,
+    mut was_empty: bevy_ecs::system::Local<'_, bool>,
 ) {
+    // Something said this context should be live and there is nothing to make live, which is the
+    // shape of a context declared but never spawned: every action in it is dead and the symptom is
+    // that a key does nothing. Only after two runs, because an entity spawned from `OnEnter` does
+    // not exist yet on the frame its state became current.
+    let empty = contexts.is_empty();
+    if live && empty && *was_empty {
+        bevy_utils::once!(log::warn!(
+            "context `{}` is active, but no entity carries it — none of its bindings can fire. \
+             Spawn an entity with the `{}` component.",
+            C::PATH,
+            core::any::type_name::<C>(),
+        ));
+    }
+    *was_empty = empty;
+
     for mut context in contexts {
         // `activate` and `deactivate` both return immediately when there is nothing to do; the
         // check here is what keeps the mutable deref, and with it the change tick, off the frames
@@ -836,6 +852,48 @@ fn order_by_priority(
     );
 }
 
+/// Warns about every suspicious binding in a context, and refuses one that cannot work.
+///
+/// All of them at once: a context with three mistakes should cost one run to find all three, not
+/// three runs to find them one at a time. Refusing is a panic because this is app-build code —
+/// unreachable in a shipped game, and Bevy's own convention for a plugin that has been set up
+/// wrongly.
+fn report_diagnostics<C: InputContext + Component>(builder: &InputContextBuilder<C>) {
+    use crate::plan::Severity;
+
+    let found = builder.diagnostics();
+    let errors = found
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+        .count();
+
+    for diagnostic in found.iter().filter(|d| d.severity() == Severity::Warning) {
+        log::warn!("in context `{}`: {diagnostic}", C::PATH);
+    }
+
+    assert!(
+        errors == 0,
+        "context `{}` has {errors} binding {} that cannot work:\n{}",
+        C::PATH,
+        if errors == 1 { "problem" } else { "problems" },
+        Listed(&found),
+    );
+}
+
+/// Formats diagnostics one per line, for a panic message that has to carry several.
+struct Listed<'a>(&'a [crate::plan::BindingDiagnostic]);
+
+impl core::fmt::Display for Listed<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        use crate::plan::Severity;
+
+        for diagnostic in self.0.iter().filter(|d| d.severity() == Severity::Error) {
+            writeln!(f, "  - {diagnostic}")?;
+        }
+        Ok(())
+    }
+}
+
 fn declare_context<C: InputContext + Component>(
     app: &mut App,
     configure: impl FnOnce(&mut InputContextBuilder<C>),
@@ -849,6 +907,8 @@ fn declare_context<C: InputContext + Component>(
 
     let mut builder = InputContextBuilder::<C>::default();
     configure(&mut builder);
+
+    report_diagnostics::<C>(&builder);
 
     // A context whose activation follows something else starts inactive and waits to be asked.
     // That is also what catches an instance spawned once the answer is already yes.
@@ -1663,6 +1723,109 @@ mod tests {
             state.why_not::<NeverBound>(app.world().resource()),
             Obstacle::Unbound
         );
+    }
+
+    /// Counts warnings about a context nobody carries, so the test below can watch for one rather
+    /// than assume it.
+    ///
+    /// A global logger, which `log` allows exactly one of per process — so the two halves of that
+    /// test share one, and live in one test rather than racing each other from two.
+    mod capture {
+        use bevy_platform::sync::atomic::{AtomicUsize, Ordering};
+
+        pub(super) static SEEN: AtomicUsize = AtomicUsize::new(0);
+
+        struct Counting;
+
+        impl log::Log for Counting {
+            fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+                metadata.level() <= log::Level::Warn
+            }
+
+            fn log(&self, record: &log::Record<'_>) {
+                if alloc::format!("{}", record.args()).contains("no entity carries it") {
+                    SEEN.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+
+            fn flush(&self) {}
+        }
+
+        static COUNTING: Counting = Counting;
+
+        pub(super) fn install() {
+            // Another test may have installed it already; either way it is ours by the time this
+            // returns, because nothing else in this crate installs one.
+            let _ = log::set_logger(&COUNTING);
+            log::set_max_level(log::LevelFilter::Warn);
+        }
+
+        pub(super) fn seen() -> usize {
+            SEEN.load(Ordering::Relaxed)
+        }
+    }
+
+    /// A context declared and never spawned is the failure that looks like "that key does nothing":
+    /// the bindings compile, the systems run, and no entity is carrying the state they would write.
+    /// Saying so is the whole of chunk 13's inherited debt.
+    ///
+    /// Both halves live in one test because they share the process-wide logger above.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_context_nobody_carries_says_so_once_it_is_sure() {
+        use bevy_ecs::schedule::common_conditions::resource_exists;
+
+        #[derive(InputContext, Component)]
+        #[context(path = "tests.carried", tick = Render)]
+        struct Carried;
+
+        #[derive(InputContext, Component)]
+        #[context(path = "tests.never_spawned", tick = Render)]
+        struct NeverSpawned;
+
+        capture::install();
+        let before = capture::seen();
+
+        // An entity carries this one, so there is nothing to say however long it runs.
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.insert_resource(AtTheControls);
+        app.add_context::<Carried>(|context| {
+            context.active_if(resource_exists::<AtTheControls>);
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        app.world_mut().spawn(Carried);
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(
+            capture::seen(),
+            before,
+            "a carried context is not a mistake"
+        );
+
+        // This one nobody carries.
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.insert_resource(AtTheControls);
+        app.add_context::<NeverSpawned>(|context| {
+            context.active_if(resource_exists::<AtTheControls>);
+            context.bind::<Jump>(KeyCode::Space);
+        });
+
+        // Not on the first run: an entity spawned by an `OnEnter` does not exist yet on the frame
+        // its state became current, and warning about that would be crying wolf.
+        app.update();
+        assert_eq!(capture::seen(), before, "too early to be sure");
+
+        app.update();
+        assert_eq!(capture::seen(), before + 1, "and now it is sure");
+
+        // Said once, not once per frame.
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(capture::seen(), before + 1);
     }
 
     /// The list in that warning is the useful half of it — the answer is usually a neighbouring

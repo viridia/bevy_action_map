@@ -6,7 +6,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use core::marker::PhantomData;
 
 use crate::action::{ActionId, ChannelShape, Intent};
-use crate::binding::{BindingModifier, BindingSource, BindingSpec};
+use crate::binding::{BindingModifier, BindingSource, BindingSpec, Control};
 use crate::condition::BindingCondition;
 use crate::event::Dispatch;
 
@@ -26,6 +26,191 @@ fn mismatch_hint(intent: Intent, shape: ChannelShape) -> &'static str {
         }
         _ => "",
     }
+}
+
+/// Something wrong with a context's bindings, found when they were compiled.
+///
+/// Collected rather than reported one at a time, so that a context with three mistakes in it tells
+/// you about three mistakes rather than about the first one three times.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BindingDiagnostic {
+    /// The declared path of the action whose binding is at fault.
+    pub action: &'static str,
+    /// What is wrong with it.
+    pub kind: DiagnosticKind,
+}
+
+impl BindingDiagnostic {
+    /// Whether this stops the context working, or is only suspicious.
+    pub fn severity(&self) -> Severity {
+        match self.kind {
+            DiagnosticKind::IntentMismatch { .. }
+            | DiagnosticKind::RateFromDelta { .. }
+            | DiagnosticKind::ChainedRescaling { .. } => Severity::Error,
+            DiagnosticKind::DuplicateBinding { .. }
+            | DiagnosticKind::ConsumeDisagreement { .. } => Severity::Warning,
+        }
+    }
+}
+
+/// How much a [`BindingDiagnostic`] matters.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Severity {
+    /// The binding cannot work as written, and the context is refused.
+    Error,
+    /// The binding will do something, but probably not what was meant.
+    Warning,
+}
+
+/// What is wrong with a binding.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum DiagnosticKind {
+    /// The action's intent cannot be served by the channel its control reports on.
+    IntentMismatch {
+        /// What the action asked for.
+        intent: Intent,
+        /// What the control offers, after any modifier that reshapes it.
+        shape: ChannelShape,
+    },
+    /// A modifier asked to read a displacement as though it were a rate.
+    RateFromDelta {
+        /// The channel the control reports on.
+        shape: ChannelShape,
+    },
+    /// More than one modifier in the chain stretches its value onto a new range.
+    ChainedRescaling {
+        /// How many of them do.
+        count: usize,
+    },
+    /// The same action reads the same control twice in this context.
+    DuplicateBinding {
+        /// The control bound twice.
+        control: Control,
+    },
+    /// Two bindings read one control and disagree about consuming it.
+    ConsumeDisagreement {
+        /// The control they share.
+        control: Control,
+        /// The action on the other side of the disagreement.
+        other: &'static str,
+    },
+}
+
+impl core::fmt::Display for BindingDiagnostic {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match &self.kind {
+            DiagnosticKind::IntentMismatch { intent, shape } => write!(
+                f,
+                "`{}` has intent {:?}, which a control reporting on a {:?} channel cannot serve{}",
+                self.action,
+                intent,
+                shape,
+                mismatch_hint(*intent, *shape)
+            ),
+            DiagnosticKind::RateFromDelta { shape } => write!(
+                f,
+                "`{}` reads a control as a rate, but a {:?} channel already reports a displacement \
+                 — there is no rate here to integrate",
+                self.action, shape
+            ),
+            DiagnosticKind::ChainedRescaling { count } => write!(
+                f,
+                "`{}` chains {count} rescaling modifiers; at most one may rescale, so all but one \
+                 need `without_rescale`",
+                self.action
+            ),
+            DiagnosticKind::DuplicateBinding { control } => write!(
+                f,
+                "`{}` reads {:?} twice in this context. Both contribute, which for a delta action \
+                 doubles it and for the rest is one binding doing nothing",
+                self.action, control
+            ),
+            DiagnosticKind::ConsumeDisagreement { control, other } => write!(
+                f,
+                "`{}` and `{other}` both read {control:?}, but only one of them consumes it — so \
+                 whether a lower-priority context sees that control depends on which of the two \
+                 fired",
+                self.action
+            ),
+        }
+    }
+}
+
+/// The channel a binding's value actually arrives on, after any modifier that reshapes it.
+fn effective_shape(binding: &BindingSpec) -> Result<ChannelShape, DiagnosticKind> {
+    let source_shape = binding.source.channel_shape();
+    let mut shape = source_shape;
+    for modifier in &binding.modifiers {
+        if let Some(reshaped) = modifier.reshapes() {
+            if shape == ChannelShape::Delta2 {
+                return Err(DiagnosticKind::RateFromDelta {
+                    shape: source_shape,
+                });
+            }
+            shape = reshaped;
+        }
+    }
+    Ok(shape)
+}
+
+/// Everything wrong with a set of authored bindings.
+///
+/// Pure: it reads the bindings and nothing else, so a rebinding UI can ask about a binding the
+/// player has not committed to yet.
+pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
+    let mut found = Vec::new();
+
+    for (index, binding) in bindings.iter().enumerate() {
+        let at = |kind| BindingDiagnostic {
+            action: binding.path,
+            kind,
+        };
+
+        match effective_shape(binding) {
+            Ok(shape) if !binding.intent.accepts(shape) => {
+                found.push(at(DiagnosticKind::IntentMismatch {
+                    intent: binding.intent,
+                    shape,
+                }));
+            }
+            Ok(_) => {}
+            Err(kind) => found.push(at(kind)),
+        }
+
+        let rescaling = binding
+            .modifiers
+            .iter()
+            .filter(|modifier| modifier.rescales())
+            .count();
+        if rescaling > 1 {
+            found.push(at(DiagnosticKind::ChainedRescaling { count: rescaling }));
+        }
+
+        // Against the bindings before this one only, so a duplicated pair is reported once.
+        for earlier in &bindings[..index] {
+            if earlier.action == binding.action && earlier.source == binding.source {
+                binding.source.for_each_control(|control| {
+                    found.push(at(DiagnosticKind::DuplicateBinding { control }));
+                });
+                break;
+            }
+            if earlier.consume != binding.consume {
+                earlier.source.for_each_control(|theirs| {
+                    binding.source.for_each_control(|mine| {
+                        if theirs == mine {
+                            found.push(at(DiagnosticKind::ConsumeDisagreement {
+                                control: mine,
+                                other: earlier.path,
+                            }));
+                        }
+                    });
+                });
+            }
+        }
+    }
+
+    found
 }
 
 /// An authored binding with its action resolved to a state slot.
@@ -73,6 +258,11 @@ pub struct Plan<C> {
 
 impl<C> Plan<C> {
     /// Compiles a plan from authored bindings.
+    ///
+    // Compilation asks nothing about whether the bindings make sense: `diagnose` owns that, and
+    // `add_context` runs it first and refuses the context rather than compiling a plan that cannot
+    // work. Keeping the two apart is what lets a rebinding UI ask about bindings it has no
+    // intention of installing.
     pub(crate) fn from_bindings(bindings: Vec<BindingSpec>) -> Self {
         let mut slot_intents: Vec<Intent> = Vec::new();
         let mut slot_dispatch: Vec<Dispatch> = Vec::new();
@@ -82,48 +272,6 @@ impl<C> Plan<C> {
         let mut scratch_count = 0;
 
         for binding in bindings {
-            let source_shape = binding.source.channel_shape();
-
-            // A modifier may change what kind of quantity the value is, and the check has to run
-            // against what the action actually receives rather than what the control reported.
-            let mut shape = source_shape;
-            for modifier in &binding.modifiers {
-                if let Some(reshaped) = modifier.reshapes() {
-                    assert!(
-                        shape != ChannelShape::Delta2,
-                        "`{}` reads a control as a rate, but a {:?} channel already reports a \
-                         displacement — there is no rate here to integrate",
-                        binding.path,
-                        source_shape
-                    );
-                    shape = reshaped;
-                }
-            }
-
-            assert!(
-                binding.intent.accepts(shape),
-                "`{}` has intent {:?}, which a control reporting on a {:?} channel cannot serve{}",
-                binding.path,
-                binding.intent,
-                shape,
-                mismatch_hint(binding.intent, shape)
-            );
-
-            // Stretching a value onto a new range means any later threshold stops corresponding to
-            // a physical control position, so the stages of a deadzone chain only compose while at
-            // most one of them does it.
-            let rescaling = binding
-                .modifiers
-                .iter()
-                .filter(|modifier| modifier.rescales())
-                .count();
-            assert!(
-                rescaling <= 1,
-                "binding for {} chains {rescaling} rescaling modifiers; at most one may rescale, \
-                 so all but one need `without_rescale`",
-                binding.path
-            );
-
             let slot = *slot_by_action.entry(binding.action).or_insert_with(|| {
                 slot_intents.push(binding.intent);
                 slot_dispatch.push(binding.dispatch);
@@ -202,5 +350,115 @@ impl<C> Plan<C> {
     /// The declared paths of every action this context binds, in slot order.
     pub(crate) fn bound_paths(&self) -> &[&'static str] {
         &self.slot_paths
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::binding::InputContextBuilder;
+
+    #[derive(crate::InputAction)]
+    #[action(path = "plan_tests.jump", output = bool, intent = Button)]
+    struct Jump;
+
+    #[derive(crate::InputAction)]
+    #[action(path = "plan_tests.menu", output = bool, intent = Button)]
+    struct MenuToggle;
+
+    #[derive(crate::InputAction)]
+    #[action(path = "plan_tests.move", output = bevy_math::Vec2, intent = Directional2)]
+    struct Move;
+
+    /// Bound twice to the same control: harmless for a button, doubling for a delta, and a mistake
+    /// either way. Reported against the second one, once, rather than once per binding in the pair.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn one_control_bound_twice_is_reported_once() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<Jump>(KeyCode::Space);
+        builder.bind::<Jump>(KeyCode::Space);
+
+        let found = builder.diagnostics();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].severity(), Severity::Warning);
+        assert_eq!(
+            found[0].kind,
+            DiagnosticKind::DuplicateBinding {
+                control: Control::Key(KeyCode::Space)
+            }
+        );
+    }
+
+    /// Two bindings on one control where only one consumes it. Whether a lower-priority context
+    /// ever sees that control then depends on which of the two fired, which is not a thing anyone
+    /// can reason about from the declaration.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn disagreeing_about_consuming_one_control_is_reported() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<MenuToggle>(KeyCode::Escape).consume();
+        builder.bind::<Jump>(KeyCode::Escape);
+
+        let found = builder.diagnostics();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(
+            found[0].kind,
+            DiagnosticKind::ConsumeDisagreement {
+                control: Control::Key(KeyCode::Escape),
+                other: "plan_tests.menu",
+            }
+        );
+    }
+
+    /// Bindings that touch different controls are none of each other's business, however their
+    /// consume flags read.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn consuming_a_control_nobody_else_reads_is_fine() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<MenuToggle>(KeyCode::Escape).consume();
+        builder.bind::<Jump>(KeyCode::Space);
+
+        assert_eq!(builder.diagnostics(), &[]);
+    }
+
+    /// The reason this is a list rather than an assertion: three mistakes should cost one run to
+    /// find, not three runs to find one at a time.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn every_problem_is_reported_together() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<Move>(KeyCode::KeyW);
+        builder.bind::<Move>(KeyCode::KeyA);
+        builder.bind::<Jump>(KeyCode::Space);
+        builder.bind::<Jump>(KeyCode::Space);
+
+        let found = builder.diagnostics();
+        assert_eq!(found.len(), 3, "{found:?}");
+        assert_eq!(
+            found
+                .iter()
+                .filter(|d| d.severity() == Severity::Error)
+                .count(),
+            2,
+            "both directional bindings are refused"
+        );
+        assert_eq!(
+            found
+                .iter()
+                .filter(|d| d.severity() == Severity::Warning)
+                .count(),
+            1,
+            "and the duplicate is only suspicious"
+        );
     }
 }

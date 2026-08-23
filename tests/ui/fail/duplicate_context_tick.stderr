@@ -1,0 +1,5 @@
+error: `tick` is given more than once
+ --> tests/ui/fail/duplicate_context_tick.rs:4:52
+  |
+4 | #[context(path = "gameplay.on_foot", tick = Fixed, tick = Render)]
+  |                                                    ^^^^^^^^^^^^^
