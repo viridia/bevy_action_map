@@ -349,4 +349,39 @@ live in several. Ours binds one value per context type in one call. Theirs is mo
 cost of two places to get right; ours cannot be half-declared. Recorded against chunk 27, where
 several contexts and several states meet for the first time.
 
+
+---
+
+## Phase VI — when an action fires
+
+### Chunk 11: conditions and the scratch table
+
+Taken before chunk 14 rather than after, because 14's own description leads with "chords beating
+their component bindings" and chords are conditions — the same producer-after-consumer inversion the
+log and the observers had. Chunk 11 had also become the debt sink: four obligations from chunks 7,
+15 and 16 were routed here, and all four wanted the same two additions.
+
+**`dt` arrives, and with it everything that was waiting on it.** The evaluator takes `Res<Time>`,
+which Bevy points at the fixed timestep inside the fixed schedules, so a context is told how long its
+own tick was rather than how long the frame was (R9.6). `ActionMapPlugin` installs `TimePlugin` if
+absent — the lack of a clock in the test apps is why chunk 15 deferred this in the first place.
+
+**The scratch record held up.** Design §6 asserts that one fixed four-field shape covers every
+condition in R6.1, on the argument that the *parameters* belong to the plan rather than to the state.
+Nine conditions later, `prev`, `time`, `count` and two flag bits between them cover all of it, with
+nothing needing an escape hatch.
+
+**A sixth phase was needed and a seventh was not.** The five phases could not express a hold
+abandoned before it ever fired: that is neither `Completed`, which claims it happened, nor `Idle`,
+which claims nothing did. `Started` fills it. The temptation was then to add another for "charging"
+versus "firing", both of which land on `Ongoing` — but the action's *value* already separates them,
+since a firing action has one and a charging action is at rest. Documented rather than duplicated.
+
+**Two of the tests were wrong before the code was.** One bound an `Analog1` action to mouse motion,
+which chunk 15's legality table refused — the third time that table has caught something written
+here. The other asserted that two taps too far apart leave a multi-tap `Idle`; they do not, because
+the second tap legitimately begins a fresh sequence. The assertion had encoded a misunderstanding of
+the feature rather than a property of it, and now checks the thing that actually matters: that no
+`Fired` appears anywhere in the sequence.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

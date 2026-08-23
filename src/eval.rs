@@ -17,6 +17,7 @@ use crate::binding::ButtonControl;
 #[cfg(feature = "gamepad")]
 use crate::binding::Stick;
 use crate::binding::{BindingSource, ButtonThreshold};
+use crate::condition::Verdict;
 use crate::context::InputContextState;
 use crate::frame::{InputFrame, RawEvent};
 
@@ -59,10 +60,14 @@ pub fn dispatch_transitions<C: InputContext + Component>(
 pub fn evaluate_context<C: InputContext + Component>(
     frame: Res<'_, InputFrame>,
     threshold: Res<'_, ButtonThreshold>,
+    // The generic clock, which Bevy points at the fixed timestep inside the fixed schedules — so a
+    // context is told how long its own tick was rather than how long the frame was (R9.6).
+    time: Res<'_, bevy_time::Time>,
     mut states: Query<'_, '_, &mut InputContextState<C>>,
 ) {
+    let delta = time.delta_secs();
     for mut state in &mut states {
-        state.apply_frame(&frame, &threshold);
+        state.apply_frame(&frame, &threshold, delta);
     }
 }
 
@@ -81,7 +86,12 @@ enum Fold {
 }
 
 impl<C: InputContext> InputContextState<C> {
-    pub(crate) fn apply_frame(&mut self, frame: &InputFrame, threshold: &ButtonThreshold) {
+    pub(crate) fn apply_frame(
+        &mut self,
+        frame: &InputFrame,
+        threshold: &ButtonThreshold,
+        delta: f32,
+    ) {
         // Only what has arrived since this context last looked. Re-reading the whole queue is what
         // made one mouse delta count three times across three fixed ticks.
         let unread = frame.events_after(self.read_through);
@@ -110,17 +120,17 @@ impl<C: InputContext> InputContextState<C> {
                 continue;
             }
             self.apply_level_event(&event.event, threshold);
-            self.fold(threshold, Vec2::ZERO, Fold::Level);
+            self.fold(threshold, Vec2::ZERO, delta, Fold::Level);
             level_changes += 1;
         }
 
         // Time passes even when nothing arrives: a phase has to reach `Ongoing` from `Fired` on its
         // own, and without an event to prompt it nothing else would.
         if level_changes == 0 {
-            self.fold(threshold, Vec2::ZERO, Fold::Level);
+            self.fold(threshold, Vec2::ZERO, delta, Fold::Level);
         }
 
-        self.fold(threshold, mouse_delta, Fold::Delta);
+        self.fold(threshold, mouse_delta, delta, Fold::Delta);
     }
 
     /// Moves one control's held state, for the sources that have a state to hold.
@@ -163,13 +173,14 @@ impl<C: InputContext> InputContextState<C> {
     }
 
     /// Resolves one half of the plan against the current device state.
-    fn fold(&mut self, threshold: &ButtonThreshold, mouse_delta: Vec2, kind: Fold) {
+    fn fold(&mut self, threshold: &ButtonThreshold, mouse_delta: Vec2, delta: f32, kind: Fold) {
         // Field-level borrows: the fold reads the device state and the plan while writing actions.
         let Self {
             plan,
             actions,
             transitions,
             require_reset,
+            scratch,
             #[cfg(feature = "keyboard")]
             held_buttons,
             #[cfg(feature = "gamepad")]
@@ -212,6 +223,7 @@ impl<C: InputContext> InputContextState<C> {
             }
 
             let mut combined = None;
+            let mut best = Verdict::Idle;
 
             // Bindings are grouped by slot, so this inner walk is one action's contributions.
             while index < bindings.len() && bindings[index].slot == slot {
@@ -260,18 +272,46 @@ impl<C: InputContext> InputContextState<C> {
                     }
                 };
 
-                let value = apply_modifiers(value, &binding.modifiers);
+                // Three disjoint pieces of this binding's working memory, in the order they are
+                // used: reshape the value, decide whether it is a press, then judge it.
+                let owned = &mut scratch
+                    [binding.scratch_base..binding.scratch_base + binding.scratch_len()];
+                let (modifier_scratch, rest) = owned.split_at_mut(binding.modifiers.len());
+                let (condition_scratch, press_scratch) =
+                    rest.split_at_mut(binding.conditions.len());
+
+                let value = apply_modifiers(value, &binding.modifiers, modifier_scratch, delta);
                 // Where a press comes from something that was not already a press, the threshold
                 // has to settle it here. Reading it later cannot: by then the only question a
                 // stored value can answer is whether it is off centre, and a resting stick always
                 // is. Modifiers run first so that a deadzone gets to define centre.
+                //
+                // Hysteretic like the button channel's own, but remembered per *binding* rather
+                // than per control: the value here was assembled from a deadzone, a composite, or
+                // whatever else the chain did, and no single control owns the answer.
                 let value = match (intent, value) {
                     (Intent::Button, ActionValue::Bool(_)) => value,
                     (Intent::Button, _) => {
-                        ActionValue::Bool(threshold.pressed(magnitude(value), false))
+                        let memory = &mut press_scratch[0];
+                        let pressed = threshold.pressed(magnitude(value), memory.prev.to_bool());
+                        memory.prev = ActionValue::Bool(pressed);
+                        ActionValue::Bool(pressed)
                     }
                     _ => value,
                 };
+                // Conditions decide *whether* this binding is firing; the value it contributes is
+                // rest until it is. A hold half-finished must not move the ship.
+                let verdict =
+                    crate::condition::combine(&binding.conditions, value, condition_scratch, delta);
+                if verdict > best {
+                    best = verdict;
+                }
+                let value = if verdict == Verdict::Fired {
+                    value
+                } else {
+                    ActionValue::Bool(false)
+                };
+
                 combined = Some(match combined {
                     Some(previous) => combine(previous, value, intent),
                     None => value,
@@ -289,7 +329,7 @@ impl<C: InputContext> InputContextState<C> {
                     require_reset[slot] = false;
                 }
 
-                let phase = update_action_state(&mut actions[slot], value);
+                let phase = update_action_state(&mut actions[slot], value, best);
                 // Only the edges. `Idle` and `Ongoing` say that nothing changed, and an observer
                 // firing every tick for a held button would be noise rather than information.
                 if matches!(phase, Phase::Fired | Phase::Completed | Phase::Canceled) {
@@ -361,56 +401,67 @@ fn axis_from_buttons(negative: bool, positive: bool) -> f32 {
 fn apply_modifiers(
     mut value: ActionValue,
     modifiers: &[crate::binding::BindingModifier],
+    scratch: &mut [crate::action::Scratch],
+    delta: f32,
 ) -> ActionValue {
-    for modifier in modifiers {
-        value = modifier.apply(value);
+    for (modifier, scratch) in modifiers.iter().zip(scratch) {
+        value = modifier.apply(value, scratch, delta);
     }
     value
 }
 
-fn update_action_state(action_state: &mut crate::action::ActionState, value: ActionValue) -> Phase {
-    let previous = action_state.value;
-    action_state.value = value;
-    action_state.phase = match (previous, value) {
-        (ActionValue::Bool(false), ActionValue::Bool(false)) => Phase::Idle,
-        (ActionValue::Bool(false), ActionValue::Bool(true)) => Phase::Fired,
-        (ActionValue::Bool(true), ActionValue::Bool(true)) => Phase::Ongoing,
-        (ActionValue::Bool(true), ActionValue::Bool(false)) => Phase::Completed,
-        (ActionValue::Axis1(previous), ActionValue::Axis1(value)) => {
-            match (previous == 0.0, value == 0.0) {
-                (true, true) => Phase::Idle,
-                (true, false) => Phase::Fired,
-                (false, false) => Phase::Ongoing,
-                (false, true) => Phase::Completed,
+/// Moves one action's state on by a tick, and reports the edge if there was one.
+///
+/// The verdict says what the bindings decided; this decides what that means given where the action
+/// already was. Two states are distinguished by the *value* rather than by the phase: an action
+/// that is `Ongoing` with a value is firing, and one that is `Ongoing` at rest is a condition still
+/// building toward firing. That is what makes giving up on a hold a `Canceled` rather than a
+/// `Completed` — the action never actually happened.
+fn update_action_state(
+    action_state: &mut crate::action::ActionState,
+    value: ActionValue,
+    verdict: Verdict,
+) -> Phase {
+    let was_firing = matches!(
+        action_state.phase,
+        Phase::Fired | Phase::Ongoing if action_state.value.to_bool()
+    );
+    let was_building = matches!(action_state.phase, Phase::Started)
+        || matches!(action_state.phase, Phase::Ongoing if !action_state.value.to_bool());
+
+    let phase = match verdict {
+        Verdict::Fired => {
+            if was_firing {
+                Phase::Ongoing
+            } else {
+                Phase::Fired
             }
         }
-        (ActionValue::Axis2(previous), ActionValue::Axis2(value)) => {
-            match (previous == Vec2::ZERO, value == Vec2::ZERO) {
-                (true, true) => Phase::Idle,
-                (true, false) => Phase::Fired,
-                (false, false) => Phase::Ongoing,
-                (false, true) => Phase::Completed,
+        Verdict::Ongoing => {
+            if was_firing {
+                // It was firing and has fallen back to merely building, which from the outside is
+                // the action ending.
+                Phase::Completed
+            } else if was_building {
+                Phase::Ongoing
+            } else {
+                Phase::Started
             }
         }
-        (ActionValue::Axis3(previous), ActionValue::Axis3(value)) => match (
-            previous == bevy_math::Vec3::ZERO,
-            value == bevy_math::Vec3::ZERO,
-        ) {
-            (true, true) => Phase::Idle,
-            (true, false) => Phase::Fired,
-            (false, false) => Phase::Ongoing,
-            (false, true) => Phase::Completed,
-        },
-        (_, ActionValue::Bool(true)) => Phase::Fired,
-        (_, ActionValue::Bool(false)) => Phase::Idle,
-        (_, ActionValue::Axis1(value)) if value != 0.0 => Phase::Fired,
-        (_, ActionValue::Axis1(_)) => Phase::Idle,
-        (_, ActionValue::Axis2(value)) if value != Vec2::ZERO => Phase::Fired,
-        (_, ActionValue::Axis2(_)) => Phase::Idle,
-        (_, ActionValue::Axis3(value)) if value != bevy_math::Vec3::ZERO => Phase::Fired,
-        (_, ActionValue::Axis3(_)) => Phase::Idle,
+        Verdict::Idle => {
+            if was_firing {
+                Phase::Completed
+            } else if was_building {
+                Phase::Canceled
+            } else {
+                Phase::Idle
+            }
+        }
     };
-    action_state.phase
+
+    action_state.value = value;
+    action_state.phase = phase;
+    phase
 }
 
 #[cfg(feature = "gamepad")]
@@ -454,6 +505,9 @@ mod tests {
         const PATH: &'static str = "eval_tests.jump";
     }
 
+    /// A plausible fixed timestep, for the tests that do not care what it is.
+    const TICK: f32 = 1.0 / 64.0;
+
     #[cfg(feature = "keyboard")]
     fn key(state: ButtonState) -> RawEvent {
         use bevy_input::keyboard::{Key, KeyCode, KeyboardInput};
@@ -492,7 +546,7 @@ mod tests {
 
         let mut frame = InputFrame::default();
         frame.record(key(ButtonState::Pressed));
-        state.apply_frame(&frame, &threshold);
+        state.apply_frame(&frame, &threshold, TICK);
         assert_eq!(state.transitions.len(), 1);
         assert_eq!(state.transitions[0].phase, Phase::Fired);
 
@@ -500,7 +554,7 @@ mod tests {
         state.transitions.clear();
 
         // Nothing new arrives; the key is still down.
-        state.apply_frame(&frame, &threshold);
+        state.apply_frame(&frame, &threshold, TICK);
         assert!(
             state.transitions.is_empty(),
             "a held key logged {:?}",
@@ -512,7 +566,7 @@ mod tests {
         );
 
         frame.record(key(ButtonState::Released));
-        state.apply_frame(&frame, &threshold);
+        state.apply_frame(&frame, &threshold, TICK);
         assert_eq!(state.transitions.len(), 1);
         assert_eq!(state.transitions[0].phase, Phase::Completed);
     }
@@ -532,7 +586,7 @@ mod tests {
         frame.record(key(ButtonState::Pressed));
         frame.record(key(ButtonState::Released));
 
-        state.apply_frame(&frame, &threshold);
+        state.apply_frame(&frame, &threshold, TICK);
 
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
         assert_eq!(phases, [Phase::Fired, Phase::Completed]);
@@ -565,7 +619,7 @@ mod tests {
         frame.record(RawEvent::MouseMotion(Vec2::new(3.0, 0.0)));
         frame.record(RawEvent::MouseMotion(Vec2::new(1.0, -2.0)));
 
-        state.apply_frame(&frame, &threshold);
+        state.apply_frame(&frame, &threshold, TICK);
 
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
         assert_eq!(phases, [Phase::Fired], "one movement, one transition");
@@ -586,7 +640,7 @@ mod tests {
 
         // The player presses the key while the context is not listening.
         frame.record(key(ButtonState::Pressed));
-        state.apply_frame(&frame, &threshold);
+        state.apply_frame(&frame, &threshold, TICK);
         assert_eq!(
             state.phase::<Jump>(),
             Phase::Idle,
@@ -594,7 +648,7 @@ mod tests {
         );
 
         state.activate();
-        state.apply_frame(&frame, &threshold);
+        state.apply_frame(&frame, &threshold, TICK);
         assert_eq!(
             state.phase::<Jump>(),
             Phase::Idle,
@@ -604,13 +658,13 @@ mod tests {
 
         // Letting go arms it again without firing anything.
         frame.record(key(ButtonState::Released));
-        state.apply_frame(&frame, &threshold);
+        state.apply_frame(&frame, &threshold, TICK);
         assert_eq!(state.phase::<Jump>(), Phase::Idle);
         assert!(state.transitions.is_empty());
 
         // And now a real press is a real press.
         frame.record(key(ButtonState::Pressed));
-        state.apply_frame(&frame, &threshold);
+        state.apply_frame(&frame, &threshold, TICK);
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
     }
 
@@ -624,10 +678,10 @@ mod tests {
 
         state.deactivate();
         frame.record(key(ButtonState::Pressed));
-        state.apply_frame(&frame, &threshold);
+        state.apply_frame(&frame, &threshold, TICK);
 
         state.activate_including_held();
-        state.apply_frame(&frame, &threshold);
+        state.apply_frame(&frame, &threshold, TICK);
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
     }
 
@@ -641,7 +695,7 @@ mod tests {
         let mut frame = InputFrame::default();
 
         frame.record(key(ButtonState::Pressed));
-        state.apply_frame(&frame, &threshold);
+        state.apply_frame(&frame, &threshold, TICK);
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
         state.transitions.clear();
 
@@ -660,5 +714,233 @@ mod tests {
         let mut state = jump_context();
         state.deactivate();
         assert!(state.transitions.is_empty());
+    }
+
+    /// R2.9's conversion, which chunk 15 refused for want of it. A stick reports how fast, a mouse
+    /// reports how far, and the two are only addable once the first has been multiplied by how long
+    /// the tick was.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_rate_becomes_the_distance_it_covered_this_tick() {
+        use crate::binding::{MouseMove, Stick};
+
+        struct Look;
+
+        impl InputAction for Look {
+            type Output = Vec2;
+
+            const INTENT: Intent = Intent::Delta2;
+            const PATH: &'static str = "eval_tests.rate_look";
+        }
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Look>(MouseMove);
+        builder.bind::<Look>(Stick::Right).per_second(180.0);
+        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        let threshold = ButtonThreshold::default();
+
+        let mut frame = InputFrame::default();
+        frame.record(RawEvent::Gamepad(
+            bevy_input::gamepad::RawGamepadEvent::Axis(
+                bevy_input::gamepad::RawGamepadAxisChangedEvent::new(
+                    bevy_ecs::entity::Entity::PLACEHOLDER,
+                    GamepadAxis::RightStickX,
+                    0.5,
+                ),
+            ),
+        ));
+
+        // Half deflection for a quarter second, at 180 a second, is 22.5 — and the same stick over
+        // a shorter tick moves the action less, which is the entire point.
+        state.apply_frame(&frame, &threshold, 0.25);
+        assert_eq!(state.value::<Look>().x, 22.5);
+
+        state.transitions.clear();
+        state.apply_frame(&frame, &threshold, 0.125);
+        assert_eq!(state.value::<Look>().x, 11.25);
+    }
+
+    /// The refusal that still stands: a displacement is not a rate, so there is nothing to
+    /// integrate and asking for it is a mistake rather than a no-op.
+    #[test]
+    #[should_panic(expected = "no rate here to integrate")]
+    fn a_delta_control_cannot_be_read_as_a_rate() {
+        struct Look;
+
+        impl InputAction for Look {
+            type Output = Vec2;
+
+            const INTENT: Intent = Intent::Delta2;
+            const PATH: &'static str = "eval_tests.double_integrated";
+        }
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder
+            .bind::<Look>(crate::binding::MouseMove)
+            .per_second(180.0);
+        Plan::<Flying>::from_bindings(builder.finish());
+    }
+
+    /// Each modifier gets its own memory. Two of a kind on one binding must not share, or the
+    /// second would read what the first wrote and the chain would depend on its own length.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn every_modifier_in_a_chain_has_its_own_scratch() {
+        struct Remembering;
+
+        impl crate::binding::Modifier for Remembering {
+            fn apply(
+                &self,
+                _value: ActionValue,
+                scratch: &mut crate::action::Scratch,
+                _delta: f32,
+            ) -> ActionValue {
+                scratch.count += 1;
+                ActionValue::Axis1(f32::from(scratch.count))
+            }
+        }
+
+        struct Counted;
+
+        impl InputAction for Counted {
+            type Output = f32;
+
+            const INTENT: Intent = Intent::Analog1;
+            const PATH: &'static str = "eval_tests.counted";
+        }
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder
+            .bind::<Counted>(bevy_input::keyboard::KeyCode::Space)
+            .custom(Remembering)
+            .custom(Remembering);
+        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        let threshold = ButtonThreshold::default();
+        let frame = InputFrame::default();
+
+        // Both start at zero and both count to one, so the pair reads 1 rather than 2.
+        state.apply_frame(&frame, &threshold, TICK);
+        assert_eq!(state.value::<Counted>(), 1.0);
+        // ...and to two on the next tick, having each kept their own count.
+        state.apply_frame(&frame, &threshold, TICK);
+        assert_eq!(state.value::<Counted>(), 2.0);
+    }
+
+    /// A hold, all the way through and then abandoned. The distinction the phases exist for is that
+    /// giving up part way is visibly different from seeing it through, and neither is silence.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_hold_starts_fires_completes_and_can_be_abandoned() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Jump>(KeyCode::Space).hold(0.25);
+        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        let threshold = ButtonThreshold::default();
+        let mut frame = InputFrame::default();
+
+        let step = |state: &mut InputContextState<Flying>, frame: &InputFrame| {
+            state.transitions.clear();
+            state.apply_frame(frame, &threshold, 0.1);
+            state.phase::<Jump>()
+        };
+
+        // Press, and wait it out.
+        frame.record(key(ButtonState::Pressed));
+        assert_eq!(step(&mut state, &frame), Phase::Started);
+        assert_eq!(step(&mut state, &frame), Phase::Ongoing, "still charging");
+        assert!(!state.value::<Jump>(), "and not yet jumping");
+        assert_eq!(step(&mut state, &frame), Phase::Fired, "0.3s is past 0.25s");
+        assert!(state.value::<Jump>());
+        assert_eq!(step(&mut state, &frame), Phase::Ongoing, "still held");
+
+        frame.record(key(ButtonState::Released));
+        assert_eq!(step(&mut state, &frame), Phase::Completed);
+
+        // Now the same press, given up on early.
+        frame.record(key(ButtonState::Pressed));
+        assert_eq!(step(&mut state, &frame), Phase::Started);
+        frame.record(key(ButtonState::Released));
+        assert_eq!(
+            step(&mut state, &frame),
+            Phase::Canceled,
+            "abandoned before it ever fired"
+        );
+        assert!(!state.value::<Jump>());
+    }
+
+    /// Two bindings on one action, one of which has a condition. The action reports the most
+    /// definite thing any of them said, so a plain press is not drowned out by a hold in progress.
+    #[cfg(all(feature = "keyboard", feature = "gamepad"))]
+    #[test]
+    fn the_most_definite_binding_decides_the_action() {
+        use bevy_input::gamepad::GamepadButton;
+        use bevy_input::keyboard::KeyCode;
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Jump>(KeyCode::Space).hold(10.0);
+        builder.bind::<Jump>(GamepadButton::South);
+        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        let threshold = ButtonThreshold::default();
+        let mut frame = InputFrame::default();
+
+        // The keyboard hold will never finish, so on its own the action is merely charging.
+        frame.record(key(ButtonState::Pressed));
+        state.apply_frame(&frame, &threshold, 0.1);
+        assert_eq!(state.phase::<Jump>(), Phase::Started);
+
+        // The pad has no condition, so it fires outright and the action goes with it.
+        frame.record(RawEvent::Gamepad(
+            bevy_input::gamepad::RawGamepadEvent::Button(
+                bevy_input::gamepad::RawGamepadButtonChangedEvent::new(
+                    bevy_ecs::entity::Entity::PLACEHOLDER,
+                    GamepadButton::South,
+                    1.0,
+                ),
+            ),
+        ));
+        state.apply_frame(&frame, &threshold, 0.1);
+        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+        assert!(state.value::<Jump>());
+    }
+
+    /// The gap chunk 15 left. A press derived from an axis was thresholded with no memory of what
+    /// it decided last tick, so a stick wobbling across the line chattered — the same defect the
+    /// button channel had fixed, in the neighbouring case.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_press_derived_from_an_axis_does_not_chatter() {
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Jump>(GamepadAxis::LeftStickY);
+        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        let threshold = ButtonThreshold::default();
+        let midband = (threshold.press + threshold.release) / 2.0;
+
+        let mut frame = InputFrame::default();
+        let push_to = |state: &mut InputContextState<Flying>, frame: &mut InputFrame, to: f32| {
+            frame.record(RawEvent::Gamepad(
+                bevy_input::gamepad::RawGamepadEvent::Axis(
+                    bevy_input::gamepad::RawGamepadAxisChangedEvent::new(
+                        bevy_ecs::entity::Entity::PLACEHOLDER,
+                        GamepadAxis::LeftStickY,
+                        to,
+                    ),
+                ),
+            ));
+            state.apply_frame(frame, &threshold, TICK);
+            state.value::<Jump>()
+        };
+
+        assert!(push_to(&mut state, &mut frame, 0.9));
+        // Falling back into the band holds the press rather than dropping it.
+        assert!(push_to(&mut state, &mut frame, midband));
+        assert!(!push_to(&mut state, &mut frame, 0.1));
+        // ...and re-entering it keeps it let go.
+        assert!(!push_to(&mut state, &mut frame, midband));
     }
 }

@@ -23,7 +23,9 @@ use bevy_ecs::system::SystemParam;
 use bevy_ecs::world::DeferredWorld;
 use bevy_platform::sync::Arc;
 
-use crate::action::{ActionOutput, ActionState, InputAction, InputContext, Phase, TickDomain};
+use crate::action::{
+    ActionOutput, ActionState, InputAction, InputContext, Phase, Scratch, TickDomain,
+};
 use crate::binding::InputContextBuilder;
 use crate::eval::{Transition, dispatch_transitions, evaluate_context};
 use crate::frame::{InputFrame, Timestamp};
@@ -70,6 +72,8 @@ pub struct InputContextState<C> {
     pub(crate) plan: Arc<Plan<C>>,
     pub(crate) actions: Vec<ActionState>,
     pub(crate) active: bool,
+    // Working memory for every modifier and condition in the plan, indexed as the plan says.
+    pub(crate) scratch: Vec<Scratch>,
     // Parallel to `actions`: this action may not fire until it has been seen at rest once. Set when
     // a context activates, so a control the player was already holding does not read as a fresh
     // press (R7.5).
@@ -93,12 +97,14 @@ pub struct InputContextState<C> {
 impl<C> InputContextState<C> {
     pub(crate) fn new(plan: Arc<Plan<C>>, read_through: Option<Timestamp>) -> Self {
         let slots = plan.slot_count();
+        let scratch_slots = plan.scratch_count();
         let actions = alloc::vec![ActionState::default(); slots];
 
         Self {
             plan,
             actions,
             active: true,
+            scratch: alloc::vec![Scratch::default(); scratch_slots],
             require_reset: alloc::vec![false; slots],
             transitions: Vec::new(),
             read_through,

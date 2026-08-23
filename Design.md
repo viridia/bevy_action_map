@@ -162,7 +162,7 @@ pub enum ActionValue { Bool(bool), Axis1(f32), Axis2(Vec2), Axis3(Vec3) }
 #[derive(Clone, Copy, Reflect)]
 pub struct ActionState {
     pub value: ActionValue,   // 20 B (tag + Vec3)
-    pub phase: Phase,         //  1 B  Idle | Ongoing | Fired | Completed | Canceled
+    pub phase: Phase,         //  1 B  Idle | Started | Ongoing | Fired | Completed | Canceled
     pub flags: StateFlags,    //  1 B  consumed, disabled, require_reset
     pub elapsed: f32,         //  4 B  in the context's clock (R9.6)
     pub progress: f32,        //  4 B  0..1 toward firing (R3.5)
@@ -805,7 +805,8 @@ bevy_action_map/
     device/     L0  registry, persistent identity, capabilities, calibration
     frame/      L1  input frame, event queue, sampling, per-player routing
     action/         identity, value, intent, action state       (D1, R2.7)
-    binding/        binding model, modifiers, conditions        (OQ-5)
+    binding/        binding model, sources, modifiers            (OQ-5)
+    condition/      when a binding counts as firing              (§6)
     context/        declaring a context, its per-entity state   (§3, R22.14)
     plan/           compilation, arbitration order, reverse index
     eval/           evaluator, transition log                   (§5)

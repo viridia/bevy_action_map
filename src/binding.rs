@@ -13,7 +13,8 @@ use bevy_input::gamepad::{GamepadAxis, GamepadButton};
 use bevy_input::keyboard::KeyCode;
 use bevy_math::Vec2;
 
-use crate::action::{ActionId, ActionValue, ChannelShape, InputAction, Intent};
+use crate::action::{ActionId, ActionValue, ChannelShape, InputAction, Intent, Scratch};
+use crate::condition::{BindingCondition, Condition};
 use crate::event::{Dispatch, dispatch_for};
 
 /// A control that reports on a button channel.
@@ -194,6 +195,7 @@ pub(crate) struct BindingSpec {
     pub(crate) dispatch: Dispatch,
     pub(crate) source: BindingSource,
     pub(crate) modifiers: Vec<BindingModifier>,
+    pub(crate) conditions: Vec<BindingCondition>,
 }
 
 /// Mouse motion as a binding source.
@@ -454,9 +456,18 @@ impl DeadZone {
 }
 
 /// A modifier that transforms one source value before it is written to an action.
+///
+/// Implement this for anything the built-in set does not cover. A modifier is a pure function of
+/// what it is given — no world access — so that it produces the same answer when a replay or a
+/// rollback runs it again with the same inputs.
 pub trait Modifier: Send + Sync + 'static {
     /// Applies the modifier to a runtime value.
-    fn apply(&self, value: ActionValue) -> ActionValue;
+    ///
+    /// `scratch` is this modifier's own working memory, untouched by anything else, and persists
+    /// between ticks. `delta` is how long the owning context's last tick was, in its own seconds —
+    /// which is the fixed timestep for a fixed context and the frame time for a render one, and is
+    /// zero on the tick a context first evaluates.
+    fn apply(&self, value: ActionValue, scratch: &mut Scratch, delta: f32) -> ActionValue;
 
     /// Whether this modifier stretches its input onto a different range.
     ///
@@ -487,13 +498,15 @@ pub enum BindingModifier {
     },
     /// Raises the magnitude to a curve power while preserving sign.
     Curve(f32),
+    /// Reads the value as a rate and turns it into the displacement it produced this tick.
+    PerSecond(f32),
     /// Calls an application-defined modifier.
     Custom(Box<dyn Modifier>),
 }
 
 impl BindingModifier {
     /// Applies this modifier to a runtime value.
-    pub fn apply(&self, value: ActionValue) -> ActionValue {
+    pub fn apply(&self, value: ActionValue, scratch: &mut Scratch, delta: f32) -> ActionValue {
         match self {
             Self::DeadZone(dead_zone) => apply_dead_zone(value, *dead_zone),
             Self::Scale(scale) => apply_scale(value, *scale),
@@ -501,7 +514,19 @@ impl BindingModifier {
             Self::Swizzle => apply_swizzle(value),
             Self::Clamp { min, max } => apply_clamp(value, *min, *max),
             Self::Curve(power) => apply_curve(value, *power),
-            Self::Custom(modifier) => modifier.apply(value),
+            Self::PerSecond(scale) => apply_scale(value, scale * delta),
+            Self::Custom(modifier) => modifier.apply(value, scratch, delta),
+        }
+    }
+
+    /// The channel shape this modifier leaves its value on, when it changes it.
+    ///
+    /// Only a conversion between a rate and a displacement does: everything else reshapes the
+    /// number without changing what kind of quantity it is.
+    pub(crate) fn reshapes(&self) -> Option<ChannelShape> {
+        match self {
+            Self::PerSecond(_) => Some(ChannelShape::Delta2),
+            _ => None,
         }
     }
 
@@ -524,6 +549,82 @@ pub struct BindingHandle<'a, C> {
 impl<'a, C> BindingHandle<'a, C> {
     fn push_modifier(&mut self, modifier: BindingModifier) {
         self.builder.bindings[self.index].modifiers.push(modifier);
+    }
+
+    fn push_condition(&mut self, condition: BindingCondition) {
+        self.builder.bindings[self.index].conditions.push(condition);
+    }
+
+    /// Fires on the press rather than for as long as the control is held.
+    pub fn press(mut self) -> Self {
+        self.push_condition(BindingCondition::Press);
+        self
+    }
+
+    /// Fires when the control is let go.
+    pub fn release(mut self) -> Self {
+        self.push_condition(BindingCondition::Release);
+        self
+    }
+
+    /// Requires the control to still be held, alongside whatever else this binding asks for.
+    pub fn down(mut self) -> Self {
+        self.push_condition(BindingCondition::Down);
+        self
+    }
+
+    /// Fires once the control has been held for `duration` seconds, and keeps firing after.
+    ///
+    /// Letting go early cancels rather than firing, so an action can show how far along it is and
+    /// then take it back.
+    pub fn hold(mut self, duration: f32) -> Self {
+        self.push_condition(BindingCondition::Hold {
+            duration,
+            one_shot: false,
+        });
+        self
+    }
+
+    /// Fires once, when the control has been held for `duration` seconds.
+    pub fn hold_once(mut self, duration: f32) -> Self {
+        self.push_condition(BindingCondition::Hold {
+            duration,
+            one_shot: true,
+        });
+        self
+    }
+
+    /// Fires on release, if the control was held for at least `duration` seconds first.
+    pub fn hold_and_release(mut self, duration: f32) -> Self {
+        self.push_condition(BindingCondition::HoldAndRelease { duration });
+        self
+    }
+
+    /// Fires on release, if the control was held no longer than `max_duration` seconds.
+    pub fn tap(mut self, max_duration: f32) -> Self {
+        self.push_condition(BindingCondition::Tap { max_duration });
+        self
+    }
+
+    /// Fires after `count` taps, each within `max_gap` seconds of the one before.
+    pub fn multi_tap(mut self, count: u16, max_gap: f32) -> Self {
+        self.push_condition(BindingCondition::MultiTap { count, max_gap });
+        self
+    }
+
+    /// Fires every `interval` seconds while the control is held, starting immediately.
+    pub fn pulse(mut self, interval: f32) -> Self {
+        self.push_condition(BindingCondition::Pulse {
+            interval,
+            immediate: true,
+        });
+        self
+    }
+
+    /// Adds an application-defined condition.
+    pub fn when<K: Condition>(mut self, condition: K) -> Self {
+        self.push_condition(BindingCondition::Custom(Box::new(condition)));
+        self
     }
 
     /// Adds a deadzone.
@@ -566,6 +667,26 @@ impl<'a, C> BindingHandle<'a, C> {
         self
     }
 
+    /// Reads this control as a rate, and converts it to the movement it caused this tick.
+    ///
+    /// A stick says how fast; a mouse says how far. They are different quantities, and adding them
+    /// is the reason a look control can feel different at different frame rates. This is the
+    /// conversion between them: `scale` is how far a fully deflected control should move the action
+    /// in one second, and what comes out is the distance covered since the last tick.
+    ///
+    /// ```ignore
+    /// // Both drive the same look action, in the same units.
+    /// context.bind::<Look>(MouseMove);
+    /// context.bind::<Look>(Stick::Right).dead_zone(DeadZone::radial(0.12)).per_second(180.0);
+    /// ```
+    ///
+    /// A control that already reports a displacement cannot be read as a rate, so this is refused
+    /// on one.
+    pub fn per_second(mut self, scale: f32) -> Self {
+        self.push_modifier(BindingModifier::PerSecond(scale));
+        self
+    }
+
     /// Adds a custom modifier.
     pub fn custom<M: Modifier>(mut self, modifier: M) -> Self {
         self.push_modifier(BindingModifier::Custom(Box::new(modifier)));
@@ -597,6 +718,7 @@ impl<C> InputContextBuilder<C> {
             dispatch: dispatch_for::<A>,
             source,
             modifiers: Vec::new(),
+            conditions: Vec::new(),
         });
         let index = self.bindings.len() - 1;
         BindingHandle {
@@ -764,8 +886,8 @@ where
 }
 
 impl Modifier for BindingModifier {
-    fn apply(&self, value: ActionValue) -> ActionValue {
-        Self::apply(self, value)
+    fn apply(&self, value: ActionValue, _scratch: &mut Scratch, _delta: f32) -> ActionValue {
+        Self::apply(self, value, &mut Scratch::default(), 0.0)
     }
 }
 
@@ -805,7 +927,7 @@ mod tests {
     struct DoubleAxis;
 
     impl Modifier for DoubleAxis {
-        fn apply(&self, value: ActionValue) -> ActionValue {
+        fn apply(&self, value: ActionValue, _scratch: &mut Scratch, _delta: f32) -> ActionValue {
             match value {
                 ActionValue::Axis2(value) => ActionValue::Axis2(value * 2.0),
                 other => other,
@@ -852,7 +974,10 @@ mod tests {
         ];
 
         for (modifier, input, expected) in cases {
-            assert_eq!(modifier.apply(input), expected);
+            assert_eq!(
+                modifier.apply(input, &mut Scratch::default(), 0.0),
+                expected
+            );
         }
     }
 
@@ -861,7 +986,11 @@ mod tests {
         let modifier = BindingModifier::Custom(Box::new(DoubleAxis));
 
         assert_eq!(
-            modifier.apply(ActionValue::Axis2(Vec2::new(1.0, -2.0))),
+            modifier.apply(
+                ActionValue::Axis2(Vec2::new(1.0, -2.0)),
+                &mut Scratch::default(),
+                0.0
+            ),
             ActionValue::Axis2(Vec2::new(2.0, -4.0))
         );
     }
@@ -1036,7 +1165,11 @@ mod tests {
     }
 
     fn dead_zoned(dead_zone: DeadZone, value: Vec2) -> Vec2 {
-        match BindingModifier::DeadZone(dead_zone).apply(ActionValue::Axis2(value)) {
+        match BindingModifier::DeadZone(dead_zone).apply(
+            ActionValue::Axis2(value),
+            &mut Scratch::default(),
+            0.0,
+        ) {
             ActionValue::Axis2(value) => value,
             other => panic!("expected Axis2, got {other:?}"),
         }
@@ -1083,7 +1216,11 @@ mod tests {
     fn a_dead_zone_applies_in_three_dimensions() {
         let value = ActionValue::Axis3(bevy_math::Vec3::new(0.1, 0.1, 0.1));
         assert_eq!(
-            BindingModifier::DeadZone(DeadZone::radial(0.5)).apply(value),
+            BindingModifier::DeadZone(DeadZone::radial(0.5)).apply(
+                value,
+                &mut Scratch::default(),
+                0.0
+            ),
             ActionValue::Axis3(bevy_math::Vec3::ZERO)
         );
     }
@@ -1091,7 +1228,11 @@ mod tests {
     #[test]
     fn a_curve_shapes_distance_without_bending_direction() {
         let diagonal = Vec2::splat(core::f32::consts::FRAC_1_SQRT_2 * 0.5);
-        let curved = match BindingModifier::Curve(2.0).apply(ActionValue::Axis2(diagonal)) {
+        let curved = match BindingModifier::Curve(2.0).apply(
+            ActionValue::Axis2(diagonal),
+            &mut Scratch::default(),
+            0.0,
+        ) {
             ActionValue::Axis2(value) => value,
             other => panic!("expected Axis2, got {other:?}"),
         };

@@ -229,14 +229,64 @@ pub enum Phase {
     /// The action is inactive.
     #[default]
     Idle,
-    /// The action is held or otherwise ongoing.
+    /// A condition on this action began this tick, but has not been satisfied yet.
+    ///
+    /// A hold that the player has just pressed is `Started`: something is happening, and it is not
+    /// yet a jump. If they let go too soon it becomes [`Canceled`](Phase::Canceled) instead of
+    /// [`Fired`](Phase::Fired).
+    Started,
+    /// The action is continuing to do whatever it was doing last tick.
+    ///
+    /// This covers both a held action still firing and a condition still building toward firing.
+    /// The action's **value** tells them apart: an action that is firing has one, and one still
+    /// building is at rest.
     Ongoing,
     /// The action became active this tick.
     Fired,
     /// The action ended this tick after being active.
     Completed,
-    /// The action was abandoned before completing.
+    /// The action was abandoned before it ever fired.
+    ///
+    /// A hold released early, or a context deactivating mid-press. The distinction from
+    /// [`Completed`](Phase::Completed) is whether the action ever actually happened.
     Canceled,
+}
+
+/// Working memory for one condition or one stateful modifier.
+///
+/// A binding that has to remember something between ticks — how long a button has been down, how
+/// many taps have landed, what the last value was — keeps it here. One of these belongs to each
+/// condition and each stateful modifier, so two conditions on one binding cannot tread on each
+/// other.
+///
+/// It is deliberately one fixed shape rather than a per-condition type. Everything a condition
+/// needs to remember turns out to fit, once the *parameters* are recognised as belonging to the
+/// binding rather than to its state — a hold's duration and a multi-tap's window do not change from
+/// tick to tick, so they live in the compiled plan and never appear here. What is left is uniform
+/// and `Copy`, which is what lets a whole context's state be snapshotted by copying two slices.
+#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Scratch {
+    /// The previous input value, or an accumulator for a filtering modifier.
+    pub prev: ActionValue,
+    /// When something started, in the context's own seconds.
+    pub time: f32,
+    /// A tap count, or how far through a sequence this binding has come.
+    pub count: u16,
+    /// Condition-defined bits.
+    pub flags: u8,
+}
+
+impl Default for Scratch {
+    fn default() -> Self {
+        Self {
+            prev: ActionValue::Bool(false),
+            time: 0.0,
+            count: 0,
+            flags: 0,
+        }
+    }
 }
 
 /// The state we keep for one action inside a context.

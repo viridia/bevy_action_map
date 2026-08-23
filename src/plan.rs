@@ -7,6 +7,7 @@ use core::marker::PhantomData;
 
 use crate::action::{ActionId, ChannelShape, Intent};
 use crate::binding::{BindingModifier, BindingSource, BindingSpec};
+use crate::condition::BindingCondition;
 use crate::event::Dispatch;
 
 /// The part of a rejected binding's message that says what to do about it.
@@ -32,6 +33,18 @@ pub(crate) struct CompiledBinding {
     pub(crate) slot: usize,
     pub(crate) source: BindingSource,
     pub(crate) modifiers: Vec<BindingModifier>,
+    pub(crate) conditions: Vec<BindingCondition>,
+    // Where this binding keeps its working memory: the modifiers first, then the conditions. No
+    // two share a slot, even when they are the same kind.
+    pub(crate) scratch_base: usize,
+}
+
+impl CompiledBinding {
+    pub(crate) fn scratch_len(&self) -> usize {
+        // Modifiers, then conditions, then one more for the press this binding derived — which is
+        // hysteretic, so it has to remember what it decided last tick.
+        self.modifiers.len() + self.conditions.len() + 1
+    }
 }
 
 /// The plan is the immutable runtime view of a context's authored bindings.
@@ -44,6 +57,7 @@ pub struct Plan<C> {
     // Parallel to `slot_intents`: how a transition on this slot becomes a typed event.
     slot_dispatch: Vec<Dispatch>,
     slot_by_action: BTreeMap<ActionId, usize>,
+    scratch_count: usize,
     _marker: PhantomData<C>,
 }
 
@@ -54,9 +68,27 @@ impl<C> Plan<C> {
         let mut slot_dispatch: Vec<Dispatch> = Vec::new();
         let mut slot_by_action = BTreeMap::new();
         let mut compiled = Vec::with_capacity(bindings.len());
+        let mut scratch_count = 0;
 
         for binding in bindings {
-            let shape = binding.source.channel_shape();
+            let source_shape = binding.source.channel_shape();
+
+            // A modifier may change what kind of quantity the value is, and the check has to run
+            // against what the action actually receives rather than what the control reported.
+            let mut shape = source_shape;
+            for modifier in &binding.modifiers {
+                if let Some(reshaped) = modifier.reshapes() {
+                    assert!(
+                        shape != ChannelShape::Delta2,
+                        "`{}` reads a control as a rate, but a {:?} channel already reports a \
+                         displacement — there is no rate here to integrate",
+                        binding.path,
+                        source_shape
+                    );
+                    shape = reshaped;
+                }
+            }
+
             assert!(
                 binding.intent.accepts(shape),
                 "`{}` has intent {:?}, which a control reporting on a {:?} channel cannot serve{}",
@@ -87,10 +119,15 @@ impl<C> Plan<C> {
                 slot_intents.len() - 1
             });
 
+            let scratch_base = scratch_count;
+            scratch_count += binding.modifiers.len() + binding.conditions.len() + 1;
+
             compiled.push(CompiledBinding {
                 slot,
                 source: binding.source,
                 modifiers: binding.modifiers,
+                conditions: binding.conditions,
+                scratch_base,
             });
         }
 
@@ -103,6 +140,7 @@ impl<C> Plan<C> {
             slot_intents,
             slot_dispatch,
             slot_by_action,
+            scratch_count,
             _marker: PhantomData,
         }
     }
@@ -113,6 +151,10 @@ impl<C> Plan<C> {
 
     pub(crate) fn slot_count(&self) -> usize {
         self.slot_intents.len()
+    }
+
+    pub(crate) fn scratch_count(&self) -> usize {
+        self.scratch_count
     }
 
     pub(crate) fn intent_for_slot(&self, slot: usize) -> Intent {

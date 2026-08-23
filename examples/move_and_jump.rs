@@ -36,10 +36,15 @@ fn main() {
         context.bind::<Jump>(GamepadButton::South);
     });
     app.add_context::<FreeLook>(|context| {
-        // Look is a delta: the mouse reports how far the view has already turned. The right stick
-        // reports how fast to turn instead, so it needs a rate-to-delta conversion this crate does
-        // not offer yet, and binding it here would add a rate to a displacement.
+        // Look is a delta: the mouse reports how far the view has already turned. The stick reports
+        // how fast to turn, so `per_second` converts it to how far it turned this tick — after
+        // which the two are the same quantity and can drive one action together.
         context.bind::<Look>(MouseMove);
+        context
+            .bind::<Look>(Stick::Right)
+            .dead_zone(DeadZone::radial(0.12))
+            .curve(1.8)
+            .per_second(180.0);
     });
     // The player owns the on-foot bindings; the camera looks around on its own.
     app.add_systems(Startup, |mut commands: Commands| {

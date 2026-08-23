@@ -28,9 +28,20 @@ pub struct Turn;
 pub struct Fire;
 
 /// Jump somewhere else on the field, at some risk.
+///
+/// Double-tapped rather than pressed, so that panicking on the fire button cannot fling the ship
+/// across the screen by accident.
 #[derive(InputAction)]
 #[action(path = "dead_zone.hyperspace", output = bool, intent = Button)]
 pub struct Hyperspace;
+
+/// A harder burn, available once the engine has been running a while.
+///
+/// Bound to the same controls as [`Thrust`], with a hold condition. One control, two actions, and
+/// the difference between them is entirely in when they are considered to have fired.
+#[derive(InputAction)]
+#[action(path = "dead_zone.afterburner", output = bool, intent = Button)]
+pub struct Afterburner;
 
 /// Open or close the pause menu.
 #[derive(InputAction)]
@@ -77,8 +88,20 @@ pub fn plugin(app: &mut App) {
         controls.bind::<Fire>(GamepadButton::South);
         controls.bind::<Fire>(KeyCode::Space);
 
-        controls.bind::<Hyperspace>(GamepadButton::East);
-        controls.bind::<Hyperspace>(KeyCode::ShiftLeft);
+        // Hold the throttle for three quarters of a second and it opens up. `Started` fires the
+        // moment the burn begins, so the exhaust can show it building before it arrives.
+        controls
+            .bind::<Afterburner>(GamepadButton::RightTrigger2)
+            .hold(0.75);
+        controls.bind::<Afterburner>(KeyCode::KeyW).hold(0.75);
+        controls.bind::<Afterburner>(KeyCode::ArrowUp).hold(0.75);
+
+        controls
+            .bind::<Hyperspace>(GamepadButton::East)
+            .multi_tap(2, 0.3);
+        controls
+            .bind::<Hyperspace>(KeyCode::ShiftLeft)
+            .multi_tap(2, 0.3);
 
         controls.bind::<Pause>(KeyCode::Escape);
         controls.bind::<Pause>(GamepadButton::Start);

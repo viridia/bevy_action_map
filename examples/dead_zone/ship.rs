@@ -4,12 +4,14 @@ use bevy::prelude::*;
 use bevy_action_map::prelude::*;
 use std::f32::consts::TAU;
 
-use crate::actions::{Fire, Flying, Hyperspace, Thrust, Turn};
+use crate::actions::{Afterburner, Fire, Flying, Hyperspace, Thrust, Turn};
 use crate::field::{HALF_EXTENT, Lifetime, Velocity, Wraps};
 use crate::pause::Simulating;
 
 const TURN_RATE: f32 = 3.2;
 const ACCELERATION: f32 = 420.0;
+/// What holding the throttle open eventually buys.
+const AFTERBURNER: f32 = 2.2;
 /// Space is not really like this, but a ship that never slows down is miserable to fly.
 const DRAG: f32 = 0.4;
 const MUZZLE_SPEED: f32 = 620.0;
@@ -79,6 +81,11 @@ fn fly(
     let delta = time.delta_secs();
     let turn = input.value::<Turn>();
     let thrust = input.value::<Thrust>();
+    let boost = if input.value::<Afterburner>() {
+        AFTERBURNER
+    } else {
+        1.0
+    };
 
     for (mut transform, mut velocity) in ships {
         transform.rotate_z(-turn * TURN_RATE * delta);
@@ -86,7 +93,7 @@ fn fly(
         // The ship accelerates along its nose, which is what makes turning and thrusting two
         // separate decisions rather than one.
         let heading = (transform.rotation * Vec3::X).truncate();
-        velocity.0 += heading * thrust * ACCELERATION * delta;
+        velocity.0 += heading * thrust * ACCELERATION * boost * delta;
         velocity.0 *= 1.0 - DRAG * delta;
     }
 }
@@ -139,11 +146,33 @@ fn hyperspace(input: Actions<Flying>, ships: Query<(&mut Transform, &mut Velocit
     }
 }
 
-fn show_exhaust(input: Actions<Flying>, exhaust: Query<&mut Transform, With<Exhaust>>) {
+fn show_exhaust(
+    input: Actions<Flying>,
+    exhaust: Query<&mut Transform, With<Exhaust>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    flame: Query<&MeshMaterial2d<ColorMaterial>, With<Exhaust>>,
+) {
     let thrust = input.value::<Thrust>();
+    // `Started` means the burn is building but has not opened up yet, so the flame can grow before
+    // the ship actually goes anywhere.
+    let charging = input.phase::<Afterburner>() == Phase::Started
+        || (input.phase::<Afterburner>() == Phase::Ongoing && !input.value::<Afterburner>());
+    let boosting = input.value::<Afterburner>();
+
     for mut transform in exhaust {
         // Drawn every frame rather than every tick, and it reads the same action either way.
-        transform.scale = Vec3::splat(thrust);
+        let stretch = if boosting { 1.9 } else { 1.0 };
+        transform.scale = Vec3::new(thrust * stretch, thrust, thrust);
+    }
+
+    for material in flame {
+        if let Some(mut material) = materials.get_mut(&material.0) {
+            material.color = match (boosting, charging) {
+                (true, _) => Color::srgb(0.6, 0.85, 1.0),
+                (_, true) => Color::srgb(1.0, 0.85, 0.4),
+                _ => Color::srgb(1.0, 0.6, 0.2),
+            };
+        }
     }
 }
 

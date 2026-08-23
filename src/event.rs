@@ -34,6 +34,21 @@ pub struct Fired<A: InputAction> {
     pub value: A::Output,
 }
 
+/// A condition on the action began, but has not been satisfied yet.
+///
+/// A hold that has just been pressed. Use it to show that something is charging; the matching
+/// [`Fired`] arrives if the player sees it through, and [`Canceled`] if they do not.
+///
+/// Without conditions this never happens, because there is nothing for a press to be the start
+/// *of* — a plain binding fires immediately.
+#[derive(EntityEvent)]
+pub struct Started<A: InputAction> {
+    /// The entity carrying the context this action belongs to.
+    pub entity: Entity,
+    /// The action's value at the moment it started, which is usually rest.
+    pub value: A::Output,
+}
+
 /// An action stopped being active after having been active.
 #[derive(EntityEvent)]
 pub struct Completed<A: InputAction> {
@@ -69,6 +84,7 @@ pub(crate) fn dispatch_for<A: InputAction>(
 ) {
     let value = A::Output::from_action_value(value);
     match phase {
+        Phase::Started => commands.trigger(Started::<A> { entity, value }),
         Phase::Fired => commands.trigger(Fired::<A> { entity, value }),
         Phase::Completed => commands.trigger(Completed::<A> { entity, value }),
         Phase::Canceled => commands.trigger(Canceled::<A> { entity, value }),

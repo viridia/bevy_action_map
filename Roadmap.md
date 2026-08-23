@@ -111,14 +111,14 @@ step and a real game is a better acceptance test than a synthetic one.
 | | |
 | --- | --- |
 | **Works today** | Actions and contexts as types; keyboard, mouse and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled. |
-| **Known wrong today** | A stick cannot drive a look action at all, because the rate-to-delta conversion R2.9 requires does not exist yet (chunk 11). |
-| **Never built** | Conditions, multiple contexts, arbitration, the whole player-facing model. |
+| **Known wrong today** | Context priority is declared and ignored: two contexts binding one control both see it, and neither can consume it (chunk 14). |
+| **Never built** | Arbitration and consumption, the whole player-facing model. |
 
 ---
 
 ## What has landed
 
-Thirteen chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
+Fifteen chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
 fell short of its own description; this table is only an index, and the sequence below is what
 remains.
 
@@ -134,9 +134,11 @@ remains.
 | 8 | Gamepad and the design-stage deadzone | done; stages 1 and 3 → 22 |
 | 24 | Housekeeping | done; doctests still deferred |
 | 9 | Tick domains and the windowed drain | done; the L2 half of R9.3 → 12 |
-| 15 | Source channel shape | done; rate-to-delta → 11 |
-| 16 | Dead Zone, first playable | playable; no death yet, hyperspace wants 11 |
+| 15 | Source channel shape | done |
+| 16 | Dead Zone, first playable | playable; no death, which is polish |
 | 12 | Transition log and observers | done |
+| 13 | Context activation lifecycle | done; priority → 14 |
+| 11 | Conditions and the scratch table | done; chords → 14 |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -198,6 +200,18 @@ The single-pass consumption algorithm (R8.3); chords beating their component bin
 
 - **Gates the rebinding UI.** R19.3 requires conflict detection to use *the same* arbitration rules
   the runtime applies, so there is nothing to check a candidate binding against until this exists.
+- **Inherited from chunk 11: chord and blocked-by (R6.1).** Both read another *action's* state
+  rather than their own value, so they need the action table that only the evaluator has — and a
+  chord's whole point is out-ranking the bindings it is made of, which is this chunk's algorithm
+  rather than a condition's.
+- **Decide before building: whether consumption crosses tick domains.** Contexts evaluate as one
+  system per context type, unordered against each other, and a render-tick context runs in
+  `PreUpdate` while a fixed-tick one runs in `FixedPreUpdate`. Priority ordering within a domain is
+  a matter of ordering those systems, which `C::PRIORITY` makes possible at declaration time.
+  Across domains it is not: a high-priority *fixed* context cannot consume from a low-priority
+  *render* one, because it runs later. Either consumption is defined within a domain only, or
+  evaluation is restructured so that one pass walks every context in priority order. That belongs
+  in [Design.md](./Design.md) before any of it is written.
 
 ### 25. Control classes and class bindings
 
@@ -224,32 +238,38 @@ claim an event.
 Both chunks here are what R24.8 turned from polish into obligation: the long tail cannot verify what
 it does not own, so mistakes have to be caught rather than discovered in QA that nobody is running.
 
-### 11. Conditions and the `Scratch` table
+### 11. Conditions and the `Scratch` table **[PARTIAL]**
 
-Press, release, hold, tap, multi-tap, chord progress; `elapsed` and `progress`. Each condition claims
-a fixed-size scratch slot from the plan. Carries chunk 7's outstanding modifier signature, since
-scratch and `dt` are the same addition.
-
-Conditions **append to** the transition log rather than introduce it: Design §5 makes the log a
-property of the evaluator, and chunk 12 needs it first. What arrives here is the transitions a
-condition can produce that a bare phase change cannot — a hold completing, a tap resolving.
-
-- **Verified by:** unit tests driving synthetic time; the R6.1 catalogue is directly a test list.
-- **Review surface:** whether the 24-byte scratch record really covers every condition, which the
-  design asserts and this chunk proves or refutes.
-- **In Dead Zone:** hyperspace on a double-tap, and hold-to-thrust. Hyperspace is a plain button
-  press today, which is the whole of what chunk 16 could express.
-- **Inherited from chunk 15: hysteresis where a press is derived** from something other than a single
-  button — a stick axis, a composite. The button channel keeps its own pressed state per control, but
-  a derived value has no control to hang that on, and the memory has to be per *binding* to survive
-  two bindings feeding one action. That is what the scratch table is. Until then those paths use a
-  plain threshold, which is right except at the boundary.
-- **Inherited from chunk 15: the rate-to-delta conversion R2.9 requires.** Chunk 15 made binding a
-  stick to a `Delta2` action an error, which is right — a position is a rate and a mouse delta is a
-  displacement, and summing them is the units error R13.2 names. But mouse-and-stick look is the
-  near-universal case, so refusing it is only half an answer: R2.9 asks for the conversion to be
-  explicit, not absent. It needs the tick's `dt`, which is the same addition the modifier signature
-  wants here, and `examples/move_and_jump.rs` carries a comment where the stick binding used to be.
+- **Delivered:** the `Scratch` record and its per-binding allocation; `dt` and scratch reaching
+  modifiers, which discharges chunk 7; the rate-to-delta conversion R2.9 asked for, so a stick and a
+  mouse can drive one look action again; and the condition catalogue — press, release, down, hold,
+  hold-once, hold-and-release, tap, multi-tap, pulse, and a trait for anything else. R6.2's
+  explicit/implicit/blocking composition is Unreal's, adopted as the requirement invites.
+- **`Phase::Started` was added**, because the five phases could not say "a hold abandoned before it
+  ever fired" — which is neither `Completed` nor `Idle`. `Ongoing` now covers both still-firing and
+  still-charging, told apart by the value: firing has one, charging is at rest. A sixth phase was
+  considered and rejected on the grounds that the value already carries it unambiguously.
+- **Also discharged chunk 15's hysteresis item.** A press derived from an axis or a composite now
+  remembers what it decided last tick, per binding, which is what the scratch table was for.
+- **In Dead Zone:** hyperspace on a double-tap, and an afterburner that opens up after holding the
+  throttle — one control driving two actions that differ only in when they count as having fired.
+- **Outstanding → chunk 14:** chord and blocked-by (R6.1). Both read *another action's* state rather
+  than their own value, which is a different shape of condition, and chord in particular is
+  entangled with the arbitration that decides whether a chord beats its own component bindings.
+- **Outstanding → its own decision, then a chunk:** R6.4's sequences and R6.5's buffering and coyote
+  time. Both are `SHOULD`s, both fit the scratch record as the design predicted, and neither has a
+  consumer yet. R6.5 in particular is called out as a frequent reason teams abandon a general input
+  crate, so it wants a real game asking for it rather than a speculative API.
+- **Outstanding → chunk 17, and R3.4 is a MUST:** an action does not expose its **elapsed time** in
+  its current state, nor R3.5's **progress toward firing**. Both only became meaningful with
+  conditions — before this chunk there was nothing to be part-way through — and both are now sitting
+  in the scratch record already, since a hold's timer is exactly R3.4's elapsed and its ratio to the
+  hold duration is exactly R3.5's progress. What is missing is carrying them out to where a caller
+  can read them, which means widening `ActionState` and is therefore worth doing alongside the other
+  API-shaped work rather than bolted on here. Dead Zone's afterburner is the consumer: it currently
+  shows "charging" as a colour because it cannot show how far along it is.
+- **Review surface:** whether the 24-byte scratch record really covers every condition. So far it
+  does, with `prev`, `time`, `count` and two flag bits between them covering all nine.
 
 ### 17. The diagnostics tier
 

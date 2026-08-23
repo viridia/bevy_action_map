@@ -33,6 +33,7 @@ bevy_app = { git = "https://github.com/bevyengine/bevy.git", default-features = 
 bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
 bevy_input = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
 bevy_math = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
+bevy_time = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
 bevy_platform = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
 bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", default-features = false, optional = true }
 bevy_input_focus = { git = "https://github.com/bevyengine/bevy.git", default-features = false, optional = true }
@@ -59,6 +60,7 @@ std = [
   "bevy_math/std",
   "bevy_platform/std",
   "bevy_state?/std",
+  "bevy_time/std",
   "bevy_reflect?/std",
   "serde?/std",
 ]
@@ -81,6 +83,7 @@ bevy_reflect = [
   "bevy_ecs/bevy_reflect",
   "bevy_input/bevy_reflect",
   "bevy_math/bevy_reflect",
+  "bevy_time/bevy_reflect",
 ]
 
 # Persistence of binding overrides and input frames (§17, R10.1).

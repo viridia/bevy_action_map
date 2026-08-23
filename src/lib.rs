@@ -40,6 +40,7 @@ pub mod frame;
 // L2
 pub mod action;
 pub mod binding;
+pub mod condition;
 pub mod context;
 pub mod eval;
 pub mod event;
@@ -94,6 +95,12 @@ impl bevy_app::Plugin for ActionMapPlugin {
 
         app.init_resource::<binding::ButtonThreshold>();
 
+        // Conditions and rate conversions are defined in simulated seconds (R9.6), so a clock is
+        // not optional. `DefaultPlugins` brings one; a headless app or a test may not have.
+        if !app.is_plugin_added::<bevy_time::TimePlugin>() {
+            app.add_plugins(bevy_time::TimePlugin);
+        }
+
         app.configure_sets(
             bevy_app::PreUpdate,
             (
@@ -127,8 +134,9 @@ pub mod prelude {
     pub use crate::binding::{AxisButtons, DirectionalButtons};
     // `MouseMove` is ungated because `BindingSource::MouseMotion` is.
     pub use crate::binding::{ButtonThreshold, DeadZone, MouseMove};
+    pub use crate::condition::{Condition, ConditionKind, Verdict};
     pub use crate::context::{ActionMapAppExt, Actions, InputContextState};
-    pub use crate::event::{Canceled, Completed, Fired};
+    pub use crate::event::{Canceled, Completed, Fired, Started};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
     // The derives share their names with the traits above, which is fine — a derive macro and a
     // trait live in different namespaces. Without these, a glob import of this prelude gives you
