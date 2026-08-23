@@ -28,24 +28,18 @@ fn main() {
     let mut app = App::new();
     app.add_plugins((DefaultPlugins, ActionMapPlugin));
     app.add_context::<OnFoot, _>(|context| {
-        context.bind_directional::<Move>(DirectionalKeys::new(
-            KeyCode::KeyW,
-            KeyCode::KeyS,
-            KeyCode::KeyA,
-            KeyCode::KeyD,
-        ));
+        context.bind::<Move>(DirectionalButtons::wasd());
         context
-            .bind::<Move, _>(Stick::Left)
+            .bind::<Move>(Stick::Left)
             .dead_zone(DeadZone::radial(0.15));
-        context.bind::<Jump, _>(KeyCode::Space);
-        context.bind::<Jump, _>(GamepadButton::South);
+        context.bind::<Jump>(KeyCode::Space);
+        context.bind::<Jump>(GamepadButton::South);
     });
     app.add_context::<FreeLook, _>(|context| {
-        context.bind_mouse_motion::<Look>();
-        context
-            .bind::<Look, _>(Stick::Right)
-            .dead_zone(DeadZone::radial(0.12))
-            .curve(1.8);
+        // Look is a delta: the mouse reports how far the view has already turned. The right stick
+        // reports how fast to turn instead, so it needs a rate-to-delta conversion this crate does
+        // not offer yet, and binding it here would add a rate to a displacement.
+        context.bind::<Look>(MouseMove);
     });
     // The player owns the on-foot bindings; the camera looks around on its own.
     app.add_systems(Startup, |mut commands: Commands| {

@@ -89,6 +89,8 @@ impl bevy_app::Plugin for ActionMapPlugin {
             app.add_plugins(frame::InputFramePlugin);
         }
 
+        app.init_resource::<binding::ButtonThreshold>();
+
         app.configure_sets(
             bevy_app::PreUpdate,
             ActionMapSystems::Evaluate.after(ActionMapSystems::Sample),
@@ -101,17 +103,18 @@ impl bevy_app::Plugin for ActionMapPlugin {
 /// This includes the most common types in this crate, re-exported for your convenience.
 pub mod prelude {
     pub use crate::action::{
-        ActionId, ActionOutput, ActionState, ActionValue, InputAction, InputContext, Intent, Phase,
-        TickDomain,
+        ActionId, ActionOutput, ActionState, ActionValue, ChannelShape, InputAction, InputContext,
+        Intent, Phase, TickDomain,
     };
     pub use crate::{ActionMapPlugin, ActionMapSystems};
     // `InputContextBuilder` is deliberately absent: `add_context` hands one to a closure, so its
     // type is inferred and never written. Import it from `binding` to name it in a signature.
-    pub use crate::binding::DeadZone;
-    #[cfg(feature = "keyboard")]
-    pub use crate::binding::DirectionalKeys;
+    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+    pub use crate::binding::DirectionalButtons;
     #[cfg(feature = "gamepad")]
     pub use crate::binding::Stick;
+    // `MouseMove` is ungated because `BindingSource::MouseMotion` is.
+    pub use crate::binding::{ButtonThreshold, DeadZone, MouseMove};
     pub use crate::context::{ActionMapAppExt, Actions, InputContextState};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
 

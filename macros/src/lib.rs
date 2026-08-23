@@ -64,7 +64,24 @@ fn expand_input_action(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
     let output = args.output;
     let intent = args.intent;
 
+    // Spelled out here rather than in the assertion, because a const assertion's message has to be
+    // a literal — so the only chance to name the two halves of the mistake is at expansion time.
+    let mismatch = format!(
+        "`{}` declares `intent = {}`, which no `{}` action can serve. Either the intent or the \
+         output shape is not the one you meant.",
+        path.value(),
+        intent,
+        quote!(#output),
+    );
+
     Ok(quote! {
+        const _: () = ::core::assert!(
+            ::bevy_action_map::action::Intent::#intent.is_one_of(
+                <#output as ::bevy_action_map::action::ActionOutput>::INTENTS
+            ),
+            #mismatch
+        );
+
         impl ::bevy_action_map::action::InputAction for #ident {
             type Output = #output;
             const INTENT: ::bevy_action_map::action::Intent = ::bevy_action_map::action::Intent::#intent;

@@ -259,13 +259,34 @@ a rebinding UI may legally offer for a slot (§19.R19.1), and what happens when 
 kinds feed one action (R2.9, §13.R13.2).
 
 - **R2.1 (MUST)** Support bool, 1D, 2D, 3D value shapes in one runtime value type.
-- **R2.2 (MUST)** Dimension conversion rules must be explicit, documented, and total (what a bool
-  becomes as `Axis2D`, what an `Axis2D` becomes as bool — magnitude vs. per-axis threshold), and the
+- **R2.2 (MUST)** Dimension conversion rules must be explicit, documented, and total, and the
   **specific rule for each pair must be settled here rather than left to the implementation**.
   _(Strengthened after implementation: requiring only that the rules be documented meant they got
   decided by whoever wrote the conversion first, and one of them — a 1D value becoming 2D by
   copying itself into both components, so a half-pressed trigger reads as a diagonal — is a choice
   nobody would defend if asked. A requirement that a decision be written down is not a decision.)_
+
+  Two rules cover the table, and both come from the same principle: **a conversion may discard
+  information, but must never invent any.**
+
+  - **Widening** places the value in the first component and leaves the rest at zero.
+  - **Narrowing to a scalar** — to 1D or to bool — measures the value as a whole, so a vector
+    becomes its length and a bool is that length being non-zero. **Narrowing between vector shapes**
+    drops the trailing components, which are the ones the target shape does not name.
+
+  | from ↓ to → | `bool`     | `Axis1`  | `Axis2`     | `Axis3`         |
+  | ----------- | ---------- | -------- | ----------- | --------------- |
+  | `bool`      | itself     | 1.0, 0.0 | `(v, 0)`    | `(v, 0, 0)`     |
+  | `Axis1`     | `v != 0`   | itself   | `(v, 0)`    | `(v, 0, 0)`     |
+  | `Axis2`     | `v != 0`   | length   | itself      | `(x, y, 0)`     |
+  | `Axis3`     | `v != 0`   | length   | `(x, y)`    | itself          |
+
+  Two consequences worth stating because they are the parts that get argued about. Narrowing to 1D
+  **loses the sign**, so an action that wants a signed reading must be bound to a single axis rather
+  than to a whole stick — the crate provides both as separate sources for exactly this reason. And
+  the bool conversion is a test against rest, **not** against a press threshold: a control's press
+  threshold (§14.R14.2) is applied where the control is read, before the value is stored, so by the
+  time a stored value is being reshaped the question has already been answered.
 - **R2.3 (MUST)** Each action declares its output shape in its derive (D1); a binding whose natural
   shape differs is either converted per R2.2 or rejected with a clear diagnostic. Because the shape is
   an associated type, typed reads must be checked at compile time — binding a `Vec2` action and

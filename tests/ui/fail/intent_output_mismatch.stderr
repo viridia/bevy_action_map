@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: `gameplay.jump` declares `intent = Button`, which no `Vec2` action can serve. Either the intent or the output shape is not the one you meant.
+ --> tests/ui/fail/intent_output_mismatch.rs:4:10
+  |
+4 | #[derive(bevy_action_map::InputAction)]
+  |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here

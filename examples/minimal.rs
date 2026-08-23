@@ -15,7 +15,7 @@ fn main() {
     App::new()
         .add_plugins((DefaultPlugins, ActionMapPlugin))
         .add_context::<OnFoot, _>(|context| {
-            context.bind::<Jump, _>(KeyCode::Space);
+            context.bind::<Jump>(KeyCode::Space);
         })
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn(OnFoot);

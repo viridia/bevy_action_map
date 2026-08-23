@@ -1,42 +1,130 @@
 //! Bindings, composites, modifiers, and conditions.
 //!
-//! The first interactive stage needs three source shapes: one keyboard key for a button action,
-//! one mouse-motion source for look, and one four-key directional composite for movement.
+//! A binding says what drives an action: a control the hardware reports directly, or a composite
+//! that assembles several controls into a value no single one of them carries. Modifiers reshape
+//! what a binding produces on its way to the action.
 
 use alloc::{boxed::Box, vec::Vec};
 use core::marker::PhantomData;
 
 #[cfg(feature = "gamepad")]
-use bevy_input::gamepad::GamepadButton;
+use bevy_input::gamepad::{GamepadAxis, GamepadButton};
 #[cfg(feature = "keyboard")]
 use bevy_input::keyboard::KeyCode;
 use bevy_math::Vec2;
 
-use crate::action::{ActionId, ActionValue, InputAction, Intent};
+use crate::action::{ActionId, ActionValue, ChannelShape, InputAction, Intent};
 
-/// Named parts for a 2D directional composite.
-#[cfg(feature = "keyboard")]
+/// A control that reports on a button channel.
+///
+/// This is what the parts of a [`DirectionalButtons`] composite are made of. A keyboard key and a
+/// D-pad button are the same kind of thing here — both report pressed or not — which is what lets
+/// one composite serve either.
+///
+/// You seldom write this type. Anywhere a part is wanted, the control itself will do:
+/// `DirectionalButtons::new(KeyCode::KeyW, ..)` and `DirectionalButtons::new(GamepadButton::DPadUp, ..)`
+/// both convert on the way in.
+#[cfg(any(feature = "keyboard", feature = "gamepad"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DirectionalKeys {
-    /// The key that contributes positive Y.
-    pub up: KeyCode,
-    /// The key that contributes negative Y.
-    pub down: KeyCode,
-    /// The key that contributes negative X.
-    pub left: KeyCode,
-    /// The key that contributes positive X.
-    pub right: KeyCode,
+pub enum ButtonControl {
+    /// A keyboard key.
+    #[cfg(feature = "keyboard")]
+    Key(KeyCode),
+    /// A gamepad button, including the D-pad and the triggers.
+    #[cfg(feature = "gamepad")]
+    GamepadButton(GamepadButton),
 }
 
 #[cfg(feature = "keyboard")]
-impl DirectionalKeys {
-    /// Creates a directional composite from the four movement keys.
-    pub const fn new(up: KeyCode, down: KeyCode, left: KeyCode, right: KeyCode) -> Self {
+impl From<KeyCode> for ButtonControl {
+    fn from(key: KeyCode) -> Self {
+        Self::Key(key)
+    }
+}
+
+#[cfg(feature = "gamepad")]
+impl From<GamepadButton> for ButtonControl {
+    fn from(button: GamepadButton) -> Self {
+        Self::GamepadButton(button)
+    }
+}
+
+/// Four buttons that together make a direction.
+///
+/// A direction never arrives from the hardware as a direction. WASD is four keys and a D-pad is
+/// four buttons — Bevy reports no D-pad axis at all — so both reach a 2D action through this, and
+/// through the same code. Whichever a player uses, an action bound this way behaves identically.
+///
+/// ```ignore
+/// context.bind::<Move>(DirectionalButtons::wasd());
+/// context.bind::<Move>(DirectionalButtons::dpad());
+/// ```
+///
+/// The parts are named for the direction each one pushes rather than for its position on a device,
+/// which is what a rebinding screen needs in order to say "Move Forward" next to one of them.
+#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DirectionalButtons {
+    /// The button that contributes positive Y.
+    pub up: ButtonControl,
+    /// The button that contributes negative Y.
+    pub down: ButtonControl,
+    /// The button that contributes negative X.
+    pub left: ButtonControl,
+    /// The button that contributes positive X.
+    pub right: ButtonControl,
+}
+
+#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+impl DirectionalButtons {
+    /// Creates a directional composite from four buttons.
+    ///
+    /// Each part accepts anything that reports on a button channel, so the four need not come from
+    /// the same device.
+    pub fn new(
+        up: impl Into<ButtonControl>,
+        down: impl Into<ButtonControl>,
+        left: impl Into<ButtonControl>,
+        right: impl Into<ButtonControl>,
+    ) -> Self {
         Self {
-            up,
-            down,
-            left,
-            right,
+            up: up.into(),
+            down: down.into(),
+            left: left.into(),
+            right: right.into(),
+        }
+    }
+
+    /// The `W`, `A`, `S` and `D` keys.
+    #[cfg(feature = "keyboard")]
+    pub const fn wasd() -> Self {
+        Self {
+            up: ButtonControl::Key(KeyCode::KeyW),
+            down: ButtonControl::Key(KeyCode::KeyS),
+            left: ButtonControl::Key(KeyCode::KeyA),
+            right: ButtonControl::Key(KeyCode::KeyD),
+        }
+    }
+
+    /// The four arrow keys.
+    #[cfg(feature = "keyboard")]
+    pub const fn arrow_keys() -> Self {
+        Self {
+            up: ButtonControl::Key(KeyCode::ArrowUp),
+            down: ButtonControl::Key(KeyCode::ArrowDown),
+            left: ButtonControl::Key(KeyCode::ArrowLeft),
+            right: ButtonControl::Key(KeyCode::ArrowRight),
+        }
+    }
+
+    /// The gamepad D-pad.
+    #[cfg(feature = "gamepad")]
+    pub const fn dpad() -> Self {
+        Self {
+            up: ButtonControl::GamepadButton(GamepadButton::DPadUp),
+            down: ButtonControl::GamepadButton(GamepadButton::DPadDown),
+            left: ButtonControl::GamepadButton(GamepadButton::DPadLeft),
+            right: ButtonControl::GamepadButton(GamepadButton::DPadRight),
         }
     }
 }
@@ -53,23 +141,59 @@ pub(crate) struct BindingSpec {
     pub(crate) modifiers: Vec<BindingModifier>,
 }
 
+/// Mouse motion as a binding source.
+///
+/// ```ignore
+/// context.bind::<Look>(MouseMove);
+/// ```
+///
+/// This reports a displacement that has already happened, so it can only drive an action whose
+/// intent is [`Delta2`](Intent::Delta2). It is named for the movement rather than for the device
+/// so that it does not collide with Bevy's own `MouseMotion` message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MouseMove;
+
 /// The binding source used by the first interactive stage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BindingSource {
     /// A keyboard key.
     #[cfg(feature = "keyboard")]
     Button(KeyCode),
-    /// A four-key directional composite.
-    #[cfg(feature = "keyboard")]
-    Directional2(DirectionalKeys),
+    /// A four-button directional composite.
+    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+    Directional2(DirectionalButtons),
     /// Mouse motion.
     MouseMotion,
     /// A gamepad button.
     #[cfg(feature = "gamepad")]
     GamepadButton(GamepadButton),
+    /// A single gamepad axis.
+    #[cfg(feature = "gamepad")]
+    GamepadAxis(GamepadAxis),
     /// A left or right gamepad stick.
     #[cfg(feature = "gamepad")]
     GamepadStick(Stick),
+}
+
+impl BindingSource {
+    /// The kind of channel this source reports on.
+    pub const fn channel_shape(&self) -> ChannelShape {
+        match self {
+            #[cfg(feature = "keyboard")]
+            Self::Button(_) => ChannelShape::Button,
+            // Four buttons, but a direction by the time anything binds to it.
+            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            Self::Directional2(_) => ChannelShape::Axis2,
+            Self::MouseMotion => ChannelShape::Delta2,
+            // Including the triggers, which carry a fraction on this channel.
+            #[cfg(feature = "gamepad")]
+            Self::GamepadButton(_) => ChannelShape::Button,
+            #[cfg(feature = "gamepad")]
+            Self::GamepadAxis(_) => ChannelShape::Axis1,
+            #[cfg(feature = "gamepad")]
+            Self::GamepadStick(_) => ChannelShape::Axis2,
+        }
+    }
 }
 
 /// The left or right stick on a gamepad.
@@ -82,37 +206,108 @@ pub enum Stick {
     Right,
 }
 
-/// A source value that can be turned into a binding source for a particular action output.
-pub trait BindingSourceSpec<Output> {
+/// A value that names a control you can bind an action to.
+///
+/// Implemented for the control types you would reach for directly — a [`KeyCode`], a
+/// [`GamepadButton`], a [`Stick`], [`MouseMove`], a [`DirectionalButtons`] composite — so that
+/// [`bind`](InputContextBuilder::bind) accepts any of them.
+///
+/// Note what this trait does *not* say: which actions the control is good for. A control reports on
+/// a channel of a given [`ChannelShape`] and that is all it knows about itself; whether that suits
+/// a particular action is decided against the action's [`Intent`] when the context is declared.
+/// This is what lets one trigger drive a button action in one game and an analog action in another.
+pub trait BindingSourceSpec {
     /// Converts this source value into the internal binding representation.
     fn into_binding_source(self) -> BindingSource;
 }
 
 #[cfg(feature = "keyboard")]
-impl BindingSourceSpec<bool> for KeyCode {
+impl BindingSourceSpec for KeyCode {
     fn into_binding_source(self) -> BindingSource {
         BindingSource::Button(self)
     }
 }
 
-#[cfg(feature = "keyboard")]
-impl BindingSourceSpec<Vec2> for DirectionalKeys {
+#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+impl BindingSourceSpec for DirectionalButtons {
     fn into_binding_source(self) -> BindingSource {
         BindingSource::Directional2(self)
     }
 }
 
+impl BindingSourceSpec for MouseMove {
+    fn into_binding_source(self) -> BindingSource {
+        BindingSource::MouseMotion
+    }
+}
+
 #[cfg(feature = "gamepad")]
-impl BindingSourceSpec<bool> for GamepadButton {
+impl BindingSourceSpec for GamepadButton {
     fn into_binding_source(self) -> BindingSource {
         BindingSource::GamepadButton(self)
     }
 }
 
 #[cfg(feature = "gamepad")]
-impl BindingSourceSpec<Vec2> for Stick {
+impl BindingSourceSpec for GamepadAxis {
+    fn into_binding_source(self) -> BindingSource {
+        BindingSource::GamepadAxis(self)
+    }
+}
+
+#[cfg(feature = "gamepad")]
+impl BindingSourceSpec for Stick {
     fn into_binding_source(self) -> BindingSource {
         BindingSource::GamepadStick(self)
+    }
+}
+
+/// When a control that reports a fraction counts as pressed.
+///
+/// An analog trigger does not press — it travels. Something has to decide where along that travel
+/// a button action fires, and a single point is the wrong answer: a finger resting near it makes
+/// the value wobble across the line and the action chatters on and off. So there are two points.
+/// The control becomes pressed at [`press`](Self::press) and does not release until it falls back
+/// to [`release`](Self::release), and anything in between leaves it as it was.
+///
+/// ```rust
+/// use bevy_action_map::binding::ButtonThreshold;
+///
+/// // A hair trigger that still resists chatter.
+/// let quick = ButtonThreshold { press: 0.25, release: 0.15 };
+/// ```
+///
+/// This is one setting for the whole app rather than one per binding, so that a trigger bound to
+/// two actions can never be pressed for one and released for the other.
+#[derive(bevy_ecs::resource::Resource, Clone, Copy, Debug, PartialEq)]
+pub struct ButtonThreshold {
+    /// The value at or above which a control becomes pressed.
+    pub press: f32,
+    /// The value at or below which it releases again.
+    pub release: f32,
+}
+
+impl Default for ButtonThreshold {
+    fn default() -> Self {
+        // Astride the half-way point, which is where a backend that synthesizes its own press
+        // usually puts it, with enough of a gap that a resting finger cannot rattle across both.
+        Self {
+            press: 0.6,
+            release: 0.4,
+        }
+    }
+}
+
+impl ButtonThreshold {
+    /// Decides whether a control reading `value` is pressed, given whether it was a moment ago.
+    pub fn pressed(&self, value: f32, was_pressed: bool) -> bool {
+        if value >= self.press {
+            true
+        } else if value <= self.release {
+            false
+        } else {
+            was_pressed
+        }
     }
 }
 
@@ -267,7 +462,7 @@ impl<'a, C> BindingHandle<'a, C> {
     /// Adds a deadzone.
     ///
     /// ```ignore
-    /// context.bind::<Move, _>(Stick::Left).dead_zone(DeadZone::radial(0.15));
+    /// context.bind::<Move>(Stick::Left).dead_zone(DeadZone::radial(0.15));
     /// ```
     pub fn dead_zone(mut self, dead_zone: DeadZone) -> Self {
         self.push_modifier(BindingModifier::DeadZone(dead_zone));
@@ -353,29 +548,21 @@ impl<C> InputContextBuilder<C> {
     ///   contributions resolve in the order the bindings were declared.
     /// - `Delta2` **sums** its contributions, because a delta is a displacement and two devices
     ///   moving at once should move the action by both.
-    pub fn bind<A, S>(&mut self, source: S) -> BindingHandle<'_, C>
-    where
-        A: InputAction,
-        S: BindingSourceSpec<A::Output>,
-    {
+    ///
+    /// The control has to be one the action can actually use. A control reports on a channel of a
+    /// particular [`ChannelShape`], the action declares an [`Intent`], and a binding between two
+    /// that do not fit — a single button asked to give a direction, a mouse asked to hold a
+    /// position — is refused when the context is declared. [`Intent::accepts`] has the table.
+    ///
+    /// ```ignore
+    /// context.bind::<Jump>(KeyCode::Space);
+    /// context.bind::<Jump>(GamepadButton::South);
+    /// context.bind::<Move>(DirectionalButtons::wasd());
+    /// context.bind::<Move>(Stick::Left).dead_zone(DeadZone::radial(0.15));
+    /// context.bind::<Look>(MouseMove);
+    /// ```
+    pub fn bind<A: InputAction>(&mut self, source: impl BindingSourceSpec) -> BindingHandle<'_, C> {
         self.push_binding::<A>(source.into_binding_source())
-    }
-
-    /// Binds a 2D action to mouse motion.
-    pub fn bind_mouse_motion<A>(&mut self) -> BindingHandle<'_, C>
-    where
-        A: InputAction<Output = Vec2>,
-    {
-        self.push_binding::<A>(BindingSource::MouseMotion)
-    }
-
-    /// Binds a 2D action to four named directional keys.
-    #[cfg(feature = "keyboard")]
-    pub fn bind_directional<A>(&mut self, keys: DirectionalKeys) -> BindingHandle<'_, C>
-    where
-        A: InputAction<Output = Vec2>,
-    {
-        self.push_binding::<A>(BindingSource::Directional2(keys))
     }
 
     pub(crate) fn finish(self) -> Vec<BindingSpec> {
@@ -538,6 +725,15 @@ mod tests {
         const PATH: &'static str = "tests::DummyVec2";
     }
 
+    struct DummyDelta2;
+
+    impl InputAction for DummyDelta2 {
+        type Output = Vec2;
+
+        const INTENT: crate::action::Intent = crate::action::Intent::Delta2;
+        const PATH: &'static str = "tests::DummyDelta2";
+    }
+
     struct DoubleAxis;
 
     impl Modifier for DoubleAxis {
@@ -607,7 +803,7 @@ mod tests {
     fn binding_builders_collect_modifiers_in_order() {
         let mut builder = InputContextBuilder::<()>::default();
         builder
-            .bind::<DummyButton, _>(KeyCode::Space)
+            .bind::<DummyButton>(KeyCode::Space)
             .scale(2.0)
             .negate()
             .dead_zone(DeadZone::radial(0.1));
@@ -626,12 +822,138 @@ mod tests {
         ));
     }
 
+    /// The two cases R2.10 names: a trigger that is button-shaped despite carrying a fraction, and
+    /// a directional composite that is direction-shaped despite being made of buttons.
+    #[test]
+    fn a_source_reports_the_channel_it_arrives_on() {
+        #[cfg(feature = "keyboard")]
+        {
+            assert_eq!(
+                BindingSource::Button(KeyCode::Space).channel_shape(),
+                ChannelShape::Button
+            );
+            assert_eq!(
+                BindingSource::Directional2(DirectionalButtons::wasd()).channel_shape(),
+                ChannelShape::Axis2
+            );
+        }
+
+        assert_eq!(
+            BindingSource::MouseMotion.channel_shape(),
+            ChannelShape::Delta2
+        );
+
+        #[cfg(feature = "gamepad")]
+        {
+            assert_eq!(
+                BindingSource::GamepadButton(GamepadButton::LeftTrigger2).channel_shape(),
+                ChannelShape::Button
+            );
+            assert_eq!(
+                BindingSource::GamepadAxis(GamepadAxis::RightStickX).channel_shape(),
+                ChannelShape::Axis1
+            );
+            assert_eq!(
+                BindingSource::GamepadStick(Stick::Left).channel_shape(),
+                ChannelShape::Axis2
+            );
+        }
+    }
+
+    #[test]
+    fn a_reading_between_the_thresholds_keeps_what_it_had() {
+        let threshold = ButtonThreshold::default();
+
+        // Outside the band the previous state does not matter.
+        assert!(threshold.pressed(0.9, false));
+        assert!(!threshold.pressed(0.1, true));
+
+        // Inside it, nothing else does.
+        assert!(threshold.pressed(0.5, true));
+        assert!(!threshold.pressed(0.5, false));
+
+        // The two edges belong to the states they name, so a reading exactly on one settles it.
+        assert!(threshold.pressed(threshold.press, false));
+        assert!(!threshold.pressed(threshold.release, true));
+    }
+
+    /// A composite's parts are controls, not keys, so nothing stops them coming from two devices.
+    #[cfg(all(feature = "keyboard", feature = "gamepad"))]
+    #[test]
+    fn composite_parts_are_not_tied_to_one_device() {
+        let mixed = DirectionalButtons::new(
+            KeyCode::KeyW,
+            GamepadButton::DPadDown,
+            KeyCode::KeyA,
+            GamepadButton::DPadRight,
+        );
+
+        assert_eq!(mixed.up, ButtonControl::Key(KeyCode::KeyW));
+        assert_eq!(
+            mixed.down,
+            ButtonControl::GamepadButton(GamepadButton::DPadDown)
+        );
+        assert_eq!(
+            DirectionalButtons::dpad().up,
+            ButtonControl::GamepadButton(GamepadButton::DPadUp)
+        );
+        assert_eq!(
+            DirectionalButtons::wasd().up,
+            ButtonControl::Key(KeyCode::KeyW)
+        );
+    }
+
+    /// The case chunk 15 exists for: an analog action driven by a control that arrives on a button
+    /// channel. Nothing about the binding is special, which is the point.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_trigger_can_drive_an_analog_action() {
+        struct Thrust;
+
+        impl InputAction for Thrust {
+            type Output = f32;
+
+            const INTENT: crate::action::Intent = crate::action::Intent::Analog1;
+            const PATH: &'static str = "tests::Thrust";
+        }
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<Thrust>(GamepadButton::LeftTrigger2);
+        crate::plan::Plan::<()>::from_bindings(builder.finish());
+    }
+
+    #[cfg(feature = "keyboard")]
+    #[test]
+    #[should_panic(expected = "carries no direction")]
+    fn a_lone_button_cannot_drive_a_directional_action() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<DummyVec2>(KeyCode::Space);
+        crate::plan::Plan::<()>::from_bindings(builder.finish());
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    #[should_panic(expected = "displacement that has already happened")]
+    fn a_stick_cannot_stand_in_for_a_delta() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<DummyDelta2>(Stick::Right);
+        crate::plan::Plan::<()>::from_bindings(builder.finish());
+    }
+
+    #[test]
+    #[should_panic(expected = "displacement that has already happened")]
+    fn mouse_motion_cannot_stand_in_for_a_direction() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<DummyVec2>(MouseMove);
+        crate::plan::Plan::<()>::from_bindings(builder.finish());
+    }
+
     #[cfg(feature = "gamepad")]
     #[test]
     fn gamepad_source_values_bind_through_the_same_pipeline() {
         let mut builder = InputContextBuilder::<()>::default();
-        builder.bind::<DummyButton, _>(GamepadButton::South);
-        builder.bind::<DummyVec2, _>(Stick::Left);
+        builder.bind::<DummyButton>(GamepadButton::South);
+        builder.bind::<DummyVec2>(Stick::Left);
 
         let bindings = builder.finish();
         assert_eq!(bindings.len(), 2);

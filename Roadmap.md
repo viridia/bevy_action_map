@@ -109,8 +109,8 @@ step and a real game is a better acceptance test than a synthetic one.
 
 | | |
 | --- | --- |
-| **Works today** | Actions and contexts as types; keyboard, mouse and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers. |
-| **Known wrong today** | L1 clears per frame rather than draining by window, so edges inside one frame are lost and deltas repeat across fixed ticks (chunk 9). An analog trigger cannot drive an analog action (chunk 15). |
+| **Works today** | Actions and contexts as types; keyboard, mouse and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled. |
+| **Known wrong today** | A stick cannot drive a look action at all, because the rate-to-delta conversion R2.9 requires does not exist yet (chunk 11). |
 | **Never built** | Conditions, transition events, multiple contexts, arbitration, the whole player-facing model. |
 
 ---
@@ -216,9 +216,10 @@ Intent-driven conversion between shapes.
   axis pair (R14.3), so this one composite covers gamepad D-pads too. Build it to be
   source-agnostic across its four parts and chunk 8 inherits D-pad support with no hat-handling
   path at all.
-- **Outstanding → chunk 15:** the composite was *not* built source-agnostic. `DirectionalKeys` holds
-  four `KeyCode`s, so a D-pad cannot drive it and chunk 8 inherited nothing. This is the paragraph
-  above going unheeded, and it costs a type change rather than a parameter.
+- **In the event:** the composite was *not* built source-agnostic. `DirectionalKeys` held four
+  `KeyCode`s, so a D-pad could not drive it and chunk 8 inherited nothing — the paragraph above
+  going unheeded. Chunk 15 fixed it, at the cost of a type change rather than the parameter it
+  would have been here.
 
 ### 7. Modifiers **[PARTIAL]**
 
@@ -261,8 +262,8 @@ Worked example A is complete after this: KBM and gamepad, both bound, one contex
   as a manual API plus an app-driven sampling step, not background detection.
 - **Outstanding → chunk 22:** R14.9's warning when `GamepadSettings` is not left at pass-through,
   which is a MUST and currently silent.
-- **Outstanding → chunk 15:** the trigger threshold is hard-coded at 0.5 with no hysteresis, which
-  is the opposite of what the note above asked for.
+- **In the event:** the trigger threshold landed hard-coded at 0.5 with no hysteresis, the opposite
+  of what the note above asked for. Chunk 15 replaced it with `ButtonThreshold`.
 
 
 ---
@@ -344,7 +345,7 @@ between a game that drops shots and one that does not.
   context, so it is neither `Copy` nor cheap to snapshot (R10.3). Draining incrementally removed the
   bug that mattered; making it snapshot-able is rollback's problem and wants rollback's testbed.
 
-### 15. Source channel shape
+### 15. Source channel shape **[PARTIAL]**
 
 R2.10's third property, which chunk 2 was warned to build in from the start and did not. A source's
 channel shape is independent of both the action's intent and its output: an analog trigger arrives
@@ -372,6 +373,20 @@ pair.
   (R11.2) joins a class the day its backend ships, with no registry to be added to.
 - **Why before Blasteroids:** analog thrust on a trigger is the motivating case, and it is the one
   control that makes an asteroids ship feel like anything.
+- **Delivered:** `ChannelShape` as the third property, declared by every source and checked against
+  the action's intent at plan build. A trigger drives an analog action with its travel and a button
+  action with a hysteretic press, from one binding each. Composite parts became controls rather than
+  keys, so `DirectionalButtons::dpad()` and `::wasd()` drive one action identically (R14.3). R2.2's
+  table is settled in the requirements and implemented in one place, so widening no longer invents a
+  diagonal. Intent against output shape is now a **compile** error from the derive, with a trybuild
+  fixture holding the message.
+- **Outstanding → chunk 11:** hysteresis where a press is derived from something other than a single
+  button — a stick axis, a composite. The button channel keeps its own pressed state per control, but
+  a derived value has no control to hang that on, and the memory has to be per *binding* to survive
+  two bindings feeding one action. That is what the scratch table is. Until then those paths use a
+  plain threshold, which is right except at the boundary.
+- **Outstanding → chunk 17:** the intent/channel mismatch is an `assert!` at plan build rather than a
+  collected diagnostic, alongside the rescaling check it sits next to.
 
 ---
 
@@ -459,6 +474,12 @@ modifier signature, since scratch and `dt` are the same addition.
 - **Review surface:** whether the 24-byte scratch record really covers every condition, which the
   design asserts and this chunk proves or refutes.
 - **In Blasteroids:** hyperspace on a double-tap, and hold-to-thrust.
+- **Inherited from chunk 15: the rate-to-delta conversion R2.9 requires.** Chunk 15 made binding a
+  stick to a `Delta2` action an error, which is right — a position is a rate and a mouse delta is a
+  displacement, and summing them is the units error R13.2 names. But mouse-and-stick look is the
+  near-universal case, so refusing it is only half an answer: R2.9 asks for the conversion to be
+  explicit, not absent. It needs the tick's `dt`, which is the same addition the modifier signature
+  wants here, and `examples/move_and_jump.rs` carries a comment where the stick binding used to be.
 
 ### 17. The diagnostics tier
 

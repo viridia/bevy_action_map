@@ -92,10 +92,104 @@ pub enum Intent {
     Delta2,
 }
 
+/// The kind of channel a control reports on.
+///
+/// This is a property of the **control**, and it is independent of both the [`Intent`] of any
+/// action you bind it to and the shape of that action's value. The three do not have to agree, and
+/// on real hardware they frequently do not:
+///
+/// - An analog trigger arrives on a [`Button`](ChannelShape::Button) channel carrying a fraction,
+///   so it can drive an [`Analog1`](Intent::Analog1) action without a special case.
+/// - A D-pad arrives as four separate buttons rather than as an axis pair, so it reaches a
+///   [`Directional2`](Intent::Directional2) action through the same composite that turns four
+///   keyboard keys into a direction.
+///
+/// You rarely name this type directly. It is what [`Intent::accepts`] consults to decide whether a
+/// binding makes sense, and what a rebinding UI filters candidate controls on.
+#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ChannelShape {
+    /// A single control with a pressed sense and a magnitude in `0.0..=1.0`.
+    ///
+    /// Keyboard keys, mouse buttons and gamepad buttons all report here. So do analog triggers,
+    /// which is why the magnitude is a fraction rather than a flag.
+    Button,
+    /// A single bipolar axis resting at zero, in `-1.0..=1.0`.
+    Axis1,
+    /// A pair of bipolar axes reporting a position, such as a stick.
+    ///
+    /// A position implies a rate: how far the control is pushed says how fast something should
+    /// happen, and it keeps saying so for as long as it is held.
+    Axis2,
+    /// A relative displacement that has already happened, such as mouse motion.
+    ///
+    /// Unlike [`Axis2`](ChannelShape::Axis2) this has no resting position and no bound. It is a
+    /// measurement of movement rather than a description of it, which is why it must not be
+    /// multiplied by a frame time and why it cannot stand in for a position.
+    Delta2,
+}
+
 impl Intent {
     /// Returns whether this intent is a match for the given output shape.
-    pub fn supports_output<O: ActionOutput>(self) -> bool {
-        O::INTENTS.contains(&self)
+    pub const fn supports_output<O: ActionOutput>(self) -> bool {
+        self.is_one_of(O::INTENTS)
+    }
+
+    /// Returns whether this intent appears in a list of them.
+    ///
+    /// This is a `const fn` because the derive calls it in a compile-time assertion, which is what
+    /// turns a mismatched `output` and `intent` into a build error rather than a surprise at run
+    /// time.
+    pub const fn is_one_of(self, intents: &[Intent]) -> bool {
+        let mut index = 0;
+        while index < intents.len() {
+            if intents[index] as u8 == self as u8 {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
+    /// Returns whether a control reporting on `shape` can serve this intent.
+    ///
+    /// Binding an action to a control it cannot serve is refused when the context is declared,
+    /// rather than silently producing a value that means something else:
+    ///
+    /// |                | `Button` | `Axis1` | `Axis2` | `Delta2` |
+    /// | -------------- | -------- | ------- | ------- | -------- |
+    /// | `Button`       | yes      | yes     | yes     | no       |
+    /// | `Analog1`      | yes      | yes     | yes     | no       |
+    /// | `Directional2` | no       | no      | yes     | no       |
+    /// | `Delta2`       | no       | no      | no      | yes      |
+    ///
+    /// The two rows that refuse things are the ones worth understanding.
+    ///
+    /// A single button carries no direction, so it cannot drive a `Directional2` action on its own.
+    /// Bind a directional composite instead — four buttons, named for the directions they push —
+    /// and the same composite accepts keyboard keys and a D-pad interchangeably.
+    ///
+    /// A `Delta2` action accepts nothing but a delta, and a delta drives nothing else. A stick
+    /// reports how fast you want to turn and a mouse reports how far you have already turned;
+    /// adding those together is a units error, and one that shows up as a look speed that changes
+    /// with the frame rate. Driving one action from both devices is the normal thing to want, and
+    /// it needs the conversion between them written down rather than assumed.
+    pub const fn accepts(self, shape: ChannelShape) -> bool {
+        match (self, shape) {
+            // A press is a press however it arrives; an axis presses by crossing a threshold.
+            (Intent::Button, ChannelShape::Button | ChannelShape::Axis1 | ChannelShape::Axis2) => {
+                true
+            }
+            // A button is an analog control with two positions, which is why a key can stand in
+            // for a trigger.
+            (Intent::Analog1, ChannelShape::Button | ChannelShape::Axis1 | ChannelShape::Axis2) => {
+                true
+            }
+            (Intent::Directional2, ChannelShape::Axis2) => true,
+            (Intent::Delta2, ChannelShape::Delta2) => true,
+            _ => false,
+        }
     }
 }
 
@@ -173,16 +267,61 @@ impl ActionState {
 }
 
 impl ActionValue {
-    /// Converts this value into a typed output when the shape matches.
+    /// Converts this value into a typed output.
     ///
-    /// Use this when you already have a runtime action value and want a typed result.
-    pub fn into_output<O: ActionOutput>(self) -> Option<O> {
+    /// Use this when you already have a runtime action value and want a typed result. Every shape
+    /// converts to every other, per the rules on [`ActionOutput`].
+    pub fn into_output<O: ActionOutput>(self) -> O {
         O::from_action_value(self)
     }
 
     /// Wraps a typed output as a runtime action value.
     pub fn from_output<O: ActionOutput>(output: O) -> Self {
         output.into_action_value()
+    }
+
+    /// Reads this value as a press.
+    pub fn to_bool(self) -> bool {
+        match self {
+            Self::Bool(value) => value,
+            Self::Axis1(value) => value != 0.0,
+            Self::Axis2(value) => value != Vec2::ZERO,
+            Self::Axis3(value) => value != Vec3::ZERO,
+        }
+    }
+
+    /// Reads this value as a single number.
+    pub fn to_axis1(self) -> f32 {
+        match self {
+            Self::Bool(value) => f32::from(u8::from(value)),
+            Self::Axis1(value) => value,
+            // Magnitude rather than one component: dropping an axis of a stick would silently
+            // discard half of what the player did, whereas its length is a fair answer to "how
+            // far". The cost is the sign, which is why a signed 1D reading wants a single axis as
+            // its source rather than a whole stick.
+            Self::Axis2(value) => value.length(),
+            Self::Axis3(value) => value.length(),
+        }
+    }
+
+    /// Reads this value as a 2D vector.
+    pub fn to_axis2(self) -> Vec2 {
+        match self {
+            Self::Bool(value) => Vec2::new(f32::from(u8::from(value)), 0.0),
+            Self::Axis1(value) => Vec2::new(value, 0.0),
+            Self::Axis2(value) => value,
+            Self::Axis3(value) => value.truncate(),
+        }
+    }
+
+    /// Reads this value as a 3D vector.
+    pub fn to_axis3(self) -> Vec3 {
+        match self {
+            Self::Bool(value) => Vec3::new(f32::from(u8::from(value)), 0.0, 0.0),
+            Self::Axis1(value) => Vec3::new(value, 0.0, 0.0),
+            Self::Axis2(value) => value.extend(0.0),
+            Self::Axis3(value) => value,
+        }
     }
 }
 
@@ -214,6 +353,21 @@ impl From<Vec3> for ActionValue {
 ///
 /// This is the production side of the match: it says what the action yields, and which intents are
 /// sensible consumers for that shape.
+///
+/// # Converting between shapes
+///
+/// Every shape converts to every other, so reading an action never fails on a shape mismatch. Two
+/// rules cover the whole table, and both exist to avoid inventing information that was not there:
+///
+/// - **Widening** puts the value in the first component and leaves the rest at zero. A trigger at
+///   40% read as a 2D value is `(0.4, 0.0)` and not `(0.4, 0.4)` — a control pulled part way is
+///   not a diagonal.
+/// - **Narrowing to a single number or a press measures the whole value**, so a 2D value becomes
+///   its length, and a press is that length being non-zero. Narrowing between vector shapes drops
+///   the trailing components instead, since those are named and the one being dropped is known.
+///
+/// You will not normally hit these, because an action stores the shape its intent calls for. They
+/// matter when you read a value in a different shape than the one it was written in.
 pub trait ActionOutput: Copy + Send + Sync + 'static {
     /// Intents that can consume this output shape.
     const INTENTS: &'static [Intent];
@@ -221,8 +375,8 @@ pub trait ActionOutput: Copy + Send + Sync + 'static {
     /// Converts the typed value into the runtime representation.
     fn into_action_value(self) -> ActionValue;
 
-    /// Converts the runtime representation back into the typed value.
-    fn from_action_value(value: ActionValue) -> Option<Self>;
+    /// Converts the runtime representation into this shape, per the rules above.
+    fn from_action_value(value: ActionValue) -> Self;
 }
 
 /// A declared gameplay context.
@@ -258,13 +412,8 @@ impl ActionOutput for bool {
         ActionValue::Bool(self)
     }
 
-    fn from_action_value(value: ActionValue) -> Option<Self> {
-        Some(match value {
-            ActionValue::Bool(value) => value,
-            ActionValue::Axis1(value) => value != 0.0,
-            ActionValue::Axis2(value) => value.length_squared() != 0.0,
-            ActionValue::Axis3(value) => value.length_squared() != 0.0,
-        })
+    fn from_action_value(value: ActionValue) -> Self {
+        value.to_bool()
     }
 }
 
@@ -275,19 +424,8 @@ impl ActionOutput for f32 {
         ActionValue::Axis1(self)
     }
 
-    fn from_action_value(value: ActionValue) -> Option<Self> {
-        Some(match value {
-            ActionValue::Bool(value) => {
-                if value {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            ActionValue::Axis1(value) => value,
-            ActionValue::Axis2(value) => value.length(),
-            ActionValue::Axis3(value) => value.length(),
-        })
+    fn from_action_value(value: ActionValue) -> Self {
+        value.to_axis1()
     }
 }
 
@@ -298,35 +436,20 @@ impl ActionOutput for Vec2 {
         ActionValue::Axis2(self)
     }
 
-    fn from_action_value(value: ActionValue) -> Option<Self> {
-        Some(match value {
-            ActionValue::Bool(value) => Vec2::splat(if value { 1.0 } else { 0.0 }),
-            ActionValue::Axis1(value) => Vec2::splat(value),
-            ActionValue::Axis2(value) => value,
-            ActionValue::Axis3(value) => Vec2::new(value.x, value.y),
-        })
+    fn from_action_value(value: ActionValue) -> Self {
+        value.to_axis2()
     }
 }
 
 impl ActionOutput for Vec3 {
-    const INTENTS: &'static [Intent] = &[
-        Intent::Button,
-        Intent::Analog1,
-        Intent::Directional2,
-        Intent::Delta2,
-    ];
+    const INTENTS: &'static [Intent] = &[Intent::Directional2, Intent::Delta2];
 
     fn into_action_value(self) -> ActionValue {
         ActionValue::Axis3(self)
     }
 
-    fn from_action_value(value: ActionValue) -> Option<Self> {
-        Some(match value {
-            ActionValue::Bool(value) => Vec3::splat(if value { 1.0 } else { 0.0 }),
-            ActionValue::Axis1(value) => Vec3::splat(value),
-            ActionValue::Axis2(value) => Vec3::new(value.x, value.y, 0.0),
-            ActionValue::Axis3(value) => value,
-        })
+    fn from_action_value(value: ActionValue) -> Self {
+        value.to_axis3()
     }
 }
 
@@ -464,6 +587,35 @@ mod tests {
         const PATH: &'static str = "tests::Look";
     }
 
+    /// The whole table, spelled out. It is the crate's answer to "may I bind this to that", so a
+    /// change to any cell should have to be made here as well as in the code.
+    #[test]
+    fn every_intent_and_channel_pair_is_decided() {
+        use ChannelShape::{Axis1, Axis2, Button as ButtonChannel, Delta2 as Delta2Channel};
+        use Intent::{Analog1, Button, Delta2, Directional2};
+
+        let expected = [
+            //                     Button  Axis1  Axis2  Delta2
+            (Button, [true, true, true, false]),
+            (Analog1, [true, true, true, false]),
+            (Directional2, [false, false, true, false]),
+            (Delta2, [false, false, false, true]),
+        ];
+
+        for (intent, row) in expected {
+            for (shape, accepted) in [ButtonChannel, Axis1, Axis2, Delta2Channel]
+                .into_iter()
+                .zip(row)
+            {
+                assert_eq!(
+                    intent.accepts(shape),
+                    accepted,
+                    "{intent:?} against a {shape:?} channel"
+                );
+            }
+        }
+    }
+
     #[test]
     fn action_ids_are_interned_by_path() {
         assert_eq!(Jump::id(), Jump::id());
@@ -515,21 +667,96 @@ mod tests {
         assert!(Intent::Delta2.supports_output::<Vec2>());
     }
 
+    /// Every cell of the shape conversion table, written out. R2.2 requires these to be decided
+    /// rather than inherited from whoever wrote a conversion first, and this is where the decision
+    /// lives in executable form.
     #[test]
-    fn action_value_conversions_are_explicit() {
-        assert_eq!(ActionValue::Bool(true).into_output::<f32>(), Some(1.0));
-        assert_eq!(ActionValue::Axis1(0.5).into_output::<bool>(), Some(true));
+    fn every_shape_converts_to_every_other() {
+        // Chosen so that no two answers coincide: 3-4-5 and 1-2-2 have integral lengths, and 0.4
+        // is distinguishable from both 0 and 1.
+        let cases = [
+            (
+                ActionValue::Bool(true),
+                true,
+                1.0,
+                Vec2::new(1.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+            ),
+            (
+                ActionValue::Axis1(0.4),
+                true,
+                0.4,
+                Vec2::new(0.4, 0.0),
+                Vec3::new(0.4, 0.0, 0.0),
+            ),
+            (
+                ActionValue::Axis2(Vec2::new(3.0, 4.0)),
+                true,
+                5.0,
+                Vec2::new(3.0, 4.0),
+                Vec3::new(3.0, 4.0, 0.0),
+            ),
+            (
+                ActionValue::Axis3(Vec3::new(1.0, 2.0, 2.0)),
+                true,
+                3.0,
+                Vec2::new(1.0, 2.0),
+                Vec3::new(1.0, 2.0, 2.0),
+            ),
+        ];
+
+        for (value, as_bool, as_axis1, as_axis2, as_axis3) in cases {
+            assert_eq!(value.to_bool(), as_bool, "{value:?} as bool");
+            assert_eq!(value.to_axis1(), as_axis1, "{value:?} as f32");
+            assert_eq!(value.to_axis2(), as_axis2, "{value:?} as Vec2");
+            assert_eq!(value.to_axis3(), as_axis3, "{value:?} as Vec3");
+        }
+
+        // Rest reads as rest in every shape.
+        for zero in [
+            ActionValue::Bool(false),
+            ActionValue::Axis1(0.0),
+            ActionValue::Axis2(Vec2::ZERO),
+            ActionValue::Axis3(Vec3::ZERO),
+        ] {
+            assert!(!zero.to_bool(), "{zero:?} as bool");
+            assert_eq!(zero.to_axis1(), 0.0, "{zero:?} as f32");
+            assert_eq!(zero.to_axis2(), Vec2::ZERO, "{zero:?} as Vec2");
+            assert_eq!(zero.to_axis3(), Vec3::ZERO, "{zero:?} as Vec3");
+        }
+    }
+
+    /// The specific mistake R2.2 was strengthened over: a control pulled part way is not pushed
+    /// diagonally, and every widening conversion has to agree about that.
+    #[test]
+    fn widening_does_not_invent_a_direction() {
         assert_eq!(
-            ActionValue::Axis2(Vec2::new(3.0, 4.0)).into_output::<f32>(),
-            Some(5.0)
+            ActionValue::Axis1(0.4).into_output::<Vec2>(),
+            Vec2::new(0.4, 0.0)
         );
         assert_eq!(
-            ActionValue::Axis3(Vec3::new(1.0, 2.0, 3.0)).into_output::<Vec2>(),
-            Some(Vec2::new(1.0, 2.0))
+            ActionValue::Axis1(0.4).into_output::<Vec3>(),
+            Vec3::new(0.4, 0.0, 0.0)
         );
         assert_eq!(
-            ActionValue::Axis1(0.25).into_output::<Vec3>(),
-            Some(Vec3::splat(0.25))
+            ActionValue::Bool(true).into_output::<Vec2>(),
+            Vec2::new(1.0, 0.0)
         );
+    }
+
+    #[test]
+    fn an_output_shape_admits_only_the_intents_it_can_serve() {
+        // A 3D value is a direction or a displacement. It was previously claimed by every intent
+        // including `Button`, which would have let a jump action declare itself as a `Vec3`.
+        assert!(!Intent::Button.supports_output::<Vec3>());
+        assert!(!Intent::Analog1.supports_output::<Vec3>());
+        assert!(Intent::Directional2.supports_output::<Vec3>());
+        assert!(Intent::Delta2.supports_output::<Vec3>());
+
+        // A press is a press; a number can be either a press or a reading.
+        assert!(Intent::Button.supports_output::<bool>());
+        assert!(!Intent::Analog1.supports_output::<bool>());
+        assert!(Intent::Button.supports_output::<f32>());
+        assert!(Intent::Analog1.supports_output::<f32>());
     }
 }

@@ -11,24 +11,27 @@ use bevy_input::{ButtonState, keyboard::KeyboardInput};
 use bevy_math::{Vec2, Vec3};
 
 use crate::action::{ActionValue, InputContext, Intent, Phase};
-use crate::binding::BindingSource;
+#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+use crate::binding::ButtonControl;
 #[cfg(feature = "gamepad")]
 use crate::binding::Stick;
+use crate::binding::{BindingSource, ButtonThreshold};
 use crate::context::InputContextState;
 use crate::frame::{InputFrame, RawEvent};
 
 /// Applies the current input frame to every instance of one context.
 pub fn evaluate_context<C: InputContext + Component>(
     frame: Res<'_, InputFrame>,
+    threshold: Res<'_, ButtonThreshold>,
     mut states: Query<'_, '_, &mut InputContextState<C>>,
 ) {
     for mut state in &mut states {
-        state.apply_frame(&frame);
+        state.apply_frame(&frame, &threshold);
     }
 }
 
 impl<C: InputContext> InputContextState<C> {
-    pub(crate) fn apply_frame(&mut self, frame: &InputFrame) {
+    pub(crate) fn apply_frame(&mut self, frame: &InputFrame, threshold: &ButtonThreshold) {
         let mut mouse_delta = Vec2::ZERO;
 
         // Only what has arrived since this context last looked. Re-reading the whole queue is what
@@ -60,8 +63,14 @@ impl<C: InputContext> InputContextState<C> {
                         self.held_gamepad_axes.insert(raw_axis.axis, raw_axis.value);
                     }
                     RawGamepadEvent::Button(raw_button) => {
-                        self.held_gamepad_buttons
-                            .insert(raw_button.button, raw_button.value);
+                        // Our own threshold, deliberately ignoring whatever press or release the
+                        // backend synthesized at a threshold of its own (R14.2).
+                        let reading = self
+                            .held_gamepad_buttons
+                            .entry(raw_button.button)
+                            .or_default();
+                        reading.pressed = threshold.pressed(raw_button.value, reading.pressed);
+                        reading.value = raw_button.value;
                     }
                     RawGamepadEvent::Connection(_) => {}
                 },
@@ -81,6 +90,18 @@ impl<C: InputContext> InputContextState<C> {
             ..
         } = self;
 
+        // One predicate for every button-shaped part, so a composite and a plain button binding
+        // can never disagree about what "pressed" means.
+        #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+        let is_pressed = |control: ButtonControl| match control {
+            #[cfg(feature = "keyboard")]
+            ButtonControl::Key(key) => held_buttons.contains(&key),
+            #[cfg(feature = "gamepad")]
+            ButtonControl::GamepadButton(button) => held_gamepad_buttons
+                .get(&button)
+                .is_some_and(|reading| reading.pressed),
+        };
+
         let bindings = plan.bindings();
         let mut index = 0;
         while index < bindings.len() {
@@ -96,24 +117,33 @@ impl<C: InputContext> InputContextState<C> {
                     BindingSource::Button(key_code) => {
                         ActionValue::Bool(held_buttons.contains(&key_code))
                     }
-                    #[cfg(feature = "keyboard")]
-                    BindingSource::Directional2(keys) => {
-                        let x = axis_from_buttons(
-                            held_buttons.contains(&keys.left),
-                            held_buttons.contains(&keys.right),
-                        );
-                        let y = axis_from_buttons(
-                            held_buttons.contains(&keys.down),
-                            held_buttons.contains(&keys.up),
-                        );
+                    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+                    BindingSource::Directional2(parts) => {
+                        // Four keys and a D-pad reach an action through this same arm, which is
+                        // the whole point of the composite.
+                        let x = axis_from_buttons(is_pressed(parts.left), is_pressed(parts.right));
+                        let y = axis_from_buttons(is_pressed(parts.down), is_pressed(parts.up));
                         ActionValue::Axis2(Vec2::new(x, y))
                     }
                     BindingSource::MouseMotion => ActionValue::Axis2(mouse_delta),
+                    // Both views of a button channel, chosen by what the action asked for. A
+                    // trigger carries a fraction, so an analog action gets the travel and a button
+                    // action gets the thresholded press — R2.10's case, and the reason a binding
+                    // cannot be resolved from the source alone.
                     #[cfg(feature = "gamepad")]
                     BindingSource::GamepadButton(button) => {
-                        let pressed =
-                            held_gamepad_buttons.get(&button).copied().unwrap_or(0.0) >= 0.5;
-                        ActionValue::Bool(pressed)
+                        let reading = held_gamepad_buttons
+                            .get(&button)
+                            .copied()
+                            .unwrap_or_default();
+                        match intent {
+                            Intent::Button => ActionValue::Bool(reading.pressed),
+                            _ => ActionValue::Axis1(reading.value),
+                        }
+                    }
+                    #[cfg(feature = "gamepad")]
+                    BindingSource::GamepadAxis(axis) => {
+                        ActionValue::Axis1(held_gamepad_axes.get(&axis).copied().unwrap_or(0.0))
                     }
                     #[cfg(feature = "gamepad")]
                     BindingSource::GamepadStick(stick) => {
@@ -122,6 +152,17 @@ impl<C: InputContext> InputContextState<C> {
                 };
 
                 let value = apply_modifiers(value, &binding.modifiers);
+                // Where a press comes from something that was not already a press, the threshold
+                // has to settle it here. Reading it later cannot: by then the only question a
+                // stored value can answer is whether it is off centre, and a resting stick always
+                // is. Modifiers run first so that a deadzone gets to define centre.
+                let value = match (intent, value) {
+                    (Intent::Button, ActionValue::Bool(_)) => value,
+                    (Intent::Button, _) => {
+                        ActionValue::Bool(threshold.pressed(magnitude(value), false))
+                    }
+                    _ => value,
+                };
                 combined = Some(match combined {
                     Some(previous) => combine(previous, value, intent),
                     None => value,
@@ -154,19 +195,11 @@ fn combine(accumulated: ActionValue, contribution: ActionValue, intent: Intent) 
     }
 }
 
+/// How strong a contribution is, for deciding which of two wins.
+// Not `to_axis1`, which keeps the sign: pushing a stick left is as strong as pushing it right, and
+// a comparison that thought otherwise would let the weaker of two bindings win.
 fn magnitude(value: ActionValue) -> f32 {
-    match value {
-        ActionValue::Bool(value) => {
-            if value {
-                1.0
-            } else {
-                0.0
-            }
-        }
-        ActionValue::Axis1(value) => value.abs(),
-        ActionValue::Axis2(value) => value.length(),
-        ActionValue::Axis3(value) => value.length(),
-    }
+    value.to_axis1().abs()
 }
 
 /// Adds two contributions, widening to whichever shape carries more components.
@@ -190,21 +223,10 @@ fn rank(value: ActionValue) -> u8 {
 }
 
 fn widen(value: ActionValue) -> Vec3 {
-    match value {
-        ActionValue::Bool(value) => {
-            if value {
-                Vec3::ONE
-            } else {
-                Vec3::ZERO
-            }
-        }
-        ActionValue::Axis1(value) => Vec3::new(value, 0.0, 0.0),
-        ActionValue::Axis2(value) => value.extend(0.0),
-        ActionValue::Axis3(value) => value,
-    }
+    value.to_axis3()
 }
 
-#[cfg(feature = "keyboard")]
+#[cfg(any(feature = "keyboard", feature = "gamepad"))]
 fn axis_from_buttons(negative: bool, positive: bool) -> f32 {
     match (negative, positive) {
         (true, false) => -1.0,

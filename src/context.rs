@@ -41,6 +41,18 @@ pub(crate) struct InputContextPlan<C> {
     plan: Arc<Plan<C>>,
 }
 
+/// Both views of one button-shaped control.
+// A trigger has an analog position and a pressed sense, and the two are not derivable from each
+// other on demand: `pressed` is hysteretic, so it depends on what it was last time this control
+// was seen. Keeping it beside the value is what lets the button view be settled once per event
+// rather than recomputed per binding, and is why two bindings on one trigger cannot disagree.
+#[cfg(feature = "gamepad")]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ButtonReading {
+    pub(crate) value: f32,
+    pub(crate) pressed: bool,
+}
+
 /// The live state for one declared context.
 ///
 /// This holds the current state of every action in a context. It is a component, so an entity
@@ -59,7 +71,7 @@ pub struct InputContextState<C> {
     #[cfg(feature = "keyboard")]
     pub(crate) held_buttons: BTreeSet<bevy_input::keyboard::KeyCode>,
     #[cfg(feature = "gamepad")]
-    pub(crate) held_gamepad_buttons: HashMap<bevy_input::gamepad::GamepadButton, f32>,
+    pub(crate) held_gamepad_buttons: HashMap<bevy_input::gamepad::GamepadButton, ButtonReading>,
     #[cfg(feature = "gamepad")]
     pub(crate) held_gamepad_axes: HashMap<bevy_input::gamepad::GamepadAxis, f32>,
     _marker: PhantomData<C>,
@@ -101,7 +113,6 @@ impl<C> InputContextState<C> {
         A::Output: ActionOutput,
     {
         A::Output::from_action_value(self.action_state::<A>().value)
-            .expect("action value does not match its declared output shape")
     }
 
     /// Returns the current phase for an action.
@@ -219,7 +230,7 @@ pub trait ActionMapAppExt {
     ///
     /// ```ignore
     /// app.add_context::<OnFoot, _>(|context| {
-    ///     context.bind::<Jump, _>(KeyCode::Space);
+    ///     context.bind::<Jump>(KeyCode::Space);
     /// });
     /// // ...then, in a startup system or a scene:
     /// commands.spawn((Player, OnFoot));
@@ -302,7 +313,7 @@ mod tests {
 
     #[cfg(feature = "gamepad")]
     use crate::binding::Stick;
-    use crate::binding::{DeadZone, DirectionalKeys};
+    use crate::binding::{ButtonThreshold, DeadZone, DirectionalButtons, MouseMove};
     use crate::frame::InputFrame;
     #[cfg(feature = "gamepad")]
     use bevy_input::gamepad::{
@@ -354,7 +365,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<OnFoot, _>(|context| {
-            context.bind::<Jump, _>(KeyCode::Space);
+            context.bind::<Jump>(KeyCode::Space);
         });
         app.world_mut().spawn(OnFoot);
         app.init_resource::<Probe>();
@@ -387,6 +398,11 @@ mod tests {
     #[action(path = "tests.look", output = Vec2, intent = Delta2)]
     struct Look;
 
+    #[cfg(feature = "gamepad")]
+    #[derive(InputAction)]
+    #[action(path = "tests.turn", output = f32, intent = Analog1)]
+    struct Turn;
+
     #[derive(InputContext, Component)]
     #[context(path = "tests.free_look", tick = Render)]
     struct FreeLook;
@@ -409,7 +425,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct GamepadProbe {
         movement: Vec2,
-        look: Vec2,
+        turn: f32,
         jump: bool,
         jump_phase: Phase,
     }
@@ -420,7 +436,7 @@ mod tests {
         mut probe: bevy_ecs::system::ResMut<'_, GamepadProbe>,
     ) {
         probe.movement = input.value::<Move>();
-        probe.look = input.value::<Look>();
+        probe.turn = input.value::<Turn>();
         probe.jump = input.value::<Jump>();
         probe.jump_phase = input.phase::<Jump>();
     }
@@ -430,13 +446,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<FreeLook, _>(|context| {
-            context.bind_directional::<Move>(DirectionalKeys::new(
-                KeyCode::KeyW,
-                KeyCode::KeyS,
-                KeyCode::KeyA,
-                KeyCode::KeyD,
-            ));
-            context.bind_mouse_motion::<Look>();
+            context.bind::<Move>(DirectionalButtons::wasd());
+            context.bind::<Look>(MouseMove);
         });
         app.world_mut().spawn(FreeLook);
         app.init_resource::<MotionProbe>();
@@ -469,16 +480,226 @@ mod tests {
     }
 
     #[cfg(feature = "gamepad")]
+    #[derive(InputAction)]
+    #[action(path = "tests.thrust", output = f32, intent = Analog1)]
+    struct Thrust;
+
+    #[cfg(feature = "gamepad")]
+    #[derive(Resource, Clone, Copy, Default)]
+    struct TriggerProbe {
+        travel: f32,
+        pressed: bool,
+        phase: Phase,
+    }
+
+    /// One trigger, bound twice: once to an analog action and once to a button action. R2.10 says
+    /// the two views are independent, and the assertions below only hold if they are — at 0.42 the
+    /// travel is live while the press has not yet happened.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_trigger_serves_an_analog_and_a_button_action_at_once() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook, _>(|context| {
+            context.bind::<Thrust>(GamepadButton::LeftTrigger2);
+            context.bind::<Jump>(GamepadButton::LeftTrigger2);
+        });
+        app.world_mut().spawn(FreeLook);
+        app.init_resource::<TriggerProbe>();
+        app.add_systems(
+            Update,
+            |input: Actions<FreeLook>, mut probe: bevy_ecs::system::ResMut<'_, TriggerProbe>| {
+                probe.travel = input.value::<Thrust>();
+                probe.pressed = input.value::<Jump>();
+                probe.phase = input.phase::<Jump>();
+            },
+        );
+
+        let pull_to = |app: &mut App, value: f32| {
+            app.world_mut().write_message(RawGamepadEvent::Button(
+                RawGamepadButtonChangedEvent::new(
+                    bevy_ecs::entity::Entity::PLACEHOLDER,
+                    GamepadButton::LeftTrigger2,
+                    value,
+                ),
+            ));
+            app.update();
+            *app.world().resource::<TriggerProbe>()
+        };
+
+        // Short of the press threshold: the travel is real, the button has not fired.
+        let probe = pull_to(&mut app, 0.42);
+        assert_eq!(probe.travel, 0.42);
+        assert!(!probe.pressed);
+
+        // Past it, both views move.
+        let probe = pull_to(&mut app, 0.8);
+        assert_eq!(probe.travel, 0.8);
+        assert!(probe.pressed);
+        assert_eq!(probe.phase, Phase::Fired);
+    }
+
+    /// A stick never rests at exactly zero, so a button action driven by one has to ask the
+    /// threshold rather than ask whether the axis is off centre.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn an_axis_driving_a_button_action_asks_the_threshold() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook, _>(|context| {
+            context.bind::<Jump>(GamepadAxis::LeftStickY);
+        });
+        app.world_mut().spawn(FreeLook);
+        app.init_resource::<TriggerProbe>();
+        app.add_systems(
+            Update,
+            |input: Actions<FreeLook>, mut probe: bevy_ecs::system::ResMut<'_, TriggerProbe>| {
+                probe.pressed = input.value::<Jump>();
+            },
+        );
+
+        let push_to = |app: &mut App, value: f32| {
+            app.world_mut()
+                .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
+                    bevy_ecs::entity::Entity::PLACEHOLDER,
+                    GamepadAxis::LeftStickY,
+                    value,
+                )));
+            app.update();
+            app.world().resource::<TriggerProbe>().pressed
+        };
+
+        // A stick at rest sits a little off centre. That is not a press.
+        assert!(!push_to(&mut app, 0.03));
+        assert!(push_to(&mut app, 0.9));
+        // And it is a press however the stick is pushed, since a threshold measures distance.
+        assert!(push_to(&mut app, -0.9));
+    }
+
+    /// R14.2: a finger resting near the threshold makes the value wobble. Without a release
+    /// threshold below the press one, every wobble would be another `Fired`.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_trigger_held_near_the_threshold_does_not_chatter() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook, _>(|context| {
+            context.bind::<Jump>(GamepadButton::RightTrigger2);
+        });
+        app.world_mut().spawn(FreeLook);
+        app.init_resource::<TriggerProbe>();
+        app.add_systems(
+            Update,
+            |input: Actions<FreeLook>, mut probe: bevy_ecs::system::ResMut<'_, TriggerProbe>| {
+                probe.pressed = input.value::<Jump>();
+                probe.phase = input.phase::<Jump>();
+            },
+        );
+
+        let threshold = *app.world().resource::<ButtonThreshold>();
+        let midband = (threshold.press + threshold.release) / 2.0;
+
+        let pull_to = |app: &mut App, value: f32| {
+            app.world_mut().write_message(RawGamepadEvent::Button(
+                RawGamepadButtonChangedEvent::new(
+                    bevy_ecs::entity::Entity::PLACEHOLDER,
+                    GamepadButton::RightTrigger2,
+                    value,
+                ),
+            ));
+            app.update();
+            *app.world().resource::<TriggerProbe>()
+        };
+
+        assert!(pull_to(&mut app, 0.9).pressed);
+        // Backing off into the band holds the press rather than dropping it.
+        assert!(pull_to(&mut app, midband).pressed);
+        assert_eq!(pull_to(&mut app, midband).phase, Phase::Ongoing);
+
+        // Only past the release threshold does it let go, and re-entering the band keeps it let go.
+        assert!(!pull_to(&mut app, 0.1).pressed);
+        assert!(!pull_to(&mut app, midband).pressed);
+    }
+
+    /// R14.3: the D-pad has no axis pair anywhere below us, so it becomes a direction the same way
+    /// WASD does. Both composites drive one action, and the two are asserted against the same
+    /// expected vectors so that a divergence between the keyboard and gamepad paths fails here.
+    #[cfg(all(feature = "keyboard", feature = "gamepad"))]
+    #[test]
+    fn a_dpad_and_four_keys_drive_one_composite_alike() {
+        fn movement_after(app: &mut App, drive: impl FnOnce(&mut App)) -> Vec2 {
+            drive(app);
+            app.update();
+            app.world().resource::<MotionProbe>().movement
+        }
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook, _>(|context| {
+            context.bind::<Move>(DirectionalButtons::wasd());
+            context.bind::<Move>(DirectionalButtons::dpad());
+        });
+        app.world_mut().spawn(FreeLook);
+        app.init_resource::<MotionProbe>();
+        app.add_systems(
+            Update,
+            |input: Actions<FreeLook>, mut probe: bevy_ecs::system::ResMut<'_, MotionProbe>| {
+                probe.movement = input.value::<Move>();
+            },
+        );
+
+        let by_keys = movement_after(&mut app, |app| {
+            app.world_mut().write_message(press(
+                KeyCode::KeyW,
+                Key::Character("w".into()),
+                ButtonState::Pressed,
+            ));
+            app.world_mut().write_message(press(
+                KeyCode::KeyA,
+                Key::Character("a".into()),
+                ButtonState::Pressed,
+            ));
+        });
+        assert_eq!(by_keys, Vec2::new(-1.0, 1.0));
+
+        // Release the keys, then push the same direction on the D-pad.
+        let by_dpad = movement_after(&mut app, |app| {
+            app.world_mut().write_message(press(
+                KeyCode::KeyW,
+                Key::Character("w".into()),
+                ButtonState::Released,
+            ));
+            app.world_mut().write_message(press(
+                KeyCode::KeyA,
+                Key::Character("a".into()),
+                ButtonState::Released,
+            ));
+            for button in [GamepadButton::DPadUp, GamepadButton::DPadLeft] {
+                app.world_mut().write_message(RawGamepadEvent::Button(
+                    RawGamepadButtonChangedEvent::new(
+                        bevy_ecs::entity::Entity::PLACEHOLDER,
+                        button,
+                        1.0,
+                    ),
+                ));
+            }
+        });
+        assert_eq!(by_dpad, by_keys);
+    }
+
+    #[cfg(feature = "gamepad")]
     #[test]
     fn raw_gamepad_events_drive_sticks_and_buttons() {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<OnFoot, _>(|context| {
             context
-                .bind::<Move, _>(Stick::Left)
+                .bind::<Move>(Stick::Left)
                 .dead_zone(DeadZone::radial(0.2));
-            context.bind::<Jump, _>(GamepadButton::South);
-            context.bind::<Look, _>(Stick::Right);
+            context.bind::<Jump>(GamepadButton::South);
+            // A single axis, not the whole stick: an `Analog1` action wants one signed number,
+            // and reading the stick as a whole would give it an unsigned magnitude instead.
+            context.bind::<Turn>(GamepadAxis::RightStickX);
         });
         app.world_mut().spawn(OnFoot);
         app.init_resource::<GamepadProbe>();
@@ -519,7 +740,7 @@ mod tests {
 
         let probe = app.world().resource::<GamepadProbe>();
         assert_eq!(probe.movement, Vec2::new(0.0, 0.375));
-        assert_eq!(probe.look, Vec2::new(-0.5, 0.25));
+        assert_eq!(probe.turn, -0.5);
         assert!(probe.jump);
         assert_eq!(probe.jump_phase, Phase::Fired);
 
@@ -528,7 +749,7 @@ mod tests {
 
         let probe = app.world().resource::<GamepadProbe>();
         assert_eq!(probe.movement, Vec2::new(0.0, 0.375));
-        assert_eq!(probe.look, Vec2::new(-0.5, 0.25));
+        assert_eq!(probe.turn, -0.5);
         assert!(probe.jump);
         assert_eq!(probe.jump_phase, Phase::Ongoing);
     }
@@ -538,7 +759,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<OnFoot, _>(|context| {
-            context.bind::<Jump, _>(KeyCode::Space);
+            context.bind::<Jump>(KeyCode::Space);
         });
         app.world_mut().spawn(OnFoot);
         app.init_resource::<Probe>();
@@ -567,8 +788,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<OnFoot, _>(|context| {
-            context.bind::<Jump, _>(KeyCode::Space);
-            context.bind::<Jump, _>(GamepadButton::South);
+            context.bind::<Jump>(KeyCode::Space);
+            context.bind::<Jump>(GamepadButton::South);
         });
         app.world_mut().spawn(OnFoot);
         app.init_resource::<Probe>();
@@ -603,14 +824,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<FreeLook, _>(|context| {
-            context.bind_directional::<Move>(DirectionalKeys::new(
-                KeyCode::KeyW,
-                KeyCode::KeyS,
-                KeyCode::KeyA,
-                KeyCode::KeyD,
-            ));
-            context.bind::<Move, _>(Stick::Left);
-            context.bind_mouse_motion::<Look>();
+            context.bind::<Move>(DirectionalButtons::wasd());
+            context.bind::<Move>(Stick::Left);
+            context.bind::<Look>(MouseMove);
         });
         app.world_mut().spawn(FreeLook);
         app.init_resource::<MotionProbe>();
@@ -656,14 +872,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<FreeLook, _>(|context| {
-            context.bind_directional::<Move>(DirectionalKeys::new(
-                KeyCode::KeyW,
-                KeyCode::KeyS,
-                KeyCode::KeyA,
-                KeyCode::KeyD,
-            ));
-            context.bind_mouse_motion::<Look>();
-            context.bind_mouse_motion::<Look>().scale(2.0);
+            context.bind::<Move>(DirectionalButtons::wasd());
+            context.bind::<Look>(MouseMove);
+            context.bind::<Look>(MouseMove).scale(2.0);
         });
         app.world_mut().spawn(FreeLook);
         app.init_resource::<MotionProbe>();
@@ -685,7 +896,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<OnFoot, _>(|context| {
-            context.bind::<Jump, _>(KeyCode::Space);
+            context.bind::<Jump>(KeyCode::Space);
         });
         let first = app.world_mut().spawn(OnFoot).id();
         let second = app.world_mut().spawn(OnFoot).id();
@@ -733,7 +944,7 @@ mod tests {
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<FreeLook, _>(|context| {
             context
-                .bind_mouse_motion::<Look>()
+                .bind::<Look>(MouseMove)
                 .dead_zone(DeadZone::radial(0.05))
                 .dead_zone(DeadZone::radial(0.15));
         });
@@ -745,7 +956,7 @@ mod tests {
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<FreeLook, _>(|context| {
             context
-                .bind_mouse_motion::<Look>()
+                .bind::<Look>(MouseMove)
                 .dead_zone(DeadZone::radial(0.05).without_rescale())
                 .dead_zone(DeadZone::radial(0.15));
         });
@@ -769,7 +980,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<OnFoot, _>(|context| {
-            context.bind::<Jump, _>(KeyCode::Space);
+            context.bind::<Jump>(KeyCode::Space);
         });
         app.world_mut().spawn(OnFoot);
         app.init_resource::<FireCount>();
@@ -813,7 +1024,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<OnFoot, _>(|context| {
-            context.bind_mouse_motion::<Look>();
+            context.bind::<Look>(MouseMove);
         });
         let context = app.world_mut().spawn(OnFoot).id();
 
@@ -842,7 +1053,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<OnFoot, _>(|context| {
-            context.bind::<Jump, _>(KeyCode::Space);
+            context.bind::<Jump>(KeyCode::Space);
         });
 
         // Space goes down and stays queued while no context exists to read it.
@@ -873,13 +1084,8 @@ mod tests {
         app.init_resource::<MotionProbe>();
         app.add_systems(Update, probe_motion);
         app.add_context::<FreeLook, _>(|context| {
-            context.bind_directional::<Move>(DirectionalKeys::new(
-                KeyCode::KeyW,
-                KeyCode::KeyS,
-                KeyCode::KeyA,
-                KeyCode::KeyD,
-            ));
-            context.bind_mouse_motion::<Look>();
+            context.bind::<Move>(DirectionalButtons::wasd());
+            context.bind::<Look>(MouseMove);
         });
         app.world_mut().spawn(FreeLook);
 

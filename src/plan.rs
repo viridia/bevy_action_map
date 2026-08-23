@@ -5,8 +5,26 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::marker::PhantomData;
 
-use crate::action::{ActionId, Intent};
+use crate::action::{ActionId, ChannelShape, Intent};
 use crate::binding::{BindingModifier, BindingSource, BindingSpec};
+
+/// The part of a rejected binding's message that says what to do about it.
+///
+/// Only the two mistakes with a specific remedy get one; the rest are adequately explained by
+/// naming the intent and the channel that cannot serve it.
+fn mismatch_hint(intent: Intent, shape: ChannelShape) -> &'static str {
+    match (intent, shape) {
+        (Intent::Directional2, ChannelShape::Button | ChannelShape::Axis1) => {
+            ". A single control carries no direction — bind a directional composite, whose parts \
+             can be keyboard keys or D-pad buttons"
+        }
+        (Intent::Delta2, _) | (_, ChannelShape::Delta2) => {
+            ". A delta is a displacement that has already happened and a position is a rate, so \
+             one cannot stand in for the other without an explicit conversion"
+        }
+        _ => "",
+    }
+}
 
 /// An authored binding with its action resolved to a state slot.
 pub(crate) struct CompiledBinding {
@@ -34,6 +52,16 @@ impl<C> Plan<C> {
         let mut compiled = Vec::with_capacity(bindings.len());
 
         for binding in bindings {
+            let shape = binding.source.channel_shape();
+            assert!(
+                binding.intent.accepts(shape),
+                "`{}` has intent {:?}, which a control reporting on a {:?} channel cannot serve{}",
+                binding.path,
+                binding.intent,
+                shape,
+                mismatch_hint(binding.intent, shape)
+            );
+
             // Stretching a value onto a new range means any later threshold stops corresponding to
             // a physical control position, so the stages of a deadzone chain only compose while at
             // most one of them does it.
