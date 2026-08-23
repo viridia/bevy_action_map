@@ -1,14 +1,14 @@
-//! Pausing: a game state, and the contexts that follow it.
+//! Pausing: a game state, and the context that follows it.
 
 use bevy::prelude::*;
 use bevy_action_map::prelude::*;
 
-use crate::actions::{Pause, PauseMenu};
+use crate::actions::Pause;
 
 /// Whether the simulation is running.
 ///
-/// The contexts follow this rather than the other way round, so there is only one fact about
-/// whether the game is paused and nothing to keep in step with it.
+/// [`Flying`](crate::actions::Flying) follows this rather than the other way round, so there is only
+/// one fact about whether the game is paused and nothing to keep in step with it.
 #[derive(States, Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Game {
     #[default]
@@ -25,7 +25,6 @@ struct PausedBanner;
 
 pub fn plugin(app: &mut App) {
     app.init_state::<Game>();
-    app.add_systems(Startup, spawn_menu_context);
     app.configure_sets(Update, Simulating.run_if(in_state(Game::Playing)));
     app.configure_sets(FixedUpdate, Simulating.run_if(in_state(Game::Playing)));
     app.add_observer(toggle);
@@ -33,15 +32,7 @@ pub fn plugin(app: &mut App) {
     app.add_systems(OnExit(Game::Paused), hide_banner);
 }
 
-/// The menu's controls have to belong to something, the same as the ship's do.
-///
-/// Nothing else is on this entity: a context that is not attached to a player or a world object is
-/// still attached to an entity, because that is what an observer targets.
-fn spawn_menu_context(mut commands: Commands) {
-    commands.spawn(PauseMenu);
-}
-
-/// Flips the state; the contexts follow on their own.
+/// Flips the state; the flying context follows on its own.
 ///
 /// An observer rather than a polled system: the press is a single event, and polling for it from
 /// `Update` would see the same `Fired` twice on a frame where no fixed tick ran.

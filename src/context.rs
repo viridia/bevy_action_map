@@ -7,6 +7,12 @@
 //! Put the context on whatever the input belongs to. One entity for a single-player game, one per
 //! player for local multiplayer, or a bare entity for input that is not tied to anything in
 //! particular. Each carries its own state, so two players never share one.
+//!
+//! A context is live from the moment an entity carries it unless you say otherwise. Say otherwise
+//! with [`active_in_state`](InputContextBuilder::active_in_state) for a context that comes and goes
+//! with a game state, [`active_if`](InputContextBuilder::active_if) for one that follows any other
+//! run condition, or [`activate`](InputContextState::activate) and
+//! [`deactivate`](InputContextState::deactivate) to drive one instance yourself.
 
 #[cfg(feature = "keyboard")]
 use alloc::collections::BTreeSet;
@@ -163,7 +169,7 @@ impl<C> InputContextState<C> {
     /// ```ignore
     /// // Why is the ship not thrusting?
     /// info!("{:?}", input.why_not::<Thrust>());
-    /// // Consumed { control: Key(KeyW), by: "dead_zone.pause_menu" }
+    /// // Consumed { control: Key(KeyW), by: "dead_zone.shell" }
     /// ```
     ///
     /// Checked in the order the obstacles apply, so what comes back is the first thing in the way
@@ -444,6 +450,149 @@ fn attach_context_state<C: InputContext + Component>(
     world.commands().entity(context.entity).insert(state);
 }
 
+/// Installs whatever decides when a context is live, once the context itself is declared.
+///
+/// Boxed because the condition's type is only known inside the closure `add_context` hands to the
+/// caller, and it has to outlive that closure to reach the `App`.
+pub(crate) type Activation = alloc::boxed::Box<dyn FnOnce(&mut App)>;
+
+/// Brings every instance of `C` in step with what its condition just answered.
+///
+/// The one mechanism behind both [`active_if`](InputContextBuilder::active_if) and
+/// [`active_in_state`](InputContextBuilder::active_in_state): the condition is an ordinary system
+/// piped into this one, so it gets the same dependency injection as anything else and needs no
+/// exclusive access to the world.
+fn apply_active<C: InputContext + Component>(
+    bevy_ecs::system::In(live): bevy_ecs::system::In<bool>,
+    contexts: Query<'_, '_, &mut InputContextState<C>>,
+) {
+    for mut context in contexts {
+        // `activate` and `deactivate` both return immediately when there is nothing to do; the
+        // check here is what keeps the mutable deref, and with it the change tick, off the frames
+        // where nothing happened.
+        if context.is_active() == live {
+            continue;
+        }
+        if live {
+            context.activate();
+        } else {
+            context.deactivate();
+        }
+    }
+}
+
+impl<C: InputContext + Component> InputContextBuilder<C> {
+    /// Makes a run condition decide whether this context is live.
+    ///
+    /// The condition is polled every frame, ahead of the evaluation that reads the bindings, and
+    /// its answer is applied to every instance of the context: true activates, false deactivates.
+    /// Any Bevy run condition works, including combinations of them.
+    ///
+    /// ```ignore
+    /// app.add_context::<Piloting>(|controls| {
+    ///     controls.active_if(any_with_component::<InVehicle>);
+    ///     controls.bind::<Throttle>(GamepadButton::RightTrigger2);
+    /// });
+    /// ```
+    ///
+    /// A context with a condition starts inactive and stays that way until the condition first
+    /// says otherwise, so it never fires for a frame before the thing it follows has been asked.
+    /// Activation ignores controls the player is already holding, exactly as
+    /// [`activate`](InputContextState::activate) describes.
+    ///
+    /// Use [`active_in_state`](Self::active_in_state) for a context that follows a game state:
+    /// `in_state` would work here, but it is worth a frame to a fixed-tick context.
+    ///
+    /// Leave both off for a context you drive yourself, per instance, with
+    /// [`activate`](InputContextState::activate) and
+    /// [`deactivate`](InputContextState::deactivate) — a condition answers for every instance at
+    /// once, so the two do not mix.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this context has already been given a condition.
+    pub fn active_if<M: 'static>(
+        &mut self,
+        condition: impl bevy_ecs::schedule::SystemCondition<M> + 'static,
+    ) -> &mut Self {
+        self.set_activation(alloc::boxed::Box::new(move |app: &mut App| {
+            app.add_systems(
+                PreUpdate,
+                condition
+                    .pipe(apply_active::<C>)
+                    .before(ActionMapSystems::Evaluate),
+            );
+        }))
+    }
+
+    /// Makes this context live exactly while the app is in one state.
+    ///
+    /// Most contexts come and go with the game's state — flying while playing, a menu while
+    /// paused — and keeping the two in step by hand is a bug waiting to happen, because it is the
+    /// kind of thing that stays correct until someone adds a third way to reach the menu.
+    ///
+    /// ```ignore
+    /// app.add_context::<Flying>(|controls| {
+    ///     controls.active_in_state(GameState::Playing);
+    ///     controls.bind::<Thrust>(KeyCode::KeyW);
+    /// });
+    /// app.add_context::<PauseMenu>(|controls| {
+    ///     controls.active_in_state(GameState::Paused);
+    ///     controls.bind::<Resume>(KeyCode::Escape);
+    /// });
+    /// ```
+    ///
+    /// Entering the state activates the context, and leaving it deactivates it — which cancels
+    /// whatever was in flight, and means a control the player is already holding when the state
+    /// changes does not read as a fresh press. That last part is what stops one key both closing a
+    /// menu and acting on the world behind it.
+    ///
+    /// An instance spawned while the state is already current is activated too, so this works for
+    /// a context that arrives with a player rather than at startup.
+    ///
+    /// A [`SubStates`](bevy_state::prelude::SubStates) or a computed state works here too: while
+    /// its parent does not select it there is no such state to be in, and the context is inactive.
+    /// A state the app never initialized reads the same way, so a context following one stays
+    /// quiet rather than bringing the app down.
+    ///
+    /// This is `active_if(in_state(state))` placed where the state has just changed rather than
+    /// where the frame started, which is what lets a fixed-tick context stand down in time for the
+    /// same frame's simulation, and lets an `OnEnter` system find the context already in step.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this context has already been given a condition.
+    #[cfg(feature = "state")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "state")))]
+    pub fn active_in_state(&mut self, state: impl bevy_state::prelude::States) -> &mut Self {
+        self.set_activation(alloc::boxed::Box::new(move |app: &mut App| {
+            use bevy_ecs::system::IntoSystem;
+            use bevy_state::prelude::in_state;
+            use bevy_state::state::{StateTransition, StateTransitionSystems};
+
+            // After the transition is computed and before the exit and enter schedules run, so a
+            // context is already in step by the time an `OnEnter` system looks at it.
+            app.add_systems(
+                StateTransition,
+                in_state(state)
+                    .pipe(apply_active::<C>)
+                    .after(StateTransitionSystems::DependentTransitions)
+                    .before(StateTransitionSystems::ExitSchedules),
+            );
+        }))
+    }
+
+    fn set_activation(&mut self, activation: Activation) -> &mut Self {
+        assert!(
+            self.activation.is_none(),
+            "context {} already has a condition deciding when it is active",
+            C::PATH
+        );
+        self.activation = Some(activation);
+        self
+    }
+}
+
 /// Extension methods for setting up contexts.
 pub trait ActionMapAppExt {
     /// Declares one context and the bindings that drive it.
@@ -464,10 +613,11 @@ pub trait ActionMapAppExt {
     /// `PreUpdate` and a `Fixed` context in `FixedPreUpdate`, both before the schedule you would
     /// normally read the actions from.
     ///
-    /// A context declared this way is live as soon as an entity carries it. Use
-    /// [`add_context_in_state`](Self::add_context_in_state) when it should follow a game state
-    /// instead, or drive it yourself with
-    /// [`activate`](InputContextState::activate) and [`deactivate`](InputContextState::deactivate).
+    /// A context declared this way is live as soon as an entity carries it. Give it an
+    /// [`active_if`](InputContextBuilder::active_if) or an
+    /// [`active_in_state`](InputContextBuilder::active_in_state) when it should follow something
+    /// else instead, or drive it yourself with [`activate`](InputContextState::activate) and
+    /// [`deactivate`](InputContextState::deactivate).
     ///
     /// # Panics
     ///
@@ -477,44 +627,6 @@ pub trait ActionMapAppExt {
         &mut self,
         configure: impl FnOnce(&mut InputContextBuilder<C>),
     ) -> &mut Self;
-
-    /// Declares a context that is live exactly while the app is in one state.
-    ///
-    /// Most contexts come and go with the game's state — flying while playing, a menu while
-    /// paused — and keeping the two in step by hand is a bug waiting to happen, because it is the
-    /// kind of thing that stays correct until someone adds a third way to reach the menu.
-    ///
-    /// ```ignore
-    /// app.add_context_in_state::<Flying>(GameState::Playing, |controls| {
-    ///     controls.bind::<Thrust>(KeyCode::KeyW);
-    /// });
-    /// app.add_context_in_state::<PauseMenu>(GameState::Paused, |controls| {
-    ///     controls.bind::<Resume>(KeyCode::Escape);
-    /// });
-    /// ```
-    ///
-    /// Entering the state activates the context, and leaving it deactivates it — which cancels
-    /// whatever was in flight, and means a control the player is already holding when the state
-    /// changes does not read as a fresh press. That last part is what stops one key both closing a
-    /// menu and acting on the world behind it.
-    ///
-    /// An instance spawned while the state is already current is activated too, so this works for
-    /// a context that arrives with a player rather than at startup.
-    ///
-    /// A [`SubStates`](bevy_state::prelude::SubStates) or a computed state works here too: while
-    /// its parent does not select it there is no such state to be in, and the context is inactive.
-    ///
-    /// # Panics
-    ///
-    /// As [`add_context`](Self::add_context), plus at run time if `S` was never initialized with
-    /// `init_state` or `insert_state`.
-    #[cfg(feature = "state")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "state")))]
-    fn add_context_in_state<C: InputContext + Component>(
-        &mut self,
-        state: impl bevy_state::prelude::States,
-        configure: impl FnOnce(&mut InputContextBuilder<C>),
-    ) -> &mut Self;
 }
 
 impl ActionMapAppExt for App {
@@ -522,20 +634,7 @@ impl ActionMapAppExt for App {
         &mut self,
         configure: impl FnOnce(&mut InputContextBuilder<C>),
     ) -> &mut Self {
-        declare_context(self, configure, true);
-        self
-    }
-
-    #[cfg(feature = "state")]
-    fn add_context_in_state<C: InputContext + Component>(
-        &mut self,
-        state: impl bevy_state::prelude::States,
-        configure: impl FnOnce(&mut InputContextBuilder<C>),
-    ) -> &mut Self {
-        // Instances start inactive: the sync below is what brings them up, and it is also what
-        // catches an instance spawned while the state is already current.
-        declare_context(self, configure, false);
-        follow_state::<C, _>(self, state);
+        declare_context(self, configure);
         self
     }
 }
@@ -599,11 +698,9 @@ fn order_by_priority(
     );
 }
 
-/// The half of declaring a context that does not depend on how it is activated.
 fn declare_context<C: InputContext + Component>(
     app: &mut App,
     configure: impl FnOnce(&mut InputContextBuilder<C>),
-    starts_active: bool,
 ) {
     // The plugin owns the set ordering, so a context added before it would evaluate
     // unordered against the sampler.
@@ -614,6 +711,11 @@ fn declare_context<C: InputContext + Component>(
 
     let mut builder = InputContextBuilder::<C>::default();
     configure(&mut builder);
+
+    // A context whose activation follows something else starts inactive and waits to be asked.
+    // That is also what catches an instance spawned once the answer is already yes.
+    let activation = builder.activation.take();
+    let starts_active = activation.is_none();
 
     let plan = Arc::new(Plan::from_bindings(builder.finish()));
     app.insert_resource(InputContextPlan::<C> {
@@ -662,43 +764,11 @@ fn declare_context<C: InputContext + Component>(
             order_by_priority(app, FixedPreUpdate, TickDomain::Fixed, C::PRIORITY);
         }
     }
-}
 
-/// Keeps every instance of `C` activated exactly while the app is in `wanted`.
-///
-/// Placed inside `StateTransition`, after the transition is computed and before the exit and enter
-/// schedules run, so a context is already in step by the time an `OnEnter` system looks at it. Both
-/// `activate` and `deactivate` return immediately when there is nothing to do, so this costs a
-/// comparison on the frames where nothing changed (R7.6).
-#[cfg(feature = "state")]
-fn follow_state<C, S>(app: &mut App, wanted: S)
-where
-    C: InputContext + Component,
-    S: bevy_state::prelude::States,
-{
-    use bevy_ecs::prelude::Res;
-    use bevy_state::prelude::State;
-    use bevy_state::state::{StateTransition, StateTransitionSystems};
-
-    app.add_systems(
-        StateTransition,
-        (move |current: Option<Res<'_, State<S>>>,
-               contexts: Query<'_, '_, &mut InputContextState<C>>| {
-            // Absent rather than merely different: a substate or a computed state has no `State`
-            // resource at all while its parent does not select it, and that means "not now" rather
-            // than being a mistake.
-            let live = current.is_some_and(|current| *current.get() == wanted);
-            for mut context in contexts {
-                if live {
-                    context.activate();
-                } else {
-                    context.deactivate();
-                }
-            }
-        })
-        .after(StateTransitionSystems::DependentTransitions)
-        .before(StateTransitionSystems::ExitSchedules),
-    );
+    // Last, so that the condition's system is ordered against evaluation that already exists.
+    if let Some(install) = activation {
+        install(app);
+    }
 }
 
 #[cfg(test)]
@@ -1016,10 +1086,12 @@ mod tests {
         app.init_state::<Game>();
         // `OnFoot` is a fixed-tick context and `FreeLook` a render-tick one, which is the pairing
         // a real pause menu has.
-        app.add_context_in_state::<OnFoot>(Game::Playing, |context| {
+        app.add_context::<OnFoot>(|context| {
+            context.active_in_state(Game::Playing);
             context.bind::<Jump>(KeyCode::Space);
         });
-        app.add_context_in_state::<FreeLook>(Game::Paused, |context| {
+        app.add_context::<FreeLook>(|context| {
+            context.active_in_state(Game::Paused);
             context.bind::<Jump>(KeyCode::Space);
         });
         app.world_mut().spawn(OnFoot);
@@ -1110,7 +1182,8 @@ mod tests {
         app.add_plugins((InputPlugin, ActionMapPlugin, bevy_state::app::StatesPlugin));
         app.init_state::<Session>();
         app.add_sub_state::<Play>();
-        app.add_context_in_state::<FreeLook>(Play::Running, |context| {
+        app.add_context::<FreeLook>(|context| {
+            context.active_in_state(Play::Running);
             context.bind::<Jump>(KeyCode::Space);
         });
         app.world_mut().spawn(FreeLook);
@@ -1161,7 +1234,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin, bevy_state::app::StatesPlugin));
         app.init_state::<Screen>();
-        app.add_context_in_state::<FreeLook>(Screen::Playing, |context| {
+        app.add_context::<FreeLook>(|context| {
+            context.active_in_state(Screen::Playing);
             context.bind::<Jump>(KeyCode::Space);
         });
         app.world_mut().spawn(FreeLook);
@@ -1194,6 +1268,128 @@ mod tests {
             .set(Screen::Menu);
         app.update();
         assert!(!active(&mut app), "leaving the state stands it down again");
+    }
+
+    #[derive(Resource)]
+    struct AtTheControls;
+
+    /// The general case of the two above: any run condition, not only a state, decides whether a
+    /// context is live — including for an instance that arrives after the answer was already yes.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_context_can_follow_an_ordinary_run_condition() {
+        use bevy_ecs::schedule::common_conditions::resource_exists;
+
+        fn active(app: &mut App) -> bool {
+            app.world_mut()
+                .query::<&InputContextState<FreeLook>>()
+                .iter(app.world())
+                .any(InputContextState::is_active)
+        }
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.active_if(resource_exists::<AtTheControls>);
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        app.world_mut().spawn(FreeLook);
+
+        app.update();
+        assert!(
+            !active(&mut app),
+            "a context with a condition waits to be asked"
+        );
+
+        app.world_mut().insert_resource(AtTheControls);
+        app.update();
+        assert!(active(&mut app), "the condition says yes now");
+
+        let latecomer = app.world_mut().spawn(FreeLook).id();
+        app.update();
+        assert!(
+            app.world()
+                .get::<InputContextState<FreeLook>>(latecomer)
+                .unwrap()
+                .is_active(),
+            "an instance spawned while the answer was already yes is brought up too"
+        );
+
+        app.world_mut().remove_resource::<AtTheControls>();
+        app.update();
+        assert!(!active(&mut app), "and stands down again when it says no");
+    }
+
+    /// R7.5 through the door `active_if` opens: whatever brings a context up, a control the player
+    /// was already holding must not read as a fresh press. Otherwise the button that satisfies the
+    /// condition is also the button that acts on what the condition just enabled.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_condition_bringing_a_context_up_ignores_a_control_already_held() {
+        use bevy_ecs::schedule::common_conditions::resource_exists;
+        use bevy_ecs::schedule::{SystemCondition, common_conditions::not};
+
+        #[derive(Resource)]
+        struct Grounded;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context.active_if(
+                resource_exists::<AtTheControls>.and_then(not(resource_exists::<Grounded>)),
+            );
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        app.world_mut().spawn(OnFoot);
+        app.init_resource::<Probe>();
+        app.add_systems(FixedUpdate, probe_jump);
+
+        let tick = |app: &mut App| {
+            app.update();
+            run_fixed_tick(app);
+        };
+        let key = |app: &mut App, state: ButtonState| {
+            app.world_mut()
+                .write_message(press(KeyCode::Space, Key::Space, state));
+        };
+
+        // Held down before the context has any interest in it.
+        key(&mut app, ButtonState::Pressed);
+        tick(&mut app);
+        assert_eq!(app.world().resource::<Probe>().phase, Phase::Idle);
+
+        app.world_mut().insert_resource(AtTheControls);
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<Probe>().phase,
+            Phase::Idle,
+            "the key was already down when the condition brought the context up"
+        );
+
+        key(&mut app, ButtonState::Released);
+        tick(&mut app);
+        key(&mut app, ButtonState::Pressed);
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<Probe>().phase,
+            Phase::Fired,
+            "released and pressed again, so it counts"
+        );
+    }
+
+    /// Two answers to one question, and no rule for which wins. An app-build mistake, so it says so
+    /// rather than picking one.
+    #[test]
+    #[should_panic(expected = "already has a condition")]
+    fn a_context_cannot_be_given_two_conditions() {
+        use bevy_ecs::schedule::common_conditions::resource_exists;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.active_if(resource_exists::<AtTheControls>);
+            context.active_if(resource_exists::<Probe>);
+        });
     }
 
     /// R8.2, in the words the requirement uses: a menu consumes `Escape` so the game behind it does

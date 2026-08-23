@@ -118,7 +118,7 @@ step and a real game is a better acceptance test than a synthetic one.
 
 ## What has landed
 
-Sixteen chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
+Seventeen chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
 fell short of its own description; this table is only an index, and the sequence below is what
 remains.
 
@@ -140,6 +140,7 @@ remains.
 | 13 | Context activation lifecycle | done |
 | 11 | Conditions and the scratch table | done; forgiveness windows → 34 |
 | 14 | Arbitration and consumption | done; chords on *actions* → 33 |
+| 32 | Activation by run condition | done, out of order |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -323,25 +324,6 @@ entries reported rather than dropped, a version field (R17.1–R17.3).
 ## Phase VIII — settling
 
 Nothing here changes what the crate can do.
-
-### 32. Activation by run condition
-
-`active_if` takes an ordinary Bevy run condition and makes it the thing that decides whether a
-context is live. A condition is `IntoSystem<In, bool, Marker>`, so it pipes straight into a system
-that applies the answer — full dependency injection, no exclusive world access, about fifteen lines.
-
-- **Subsumes `add_context_in_state`,** which becomes `active_if(in_state(s))`. That is worth more
-  than the tidying: `in_state` is `Option<Res<State<S>>>` internally, so the substate tolerance
-  that the `bevy_enhanced_input` comparison caught us lacking comes from Bevy rather than from us
-  remembering to write it a second time.
-- **Polling is not a problem here.** Run conditions are polled rather than edge-triggered, but the
-  edge is detected by comparing against the context's own `active` flag, which is how the state
-  sync already works. `activate` and `deactivate` return immediately when there is nothing to do.
-- **Two placements, one mechanism.** A state binding belongs in `StateTransition`, where the
-  transition has just been applied; a general condition reads current data and belongs in
-  `PreUpdate` before evaluation.
-- **Says nothing about instances.** A condition returns one answer for the whole context type. The
-  per-instance case is `activate` on the entity, and stays that way — see chunk 13.
 
 ### 22. The deadzone chain, stages 1 and 3
 

@@ -459,4 +459,86 @@ a case the first already covers, which is the same argument that removed R2.4.
 and the implementation is what needs to move: R8.6's offline conflict query has no seam, since the
 clash rule lives inside the fold and a rebinding UI needs it as a function; and R23.2 is unenforced.
 
+
+---
+
+## Out of order
+
+### Chunk 32: activation by run condition
+
+Taken well ahead of its place in the sequence, and it cost nothing to: it needs only chunk 13, and
+nothing between the two touches activation.
+
+Any Bevy run condition can now decide whether a context is live. The mechanism is one system —
+`condition.pipe(apply_active::<C>)` — so the condition gets ordinary dependency injection and the
+world is never accessed exclusively. `add_context_in_state` is gone, and what replaced it is a
+builder method, so activation is declared beside the bindings it governs rather than in the name of
+the call that declares them:
+
+```rust
+app.add_context::<PauseMenu>(|controls| {
+    controls.active_in_state(Game::Paused);
+    controls.bind::<Resume>(KeyCode::Escape);
+});
+```
+
+**Why the builder and not a third `add_context_*`.** The trait would have grown a method per
+activation policy, and D4's focus-driven activation is already a fourth. On the builder each policy
+is one method on a type that is already the place a context says what it is. The cost is a boxed
+installer closure held on the builder until `declare_context` can hand it the `App` — the condition's
+type is known only inside the caller's closure, so it has to be erased to get out.
+
+**Two placements, and the second one is not a shortcut for the first.** The roadmap read as though
+`active_in_state` would collapse into `active_if(in_state(s))`, and it nearly does — `in_state` is
+what supplies the substate tolerance, so our hand-written `Option<Res<State<S>>>` comparison was
+deleted rather than reimplemented. What does not collapse is *where the system goes*. Bevy inserts
+`StateTransition` **after** `PreUpdate`, so a condition polled in `PreUpdate` reads the state before
+that frame's transition has been applied. Chunk 13 already learned this and moved the state sync into
+`StateTransition` for it; putting states back through the general path would have undone that
+finding. Concretely, the cases differ only for fixed-tick contexts and for `OnEnter`:
+
+| | `StateTransition` (`active_in_state`) | `PreUpdate` (`active_if`) |
+| --- | --- | --- |
+| Render context's next evaluation | frame N+1 | frame N+1 — no difference |
+| Fixed context's next evaluation | frame N | frame N+1 |
+| What an `OnEnter` system sees | already in step | still the old answer |
+
+So a general condition, which has no transition to sit behind, is polled in `PreUpdate` before
+evaluation; a state keeps the placement that a pause menu's simulation half needs. One mechanism,
+two installers, and the difference is a table rather than a caveat.
+
+**Polling is not the cost it sounds like.** Run conditions are polled rather than edge-triggered, but
+the edge is the comparison against the context's own `active` flag, which is how the state sync
+already worked. The applier now makes that comparison itself instead of leaving it to
+`activate`/`deactivate` — not to save the early return, but to keep the mutable deref, and with it a
+change tick on every instance, off the frames where nothing happened.
+
+**What it says about instances: nothing.** A condition answers once for the whole context type. Per
+instance is still `activate` on the entity, and mixing the two would mean the condition winning every
+frame — said in the doc comment rather than prevented, since preventing it would mean tracking which
+door an activation came through.
+
+**Dead Zone's contexts were arranged the way the crate's history made them, not the way a developer
+would.** Reviewing the chunk turned it up: pause was an action bound in *two* state-driven contexts,
+`Flying` and `PauseMenu`, each hearing the button while the other was down. That arrangement exists
+because chunk 13 built `add_context_in_state` and the example was written to show it off. The
+arrangement a developer reaches for is one context with no condition at all — pause, and later the
+settings screen — beside one conditional context holding everything else. Rewritten that way: the
+`Shell` context is live from the moment its entity exists, and `Flying` is the only thing following
+the state.
+
+It is a smaller example for it — one binding of `Pause` instead of two, and one less context — and
+the reason it works is easier to state: the control that unpauses has to be heard by something
+pausing did not switch off. Worth recording that the old shape was not wrong, only unidiomatic; it
+demonstrated require-reset (R7.5) honestly, and it took the mechanism *not* being the point of the
+example before the arrangement's oddness was visible.
+
+**And it left the require-reset default standing somewhere less flattering.** With pause out of
+`Flying`, the remaining case is analog: hold thrust, pause, unpause while still holding it, and the
+ship does not burn again until the control has been released and pressed. That is R7.5 working as
+specified, and it was true before the rearrangement too — the old example simply had a more
+convincing case in front of it. `active_in_state` always requires the reset, the
+`activate_including_held` variant of it being the thing this chunk deliberately did not ship. If
+that reads wrong in the hand, the variant is what answers it.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

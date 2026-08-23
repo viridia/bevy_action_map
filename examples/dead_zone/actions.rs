@@ -56,20 +56,27 @@ pub struct Pause;
 #[context(path = "dead_zone.flying", tick = Fixed)]
 pub struct Flying;
 
-/// The context the pause menu runs under.
+/// The controls that work whatever the game is doing.
 ///
-/// Render tick, because a menu answers at the frame rate rather than the simulation rate — and
-/// while it is up there is no simulation to answer at.
+/// Pause lives here rather than in [`Flying`] for the reason it always does: something has to hear
+/// the button that unpauses, and the context the player was flying under is exactly the one that is
+/// no longer listening. Anything else the player can always reach — a settings screen, a quit
+/// prompt — belongs here beside it.
+///
+/// Render tick, because these answer at the frame rate rather than the simulation rate, and while
+/// the game is paused there is no simulation to answer at.
 #[derive(InputContext, Component)]
-#[context(path = "dead_zone.pause_menu", tick = Render)]
-pub struct PauseMenu;
+#[context(path = "dead_zone.shell", tick = Render)]
+pub struct Shell;
 
 /// Declares the control scheme.
 ///
 /// Every action is bound twice, once for each device, and neither knows about the other. Reading
 /// `Thrust` gives a number whether it came from a trigger or a key.
 pub fn plugin(app: &mut App) {
-    app.add_context_in_state::<Flying>(Game::Playing, |controls| {
+    app.add_context::<Flying>(|controls| {
+        controls.active_in_state(Game::Playing);
+
         // The trigger reports a fraction on a button channel, so it drives an analog action
         // directly. A key has only two positions, which is a coarse analog control rather than a
         // different kind of thing.
@@ -102,18 +109,22 @@ pub fn plugin(app: &mut App) {
         controls
             .bind::<Hyperspace>(KeyCode::ShiftLeft)
             .multi_tap(2, 0.3);
+    });
 
+    // No condition, so this one is live from the moment its entity exists and stays that way. Pause
+    // is one action bound once, and the state it toggles is what the flying context follows.
+    app.add_context::<Shell>(|controls| {
         controls.bind::<Pause>(KeyCode::Escape);
         controls.bind::<Pause>(GamepadButton::Start);
     });
 
-    // The same control, bound again in the context that the first one hands over to. This is the
-    // arrangement that goes wrong without require-reset: the key that closes the menu is still
-    // down when flying resumes, and a context that started reading it now would see a press meant
-    // for the menu. Following the state is what makes that somebody else's problem — neither
-    // context is told when to activate, and neither can be told wrongly.
-    app.add_context_in_state::<PauseMenu>(Game::Paused, |controls| {
-        controls.bind::<Pause>(KeyCode::Escape);
-        controls.bind::<Pause>(GamepadButton::Start);
-    });
+    app.add_systems(Startup, spawn_shell);
+}
+
+/// The always-on controls have to belong to something, the same as the ship's do.
+///
+/// Nothing else is on this entity: a context that is not attached to a player or a world object is
+/// still attached to an entity, because that is what an observer targets.
+fn spawn_shell(mut commands: Commands) {
+    commands.spawn(Shell);
 }

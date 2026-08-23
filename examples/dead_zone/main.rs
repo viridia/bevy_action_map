@@ -1,6 +1,6 @@
 //! Dead Zone — an asteroids-like game, playable on the keyboard or a gamepad.
 //!
-//! The point of the example is [`actions`], which holds the entire input layer: five actions, two
+//! The point of the example is [`actions`], which holds the entire input layer: six actions, two
 //! contexts, and the bindings that drive them from either device. Nothing else in the game mentions
 //! a key or a button.
 //!
@@ -8,8 +8,10 @@
 //! pause with escape. On a pad, the right trigger is the throttle and it is analog — the ship burns
 //! as hard as you pull it.
 //!
-//! Escape is bound in both contexts, which is the arrangement worth trying: hold it down while the
-//! menu opens and closes, and neither context reacts to a press that was meant for the other.
+//! The two contexts are the arrangement worth copying. Flying is live only while the game is
+//! playing, so pausing stands it down and whatever the player was holding is canceled rather than
+//! left running. Pause itself is in a context with no condition at all, because the control that
+//! unpauses has to be heard by something that pausing did not switch off.
 
 #![allow(missing_docs)]
 

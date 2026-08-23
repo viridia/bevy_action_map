@@ -823,6 +823,10 @@ impl<'a, C> BindingHandle<'a, C> {
 /// Builder used by [`crate::player::ActionMapAppExt::add_context`].
 pub struct InputContextBuilder<C> {
     bindings: Vec<BindingSpec>,
+    // Installed against the `App` once the context has been declared. `None` leaves the context
+    // live from the moment an entity carries it; see `active_if`, which lives in `context` because
+    // everything it touches does.
+    pub(crate) activation: Option<crate::context::Activation>,
     _marker: PhantomData<C>,
 }
 
@@ -830,6 +834,7 @@ impl<C> Default for InputContextBuilder<C> {
     fn default() -> Self {
         Self {
             bindings: Vec::new(),
+            activation: None,
             _marker: PhantomData,
         }
     }
