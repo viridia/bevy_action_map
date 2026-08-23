@@ -984,6 +984,15 @@ exists, the split is speculative, and the module layout above makes it a move ra
 
 **Risks.**
 
+- **R8.6's offline conflict query has no seam.** The clash rule (§5) is a pre-pass inside the fold,
+  reading the plan and the held state together. A rebinding UI needs the same rule applied to a
+  *hypothetical* binding with nothing held, which means the rule has to become a function of
+  (bindings, controls-held) that both callers can use, rather than a loop the evaluator owns. It is
+  a small refactor while there is one caller and an awkward one after there are two, so it should
+  happen when §19's slots arrive rather than when §20 discovers it.
+- **R23.2 is unenforced.** Two allocations reached the per-tick path during §8's work and were caught
+  by reading rather than by tooling — both times a helper that returned a collection, which is the
+  ordinary way to write one. A rule this easy to break by accident wants a check.
 - **Plan rebuild cost during rebinding.** Recompiling on every keystroke of an interactive rebind
   would be visible. Mitigation: rebinding operates on the authoring representation and compiles once
   on commit.

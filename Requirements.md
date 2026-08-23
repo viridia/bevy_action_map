@@ -337,8 +337,15 @@ kinds feed one action (R2.9, §13.R13.2).
 ongoing condition is abandoned; surfaced as five events. Unity: `started / performed / canceled`.
 LWIM: polled `ActionState` with `current_duration()` and explicit `consume()`.
 
-- **R3.1 (MUST)** Model an explicit state machine, not just edges. Minimum: idle, ongoing (condition
-  partially satisfied), fired, completed, canceled.
+- **R3.1 (MUST)** Model an explicit state machine, not just edges. Minimum: idle; **started**, for a
+  condition that has begun and not yet been satisfied; ongoing; fired; completed; and canceled, for
+  a started condition abandoned before it ever fired.
+
+  _(Six rather than five, because "started" and "ongoing" are different questions and one name
+  cannot answer both. A hold that has just been pressed and a hold that is now firing are both
+  "not an edge", and a player can tell them apart on screen, so the model must too. Canceled is
+  only meaningful against started: what distinguishes it from completed is whether the action ever
+  actually happened.)_
 - **R3.2 (MUST)** Both polling and event/observer access to state. Polling is required for
   `FixedUpdate` simulation code (§9); events are required for UI and for one-shot commands.
   Event delivery must be attachable **declaratively**, not only from imperative setup code — a scene
@@ -349,12 +356,27 @@ LWIM: polled `ActionState` with `current_duration()` and explicit `consume()`.
   plugin-build time.
 - **R3.3 (MUST)** Every transition must be observable — an action that fires and completes within one
   tick must not be silently collapsed (§9.R9.4).
-- **R3.4 (MUST)** Expose elapsed time in the current state, sourced from a clock the caller selects
-  (§9.R9.6), and that elapsed time must be part of serializable state (§10.R10.3).
+- **R3.4 (MUST)** Expose elapsed time in the current state, measured in the same simulated seconds
+  the action's own conditions use (§9.R9.6), and part of serializable state (§10.R10.3).
+
+  _(Not a clock the caller selects. A context declares one tick domain and is evaluated in it, so
+  there is one clock the answer can honestly be given in — the same one the conditions counted with.
+  Offering a choice at the point of reading would mean converting between rates after the fact,
+  which is how a hold ends up reporting a duration it was never measured against.)_
 - **R3.5 (SHOULD)** Expose _progress_ toward firing (0..1) for hold-to-confirm UI — Unreal's CommonUI
   hold indicators need this and it is painful to reconstruct externally.
-- **R3.6 (MUST)** Provide "consume"/mark-handled semantics so a handler can prevent lower-priority
-  contexts or the same action's other observers from also reacting this tick.
+- **R3.6 (MUST)** Provide "consume"/mark-handled semantics so a binding can prevent lower-priority
+  contexts from also reacting this tick.
+
+  _(Narrowed: this also required preventing **the same action's other observers** from reacting,
+  and that half is withdrawn. It is the dynamic interception D5 rules out, one level further down —
+  an observer electing at handling time to suppress its peers makes the outcome depend on which ran
+  first, which is what R8.3 forbids for contexts and is no more defensible for observers. Its
+  motivating case is a UI handler out-ranking a gameplay one, and that is already answered by the
+  half kept: the UI's context claims the control and the gameplay action never fires at all, which
+  is both stronger and inspectable. If a case appears that genuinely needs two observers of one
+  firing to arbitrate between themselves, it should arrive as its own requirement with that case
+  attached.)_
 - **R3.7 (MUST)** Actions must be individually disable-able without unbinding, and re-enabling must not
   spuriously fire (require-reset semantics: a key held across the enable boundary does not count as a
   fresh press).
@@ -519,8 +541,15 @@ Sets plus _Action Set Layers_ (additive overlays rather than replacements) — t
 underused elsewhere and is exactly right for "while aiming" or "while holding an item". Unity: action
 maps enabled/disabled individually, with no built-in priority — a known pain point.
 
-- **R7.1 (MUST)** Multiple contexts active simultaneously, with a total order (priority) that is
-  explicit and inspectable.
+- **R7.1 (MUST)** Multiple contexts active simultaneously, ordered by an explicit, inspectable
+  priority. That order is total **within a tick domain** and not across one: a context evaluated at
+  the render rate reads before one evaluated at the simulation rate, whatever their priorities say,
+  because the frame puts those schedules in that order.
+
+  _(Stated as a limit rather than a goal, because the alternative is worse. Making priority total
+  across domains would mean one evaluation pass for every context, which costs the per-domain
+  evaluation §9 requires. The restriction only bites in the direction nobody wants: what claims
+  controls is UI, UI runs at the render rate, and what it claims from is simulation.)_
 - **R7.2 (MUST)** Contexts must be scoped per player/entity, not only global (§15).
 - **R7.3 (MUST)** Additive layers: a layer that overrides a subset of bindings without redefining the
   whole context.
@@ -1252,9 +1281,12 @@ properties that constrain the state layout left open in OQ-3.
 
 - **R23.1 (MUST)** Per-frame cost proportional to _active_ bindings, not to all defined actions ×
   entities.
-- **R23.2 (MUST)** No allocation **and no synchronization** in the steady-state hot path.
-  _(Synchronization and not only allocation: a lock on a per-frame path is worse than an
-  allocation, and a rule naming only allocation does not catch it.)_
+- **R23.2 (MUST)** No allocation **and no synchronization** in the steady-state hot path, and a way
+  to **detect a violation** rather than only a rule against one.
+  _(Synchronization and not only allocation: a lock on a per-frame path is worse than an allocation,
+  and a rule naming only allocation does not catch it. Detection because a rule nobody can check is
+  a rule that gets broken by accident — a helper returning a collection is the ordinary way to write
+  it, and the ordinary way is the one that ends up in a loop that runs every tick.)_
 - **R23.3 (MUST)** Context activation/deactivation must not cause structural ECS churn proportional to
   the number of actions — activating a context should not spawn, despawn, insert, or remove per
   action. A layout that does so must show the cost is acceptable at the action counts in §23.R23.1.

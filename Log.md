@@ -425,4 +425,38 @@ flag *or* reverse the priority ordering — checking both was what confirmed it 
 rather than only the flag. And the chord test passes under the chord gate alone, so disabling only
 the clash was needed to show that R8.1's rule does separate work.
 
+
+---
+
+## The second grooming, after §§9–16
+
+A second pass over the requirements once conditions, arbitration and the player-visible state machine
+existed. The first pass found requirements that were vague; this one found requirements that were
+**wrong** — three of them contradicted by what had been built, which is a different and more useful
+kind of finding.
+
+| Requirement | Change | Why |
+| --- | --- | --- |
+| R7.1 | "a total order" → total *within a tick domain* | Design §5.2 says outright that priority cannot order contexts across schedules, so the requirement asserted something the design forbids. |
+| R3.1 | Five states → six, with "started" separated from "ongoing" | One name was answering two questions: a hold that has just begun and a hold that is now firing are both "not an edge", and a player can tell them apart on screen. |
+| R3.4 | "a clock the caller selects" → the context's own clock | Presumed a choice the tick-domain commitment removes. The same failure R9.2 had in the first pass: a requirement describing a layout rather than a guarantee. |
+| R3.6 | Second half **withdrawn** | See below. |
+| R23.2 | Adds "and a way to detect a violation" | Two allocations reached the per-tick path and were caught by reading, not tooling. |
+| R3.7 | Given a home (chunk 17) | A `MUST` that no chunk claimed — the requirements' own version of the destination-less item ground rule 5 forbids. |
+
+**Why half of R3.6 was withdrawn.** It required that consuming prevent *the same action's other
+observers* from reacting, as well as lower-priority contexts. That is the dynamic interception D5
+rules out, one level further down: an observer electing at handling time to suppress its peers makes
+the outcome depend on which ran first, which R8.3 forbids for contexts and which is no more
+defensible for observers.
+
+Its motivating case — a UI handler out-ranking a gameplay one — is answered by the half kept, and
+answered better: the UI's context claims the control, so the gameplay action never fires at all,
+and R22.1 can say which context took it. The withdrawn half would have been a second mechanism for
+a case the first already covers, which is the same argument that removed R2.4.
+
+**Two risks recorded in Design §12 rather than as amendments**, because the requirements are right
+and the implementation is what needs to move: R8.6's offline conflict query has no seam, since the
+clash rule lives inside the fold and a rebinding UI needs it as a function; and R23.2 is unenforced.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087
