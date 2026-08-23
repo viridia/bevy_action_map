@@ -178,17 +178,16 @@ stays out of the sequence: it would be a second demonstration of the switch this
   them in step; the version that shipped has the contexts follow, so there is one fact and nothing
   to disagree. Declaring a context that starts inactive falls out, which was the gap this chunk
   would otherwise have left.
-- **Outstanding → chunk 27, leaning toward adopting BEI's shape:** a context follows one state
-  value, and the binding is per context *type* rather than per instance. `bevy_enhanced_input`
-  splits the same job differently — a registration for the (context, state) pair plus an
-  `ActiveInStates` **component** naming the values, so instances can differ and a context can be
-  live in several states at once.
+- **Activation is declared per context *type*, and that is the decision rather than a stopgap.**
+  `bevy_enhanced_input` binds it per *entity* instead — an `ActiveInStates<C, S>` component naming
+  the values — so two instances of one context can follow different states. More capable, and the
+  extra capability is speculative: the per-instance case is already served by calling
+  [`activate`](InputContextState::activate) on the instance, which is imperative but is also the
+  thing a game reaches for when it has the entity in hand anyway. What would be gained is a
+  *declarative* per-entity binding, and no case has yet been named where that beats the method.
 
-  BEI leans hard into ECS ideology as a matter of course, and that is worth discounting for; here it
-  is judged to earn its keep, because the flexibility is real rather than incidental. So the
-  expectation is that this moves to a per-entity binding, and what chunk 27 decides is the shape
-  rather than the question — Split Friction is the first place several contexts and several states
-  meet, so it is where the cost of the second declaration can be weighed against what it buys.
+  Revisit if Split Friction turns one up — two players whose contexts genuinely want to follow
+  different states, declared rather than driven — and not before.
 
 - **Outstanding → chunk 13 itself:** R7.7's mutually-exclusive stack. States cover the common case
   of it, so what remains is whether a stack that is *not* a state is worth its own mechanism.
@@ -310,6 +309,12 @@ external backends can resolve an action by name (R1.7). Small, and needed by chu
 D7 made real. This is the half of the crate a player ever sees, and per the audience commitment it
 must stay additive: a game that declares none of it keeps working exactly as before (R19.13, R24.7).
 
+**The screen arrives in three passes**, because each one is separately capable of being wrong and
+mixing them would make it unclear which half was at fault: first a read-only list, then something
+navigable, then something that rebinds. Navigation sits between the first two, since a screen you
+cannot move around is a help screen rather than a settings screen — which is exactly why the first
+pass is worth having on its own.
+
 ### 19. Mappable slots and localization keys
 
 Slots as the unit of rebinding, one per composite part (R19.9, R19.10). Name keys derived from the
@@ -340,24 +345,93 @@ default at every scope (R19.4).
 - **Verified by:** capturing from the **gamepad**, not only the keyboard, which is the case that
   finds the mistakes.
 
-### 21. The rebinding screen
+### 21. The settings screen, read-only
 
-In Dead Zone: a `bevy_ui_widgets` table of slots grouped by action category, a button per row that
-enters capture, and the whole screen operable from the controller.
+In Dead Zone: a screen listing every mappable slot with what is currently bound to it. A help
+screen, and nothing more — no buttons, no focus, dismissed by the same control that opened it.
 
-- **Review surface:** the rebinding API judged from a real consumer. If a UI author needs to reach
-  past the slot list into this crate's internals, D7 has leaked.
+- **Why this first:** it is the smallest thing that exercises iterating the slot list and rendering
+  a binding as text, which are the two halves of D7 a UI actually needs. If either is awkward here
+  it is awkward everywhere, and there is no capture machinery in the way to obscure it.
+- **Review surface:** whether a UI author can build this without reaching past the slot list into
+  this crate's internals. If they cannot, D7 has leaked.
+
+### 29. Directional navigation
+
+The half of D4 that is dispatch rather than activation (R22.7): an action whose firing moves the
+focus. `bevy_input_focus` has the sequential half wired to events already, and the directional half
+only as a `SystemParam` — deliberately, because it was waiting on an input mapper to settle before
+going further. So what is chosen here is a candidate for what lands upstream.
+
+- **Delivers, in the crate:** a modifier that quantises a 2D direction to the compass points, and a
+  condition that fires when a value changes. Both are general — eight-way movement and radial menus
+  want the first; the second is the cheapest condition in the set, needing only the previous value
+  that `Scratch` already carries.
+- **Why two pieces and not one.** Snapping alone fires every tick, because the stick stays off
+  centre. Change-detection alone fires on every wobble. Together they fire once per compass point
+  crossed, which is the behaviour a menu wants — and `.on_change().pulse(0.15)` is then auto-repeat,
+  out of two conditions that exist for other reasons.
+- **Not doing:** bubbling the instruction as a `FocusedInput`. Bubbling exists so that something can
+  *intercept*, and until a widget wants to swallow a direction there is nothing to intercept; the
+  observer calls `DirectionalNavigation::navigate` directly. The event-driven entry point belongs
+  upstream beside `handle_tab_navigation`, where the interception cases live.
+- **Not doing:** `InputFocusVisible`. It exists to hide focus rings from desktop mouse users, and a
+  pad-driven game has no such ambiguity.
+- **In Dead Zone:** a focus ring on the settings screen, drawn with `Outline`.
+- **Review surface:** the two names, more carefully than usual. If bevy_input_focus ends up
+  depending on these concepts, renaming them afterwards is somebody else's breaking change.
+
+### 30. The settings screen, interactive
+
+Chunk 21's list grows a button per slot, focus moves between them on stick and D-pad, and the screen
+can be dismissed. Still nothing rebinds — pressing a row does nothing yet.
+
+- **Why separate from capture:** navigating a menu with a pad is where the awkwardness usually is,
+  and mixing it with capture would make it unclear which half was at fault.
+- **Verified by:** operating the whole screen from the Xbox pad without touching the keyboard.
+
+### 31. The settings screen, rebinding
+
+Pressing a row enters capture, the next control pressed takes the slot, and conflicts are reported
+per chunk 20's policy.
 
 ### 23. Persistence of overrides
 
 A rebind that does not survive a restart is a demo, not a feature. Diff against defaults, unknown
 entries reported rather than dropped, a version field (R17.1–R17.3).
 
+- **Intended vehicle: `bevy_settings`** — overrides live in a reflected resource carrying its
+  derives, so the file format and its location are somebody else's problem.
+- **Check before committing to it:** R17.2 requires an entry that no longer resolves to be
+  **reported rather than dropped**, which is what stops a renamed action silently discarding a
+  player's rebind. A settings crate that deserializes and quietly ignores what it does not
+  recognise cannot satisfy that, and most do exactly that. If it cannot be made to, the diff layer
+  is ours and only the file handling is theirs.
+
 ---
 
 ## Phase VIII — settling
 
 Nothing here changes what the crate can do.
+
+### 32. Activation by run condition
+
+`active_if` takes an ordinary Bevy run condition and makes it the thing that decides whether a
+context is live. A condition is `IntoSystem<In, bool, Marker>`, so it pipes straight into a system
+that applies the answer — full dependency injection, no exclusive world access, about fifteen lines.
+
+- **Subsumes `add_context_in_state`,** which becomes `active_if(in_state(s))`. That is worth more
+  than the tidying: `in_state` is `Option<Res<State<S>>>` internally, so the substate tolerance
+  that the `bevy_enhanced_input` comparison caught us lacking comes from Bevy rather than from us
+  remembering to write it a second time.
+- **Polling is not a problem here.** Run conditions are polled rather than edge-triggered, but the
+  edge is detected by comparing against the context's own `active` flag, which is how the state
+  sync already works. `activate` and `deactivate` return immediately when there is nothing to do.
+- **Two placements, one mechanism.** A state binding belongs in `StateTransition`, where the
+  transition has just been applied; a general condition reads current data and belongs in
+  `PreUpdate` before evaluation.
+- **Says nothing about instances.** A condition returns one answer for the whole context type. The
+  per-instance case is `activate` on the entity, and stays that way — see chunk 13.
 
 ### 22. The deadzone chain, stages 1 and 3
 
@@ -461,7 +535,7 @@ Split Friction does, and because the gate turned out to be met already.
 | Prompts and glyph ids (§18)                       | asset-pipeline questions this document does not touch                      |
 | Source and authority backends (D3)                | one working in-tree path to generalize _from_                              |
 | Netcode injection and rollback (§10)              | a testbed that actually rolls back; also wants held device state made snapshot-able (R10.3), which chunk 9 left as `BTreeSet`/`HashMap` |
-| Focus integration (D4, D5), and with it text input | chunks 13, 14 and 25 — priority, arbitration, and class bindings are what claiming a control means |
+| Focus-driven context activation (R22.8) and text input | chunks 14 and 25 — priority, arbitration, and class bindings are what *claiming* a control means. D4's other half, dispatch (R22.7), needs none of that and is chunk 29. |
 | **Guardian migration**                            | porting guardian from bevy 0.16.1 to 0.20-dev — four versions, its own job |
 
 Guardian is worth restating: it is on **bevy 0.16.1** with `bevy_enhanced_input 0.12`, and we target
