@@ -314,11 +314,16 @@ Ties keep the earlier contribution, so declaration order is the documented tiebr
 bindings by slot at compile time, which makes the fold one pass over a sorted list with no per-frame
 allocation (R23.2).
 
-**What this does not yet satisfy.** R2.9 asks that mixing intents be made *impossible*, not merely
-defined. Keying the fold off the action's intent stops the units error *between* actions, but a
-binding still declares no intent of its own — the source-channel shape of R2.10 is not modeled — so
-nothing yet rejects a mouse-delta source bound to a `Directional2` action. That check belongs with
-R2.10's source-shape work.
+**What makes the mixing impossible rather than merely defined.** Keying the fold off the action's
+intent stops the units error *between* actions, but on its own it would still accept a mouse delta
+bound to a `Directional2` action. R2.10's source-channel shape is what closes that: every source
+declares the channel it reports on, and a binding whose channel cannot serve the action's intent is
+refused when the context is declared.
+
+The one case that refusal leaves open is the near-universal one. A stick bound to a `Delta2` look
+action is rejected, correctly — a position is a rate and a delta is a displacement — but R2.9 asks
+for the conversion between them to be *explicit*, not absent, and an explicit rate-to-delta step
+needs the tick's `dt`. Until it exists, one action cannot be driven by both a mouse and a stick.
 
 **Nothing user-defined runs inside the evaluator.** Evaluation writes state and appends to a
 **transition log** — every phase change, in order. Observers and effects are dispatched by a separate
@@ -804,6 +809,7 @@ bevy_action_map/
     context/        declaring a context, its per-entity state   (§3, R22.14)
     plan/           compilation, arbitration order, reverse index
     eval/           evaluator, transition log                   (§5)
+    event/          transition events and their dispatch        (§9.6)
     player/         device pairing, control schemes             (§15)
     present/    L3  prompts, display descriptors, glyph ids     (§18)
     rebind/         mappable slots, tunables, presets           (D7)

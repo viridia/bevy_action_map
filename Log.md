@@ -262,4 +262,41 @@ macros crate's separately.
 bullets too. The file contains a correct example of the same filter three functions further down,
 which is what let it survive a read-through.
 
+
+---
+
+## Phase V — reading actions the other way
+
+### Chunk 12: the transition log and observers
+
+Delivered the log itself, `Fired<A>`/`Completed<A>`/`Canceled<A>` as generic `EntityEvent`s targeting
+the context entity, and the dispatch system that turns one into the other. `Started<A>` waits for
+conditions, since without them it would be indistinguishable from `Fired<A>`.
+
+**How a slot finds its action type.** The evaluator works in `ActionId`s and slot indices, and
+neither can name a generic event. `bind::<A>()` is the only place the concrete type exists, so it
+records a `dispatch_for::<A>` function pointer that the plan keeps per slot. One monomorphised
+function per action, resolved at bind time — no registry and no downcasting. The generic
+`EntityEvent` derive was the chunk's stated risk and turned out to need no special handling at all.
+
+**R9.3's second half, which chunk 9 handed over.** L2 had been collapsing a window to its final
+state: a press and release inside one window cancel in the held state, and a single fold afterwards
+sees *nothing happen* — not one transition, zero. The fix is to replay events one at a time and fold
+after each.
+
+That collides with deltas, which have no value at an instant, only a total over an interval — folding
+per event would hand a mouse-look action partial movements. What makes the two reconcilable is
+chunk 15's legality table: `Intent::accepts` lets a `Delta2` action take only delta-shaped sources
+and every other intent take none, so **no slot can want both treatments**. The fold runs in two
+passes over a partition that was already guaranteed to exist. A constraint added to prevent a units
+error turned out to be what made this tractable.
+
+**A test that was true but vacuous.** The first version of "a held key is silent" asserted over
+observers, and passed even when `Ongoing` was deliberately added to the logged phases — because
+dispatch drops non-edges on the way out, so an observer-based test cannot see a log that records
+them. Rewritten to assert against the log directly, driving `apply_frame` with no `App` at all,
+which the design's claim that `InputContextState` holds no world references makes possible. Worth
+recording as a pattern: a test that only observes the far end of a pipeline cannot verify a
+property of the near end.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

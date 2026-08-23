@@ -7,6 +7,7 @@ use core::marker::PhantomData;
 
 use crate::action::{ActionId, ChannelShape, Intent};
 use crate::binding::{BindingModifier, BindingSource, BindingSpec};
+use crate::event::Dispatch;
 
 /// The part of a rejected binding's message that says what to do about it.
 ///
@@ -40,6 +41,8 @@ pub(crate) struct CompiledBinding {
 pub struct Plan<C> {
     bindings: Vec<CompiledBinding>,
     slot_intents: Vec<Intent>,
+    // Parallel to `slot_intents`: how a transition on this slot becomes a typed event.
+    slot_dispatch: Vec<Dispatch>,
     slot_by_action: BTreeMap<ActionId, usize>,
     _marker: PhantomData<C>,
 }
@@ -48,6 +51,7 @@ impl<C> Plan<C> {
     /// Compiles a plan from authored bindings.
     pub(crate) fn from_bindings(bindings: Vec<BindingSpec>) -> Self {
         let mut slot_intents: Vec<Intent> = Vec::new();
+        let mut slot_dispatch: Vec<Dispatch> = Vec::new();
         let mut slot_by_action = BTreeMap::new();
         let mut compiled = Vec::with_capacity(bindings.len());
 
@@ -79,6 +83,7 @@ impl<C> Plan<C> {
 
             let slot = *slot_by_action.entry(binding.action).or_insert_with(|| {
                 slot_intents.push(binding.intent);
+                slot_dispatch.push(binding.dispatch);
                 slot_intents.len() - 1
             });
 
@@ -96,6 +101,7 @@ impl<C> Plan<C> {
         Self {
             bindings: compiled,
             slot_intents,
+            slot_dispatch,
             slot_by_action,
             _marker: PhantomData,
         }
@@ -111,6 +117,10 @@ impl<C> Plan<C> {
 
     pub(crate) fn intent_for_slot(&self, slot: usize) -> Intent {
         self.slot_intents[slot]
+    }
+
+    pub(crate) fn dispatch_for_slot(&self, slot: usize) -> Dispatch {
+        self.slot_dispatch[slot]
     }
 
     pub(crate) fn slot_for_action(&self, action: ActionId) -> Option<usize> {

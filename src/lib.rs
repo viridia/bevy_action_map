@@ -42,6 +42,7 @@ pub mod action;
 pub mod binding;
 pub mod context;
 pub mod eval;
+pub mod event;
 pub mod plan;
 pub mod player;
 
@@ -70,6 +71,8 @@ pub enum ActionMapSystems {
     Sample,
     /// Maps the input frame onto action state.
     Evaluate,
+    /// Delivers what changed to observers.
+    Dispatch,
 }
 
 /// The plugin entry point for the mapping layer.
@@ -93,7 +96,16 @@ impl bevy_app::Plugin for ActionMapPlugin {
 
         app.configure_sets(
             bevy_app::PreUpdate,
-            ActionMapSystems::Evaluate.after(ActionMapSystems::Sample),
+            (
+                ActionMapSystems::Evaluate.after(ActionMapSystems::Sample),
+                ActionMapSystems::Dispatch.after(ActionMapSystems::Evaluate),
+            ),
+        );
+        // Fixed contexts never sample — the frame is filled once per render frame — but their
+        // observers still have to run after their evaluation.
+        app.configure_sets(
+            bevy_app::FixedPreUpdate,
+            ActionMapSystems::Dispatch.after(ActionMapSystems::Evaluate),
         );
     }
 }
@@ -116,6 +128,7 @@ pub mod prelude {
     // `MouseMove` is ungated because `BindingSource::MouseMotion` is.
     pub use crate::binding::{ButtonThreshold, DeadZone, MouseMove};
     pub use crate::context::{ActionMapAppExt, Actions, InputContextState};
+    pub use crate::event::{Canceled, Completed, Fired};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
     // The derives share their names with the traits above, which is fine — a derive macro and a
     // trait live in different namespaces. Without these, a glob import of this prelude gives you

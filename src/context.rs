@@ -25,7 +25,7 @@ use bevy_platform::sync::Arc;
 
 use crate::action::{ActionOutput, ActionState, InputAction, InputContext, Phase, TickDomain};
 use crate::binding::InputContextBuilder;
-use crate::eval::evaluate_context;
+use crate::eval::{Transition, dispatch_transitions, evaluate_context};
 use crate::frame::{InputFrame, Timestamp};
 use crate::plan::Plan;
 use crate::{ActionMapPlugin, ActionMapSystems};
@@ -65,6 +65,10 @@ pub(crate) struct ButtonReading {
 pub struct InputContextState<C> {
     pub(crate) plan: Arc<Plan<C>>,
     pub(crate) actions: Vec<ActionState>,
+    // Every phase change since the last dispatch, in order. Evaluation appends and the dispatcher
+    // drains, which is what keeps observers — arbitrary code with `&mut World` — outside the
+    // evaluator (R10.2).
+    pub(crate) transitions: Vec<Transition>,
     // The last event this context has read. Seeded at spawn rather than left empty, so a context
     // added mid-session starts from the present instead of replaying whatever is still queued.
     pub(crate) read_through: Option<Timestamp>,
@@ -84,6 +88,7 @@ impl<C> InputContextState<C> {
         Self {
             plan,
             actions,
+            transitions: Vec::new(),
             read_through,
             #[cfg(feature = "keyboard")]
             held_buttons: BTreeSet::new(),
@@ -290,9 +295,10 @@ impl ActionMapAppExt for App {
         );
 
         let evaluate = evaluate_context::<C>.in_set(ActionMapSystems::Evaluate);
+        let dispatch = dispatch_transitions::<C>.in_set(ActionMapSystems::Dispatch);
         match C::TICK {
-            TickDomain::Render => self.add_systems(PreUpdate, evaluate),
-            TickDomain::Fixed => self.add_systems(FixedPreUpdate, evaluate),
+            TickDomain::Render => self.add_systems(PreUpdate, (evaluate, dispatch)),
+            TickDomain::Fixed => self.add_systems(FixedPreUpdate, (evaluate, dispatch)),
         };
         self
     }
@@ -537,6 +543,136 @@ mod tests {
         assert_eq!(probe.travel, 0.8);
         assert!(probe.pressed);
         assert_eq!(probe.phase, Phase::Fired);
+    }
+
+    /// The edges of a press, delivered as events rather than polled. `Ongoing` is deliberately not
+    /// among them — an observer that fired every tick a key was held would be reporting the absence
+    /// of news.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_press_and_a_release_reach_an_observer_as_two_events() {
+        use crate::event::{Completed, Fired};
+        use bevy_ecs::observer::On;
+
+        #[derive(Resource, Default)]
+        struct Heard(Vec<&'static str>);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook, _>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        app.init_resource::<Heard>();
+        app.add_observer(
+            |_: On<Fired<Jump>>, mut heard: bevy_ecs::system::ResMut<'_, Heard>| {
+                heard.0.push("fired");
+            },
+        );
+        app.add_observer(
+            |_: On<Completed<Jump>>, mut heard: bevy_ecs::system::ResMut<'_, Heard>| {
+                heard.0.push("completed");
+            },
+        );
+        app.world_mut().spawn(FreeLook);
+
+        app.update();
+        assert!(
+            app.world().resource::<Heard>().0.is_empty(),
+            "idle is silent"
+        );
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        assert_eq!(app.world().resource::<Heard>().0, ["fired"]);
+
+        // Held, not newly pressed: no further news.
+        app.update();
+        assert_eq!(app.world().resource::<Heard>().0, ["fired"]);
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Released));
+        app.update();
+        assert_eq!(app.world().resource::<Heard>().0, ["fired", "completed"]);
+    }
+
+    /// A tap faster than the tick rate, end to end. Polling can only report where the tick ended —
+    /// the key back up — so an observer is the only way to learn it happened at all.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_tap_within_one_frame_reaches_observers_as_both_edges() {
+        use bevy_ecs::observer::On;
+
+        use crate::event::{Completed, Fired};
+
+        #[derive(Resource, Default)]
+        struct Heard(Vec<&'static str>);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook, _>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        app.init_resource::<Heard>();
+        app.add_observer(
+            |_: On<Fired<Jump>>, mut heard: bevy_ecs::system::ResMut<'_, Heard>| {
+                heard.0.push("fired");
+            },
+        );
+        app.add_observer(
+            |_: On<Completed<Jump>>, mut heard: bevy_ecs::system::ResMut<'_, Heard>| {
+                heard.0.push("completed");
+            },
+        );
+        app.world_mut().spawn(FreeLook);
+
+        // Both edges in one frame, which is what a fast tap looks like from here.
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Released));
+        app.update();
+
+        assert_eq!(app.world().resource::<Heard>().0, ["fired", "completed"]);
+    }
+
+    /// The events target the context entity, which is what makes them usable per player. An
+    /// observer attached to one entity must not hear another's input.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn an_entity_observer_hears_only_its_own_context() {
+        use crate::event::Fired;
+        use bevy_ecs::observer::On;
+
+        #[derive(Component, Default)]
+        struct Count(usize);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook, _>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+
+        let watched = app
+            .world_mut()
+            .spawn((FreeLook, Count::default()))
+            .observe(
+                |fired: On<Fired<Jump>>, mut counts: Query<'_, '_, &mut Count>| {
+                    if let Ok(mut count) = counts.get_mut(fired.entity) {
+                        count.0 += 1;
+                    }
+                },
+            )
+            .id();
+        let ignored = app.world_mut().spawn((FreeLook, Count::default())).id();
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+
+        // Both contexts fired — they read the same frame — but only one had an observer.
+        assert_eq!(app.world().get::<Count>(watched).unwrap().0, 1);
+        assert_eq!(app.world().get::<Count>(ignored).unwrap().0, 0);
     }
 
     /// Two keys pushing one number in opposite directions. Holding both has to cancel: a turn

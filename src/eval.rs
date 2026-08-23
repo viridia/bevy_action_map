@@ -3,7 +3,8 @@
 //! The evaluator resolves bindings and emits a transition log for later dispatch.
 
 use bevy_ecs::component::Component;
-use bevy_ecs::prelude::{Query, Res};
+use bevy_ecs::entity::Entity;
+use bevy_ecs::prelude::{Commands, Query, Res};
 #[cfg(feature = "gamepad")]
 use bevy_input::gamepad::{GamepadAxis, RawGamepadEvent};
 #[cfg(feature = "keyboard")]
@@ -19,6 +20,41 @@ use crate::binding::{BindingSource, ButtonThreshold};
 use crate::context::InputContextState;
 use crate::frame::{InputFrame, RawEvent};
 
+/// One phase change, in the order it happened.
+///
+/// The log records transitions rather than final state, which is the whole point: an action that
+/// fires and completes inside one tick has two of these, and a reader that only ever sees the
+/// current phase cannot express that.
+pub(crate) struct Transition {
+    pub(crate) slot: usize,
+    pub(crate) phase: Phase,
+    pub(crate) value: ActionValue,
+}
+
+/// Turns each logged transition into its typed event.
+///
+/// Separate from evaluation because observers run arbitrary code with `&mut World`, and the
+/// evaluator has to stay a pure function of its inputs (R10.2).
+pub fn dispatch_transitions<C: InputContext + Component>(
+    mut commands: Commands<'_, '_>,
+    mut states: Query<'_, '_, (Entity, &mut InputContextState<C>)>,
+) {
+    for (entity, mut state) in &mut states {
+        if state.transitions.is_empty() {
+            continue;
+        }
+
+        // Taken rather than borrowed so the plan stays readable while dispatching, and handed back
+        // afterwards so the allocation survives to the next tick.
+        let mut log = core::mem::take(&mut state.transitions);
+        for transition in log.drain(..) {
+            let dispatch = state.plan.dispatch_for_slot(transition.slot);
+            dispatch(&mut commands, entity, transition.phase, transition.value);
+        }
+        state.transitions = log;
+    }
+}
+
 /// Applies the current input frame to every instance of one context.
 pub fn evaluate_context<C: InputContext + Component>(
     frame: Res<'_, InputFrame>,
@@ -30,10 +66,22 @@ pub fn evaluate_context<C: InputContext + Component>(
     }
 }
 
+/// Which half of the plan a fold pass is for.
+///
+/// The two kinds of source have different temporal semantics, and the split is what lets a fast tap
+/// be seen without disturbing a mouse delta.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fold {
+    /// Controls with a value at every instant — buttons, axes, sticks. Sampled at each change, so a
+    /// press and a release inside one window are two separate readings.
+    Level,
+    /// Controls with no value at an instant, only a total over an interval — mouse motion. Summed
+    /// across the whole window and read once, because half of a movement is not a position.
+    Delta,
+}
+
 impl<C: InputContext> InputContextState<C> {
     pub(crate) fn apply_frame(&mut self, frame: &InputFrame, threshold: &ButtonThreshold) {
-        let mut mouse_delta = Vec2::ZERO;
-
         // Only what has arrived since this context last looked. Re-reading the whole queue is what
         // made one mouse delta count three times across three fixed ticks.
         let unread = frame.events_after(self.read_through);
@@ -41,46 +89,77 @@ impl<C: InputContext> InputContextState<C> {
             self.read_through = Some(last.timestamp);
         }
 
+        let mut mouse_delta = Vec2::ZERO;
+        let mut level_changes = 0usize;
+
+        // Replayed one at a time rather than collapsed. Draining the whole window and then folding
+        // once is what made a press and release inside a single window vanish: the two cancel in
+        // the held state, and the fold sees nothing happen (R9.3).
         for event in unread {
-            match &event.event {
-                #[cfg(feature = "keyboard")]
-                RawEvent::Keyboard(KeyboardInput {
-                    key_code, state, ..
-                }) => match state {
-                    ButtonState::Pressed => {
-                        self.held_buttons.insert(*key_code);
-                    }
-                    ButtonState::Released => {
-                        self.held_buttons.remove(key_code);
-                    }
-                },
-                RawEvent::MouseMotion(delta) => {
-                    mouse_delta += *delta;
-                }
-                #[cfg(feature = "gamepad")]
-                RawEvent::Gamepad(event) => match event {
-                    RawGamepadEvent::Axis(raw_axis) => {
-                        self.held_gamepad_axes.insert(raw_axis.axis, raw_axis.value);
-                    }
-                    RawGamepadEvent::Button(raw_button) => {
-                        // Our own threshold, deliberately ignoring whatever press or release the
-                        // backend synthesized at a threshold of its own (R14.2).
-                        let reading = self
-                            .held_gamepad_buttons
-                            .entry(raw_button.button)
-                            .or_default();
-                        reading.pressed = threshold.pressed(raw_button.value, reading.pressed);
-                        reading.value = raw_button.value;
-                    }
-                    RawGamepadEvent::Connection(_) => {}
-                },
+            if let RawEvent::MouseMotion(delta) = &event.event {
+                mouse_delta += *delta;
+                continue;
             }
+            self.apply_level_event(&event.event, threshold);
+            self.fold(threshold, Vec2::ZERO, Fold::Level);
+            level_changes += 1;
         }
 
+        // Time passes even when nothing arrives: a phase has to reach `Ongoing` from `Fired` on its
+        // own, and without an event to prompt it nothing else would.
+        if level_changes == 0 {
+            self.fold(threshold, Vec2::ZERO, Fold::Level);
+        }
+
+        self.fold(threshold, mouse_delta, Fold::Delta);
+    }
+
+    /// Moves one control's held state, for the sources that have a state to hold.
+    fn apply_level_event(&mut self, event: &RawEvent, threshold: &ButtonThreshold) {
+        #[cfg(not(feature = "gamepad"))]
+        let _ = threshold;
+
+        match event {
+            #[cfg(feature = "keyboard")]
+            RawEvent::Keyboard(KeyboardInput {
+                key_code, state, ..
+            }) => match state {
+                ButtonState::Pressed => {
+                    self.held_buttons.insert(*key_code);
+                }
+                ButtonState::Released => {
+                    self.held_buttons.remove(key_code);
+                }
+            },
+            // Accumulated by the caller: a delta is not a state.
+            RawEvent::MouseMotion(_) => {}
+            #[cfg(feature = "gamepad")]
+            RawEvent::Gamepad(event) => match event {
+                RawGamepadEvent::Axis(raw_axis) => {
+                    self.held_gamepad_axes.insert(raw_axis.axis, raw_axis.value);
+                }
+                RawGamepadEvent::Button(raw_button) => {
+                    // Our own threshold, deliberately ignoring whatever press or release the
+                    // backend synthesized at a threshold of its own (R14.2).
+                    let reading = self
+                        .held_gamepad_buttons
+                        .entry(raw_button.button)
+                        .or_default();
+                    reading.pressed = threshold.pressed(raw_button.value, reading.pressed);
+                    reading.value = raw_button.value;
+                }
+                RawGamepadEvent::Connection(_) => {}
+            },
+        }
+    }
+
+    /// Resolves one half of the plan against the current device state.
+    fn fold(&mut self, threshold: &ButtonThreshold, mouse_delta: Vec2, kind: Fold) {
         // Field-level borrows: the fold reads the device state and the plan while writing actions.
         let Self {
             plan,
             actions,
+            transitions,
             #[cfg(feature = "keyboard")]
             held_buttons,
             #[cfg(feature = "gamepad")]
@@ -107,6 +186,21 @@ impl<C: InputContext> InputContextState<C> {
         while index < bindings.len() {
             let slot = bindings[index].slot;
             let intent = plan.intent_for_slot(slot);
+
+            // A slot belongs to exactly one half, and `Intent::accepts` is what guarantees it: a
+            // `Delta2` action admits only delta-shaped sources and every other intent admits none,
+            // so no slot can want both passes.
+            let wanted = match kind {
+                Fold::Delta => intent == Intent::Delta2,
+                Fold::Level => intent != Intent::Delta2,
+            };
+            if !wanted {
+                while index < bindings.len() && bindings[index].slot == slot {
+                    index += 1;
+                }
+                continue;
+            }
+
             let mut combined = None;
 
             // Bindings are grouped by slot, so this inner walk is one action's contributions.
@@ -176,7 +270,12 @@ impl<C: InputContext> InputContextState<C> {
             }
 
             if let Some(value) = combined {
-                update_action_state(&mut actions[slot], value);
+                let phase = update_action_state(&mut actions[slot], value);
+                // Only the edges. `Idle` and `Ongoing` say that nothing changed, and an observer
+                // firing every tick for a held button would be noise rather than information.
+                if matches!(phase, Phase::Fired | Phase::Completed | Phase::Canceled) {
+                    transitions.push(Transition { slot, phase, value });
+                }
             }
         }
     }
@@ -250,7 +349,7 @@ fn apply_modifiers(
     value
 }
 
-fn update_action_state(action_state: &mut crate::action::ActionState, value: ActionValue) {
+fn update_action_state(action_state: &mut crate::action::ActionState, value: ActionValue) -> Phase {
     let previous = action_state.value;
     action_state.value = value;
     action_state.phase = match (previous, value) {
@@ -292,6 +391,7 @@ fn update_action_state(action_state: &mut crate::action::ActionState, value: Act
         (_, ActionValue::Axis3(value)) if value != bevy_math::Vec3::ZERO => Phase::Fired,
         (_, ActionValue::Axis3(_)) => Phase::Idle,
     };
+    action_state.phase
 }
 
 #[cfg(feature = "gamepad")]
@@ -307,4 +407,157 @@ fn gamepad_stick_value(
         axes.get(&x_axis).copied().unwrap_or(0.0),
         axes.get(&y_axis).copied().unwrap_or(0.0),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::action::{InputAction, TickDomain};
+    use crate::binding::InputContextBuilder;
+    use crate::plan::Plan;
+    use alloc::vec::Vec;
+    use bevy_platform::sync::Arc;
+
+    struct Flying;
+
+    impl InputContext for Flying {
+        const TICK: TickDomain = TickDomain::Fixed;
+        const PRIORITY: i32 = 0;
+        const PATH: &'static str = "eval_tests.flying";
+    }
+
+    struct Jump;
+
+    impl InputAction for Jump {
+        type Output = bool;
+
+        const INTENT: Intent = Intent::Button;
+        const PATH: &'static str = "eval_tests.jump";
+    }
+
+    /// The log holds transitions, not state. A key that is still down is not news, and if held
+    /// actions logged an entry per tick the log would grow with the number of things a player is
+    /// holding rather than with the number of things they did.
+    ///
+    /// Asserted against the log itself rather than against observers, because dispatch drops
+    /// non-edges on its way out and would hide a log that recorded them.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn the_log_records_edges_and_not_held_state() {
+        use bevy_input::keyboard::{Key, KeyCode, KeyboardInput};
+
+        fn key(state: ButtonState) -> RawEvent {
+            RawEvent::Keyboard(KeyboardInput {
+                key_code: KeyCode::Space,
+                logical_key: Key::Space,
+                state,
+                text: None,
+                repeat: false,
+                window: bevy_ecs::entity::Entity::PLACEHOLDER,
+            })
+        }
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Jump>(KeyCode::Space);
+        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        let threshold = ButtonThreshold::default();
+
+        let mut frame = InputFrame::default();
+        frame.record(key(ButtonState::Pressed));
+        state.apply_frame(&frame, &threshold);
+        assert_eq!(state.transitions.len(), 1);
+        assert_eq!(state.transitions[0].phase, Phase::Fired);
+
+        // Dispatch would have drained it by now.
+        state.transitions.clear();
+
+        // Nothing new arrives; the key is still down.
+        state.apply_frame(&frame, &threshold);
+        assert!(
+            state.transitions.is_empty(),
+            "a held key logged {:?}",
+            state
+                .transitions
+                .iter()
+                .map(|t| t.phase)
+                .collect::<Vec<_>>()
+        );
+
+        frame.record(key(ButtonState::Released));
+        state.apply_frame(&frame, &threshold);
+        assert_eq!(state.transitions.len(), 1);
+        assert_eq!(state.transitions[0].phase, Phase::Completed);
+    }
+
+    /// R9.3's other half. A player who taps faster than the tick rate still tapped, and collapsing
+    /// the window to its final state loses the whole event: press and release cancel in the held
+    /// state, and a single fold afterwards sees nothing happen at all.
+    ///
+    /// Polling cannot express this — one `Phase` per read — which is why the log exists.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_tap_inside_one_window_is_two_transitions() {
+        use bevy_input::keyboard::{Key, KeyCode, KeyboardInput};
+
+        fn key(state: ButtonState) -> RawEvent {
+            RawEvent::Keyboard(KeyboardInput {
+                key_code: KeyCode::Space,
+                logical_key: Key::Space,
+                state,
+                text: None,
+                repeat: false,
+                window: bevy_ecs::entity::Entity::PLACEHOLDER,
+            })
+        }
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Jump>(KeyCode::Space);
+        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        let threshold = ButtonThreshold::default();
+
+        let mut frame = InputFrame::default();
+        frame.record(key(ButtonState::Pressed));
+        frame.record(key(ButtonState::Released));
+
+        state.apply_frame(&frame, &threshold);
+
+        let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
+        assert_eq!(phases, [Phase::Fired, Phase::Completed]);
+
+        // And the poll agrees with where the tick ended, which is the key back up.
+        assert_eq!(state.phase::<Jump>(), Phase::Completed);
+        assert!(!state.value::<Jump>());
+    }
+
+    /// The other side of the split. A delta has no value at an instant, so several motions inside
+    /// one window are one movement and not several: they sum, and the action transitions once.
+    #[test]
+    fn several_motions_inside_one_window_are_one_transition() {
+        struct Look;
+
+        impl InputAction for Look {
+            type Output = Vec2;
+
+            const INTENT: Intent = Intent::Delta2;
+            const PATH: &'static str = "eval_tests.look";
+        }
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Look>(crate::binding::MouseMove);
+        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        let threshold = ButtonThreshold::default();
+
+        let mut frame = InputFrame::default();
+        frame.record(RawEvent::MouseMotion(Vec2::new(3.0, 0.0)));
+        frame.record(RawEvent::MouseMotion(Vec2::new(1.0, -2.0)));
+
+        state.apply_frame(&frame, &threshold);
+
+        let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
+        assert_eq!(phases, [Phase::Fired], "one movement, one transition");
+        assert_eq!(state.value::<Look>(), Vec2::new(4.0, -2.0), "summed");
+    }
 }

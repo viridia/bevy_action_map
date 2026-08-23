@@ -14,6 +14,7 @@ use bevy_input::keyboard::KeyCode;
 use bevy_math::Vec2;
 
 use crate::action::{ActionId, ActionValue, ChannelShape, InputAction, Intent};
+use crate::event::{Dispatch, dispatch_for};
 
 /// A control that reports on a button channel.
 ///
@@ -188,6 +189,9 @@ pub(crate) struct BindingSpec {
     // path is here so plan-build diagnostics can name the action a mistake is in.
     pub(crate) intent: Intent,
     pub(crate) path: &'static str,
+    // The only place the concrete action type survives bind time. Everything downstream works in
+    // slots, which cannot name a generic event.
+    pub(crate) dispatch: Dispatch,
     pub(crate) source: BindingSource,
     pub(crate) modifiers: Vec<BindingModifier>,
 }
@@ -590,6 +594,7 @@ impl<C> InputContextBuilder<C> {
             action: A::id(),
             intent: A::INTENT,
             path: A::PATH,
+            dispatch: dispatch_for::<A>,
             source,
             modifiers: Vec::new(),
         });

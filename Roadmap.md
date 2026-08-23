@@ -112,13 +112,13 @@ step and a real game is a better acceptance test than a synthetic one.
 | --- | --- |
 | **Works today** | Actions and contexts as types; keyboard, mouse and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled. |
 | **Known wrong today** | A stick cannot drive a look action at all, because the rate-to-delta conversion R2.9 requires does not exist yet (chunk 11). |
-| **Never built** | Conditions, transition events, multiple contexts, arbitration, the whole player-facing model. |
+| **Never built** | Conditions, multiple contexts, arbitration, the whole player-facing model. |
 
 ---
 
 ## What has landed
 
-Twelve chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
+Thirteen chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
 fell short of its own description; this table is only an index, and the sequence below is what
 remains.
 
@@ -136,6 +136,7 @@ remains.
 | 9 | Tick domains and the windowed drain | done; the L2 half of R9.3 → 12 |
 | 15 | Source channel shape | done; rate-to-delta → 11 |
 | 16 | Dead Zone, first playable | playable; no death yet, hyperspace wants 11 |
+| 12 | Transition log and observers | done |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -144,24 +145,13 @@ than by the chunk that incurred it — so what a chunk must do is stated in one 
 
 ## Phase V — multiple contexts
 
-Dead Zone grows a pause menu, which is what forces all three of these.
-
-### 12. Transition events and observers
-
-`Fired<A>`, `Started<A>`, `Completed<A>` as generic `EntityEvent`s targeting the context entity;
-dispatch from the transition log. §9.6's observer surface.
-
-- **Verified by:** observer-based `App` tests; Dead Zone firing on an observer rather than a poll;
-  an example using `bsn!` to attach one declaratively (§9.6.1), which is the R22.15/R22.17 claim
-  under test.
-- **Review surface:** the generic-`EntityEvent` bet. The context entity it targets now exists, which
-  it did not when this chunk was written.
-- **Inherited from chunk 9: the L2 half of R9.3.** An action that fires *and* completes inside one
-  window is observable only as its final phase, because a polling reader has one `Phase` to report.
-  The events reach the tick that wants them; Design §5 is explicit that R3.3 is satisfied by the
-  transition log rather than by polling, so the log is what finishes the job.
+Dead Zone grows a pause menu, which is what forces all of these.
 
 ### 13. Context priority, layering, and activation
+
+Dead Zone's pause menu is what forces this, and it also covers the case player death would have
+covered — an interstitial screen with a different context active. Death is therefore polish, and
+stays out of the sequence: it would be a second demonstration of the switch this chunk already makes.
 
 Multiple context instances, priority ordering, activation and deactivation lifecycle, and what
 happens to in-flight state when a context deactivates mid-hold (R7.4, R7.5).
@@ -204,9 +194,13 @@ it does not own, so mistakes have to be caught rather than discovered in QA that
 
 ### 11. Conditions and the `Scratch` table
 
-Press, release, hold, tap, multi-tap, chord progress; `elapsed` and `progress`; the transition log.
-Each condition claims a fixed-size scratch slot from the plan. Carries chunk 7's outstanding
-modifier signature, since scratch and `dt` are the same addition.
+Press, release, hold, tap, multi-tap, chord progress; `elapsed` and `progress`. Each condition claims
+a fixed-size scratch slot from the plan. Carries chunk 7's outstanding modifier signature, since
+scratch and `dt` are the same addition.
+
+Conditions **append to** the transition log rather than introduce it: Design §5 makes the log a
+property of the evaluator, and chunk 12 needs it first. What arrives here is the transitions a
+condition can produce that a bare phase change cannot — a hold completing, a tap resolving.
 
 - **Verified by:** unit tests driving synthetic time; the R6.1 catalogue is directly a test list.
 - **Review surface:** whether the 24-byte scratch record really covers every condition, which the
