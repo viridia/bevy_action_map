@@ -14,7 +14,7 @@ struct OnFoot;
 fn main() {
     App::new()
         .add_plugins((DefaultPlugins, ActionMapPlugin))
-        .add_context::<OnFoot, _>(|context| {
+        .add_context::<OnFoot>(|context| {
             context.bind::<Jump>(KeyCode::Space);
         })
         .add_systems(Startup, |mut commands: Commands| {

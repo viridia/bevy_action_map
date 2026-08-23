@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use std::f32::consts::TAU;
 
 use crate::field::{HALF_EXTENT, Velocity, Wraps};
+use crate::pause::Simulating;
 use crate::ship::{Bullet, rand_unit};
 
 /// How many times a rock has already been broken.
@@ -37,7 +38,7 @@ pub struct Asteroid;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Startup, spawn_field);
-    app.add_systems(FixedUpdate, shatter_on_hit);
+    app.add_systems(FixedUpdate, shatter_on_hit.in_set(Simulating));
 }
 
 fn spawn_field(

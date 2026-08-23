@@ -6,6 +6,7 @@ use std::f32::consts::TAU;
 
 use crate::actions::{Fire, Flying, Hyperspace, Thrust, Turn};
 use crate::field::{HALF_EXTENT, Lifetime, Velocity, Wraps};
+use crate::pause::Simulating;
 
 const TURN_RATE: f32 = 3.2;
 const ACCELERATION: f32 = 420.0;
@@ -28,7 +29,7 @@ struct Exhaust;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Startup, spawn_ship);
-    app.add_systems(FixedUpdate, (fly, shoot, hyperspace));
+    app.add_systems(FixedUpdate, (fly, shoot, hyperspace).in_set(Simulating));
     app.add_systems(Update, show_exhaust);
 }
 

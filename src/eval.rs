@@ -89,6 +89,15 @@ impl<C: InputContext> InputContextState<C> {
             self.read_through = Some(last.timestamp);
         }
 
+        // An inactive context still tracks its devices. Skipping that would leave the held state
+        // stale, so reactivating would need a rebuild — and R7.6 wants activation to be free.
+        if !self.active {
+            for event in unread {
+                self.apply_level_event(&event.event, threshold);
+            }
+            return;
+        }
+
         let mut mouse_delta = Vec2::ZERO;
         let mut level_changes = 0usize;
 
@@ -160,6 +169,7 @@ impl<C: InputContext> InputContextState<C> {
             plan,
             actions,
             transitions,
+            require_reset,
             #[cfg(feature = "keyboard")]
             held_buttons,
             #[cfg(feature = "gamepad")]
@@ -270,6 +280,15 @@ impl<C: InputContext> InputContextState<C> {
             }
 
             if let Some(value) = combined {
+                // Held over from before this context activated: report rest until the player lets
+                // go once, then let the action behave normally (R7.5).
+                if require_reset[slot] {
+                    if value.to_bool() {
+                        continue;
+                    }
+                    require_reset[slot] = false;
+                }
+
                 let phase = update_action_state(&mut actions[slot], value);
                 // Only the edges. `Idle` and `Ongoing` say that nothing changed, and an observer
                 // firing every tick for a held button would be noise rather than information.
@@ -435,6 +454,30 @@ mod tests {
         const PATH: &'static str = "eval_tests.jump";
     }
 
+    #[cfg(feature = "keyboard")]
+    fn key(state: ButtonState) -> RawEvent {
+        use bevy_input::keyboard::{Key, KeyCode, KeyboardInput};
+
+        RawEvent::Keyboard(KeyboardInput {
+            key_code: KeyCode::Space,
+            logical_key: Key::Space,
+            state,
+            text: None,
+            repeat: false,
+            window: bevy_ecs::entity::Entity::PLACEHOLDER,
+        })
+    }
+
+    /// A context with `Jump` on the space bar, and nothing else.
+    #[cfg(feature = "keyboard")]
+    fn jump_context() -> InputContextState<Flying> {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Jump>(KeyCode::Space);
+        InputContextState::<Flying>::new(Arc::new(Plan::from_bindings(builder.finish())), None)
+    }
+
     /// The log holds transitions, not state. A key that is still down is not news, and if held
     /// actions logged an entry per tick the log would grow with the number of things a player is
     /// holding rather than with the number of things they did.
@@ -444,23 +487,7 @@ mod tests {
     #[cfg(feature = "keyboard")]
     #[test]
     fn the_log_records_edges_and_not_held_state() {
-        use bevy_input::keyboard::{Key, KeyCode, KeyboardInput};
-
-        fn key(state: ButtonState) -> RawEvent {
-            RawEvent::Keyboard(KeyboardInput {
-                key_code: KeyCode::Space,
-                logical_key: Key::Space,
-                state,
-                text: None,
-                repeat: false,
-                window: bevy_ecs::entity::Entity::PLACEHOLDER,
-            })
-        }
-
-        let mut builder = InputContextBuilder::<Flying>::default();
-        builder.bind::<Jump>(KeyCode::Space);
-        let plan = Arc::new(Plan::from_bindings(builder.finish()));
-        let mut state = InputContextState::<Flying>::new(plan, None);
+        let mut state = jump_context();
         let threshold = ButtonThreshold::default();
 
         let mut frame = InputFrame::default();
@@ -498,23 +525,7 @@ mod tests {
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_tap_inside_one_window_is_two_transitions() {
-        use bevy_input::keyboard::{Key, KeyCode, KeyboardInput};
-
-        fn key(state: ButtonState) -> RawEvent {
-            RawEvent::Keyboard(KeyboardInput {
-                key_code: KeyCode::Space,
-                logical_key: Key::Space,
-                state,
-                text: None,
-                repeat: false,
-                window: bevy_ecs::entity::Entity::PLACEHOLDER,
-            })
-        }
-
-        let mut builder = InputContextBuilder::<Flying>::default();
-        builder.bind::<Jump>(KeyCode::Space);
-        let plan = Arc::new(Plan::from_bindings(builder.finish()));
-        let mut state = InputContextState::<Flying>::new(plan, None);
+        let mut state = jump_context();
         let threshold = ButtonThreshold::default();
 
         let mut frame = InputFrame::default();
@@ -559,5 +570,95 @@ mod tests {
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
         assert_eq!(phases, [Phase::Fired], "one movement, one transition");
         assert_eq!(state.value::<Look>(), Vec2::new(4.0, -2.0), "summed");
+    }
+
+    /// R7.5, which names this bug class outright: closing a menu with the same key that interacts
+    /// with the world must not interact the instant the menu disappears. The key is still down, and
+    /// a context that started reading it now would see a press that the player made for the menu.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_context_activating_ignores_a_control_already_held() {
+        let mut state = jump_context();
+        let threshold = ButtonThreshold::default();
+        let mut frame = InputFrame::default();
+
+        state.deactivate();
+
+        // The player presses the key while the context is not listening.
+        frame.record(key(ButtonState::Pressed));
+        state.apply_frame(&frame, &threshold);
+        assert_eq!(
+            state.phase::<Jump>(),
+            Phase::Idle,
+            "inactive contexts do not fire"
+        );
+
+        state.activate();
+        state.apply_frame(&frame, &threshold);
+        assert_eq!(
+            state.phase::<Jump>(),
+            Phase::Idle,
+            "a key held across activation is not a press"
+        );
+        assert!(state.transitions.is_empty());
+
+        // Letting go arms it again without firing anything.
+        frame.record(key(ButtonState::Released));
+        state.apply_frame(&frame, &threshold);
+        assert_eq!(state.phase::<Jump>(), Phase::Idle);
+        assert!(state.transitions.is_empty());
+
+        // And now a real press is a real press.
+        frame.record(key(ButtonState::Pressed));
+        state.apply_frame(&frame, &threshold);
+        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+    }
+
+    /// The opt-out, for a context taking over from one that was already driving the same control.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn activating_can_accept_a_control_already_held() {
+        let mut state = jump_context();
+        let threshold = ButtonThreshold::default();
+        let mut frame = InputFrame::default();
+
+        state.deactivate();
+        frame.record(key(ButtonState::Pressed));
+        state.apply_frame(&frame, &threshold);
+
+        state.activate_including_held();
+        state.apply_frame(&frame, &threshold);
+        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+    }
+
+    /// R7.4. An action interrupted by a context going away has to resolve: left as it was, a hold
+    /// would still read as held for as long as the menu is up, and would never complete.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn deactivating_cancels_what_was_in_flight() {
+        let mut state = jump_context();
+        let threshold = ButtonThreshold::default();
+        let mut frame = InputFrame::default();
+
+        frame.record(key(ButtonState::Pressed));
+        state.apply_frame(&frame, &threshold);
+        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+        state.transitions.clear();
+
+        state.deactivate();
+
+        let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
+        assert_eq!(phases, [Phase::Canceled]);
+        assert_eq!(state.phase::<Jump>(), Phase::Canceled);
+        assert!(!state.value::<Jump>(), "and it is no longer held");
+    }
+
+    /// Nothing in flight, nothing to cancel — deactivating an idle context is silent.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn deactivating_an_idle_context_says_nothing() {
+        let mut state = jump_context();
+        state.deactivate();
+        assert!(state.transitions.is_empty());
     }
 }

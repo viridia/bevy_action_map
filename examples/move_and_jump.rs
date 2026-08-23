@@ -27,7 +27,7 @@ struct FreeLook;
 fn main() {
     let mut app = App::new();
     app.add_plugins((DefaultPlugins, ActionMapPlugin));
-    app.add_context::<OnFoot, _>(|context| {
+    app.add_context::<OnFoot>(|context| {
         context.bind::<Move>(DirectionalButtons::wasd());
         context
             .bind::<Move>(Stick::Left)
@@ -35,7 +35,7 @@ fn main() {
         context.bind::<Jump>(KeyCode::Space);
         context.bind::<Jump>(GamepadButton::South);
     });
-    app.add_context::<FreeLook, _>(|context| {
+    app.add_context::<FreeLook>(|context| {
         // Look is a delta: the mouse reports how far the view has already turned. The right stick
         // reports how fast to turn instead, so it needs a rate-to-delta conversion this crate does
         // not offer yet, and binding it here would add a rate to a displacement.

@@ -299,4 +299,54 @@ which the design's claim that `InputContextState` holds no world references make
 recording as a pattern: a test that only observes the far end of a pipeline cannot verify a
 property of the near end.
 
+
+### Chunk 13: the activation lifecycle
+
+Delivered `activate`/`deactivate` with the two behaviours the requirements name: deactivating cancels
+what was in flight rather than leaving a hold stuck (R7.4), and activating ignores controls the
+player is already holding, with an opt-out (R7.5). An inactive context keeps tracking its devices, so
+coming back is free (R7.6).
+
+**The first API was wrong and the example is what showed it.** Dead Zone's pause menu originally held
+two facts — a state, and two contexts driven by hand to match — and kept them in step in an observer.
+That works and reads like something waiting to drift the moment a third way to reach the menu
+appears. `add_context_in_state` inverts it: the contexts follow the state, so there is one fact and
+nothing to disagree with it. "Declared inactive" then falls out for free, which had been recorded as
+an outstanding gap an hour earlier.
+
+Two smaller things came with it. `add_context` takes its closure as `impl FnOnce`, so
+`add_context::<Flying, _>` lost its placeholder — the same trick `bind::<Jump>` got in chunk 15. And
+the state sync is one idempotent system rather than a pair on `OnEnter`/`OnExit`, because those fire
+only on the transition and would miss an instance spawned while the state was already current.
+
+**A context declared and never spawned is silent.** Rewriting `pause.rs` for the new API dropped the
+line that spawned the menu's entity, and the result was a game that paused and would not unpause:
+`Flying` fired the pause action, and nothing carried `PauseMenu` to fire it back. Nothing anywhere
+said so. The symptom — one key working in one direction only — took a reproduction test to localize,
+and the test passed, which is what pointed at the example rather than the crate.
+
+
+### Reading `bevy_enhanced_input`'s state integration
+
+Compared after chunk 13, and it found a defect and a latency bug in ours.
+
+**A substate has no `State` resource.** BEI reads `Option<Res<State<S>>>` with a comment saying the
+resource may be absent for inactive substates and computed states. Ours read `Res<State<S>>` and
+would have panicked the first time anyone declared a context in a nested state — and pause as a
+substate of playing is the obvious way to write the very example we ship. Now tolerated, with a test
+that fails by panic if the tolerance is removed.
+
+**Placement.** Ours ran in `PreUpdate` before evaluation, which is a frame behind the transition,
+because Bevy applies transitions *after* `PreUpdate`. BEI runs inside `StateTransition` itself,
+after `DependentTransitions` and before `ExitSchedules` — so a context is already in step by the
+time an `OnEnter` system looks at it. Adopted, and the one-frame caveat that had been written into
+the docs and a test simply went away.
+
+**The decomposition, which we did not adopt.** BEI puts the state binding on the *entity*
+(`ActiveInStates<C, S>`, a component holding several values) and registers the (context, state) pair
+separately. Two instances of one context can therefore follow different states, and a context can be
+live in several. Ours binds one value per context type in one call. Theirs is more capable at the
+cost of two places to get right; ours cannot be half-declared. Recorded against chunk 27, where
+several contexts and several states meet for the first time.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

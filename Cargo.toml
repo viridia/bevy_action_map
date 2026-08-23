@@ -36,6 +36,7 @@ bevy_math = { git = "https://github.com/bevyengine/bevy.git", default-features =
 bevy_platform = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
 bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", default-features = false, optional = true }
 bevy_input_focus = { git = "https://github.com/bevyengine/bevy.git", default-features = false, optional = true }
+bevy_state = { git = "https://github.com/bevyengine/bevy.git", default-features = false, optional = true }
 serde = { version = "1", default-features = false, features = [
   "alloc",
   "derive",
@@ -48,7 +49,7 @@ bevy = { git = "https://github.com/bevyengine/bevy.git", features = [
 trybuild = "1.0"
 
 [features]
-default = ["std", "bevy_reflect", "keyboard", "mouse", "gamepad"]
+default = ["std", "bevy_reflect", "keyboard", "mouse", "gamepad", "state"]
 
 # The core mapping layer is no_std-capable (R24.1, R16.6).
 std = [
@@ -57,6 +58,7 @@ std = [
   "bevy_input/std",
   "bevy_math/std",
   "bevy_platform/std",
+  "bevy_state?/std",
   "bevy_reflect?/std",
   "serde?/std",
 ]
@@ -86,6 +88,9 @@ serialize = ["dep:serde", "bevy_input/serialize", "bevy_math/serialize"]
 
 # bevy_input_focus integration: focus-activated contexts, dispatch effects (D4, R22.10).
 focus = ["dep:bevy_input_focus"]
+
+# bevy_state integration: a context's activation follows a game state (R7.1, R7.7).
+state = ["dep:bevy_state"]
 
 # Deliberately absent: a `scene`/BSN feature. Transitions are plain `EntityEvent`s, so `bsn!`
 # attaches observers with no adapter and no dependency either way (R22.15, R22.17).

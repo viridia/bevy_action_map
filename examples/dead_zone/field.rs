@@ -2,6 +2,8 @@
 
 use bevy::prelude::*;
 
+use crate::pause::Simulating;
+
 /// Half the width and height of the field, in world units.
 pub const HALF_EXTENT: Vec2 = Vec2::new(640.0, 360.0);
 
@@ -18,8 +20,8 @@ pub struct Velocity(pub Vec2);
 pub struct Lifetime(pub Timer);
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(FixedUpdate, (integrate, wrap).chain());
-    app.add_systems(Update, expire);
+    app.add_systems(FixedUpdate, (integrate, wrap).chain().in_set(Simulating));
+    app.add_systems(Update, expire.in_set(Simulating));
 }
 
 fn integrate(time: Res<Time>, movers: Query<(&mut Transform, &Velocity)>) {

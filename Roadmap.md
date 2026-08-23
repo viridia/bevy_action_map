@@ -147,17 +147,49 @@ than by the chunk that incurred it — so what a chunk must do is stated in one 
 
 Dead Zone grows a pause menu, which is what forces all of these.
 
-### 13. Context priority, layering, and activation
+### 13. Context priority, layering, and activation **[PARTIAL]**
 
 Dead Zone's pause menu is what forces this, and it also covers the case player death would have
 covered — an interstitial screen with a different context active. Death is therefore polish, and
 stays out of the sequence: it would be a second demonstration of the switch this chunk already makes.
 
-Multiple context instances, priority ordering, activation and deactivation lifecycle, and what
-happens to in-flight state when a context deactivates mid-hold (R7.4, R7.5).
+- **Delivered:** the activation lifecycle. A context can be stood down and brought back; standing it
+  down cancels whatever was in flight rather than leaving a hold stuck for as long as the menu is up
+  (R7.4); bringing it back ignores controls the player is already holding, with an opt-out for the
+  case where a context is taking over from one that was driving the same stick (R7.5). An inactive
+  context keeps tracking its devices, so coming back costs nothing (R7.6). Dead Zone pauses and
+  resumes on one key bound in both contexts.
+- **Outstanding → chunk 14:** priority does nothing yet. `PRIORITY` is declared on every context and
+  ignored, because what it orders is arbitration between contexts binding the same control, and
+  that is chunk 14's single-pass algorithm. R7.1 is half-met: the order is explicit, not yet
+  inspectable or effective.
+- **Outstanding → chunk 14:** additive layers (R7.3). A layer is a higher-priority context binding a
+  subset of the same controls, so it should fall out of arbitration rather than need a mechanism of
+  its own — which is a claim worth testing there rather than asserting here.
+- **Outstanding → chunk 17:** an analog action whose control has no deadzone can never satisfy
+  require-reset, because a stick that idles at 0.02 is never at rest, and the action stays quiet
+  after every activation. Documented on `activate`, but a binding with an analog source and no
+  deadzone is something plan-build diagnostics should say out loud.
+- **Also delivered, after the first attempt read badly:** `add_context_in_state` ties a context's
+  activation to a Bevy state, which is where most of them belong — a pause menu is the poster child.
+  The first version had the game hold both facts, a state and two hand-driven contexts, and keep
+  them in step; the version that shipped has the contexts follow, so there is one fact and nothing
+  to disagree. Declaring a context that starts inactive falls out, which was the gap this chunk
+  would otherwise have left.
+- **Outstanding → chunk 27, leaning toward adopting BEI's shape:** a context follows one state
+  value, and the binding is per context *type* rather than per instance. `bevy_enhanced_input`
+  splits the same job differently — a registration for the (context, state) pair plus an
+  `ActiveInStates` **component** naming the values, so instances can differ and a context can be
+  live in several states at once.
 
-- **Verified by:** Dead Zone pausing and resuming without the pause key re-triggering on the way
-  out — the "pressing E to close a menu instantly re-triggers Interact" bug class, from the game side.
+  BEI leans hard into ECS ideology as a matter of course, and that is worth discounting for; here it
+  is judged to earn its keep, because the flexibility is real rather than incidental. So the
+  expectation is that this moves to a per-entity binding, and what chunk 27 decides is the shape
+  rather than the question — Split Friction is the first place several contexts and several states
+  meet, so it is where the cost of the second declaration can be weighed against what it buys.
+
+- **Outstanding → chunk 13 itself:** R7.7's mutually-exclusive stack. States cover the common case
+  of it, so what remains is whether a stack that is *not* a state is worth its own mechanism.
 
 ### 14. Arbitration and consumption
 
@@ -236,6 +268,13 @@ to unit length, the other remaps a range and therefore falls under D6's one-resc
 
 - **Inherited from chunk 15:** the intent-versus-channel mismatch is an `assert!` at plan build
   rather than a collected diagnostic, alongside the rescaling check it sits next to.
+- **Inherited from chunk 13: a context declared and never spawned says nothing.** Declaring one
+  registers a plan and some systems; if no entity ever carries it, every action in it is silently
+  dead and the failure looks like "that key does nothing". This cost a bug in Dead Zone's own pause
+  menu, in the file that had just been rewritten. A blanket check at startup would be wrong — a
+  per-player context legitimately arrives later — but a **state-driven** context whose state is
+  current and whose instance count is zero is a much narrower signal, and one worth saying out
+  loud.
 - **Review surface:** error text, judged as the deliverable it is. R24.4 distinguishes runtime
   failures (must return errors) from app-build ones (may panic, must be actionable).
 
@@ -380,7 +419,9 @@ of things that would quietly never happen.
 - **The README rewrite** — a user-facing introduction, feature list, and quickstart, with its
   examples lifted from a real game rather than invented.
 - **Comparison with LWIM and `bevy_enhanced_input`** (R22.6) — the migration path the ecosystem will
-  ask for.
+  ask for. The useful question to ask of each BEI difference is not "is this more ECS-shaped" — it
+  reliably is — but "does the ECS-ness earn its keep here". State activation is a case where it
+  does; the comparison should say which cases do not, and why.
 - **Why last:** the first item can be done at any time and the other two document a moving target.
   The README wants chunk 19, after which the feature list stops growing in the player-facing
   direction; the comparison wants chunks 11 and 14, since conditions and arbitration are where the
