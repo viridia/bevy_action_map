@@ -384,4 +384,45 @@ the second tap legitimately begins a fresh sequence. The assertion had encoded a
 the feature rather than a property of it, and now checks the thing that actually matters: that no
 `Fired` appears anywhere in the sequence.
 
+
+---
+
+## Phase V continued — who wins
+
+### Chunk 14: arbitration and consumption
+
+Preceded by settling the question the chunk could not start without: **whether consumption crosses
+tick domains.** It cannot, in one direction. A render-tick context evaluates in `PreUpdate` and a
+fixed-tick one in `FixedPreUpdate`, so the first can take a control from the second and never the
+reverse — priority is not a total order across domains. Recorded in Design §5.2 with the reason it
+is tolerable: the things that claim controls are UI, UI is render-tick, and what they claim from is
+gameplay. `bevy_enhanced_input` keys its consumed set by schedule `TypeId` for the same reason, with
+a comment giving the same multi-run argument, which is about as good as this evidence gets.
+
+**Design.md described an implementation that cannot exist.** §5 had the plan sorting every binding
+touching a control by (priority, chord length) and evaluation walking that list once. A plan belongs
+to one context and cannot see another's bindings, so that list has nowhere to live — and §5.2 rules
+out one spanning two schedules anyway. The two halves of the sort are now resolved separately and
+each where it can be: priority as system ordering fixed at app build, chord length as a stateless
+pre-pass within one evaluation. §5 says so.
+
+**A chord is a property of the binding, not a condition.** `Ctrl+S` is "S while Ctrl is held", which
+is what the binding *reads* rather than a rule about when it fires — closer to a composite source
+than to a hold. The practical benefit is that the plan then knows a chord's length without
+introspecting conditions, which is exactly what R8.1's clash needs.
+
+**Two allocations caught in the hot path.** `controls()` returned a `Vec` and was about to run per
+binding per tick; it became `for_each_control`, with the collecting version kept for a UI. And the
+clash buffer lives on the context state rather than being allocated per fold. R23.2 is easy to
+violate by accident in precisely this kind of code, which is the second time this has come up.
+
+**The `--features libm` configuration found a bug again.** A `chord` field went in without the cfg
+that `ButtonControl` carries. That build — a math backend and no devices at all — is the only one
+that catches this class of mistake, and it has now caught two.
+
+**Mutation testing earned its keep twice.** The consumption test passes if you disable the `consume`
+flag *or* reverse the priority ordering — checking both was what confirmed it tests the ordering
+rather than only the flag. And the chord test passes under the chord gate alone, so disabling only
+the clash was needed to show that R8.1's rule does separate work.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

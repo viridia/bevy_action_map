@@ -2,6 +2,8 @@
 //!
 //! The evaluator resolves bindings and emits a transition log for later dispatch.
 
+use alloc::vec::Vec;
+
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::{Commands, Query, Res};
@@ -16,10 +18,71 @@ use crate::action::{ActionValue, InputContext, Intent, Phase};
 use crate::binding::ButtonControl;
 #[cfg(feature = "gamepad")]
 use crate::binding::Stick;
-use crate::binding::{BindingSource, ButtonThreshold};
+use crate::binding::{BindingSource, ButtonThreshold, Control};
 use crate::condition::Verdict;
 use crate::context::InputContextState;
 use crate::frame::{InputFrame, RawEvent};
+
+/// Which controls have already been claimed this frame, and by which schedule.
+///
+/// Keyed by schedule rather than held flat, so that the three cases in Design §5.2 come out right:
+/// what `PreUpdate` claimed stays claimed for every fixed tick in the frame, what one fixed tick
+/// claimed does not bind the next, and nothing survives into a frame where no fixed tick runs.
+#[derive(bevy_ecs::resource::Resource, Default)]
+pub struct ConsumedControls {
+    // Which context took it, not merely that something did: "consumed" is one of five reasons an
+    // action can silently not fire (R22.1), and the only useful form of the answer names the taker.
+    by_schedule: bevy_platform::collections::HashMap<
+        core::any::TypeId,
+        bevy_platform::collections::HashMap<Control, &'static str>,
+    >,
+}
+
+impl ConsumedControls {
+    /// Whether any schedule has claimed this control.
+    pub fn contains(&self, control: Control) -> bool {
+        self.claimant(control).is_some()
+    }
+
+    /// The path of the context that claimed this control, if one did.
+    pub fn claimant(&self, control: Control) -> Option<&'static str> {
+        self.by_schedule
+            .values()
+            .find_map(|claims| claims.get(&control).copied())
+    }
+
+    fn claim<S: bevy_ecs::schedule::ScheduleLabel>(&mut self, control: Control, by: &'static str) {
+        self.by_schedule
+            .entry(core::any::TypeId::of::<S>())
+            .or_default()
+            .insert(control, by);
+    }
+
+    /// Forgets what one schedule claimed, which it does on entry so that each run decides afresh.
+    fn release<S: bevy_ecs::schedule::ScheduleLabel>(&mut self) {
+        if let Some(set) = self.by_schedule.get_mut(&core::any::TypeId::of::<S>()) {
+            set.clear();
+        }
+    }
+
+    fn release_all(&mut self) {
+        for set in self.by_schedule.values_mut() {
+            set.clear();
+        }
+    }
+}
+
+/// Starts a frame with nothing claimed.
+pub fn release_consumed_controls(mut consumed: bevy_ecs::prelude::ResMut<'_, ConsumedControls>) {
+    consumed.release_all();
+}
+
+/// Starts one run of a schedule with nothing claimed *by that schedule*.
+pub fn release_consumed_in<S: bevy_ecs::schedule::ScheduleLabel>(
+    mut consumed: bevy_ecs::prelude::ResMut<'_, ConsumedControls>,
+) {
+    consumed.release::<S>();
+}
 
 /// One phase change, in the order it happened.
 ///
@@ -57,9 +120,10 @@ pub fn dispatch_transitions<C: InputContext + Component>(
 }
 
 /// Applies the current input frame to every instance of one context.
-pub fn evaluate_context<C: InputContext + Component>(
+pub fn evaluate_context<C: InputContext + Component, S: bevy_ecs::schedule::ScheduleLabel>(
     frame: Res<'_, InputFrame>,
     threshold: Res<'_, ButtonThreshold>,
+    mut consumed: bevy_ecs::prelude::ResMut<'_, ConsumedControls>,
     // The generic clock, which Bevy points at the fixed timestep inside the fixed schedules — so a
     // context is told how long its own tick was rather than how long the frame was (R9.6).
     time: Res<'_, bevy_time::Time>,
@@ -67,7 +131,13 @@ pub fn evaluate_context<C: InputContext + Component>(
 ) {
     let delta = time.delta_secs();
     for mut state in &mut states {
-        state.apply_frame(&frame, &threshold, delta);
+        // Every instance of one context sees the same claims and adds to them together, so two
+        // players sharing a context cannot take controls from each other.
+        let mut claims = Vec::new();
+        state.apply_frame(&frame, &threshold, delta, &consumed, &mut claims);
+        for control in claims {
+            consumed.claim::<S>(control, C::PATH);
+        }
     }
 }
 
@@ -91,6 +161,8 @@ impl<C: InputContext> InputContextState<C> {
         frame: &InputFrame,
         threshold: &ButtonThreshold,
         delta: f32,
+        consumed: &ConsumedControls,
+        claims: &mut Vec<Control>,
     ) {
         // Only what has arrived since this context last looked. Re-reading the whole queue is what
         // made one mouse delta count three times across three fixed ticks.
@@ -120,17 +192,17 @@ impl<C: InputContext> InputContextState<C> {
                 continue;
             }
             self.apply_level_event(&event.event, threshold);
-            self.fold(threshold, Vec2::ZERO, delta, Fold::Level);
+            self.fold(threshold, Vec2::ZERO, delta, Fold::Level, consumed, claims);
             level_changes += 1;
         }
 
         // Time passes even when nothing arrives: a phase has to reach `Ongoing` from `Fired` on its
         // own, and without an event to prompt it nothing else would.
         if level_changes == 0 {
-            self.fold(threshold, Vec2::ZERO, delta, Fold::Level);
+            self.fold(threshold, Vec2::ZERO, delta, Fold::Level, consumed, claims);
         }
 
-        self.fold(threshold, mouse_delta, delta, Fold::Delta);
+        self.fold(threshold, mouse_delta, delta, Fold::Delta, consumed, claims);
     }
 
     /// Moves one control's held state, for the sources that have a state to hold.
@@ -173,7 +245,15 @@ impl<C: InputContext> InputContextState<C> {
     }
 
     /// Resolves one half of the plan against the current device state.
-    fn fold(&mut self, threshold: &ButtonThreshold, mouse_delta: Vec2, delta: f32, kind: Fold) {
+    fn fold(
+        &mut self,
+        threshold: &ButtonThreshold,
+        mouse_delta: Vec2,
+        delta: f32,
+        kind: Fold,
+        consumed: &ConsumedControls,
+        claims: &mut Vec<Control>,
+    ) {
         // Field-level borrows: the fold reads the device state and the plan while writing actions.
         let Self {
             plan,
@@ -181,6 +261,7 @@ impl<C: InputContext> InputContextState<C> {
             transitions,
             require_reset,
             scratch,
+            chord_claims,
             #[cfg(feature = "keyboard")]
             held_buttons,
             #[cfg(feature = "gamepad")]
@@ -193,13 +274,48 @@ impl<C: InputContext> InputContextState<C> {
         // One predicate for every button-shaped part, so a composite and a plain button binding
         // can never disagree about what "pressed" means.
         #[cfg(any(feature = "keyboard", feature = "gamepad"))]
-        let is_pressed = |control: ButtonControl| match control {
-            #[cfg(feature = "keyboard")]
-            ButtonControl::Key(key) => held_buttons.contains(&key),
-            #[cfg(feature = "gamepad")]
-            ButtonControl::GamepadButton(button) => held_gamepad_buttons
-                .get(&button)
-                .is_some_and(|reading| reading.pressed),
+        let is_pressed = |control: ButtonControl| {
+            // A control another context has taken reads as untouched, rather than being skipped:
+            // one part of a composite going away should leave the other three working.
+            if consumed.contains(control.into()) {
+                return false;
+            }
+            match control {
+                #[cfg(feature = "keyboard")]
+                ButtonControl::Key(key) => held_buttons.contains(&key),
+                #[cfg(feature = "gamepad")]
+                ButtonControl::GamepadButton(button) => held_gamepad_buttons
+                    .get(&button)
+                    .is_some_and(|reading| reading.pressed),
+            }
+        };
+
+        // Which chord has the strongest claim on each control. Computed before anything is read,
+        // because a binding cannot know it is out-ranked without looking at the others — and it is
+        // a pure function of what is held, so it costs nothing stateful and can be redone per fold.
+        chord_claims.clear();
+        #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+        if plan.has_chords() {
+            for binding in plan.bindings() {
+                if !binding.chord.iter().copied().all(&is_pressed) {
+                    continue;
+                }
+                binding.source.for_each_control(|control| {
+                    match chord_claims.iter_mut().find(|(seen, _)| *seen == control) {
+                        Some((_, best)) => *best = (*best).max(binding.chord_len),
+                        None => chord_claims.push((control, binding.chord_len)),
+                    }
+                });
+            }
+        }
+        let out_ranked = |binding: &crate::plan::CompiledBinding| {
+            let mut lost = false;
+            binding.source.for_each_control(|control| {
+                lost |= chord_claims
+                    .iter()
+                    .any(|&(seen, best)| seen == control && best > binding.chord_len);
+            });
+            lost
         };
 
         let bindings = plan.bindings();
@@ -228,11 +344,21 @@ impl<C: InputContext> InputContextState<C> {
             // Bindings are grouped by slot, so this inner walk is one action's contributions.
             while index < bindings.len() && bindings[index].slot == slot {
                 let binding = &bindings[index];
+
+                // Two ways to be out of the running before the control is even read: the chord this
+                // binding needs is not held, or a longer one on the same control is (R8.1).
+                #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+                let held_back = !binding.chord.iter().copied().all(&is_pressed)
+                    || (plan.has_chords() && out_ranked(binding));
+                #[cfg(not(any(feature = "keyboard", feature = "gamepad")))]
+                let held_back = false;
+
                 let value = match binding.source {
                     #[cfg(feature = "keyboard")]
-                    BindingSource::Button(key_code) => {
-                        ActionValue::Bool(held_buttons.contains(&key_code))
-                    }
+                    BindingSource::Button(key_code) => ActionValue::Bool(
+                        !consumed.contains(Control::Key(key_code))
+                            && held_buttons.contains(&key_code),
+                    ),
                     #[cfg(any(feature = "keyboard", feature = "gamepad"))]
                     BindingSource::Axis1(parts) => ActionValue::Axis1(axis_from_buttons(
                         is_pressed(parts.negative),
@@ -246,7 +372,13 @@ impl<C: InputContext> InputContextState<C> {
                         let y = axis_from_buttons(is_pressed(parts.down), is_pressed(parts.up));
                         ActionValue::Axis2(Vec2::new(x, y))
                     }
-                    BindingSource::MouseMotion => ActionValue::Axis2(mouse_delta),
+                    BindingSource::MouseMotion => {
+                        ActionValue::Axis2(if consumed.contains(Control::MouseMotion) {
+                            Vec2::ZERO
+                        } else {
+                            mouse_delta
+                        })
+                    }
                     // Both views of a button channel, chosen by what the action asked for. A
                     // trigger carries a fraction, so an analog action gets the travel and a button
                     // action gets the thresholded press — R2.10's case, and the reason a binding
@@ -264,7 +396,11 @@ impl<C: InputContext> InputContextState<C> {
                     }
                     #[cfg(feature = "gamepad")]
                     BindingSource::GamepadAxis(axis) => {
-                        ActionValue::Axis1(held_gamepad_axes.get(&axis).copied().unwrap_or(0.0))
+                        ActionValue::Axis1(if consumed.contains(Control::GamepadAxis(axis)) {
+                            0.0
+                        } else {
+                            held_gamepad_axes.get(&axis).copied().unwrap_or(0.0)
+                        })
                     }
                     #[cfg(feature = "gamepad")]
                     BindingSource::GamepadStick(stick) => {
@@ -280,6 +416,13 @@ impl<C: InputContext> InputContextState<C> {
                 let (condition_scratch, press_scratch) =
                     rest.split_at_mut(binding.conditions.len());
 
+                // Conditions still run: a hold that loses its control has to be told, or it would
+                // resume from where it left off when the control came back.
+                let value = if held_back {
+                    ActionValue::Bool(false)
+                } else {
+                    value
+                };
                 let value = apply_modifiers(value, &binding.modifiers, modifier_scratch, delta);
                 // Where a press comes from something that was not already a press, the threshold
                 // has to settle it here. Reading it later cannot: by then the only question a
@@ -305,6 +448,11 @@ impl<C: InputContext> InputContextState<C> {
                     crate::condition::combine(&binding.conditions, value, condition_scratch, delta);
                 if verdict > best {
                     best = verdict;
+                }
+                // Claimed only on the ticks it actually fires, so a binding that is merely bound to
+                // a control does not hold it against everyone else all the time.
+                if binding.consume && verdict == Verdict::Fired {
+                    claims.extend(binding.source.controls());
                 }
                 let value = if verdict == Verdict::Fired {
                     value
@@ -469,10 +617,7 @@ fn gamepad_stick_value(
     axes: &bevy_platform::collections::HashMap<GamepadAxis, f32>,
     stick: Stick,
 ) -> Vec2 {
-    let (x_axis, y_axis) = match stick {
-        Stick::Left => (GamepadAxis::LeftStickX, GamepadAxis::LeftStickY),
-        Stick::Right => (GamepadAxis::RightStickX, GamepadAxis::RightStickY),
-    };
+    let (x_axis, y_axis) = stick.axes();
     Vec2::new(
         axes.get(&x_axis).copied().unwrap_or(0.0),
         axes.get(&y_axis).copied().unwrap_or(0.0),
@@ -546,7 +691,13 @@ mod tests {
 
         let mut frame = InputFrame::default();
         frame.record(key(ButtonState::Pressed));
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(state.transitions.len(), 1);
         assert_eq!(state.transitions[0].phase, Phase::Fired);
 
@@ -554,7 +705,13 @@ mod tests {
         state.transitions.clear();
 
         // Nothing new arrives; the key is still down.
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert!(
             state.transitions.is_empty(),
             "a held key logged {:?}",
@@ -566,7 +723,13 @@ mod tests {
         );
 
         frame.record(key(ButtonState::Released));
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(state.transitions.len(), 1);
         assert_eq!(state.transitions[0].phase, Phase::Completed);
     }
@@ -586,7 +749,13 @@ mod tests {
         frame.record(key(ButtonState::Pressed));
         frame.record(key(ButtonState::Released));
 
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
 
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
         assert_eq!(phases, [Phase::Fired, Phase::Completed]);
@@ -619,7 +788,13 @@ mod tests {
         frame.record(RawEvent::MouseMotion(Vec2::new(3.0, 0.0)));
         frame.record(RawEvent::MouseMotion(Vec2::new(1.0, -2.0)));
 
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
 
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
         assert_eq!(phases, [Phase::Fired], "one movement, one transition");
@@ -640,7 +815,13 @@ mod tests {
 
         // The player presses the key while the context is not listening.
         frame.record(key(ButtonState::Pressed));
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(
             state.phase::<Jump>(),
             Phase::Idle,
@@ -648,7 +829,13 @@ mod tests {
         );
 
         state.activate();
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(
             state.phase::<Jump>(),
             Phase::Idle,
@@ -658,13 +845,25 @@ mod tests {
 
         // Letting go arms it again without firing anything.
         frame.record(key(ButtonState::Released));
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(state.phase::<Jump>(), Phase::Idle);
         assert!(state.transitions.is_empty());
 
         // And now a real press is a real press.
         frame.record(key(ButtonState::Pressed));
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
     }
 
@@ -678,10 +877,22 @@ mod tests {
 
         state.deactivate();
         frame.record(key(ButtonState::Pressed));
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
 
         state.activate_including_held();
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
     }
 
@@ -695,7 +906,13 @@ mod tests {
         let mut frame = InputFrame::default();
 
         frame.record(key(ButtonState::Pressed));
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
         state.transitions.clear();
 
@@ -753,11 +970,23 @@ mod tests {
 
         // Half deflection for a quarter second, at 180 a second, is 22.5 — and the same stick over
         // a shorter tick moves the action less, which is the entire point.
-        state.apply_frame(&frame, &threshold, 0.25);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            0.25,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(state.value::<Look>().x, 22.5);
 
         state.transitions.clear();
-        state.apply_frame(&frame, &threshold, 0.125);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            0.125,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(state.value::<Look>().x, 11.25);
     }
 
@@ -821,10 +1050,22 @@ mod tests {
         let frame = InputFrame::default();
 
         // Both start at zero and both count to one, so the pair reads 1 rather than 2.
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(state.value::<Counted>(), 1.0);
         // ...and to two on the next tick, having each kept their own count.
-        state.apply_frame(&frame, &threshold, TICK);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(state.value::<Counted>(), 2.0);
     }
 
@@ -844,7 +1085,13 @@ mod tests {
 
         let step = |state: &mut InputContextState<Flying>, frame: &InputFrame| {
             state.transitions.clear();
-            state.apply_frame(frame, &threshold, 0.1);
+            state.apply_frame(
+                frame,
+                &threshold,
+                0.1,
+                &ConsumedControls::default(),
+                &mut Vec::new(),
+            );
             state.phase::<Jump>()
         };
 
@@ -890,7 +1137,13 @@ mod tests {
 
         // The keyboard hold will never finish, so on its own the action is merely charging.
         frame.record(key(ButtonState::Pressed));
-        state.apply_frame(&frame, &threshold, 0.1);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            0.1,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(state.phase::<Jump>(), Phase::Started);
 
         // The pad has no condition, so it fires outright and the action goes with it.
@@ -903,7 +1156,13 @@ mod tests {
                 ),
             ),
         ));
-        state.apply_frame(&frame, &threshold, 0.1);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            0.1,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
         assert!(state.value::<Jump>());
     }
@@ -932,7 +1191,13 @@ mod tests {
                     ),
                 ),
             ));
-            state.apply_frame(frame, &threshold, TICK);
+            state.apply_frame(
+                frame,
+                &threshold,
+                TICK,
+                &ConsumedControls::default(),
+                &mut Vec::new(),
+            );
             state.value::<Jump>()
         };
 

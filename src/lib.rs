@@ -94,6 +94,20 @@ impl bevy_app::Plugin for ActionMapPlugin {
         }
 
         app.init_resource::<binding::ButtonThreshold>();
+        app.init_resource::<eval::ConsumedControls>();
+
+        // Two clearing points, per Design §5.2. The frame's starts everything from nothing; the
+        // fixed one lets a schedule that runs several times decide afresh each run while what
+        // `PreUpdate` claimed still stands.
+        app.add_systems(
+            bevy_app::PreUpdate,
+            eval::release_consumed_controls.before(ActionMapSystems::Evaluate),
+        );
+        app.add_systems(
+            bevy_app::FixedPreUpdate,
+            eval::release_consumed_in::<bevy_app::FixedPreUpdate>
+                .before(ActionMapSystems::Evaluate),
+        );
 
         // Conditions and rate conversions are defined in simulated seconds (R9.6), so a clock is
         // not optional. `DefaultPlugins` brings one; a headless app or a test may not have.
@@ -133,9 +147,9 @@ pub mod prelude {
     #[cfg(any(feature = "keyboard", feature = "gamepad"))]
     pub use crate::binding::{AxisButtons, DirectionalButtons};
     // `MouseMove` is ungated because `BindingSource::MouseMotion` is.
-    pub use crate::binding::{ButtonThreshold, DeadZone, MouseMove};
+    pub use crate::binding::{ButtonThreshold, Control, DeadZone, MouseMove};
     pub use crate::condition::{Condition, ConditionKind, Verdict};
-    pub use crate::context::{ActionMapAppExt, Actions, InputContextState};
+    pub use crate::context::{ActionMapAppExt, Actions, InputContextState, Obstacle};
     pub use crate::event::{Canceled, Completed, Fired, Started};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
     // The derives share their names with the traits above, which is fine — a derive macro and a

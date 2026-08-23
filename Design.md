@@ -232,7 +232,7 @@ the work that would otherwise be per-frame happens (R23.1, R7.6):
 | --- | --- |
 | Action → slot assignment | O(1) state access without hashing (R23.5) |
 | Scratch slot assignment per condition and stateful modifier | §6 |
-| Per-control arbitration order (priority desc, then chord length desc) | Single-pass consumption (R8.1, R8.3) |
+| Each binding's chord length, and whether the plan has any | The clash pre-pass in §5, skipped entirely when it would find nothing (R8.1) |
 | Reverse index: action → bindings | Prompt lookup without scanning (R18.1) |
 | Resolved device-class filters | Per-player routing (R15.3) |
 | Diagnostics: unknown controls, shape mismatches, duplicates | R4.8 |
@@ -287,12 +287,24 @@ flowchart TD
     H -->|no| J[Lower contexts still see it]
 ```
 
-**Arbitration in one pass.** The plan has already sorted every binding that touches a given control by
-(context priority, chord length). At evaluation, walk that list once: the first entry whose context is
-active and whose chord is satisfied claims the control; if it is marked `consume`, the walk for that
-control stops. `Ctrl+S` precedes `S` in the list because its chord is longer, so it wins without any
-special-casing (R8.1), and the whole thing is order-independent with respect to system scheduling
-(R8.3).
+**Arbitration in one pass, resolved in two places.** The obvious shape — one list of every binding
+that touches a control, sorted by (context priority, chord length) — cannot be built: a plan belongs
+to one context and cannot see another's bindings, and §5.2 rules out one list spanning two
+schedules. So the two halves of the sort are resolved separately, and each where it can be:
+
+- **Context priority is system ordering.** `PRIORITY` is a const, so a context's evaluation is
+  placed in a priority-keyed system set ordered against the others in its schedule, once at app
+  build. A higher-priority context therefore runs first and gets to claim a control before anyone
+  else reads it, with no per-frame decision to make.
+- **Chord length is a pre-pass within one evaluation.** Whether a chord is satisfied is a pure
+  function of what is held — no scratch, no conditions — so before any binding is read, the longest
+  satisfied chord on each control is found. A binding whose chord is shorter than the winner on any
+  of its controls reads as rest. `Ctrl+S` beats `S` by length alone, with nothing declared for it
+  (R8.1), and a plan with no chords skips the pass entirely.
+
+Consumption (R8.2) rides on the first of those: a binding marked `consume` records its controls when
+it fires, and contexts evaluating later see them as untouched. Both halves are fixed before the
+frame starts, which is what makes the pass deterministic with respect to system scheduling (R8.3).
 
 ### 5.1 Folding several bindings into one action
 
@@ -335,6 +347,45 @@ observers or re-dispatch effects.
 Because the log records transitions rather than final state, an action that fires *and* completes
 within one tick produces two entries and therefore two observer invocations, in order — which is what
 R3.3 requires and what a "read the current phase" model cannot express.
+
+---
+
+### 5.2 Consumption across tick domains
+
+Arbitration assumes every contender is considered together. Tick domains break that assumption: a
+render-tick context evaluates in `PreUpdate` and a fixed-tick one in `FixedPreUpdate`, which runs
+later in the frame and may run zero times or several. Two things follow, and they have to be decided
+rather than discovered.
+
+**Consumption is recorded per schedule, and a read consults all of them.** Each schedule clears its
+own record when it runs; the frame's sampler clears every record once, at the top. So:
+
+| | |
+| --- | --- |
+| `PreUpdate` consumes a control | every fixed tick in that frame sees it as taken |
+| A fixed tick consumes a control | the next fixed tick does not — each tick is its own decision over its own window |
+| No fixed tick runs at all | nothing is left behind, because the next frame's sampler clears it |
+
+**The consequence, stated plainly: consumption flows forward in schedule order.** A render-tick
+context can take a control from a fixed-tick one; a fixed-tick context cannot take one from a
+render-tick one, whatever the priorities say. That is a real limitation and it is worth being honest
+that priority is therefore not a total order across domains.
+
+It is also the direction every motivating case runs in. A menu, a focused text field, a modal
+overlay — the things that claim controls are UI, UI is render-tick, and the thing being claimed from
+is gameplay, which is fixed-tick. The reverse — a physics tick out-ranking a menu — is not a case
+anyone has asked for, and if one appears the answer is to give the claimant a render-tick context
+rather than to reorder the frame.
+
+`bevy_enhanced_input` reached the same arrangement from the same starting point: it lets a context
+name its schedule, and keys its consumed set by `TypeId` of that schedule, clearing each schedule's
+own record as it runs. Its stated reason is the multi-run case in the table above.
+
+**Within one schedule, contexts evaluate in priority order.** `PRIORITY` is a const on the context
+type, so the order is known when the context is declared, and evaluation is placed in a
+priority-keyed system set ordered against the ones already registered. The number of distinct
+priorities is small, and the ordering is fixed at app build rather than resolved per frame — which
+is what keeps R8.3's single deterministic pass single and deterministic.
 
 ---
 

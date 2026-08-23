@@ -74,6 +74,9 @@ pub struct InputContextState<C> {
     pub(crate) active: bool,
     // Working memory for every modifier and condition in the plan, indexed as the plan says.
     pub(crate) scratch: Vec<Scratch>,
+    // Reused between folds: the longest satisfied chord found on each control. Kept here rather
+    // than allocated per fold, since a plan that uses chords uses them every tick (R23.2).
+    pub(crate) chord_claims: Vec<(crate::binding::Control, u8)>,
     // Parallel to `actions`: this action may not fire until it has been seen at rest once. Set when
     // a context activates, so a control the player was already holding does not read as a fresh
     // press (R7.5).
@@ -105,6 +108,7 @@ impl<C> InputContextState<C> {
             actions,
             active: true,
             scratch: alloc::vec![Scratch::default(); scratch_slots],
+            chord_claims: Vec::new(),
             require_reset: alloc::vec![false; slots],
             transitions: Vec::new(),
             read_through,
@@ -152,6 +156,65 @@ impl<C> InputContextState<C> {
         A: InputAction<Output = bool>,
     {
         self.phase::<A>() == Phase::Fired
+    }
+
+    /// Explains why an action is not firing.
+    ///
+    /// ```ignore
+    /// // Why is the ship not thrusting?
+    /// info!("{:?}", input.why_not::<Thrust>());
+    /// // Consumed { control: Key(KeyW), by: "dead_zone.pause_menu" }
+    /// ```
+    ///
+    /// Checked in the order the obstacles apply, so what comes back is the first thing in the way
+    /// rather than a list. Clearing it may reveal another.
+    pub fn why_not<A>(&self, consumed: &crate::eval::ConsumedControls) -> Obstacle
+    where
+        A: InputAction,
+    {
+        let Some(slot) = self.plan.slot_for_action(A::id()) else {
+            return Obstacle::Unbound;
+        };
+        if !self.active {
+            return Obstacle::ContextInactive;
+        }
+        if self.actions[slot].phase == Phase::Fired || self.actions[slot].phase == Phase::Ongoing {
+            if self.actions[slot].value.to_bool() {
+                return Obstacle::None;
+            }
+            return Obstacle::ConditionPending;
+        }
+        if self.actions[slot].phase == Phase::Started {
+            return Obstacle::ConditionPending;
+        }
+        // A control someone else holds is the most useful answer available, so both of these
+        // outrank the catch-all below even though all three are "the binding read nothing".
+        for binding in self.plan.bindings().iter().filter(|b| b.slot == slot) {
+            let mut taken = None;
+            let mut outranked = None;
+            binding.source.for_each_control(|control| {
+                if taken.is_none()
+                    && let Some(by) = consumed.claimant(control)
+                {
+                    taken = Some(Obstacle::Consumed { control, by });
+                }
+                if outranked.is_none()
+                    && let Some(&(_, chord)) = self
+                        .chord_claims
+                        .iter()
+                        .find(|&&(seen, best)| seen == control && best > binding.chord_len)
+                {
+                    outranked = Some(Obstacle::Outranked { control, chord });
+                }
+            });
+            if let Some(obstacle) = taken.or(outranked) {
+                return obstacle;
+            }
+        }
+        if self.require_reset[slot] {
+            return Obstacle::AwaitingRelease;
+        }
+        Obstacle::NoInput
     }
 
     /// Whether this context is currently driving its actions.
@@ -233,6 +296,53 @@ fn rest_like(value: crate::action::ActionValue) -> crate::action::ActionValue {
     }
 }
 
+/// Why an action is not firing.
+///
+/// When an action does not fire, the cause is invisible from the call site: an inactive context, a
+/// higher-priority context that took the control, a condition still counting, and a control nobody
+/// touched all look exactly alike. This names which it was.
+///
+/// Meant for a debug overlay, a log line, or a breakpoint condition — not for game logic. What it
+/// reports is the *first* obstacle found, so clearing one may reveal another.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Obstacle {
+    /// Nothing is in the way: the action is firing.
+    None,
+    /// This action is not bound in this context.
+    ///
+    /// Usually a typo, or reading the right action from the wrong context.
+    Unbound,
+    /// The context is not active, so none of its bindings are being read.
+    ContextInactive,
+    /// The context has just activated and this control was already held.
+    ///
+    /// It will fire once the player has let go and pressed again. See
+    /// [`activate`](InputContextState::activate).
+    AwaitingRelease,
+    /// A higher-priority context took one of the controls this action reads.
+    Consumed {
+        /// The control that was taken.
+        control: crate::binding::Control,
+        /// The `PATH` of the context that took it.
+        by: &'static str,
+    },
+    /// A longer chord on one of this action's controls took it.
+    ///
+    /// `Ctrl+S` firing is why a plain `S` binding did not. See
+    /// [`with`](crate::binding::BindingHandle::with).
+    Outranked {
+        /// The control the longer chord took.
+        control: crate::binding::Control,
+        /// How many controls that chord requires held, this one included.
+        chord: u8,
+    },
+    /// A condition has begun but has not been satisfied — a hold part way through.
+    ConditionPending,
+    /// Nothing has touched any control this action is bound to.
+    NoInput,
+}
+
 /// System parameter for polling a context's actions.
 ///
 /// Most games have one instance of a given context, and [`value`](Self::value),
@@ -242,6 +352,7 @@ fn rest_like(value: crate::action::ActionValue) -> crate::action::ActionValue {
 #[derive(SystemParam)]
 pub struct Actions<'w, 's, C: InputContext + Component> {
     states: Query<'w, 's, (Entity, &'static InputContextState<C>)>,
+    consumed: bevy_ecs::system::Res<'w, crate::eval::ConsumedControls>,
 }
 
 impl<C: InputContext + Component> Actions<'_, '_, C> {
@@ -294,6 +405,16 @@ impl<C: InputContext + Component> Actions<'_, '_, C> {
         A: InputAction<Output = bool>,
     {
         self.single().fired::<A>()
+    }
+
+    /// Explains why an action on the only instance of this context is not firing.
+    ///
+    /// See [`InputContextState::why_not`].
+    pub fn why_not<A>(&self) -> Obstacle
+    where
+        A: InputAction,
+    {
+        self.single().why_not::<A>(&self.consumed)
     }
 }
 
@@ -419,6 +540,65 @@ impl ActionMapAppExt for App {
     }
 }
 
+/// Where one priority's contexts evaluate, relative to the others in the same schedule.
+///
+/// A value-typed set rather than a marker, so that the priority a context declares becomes the
+/// ordering directly. Higher priorities run first, which is what gives them the chance to claim a
+/// control before anyone else reads it.
+#[derive(bevy_ecs::schedule::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct EvaluateAt(i32);
+
+/// Which priorities have been seen, so a new one can be ordered against them.
+#[derive(Resource, Default)]
+struct DeclaredPriorities {
+    render: alloc::collections::BTreeSet<i32>,
+    fixed: alloc::collections::BTreeSet<i32>,
+}
+
+/// Orders a newly seen priority against every other in its schedule.
+///
+/// Done once per distinct priority at app build rather than per frame, which is what keeps R8.3's
+/// single deterministic pass free of any run-time ordering decision. The number of distinct
+/// priorities is small — it is a handful of layers, not a handful per context.
+fn order_by_priority(
+    app: &mut App,
+    schedule: impl bevy_ecs::schedule::ScheduleLabel + Clone,
+    domain: TickDomain,
+    priority: i32,
+) {
+    let others: alloc::vec::Vec<i32> = {
+        let mut declared = app
+            .world_mut()
+            .get_resource_or_insert_with(DeclaredPriorities::default);
+        let seen = match domain {
+            TickDomain::Render => &mut declared.render,
+            TickDomain::Fixed => &mut declared.fixed,
+        };
+        if !seen.insert(priority) {
+            return;
+        }
+        seen.iter().copied().filter(|&p| p != priority).collect()
+    };
+
+    for other in others {
+        if priority > other {
+            app.configure_sets(
+                schedule.clone(),
+                EvaluateAt(priority).before(EvaluateAt(other)),
+            );
+        } else {
+            app.configure_sets(
+                schedule.clone(),
+                EvaluateAt(priority).after(EvaluateAt(other)),
+            );
+        }
+    }
+    app.configure_sets(
+        schedule,
+        EvaluateAt(priority).in_set(ActionMapSystems::Evaluate),
+    );
+}
+
 /// The half of declaring a context that does not depend on how it is activated.
 fn declare_context<C: InputContext + Component>(
     app: &mut App,
@@ -461,12 +641,27 @@ fn declare_context<C: InputContext + Component>(
         C::PATH
     );
 
-    let evaluate = evaluate_context::<C>.in_set(ActionMapSystems::Evaluate);
     let dispatch = dispatch_transitions::<C>.in_set(ActionMapSystems::Dispatch);
+    let order = EvaluateAt(C::PRIORITY);
     match C::TICK {
-        TickDomain::Render => app.add_systems(PreUpdate, (evaluate, dispatch)),
-        TickDomain::Fixed => app.add_systems(FixedPreUpdate, (evaluate, dispatch)),
-    };
+        TickDomain::Render => {
+            app.add_systems(
+                PreUpdate,
+                (evaluate_context::<C, PreUpdate>.in_set(order), dispatch),
+            );
+            order_by_priority(app, PreUpdate, TickDomain::Render, C::PRIORITY);
+        }
+        TickDomain::Fixed => {
+            app.add_systems(
+                FixedPreUpdate,
+                (
+                    evaluate_context::<C, FixedPreUpdate>.in_set(order),
+                    dispatch,
+                ),
+            );
+            order_by_priority(app, FixedPreUpdate, TickDomain::Fixed, C::PRIORITY);
+        }
+    }
 }
 
 /// Keeps every instance of `C` activated exactly while the app is in `wanted`.
@@ -999,6 +1194,308 @@ mod tests {
             .set(Screen::Menu);
         app.update();
         assert!(!active(&mut app), "leaving the state stands it down again");
+    }
+
+    /// R8.2, in the words the requirement uses: a menu consumes `Escape` so the game behind it does
+    /// not also act on it, while a global screenshot key on `F12` goes on working. Consumption is
+    /// per binding rather than per context precisely so those two can differ.
+    ///
+    /// `FreeLook` is declared at a higher priority than `OnFoot`, and both are render-tick here so
+    /// that one schedule orders them — which is the only direction Design §5.2 allows.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_consuming_binding_takes_only_the_control_it_named() {
+        #[derive(InputAction)]
+        #[action(path = "tests.dismiss", output = bool, intent = Button)]
+        struct Dismiss;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.screenshot", output = bool, intent = Button)]
+        struct Screenshot;
+
+        #[derive(InputContext, Component)]
+        #[context(path = "tests.menu", tick = Render, priority = 10)]
+        struct Menu;
+
+        #[derive(InputContext, Component)]
+        #[context(path = "tests.behind", tick = Render, priority = 0)]
+        struct Behind;
+
+        #[derive(Resource, Default)]
+        struct Seen {
+            dismissed: bool,
+            behind_saw_escape: bool,
+            screenshot: bool,
+        }
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Menu>(|context| {
+            context.bind::<Dismiss>(KeyCode::Escape).consume();
+        });
+        app.add_context::<Behind>(|context| {
+            context.bind::<Jump>(KeyCode::Escape);
+            context.bind::<Screenshot>(KeyCode::F12);
+        });
+        app.world_mut().spawn(Menu);
+        app.world_mut().spawn(Behind);
+        app.init_resource::<Seen>();
+        app.add_systems(
+            Update,
+            |menu: Actions<Menu>,
+             behind: Actions<Behind>,
+             mut seen: bevy_ecs::system::ResMut<'_, Seen>| {
+                seen.dismissed = menu.value::<Dismiss>();
+                seen.behind_saw_escape = behind.value::<Jump>();
+                seen.screenshot = behind.value::<Screenshot>();
+            },
+        );
+
+        app.world_mut()
+            .write_message(press(KeyCode::Escape, Key::Escape, ButtonState::Pressed));
+        app.world_mut()
+            .write_message(press(KeyCode::F12, Key::F12, ButtonState::Pressed));
+        app.update();
+
+        let seen = app.world().resource::<Seen>();
+        assert!(seen.dismissed, "the menu acted on escape");
+        assert!(!seen.behind_saw_escape, "and took it from the game behind");
+        assert!(
+            seen.screenshot,
+            "but f12 was never claimed, so it still works"
+        );
+    }
+
+    /// Each obstacle the query can currently reach, provoked one at a time. The point of the type
+    /// is that these are five different situations that look identical from the call site, so the
+    /// test is worth as much as the feature.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn the_diagnostic_names_which_thing_is_in_the_way() {
+        use crate::binding::Control;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.never_bound", output = bool, intent = Button)]
+        struct NeverBound;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.charged", output = bool, intent = Button)]
+        struct Charged;
+
+        #[derive(InputContext, Component)]
+        #[context(path = "tests.taker", tick = Render, priority = 10)]
+        struct Taker;
+
+        #[derive(InputContext, Component)]
+        #[context(path = "tests.asker", tick = Render, priority = 0)]
+        struct Asker;
+
+        #[derive(Resource, Default)]
+        struct Report(Option<Obstacle>, Option<Obstacle>, Option<Obstacle>);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Taker>(|context| {
+            context.bind::<Jump>(KeyCode::Escape).consume();
+        });
+        app.add_context::<Asker>(|context| {
+            context.bind::<Jump>(KeyCode::Escape);
+            context.bind::<Charged>(KeyCode::Space).hold(10.0);
+        });
+        app.world_mut().spawn(Taker);
+        app.world_mut().spawn(Asker);
+        app.init_resource::<Report>();
+        app.add_systems(
+            Update,
+            |asker: Actions<Asker>, mut report: bevy_ecs::system::ResMut<'_, Report>| {
+                report.0 = Some(asker.why_not::<NeverBound>());
+                report.1 = Some(asker.why_not::<Jump>());
+                report.2 = Some(asker.why_not::<Charged>());
+            },
+        );
+
+        // Nothing pressed at all.
+        app.update();
+        let report = app.world().resource::<Report>();
+        assert_eq!(
+            report.0,
+            Some(Obstacle::Unbound),
+            "reading the wrong context"
+        );
+        assert_eq!(report.1, Some(Obstacle::NoInput), "nobody touched it");
+
+        // Escape taken by the higher-priority context; space held but nowhere near ten seconds.
+        app.world_mut()
+            .write_message(press(KeyCode::Escape, Key::Escape, ButtonState::Pressed));
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+
+        let report = app.world().resource::<Report>();
+        assert_eq!(
+            report.1,
+            Some(Obstacle::Consumed {
+                control: Control::Key(KeyCode::Escape),
+                by: "tests.taker",
+            }),
+            "and it says who took it"
+        );
+        assert_eq!(report.2, Some(Obstacle::ConditionPending), "still charging");
+    }
+
+    /// The two obstacles that need a context to change state under them.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn the_diagnostic_covers_inactive_and_awaiting_release() {
+        use crate::eval::ConsumedControls;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        let entity = app.world_mut().spawn(FreeLook).id();
+        app.update();
+
+        let nothing_taken = ConsumedControls::default();
+        let mut world = app.world_mut();
+
+        {
+            let mut state = world
+                .get_mut::<InputContextState<FreeLook>>(entity)
+                .unwrap();
+            state.deactivate();
+            assert_eq!(
+                state.why_not::<Jump>(&nothing_taken),
+                Obstacle::ContextInactive
+            );
+            // Coming back while the control is already held is the R7.5 case, and it has its own
+            // answer rather than looking like nobody pressed anything.
+            state.activate();
+            assert_eq!(
+                state.why_not::<Jump>(&nothing_taken),
+                Obstacle::AwaitingRelease
+            );
+        }
+
+        let _ = &mut world;
+    }
+
+    /// R8.1: the longest chord wins, and nothing has to be declared for it. Three bindings on one
+    /// key, distinguished only by what is held alongside.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_longer_chord_takes_the_control_from_a_shorter_one() {
+        #[derive(InputAction)]
+        #[action(path = "tests.save", output = bool, intent = Button)]
+        struct Save;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.save_as", output = bool, intent = Button)]
+        struct SaveAs;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.type_s", output = bool, intent = Button)]
+        struct TypeS;
+
+        #[derive(Resource, Default, Debug, PartialEq)]
+        struct Fired {
+            typed: bool,
+            save: bool,
+            save_as: bool,
+        }
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.bind::<TypeS>(KeyCode::KeyS);
+            context
+                .bind::<Save>(KeyCode::KeyS)
+                .with(KeyCode::ControlLeft);
+            context
+                .bind::<SaveAs>(KeyCode::KeyS)
+                .with(KeyCode::ControlLeft)
+                .with(KeyCode::ShiftLeft);
+        });
+        app.world_mut().spawn(FreeLook);
+        app.init_resource::<Fired>();
+        app.add_systems(
+            Update,
+            |input: Actions<FreeLook>, mut fired: bevy_ecs::system::ResMut<'_, Fired>| {
+                *fired = Fired {
+                    typed: input.value::<TypeS>(),
+                    save: input.value::<Save>(),
+                    save_as: input.value::<SaveAs>(),
+                };
+            },
+        );
+
+        let hold = |app: &mut App, key: KeyCode, logical: Key, state: ButtonState| {
+            app.world_mut().write_message(press(key, logical, state));
+        };
+
+        // S alone.
+        hold(
+            &mut app,
+            KeyCode::KeyS,
+            Key::Character("s".into()),
+            ButtonState::Pressed,
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<Fired>(),
+            Fired {
+                typed: true,
+                save: false,
+                save_as: false
+            }
+        );
+
+        // Ctrl joins: the two-key chord takes the S from the one-key binding.
+        hold(
+            &mut app,
+            KeyCode::ControlLeft,
+            Key::Control,
+            ButtonState::Pressed,
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<Fired>(),
+            Fired {
+                typed: false,
+                save: true,
+                save_as: false
+            }
+        );
+
+        // Shift joins: the three-key chord takes it from both.
+        hold(
+            &mut app,
+            KeyCode::ShiftLeft,
+            Key::Shift,
+            ButtonState::Pressed,
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<Fired>(),
+            Fired {
+                typed: false,
+                save: false,
+                save_as: true
+            }
+        );
+
+        // And the diagnostic says so, rather than leaving "S is held but nothing happened".
+        let mut probe = app.world_mut().query::<&InputContextState<FreeLook>>();
+        let state = probe.single(app.world()).unwrap();
+        let consumed = crate::eval::ConsumedControls::default();
+        assert_eq!(
+            state.why_not::<TypeS>(&consumed),
+            Obstacle::Outranked {
+                control: crate::binding::Control::Key(KeyCode::KeyS),
+                chord: 3,
+            }
+        );
     }
 
     /// A tap faster than the tick rate, end to end. Polling can only report where the tick ended —

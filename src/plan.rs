@@ -34,6 +34,12 @@ pub(crate) struct CompiledBinding {
     pub(crate) source: BindingSource,
     pub(crate) modifiers: Vec<BindingModifier>,
     pub(crate) conditions: Vec<BindingCondition>,
+    pub(crate) consume: bool,
+    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+    pub(crate) chord: alloc::vec::Vec<crate::binding::ButtonControl>,
+    // How specific this binding is: one for the control it names, plus one per control it requires
+    // alongside. The clash between two bindings on one control is decided by this and nothing else.
+    pub(crate) chord_len: u8,
     // Where this binding keeps its working memory: the modifiers first, then the conditions. No
     // two share a slot, even when they are the same kind.
     pub(crate) scratch_base: usize,
@@ -58,6 +64,7 @@ pub struct Plan<C> {
     slot_dispatch: Vec<Dispatch>,
     slot_by_action: BTreeMap<ActionId, usize>,
     scratch_count: usize,
+    has_chords: bool,
     _marker: PhantomData<C>,
 }
 
@@ -127,6 +134,13 @@ impl<C> Plan<C> {
                 source: binding.source,
                 modifiers: binding.modifiers,
                 conditions: binding.conditions,
+                consume: binding.consume,
+                #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+                chord_len: 1 + u8::try_from(binding.chord.len()).unwrap_or(u8::MAX),
+                #[cfg(not(any(feature = "keyboard", feature = "gamepad")))]
+                chord_len: 1,
+                #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+                chord: binding.chord,
                 scratch_base,
             });
         }
@@ -135,12 +149,15 @@ impl<C> Plan<C> {
         // equal strength.
         compiled.sort_by_key(|binding| binding.slot);
 
+        let has_chords = compiled.iter().any(|binding| binding.chord_len > 1);
+
         Self {
             bindings: compiled,
             slot_intents,
             slot_dispatch,
             slot_by_action,
             scratch_count,
+            has_chords,
             _marker: PhantomData,
         }
     }
@@ -155,6 +172,13 @@ impl<C> Plan<C> {
 
     pub(crate) fn scratch_count(&self) -> usize {
         self.scratch_count
+    }
+
+    /// Whether any binding requires a control held alongside its own.
+    ///
+    /// A plan with none skips the clash pass entirely, which is most plans.
+    pub(crate) fn has_chords(&self) -> bool {
+        self.has_chords
     }
 
     pub(crate) fn intent_for_slot(&self, slot: usize) -> Intent {

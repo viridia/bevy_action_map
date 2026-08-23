@@ -111,14 +111,14 @@ step and a real game is a better acceptance test than a synthetic one.
 | | |
 | --- | --- |
 | **Works today** | Actions and contexts as types; keyboard, mouse and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled. |
-| **Known wrong today** | Context priority is declared and ignored: two contexts binding one control both see it, and neither can consume it (chunk 14). |
-| **Never built** | Arbitration and consumption, the whole player-facing model. |
+| **Known wrong today** | Nothing outstanding is wrong so much as absent; the player-facing half of the crate does not exist yet. |
+| **Never built** | The whole player-facing model: slots, capture, rebinding, persistence, prompts. |
 
 ---
 
 ## What has landed
 
-Fifteen chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
+Sixteen chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
 fell short of its own description; this table is only an index, and the sequence below is what
 remains.
 
@@ -137,8 +137,9 @@ remains.
 | 15 | Source channel shape | done |
 | 16 | Dead Zone, first playable | playable; no death, which is polish |
 | 12 | Transition log and observers | done |
-| 13 | Context activation lifecycle | done; priority → 14 |
-| 11 | Conditions and the scratch table | done; chords → 14 |
+| 13 | Context activation lifecycle | done |
+| 11 | Conditions and the scratch table | done; forgiveness windows → 34 |
+| 14 | Arbitration and consumption | done; chords on *actions* → 33 |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -147,70 +148,8 @@ than by the chunk that incurred it — so what a chunk must do is stated in one 
 
 ## Phase V — multiple contexts
 
-Dead Zone grows a pause menu, which is what forces all of these.
-
-### 13. Context priority, layering, and activation **[PARTIAL]**
-
-Dead Zone's pause menu is what forces this, and it also covers the case player death would have
-covered — an interstitial screen with a different context active. Death is therefore polish, and
-stays out of the sequence: it would be a second demonstration of the switch this chunk already makes.
-
-- **Delivered:** the activation lifecycle. A context can be stood down and brought back; standing it
-  down cancels whatever was in flight rather than leaving a hold stuck for as long as the menu is up
-  (R7.4); bringing it back ignores controls the player is already holding, with an opt-out for the
-  case where a context is taking over from one that was driving the same stick (R7.5). An inactive
-  context keeps tracking its devices, so coming back costs nothing (R7.6). Dead Zone pauses and
-  resumes on one key bound in both contexts.
-- **Outstanding → chunk 14:** priority does nothing yet. `PRIORITY` is declared on every context and
-  ignored, because what it orders is arbitration between contexts binding the same control, and
-  that is chunk 14's single-pass algorithm. R7.1 is half-met: the order is explicit, not yet
-  inspectable or effective.
-- **Outstanding → chunk 14:** additive layers (R7.3). A layer is a higher-priority context binding a
-  subset of the same controls, so it should fall out of arbitration rather than need a mechanism of
-  its own — which is a claim worth testing there rather than asserting here.
-- **Outstanding → chunk 17:** an analog action whose control has no deadzone can never satisfy
-  require-reset, because a stick that idles at 0.02 is never at rest, and the action stays quiet
-  after every activation. Documented on `activate`, but a binding with an analog source and no
-  deadzone is something plan-build diagnostics should say out loud.
-- **Also delivered, after the first attempt read badly:** `add_context_in_state` ties a context's
-  activation to a Bevy state, which is where most of them belong — a pause menu is the poster child.
-  The first version had the game hold both facts, a state and two hand-driven contexts, and keep
-  them in step; the version that shipped has the contexts follow, so there is one fact and nothing
-  to disagree. Declaring a context that starts inactive falls out, which was the gap this chunk
-  would otherwise have left.
-- **Activation is declared per context *type*, and that is the decision rather than a stopgap.**
-  `bevy_enhanced_input` binds it per *entity* instead — an `ActiveInStates<C, S>` component naming
-  the values — so two instances of one context can follow different states. More capable, and the
-  extra capability is speculative: the per-instance case is already served by calling
-  [`activate`](InputContextState::activate) on the instance, which is imperative but is also the
-  thing a game reaches for when it has the entity in hand anyway. What would be gained is a
-  *declarative* per-entity binding, and no case has yet been named where that beats the method.
-
-  Revisit if Split Friction turns one up — two players whose contexts genuinely want to follow
-  different states, declared rather than driven — and not before.
-
-- **Outstanding → chunk 13 itself:** R7.7's mutually-exclusive stack. States cover the common case
-  of it, so what remains is whether a stack that is *not* a state is worth its own mechanism.
-
-### 14. Arbitration and consumption
-
-The single-pass consumption algorithm (R8.3); chords beating their component bindings; the
-"why didn't this fire" diagnostic query (§9.5's third tier).
-
-- **Gates the rebinding UI.** R19.3 requires conflict detection to use *the same* arbitration rules
-  the runtime applies, so there is nothing to check a candidate binding against until this exists.
-- **Inherited from chunk 11: chord and blocked-by (R6.1).** Both read another *action's* state
-  rather than their own value, so they need the action table that only the evaluator has — and a
-  chord's whole point is out-ranking the bindings it is made of, which is this chunk's algorithm
-  rather than a condition's.
-- **Decide before building: whether consumption crosses tick domains.** Contexts evaluate as one
-  system per context type, unordered against each other, and a render-tick context runs in
-  `PreUpdate` while a fixed-tick one runs in `FixedPreUpdate`. Priority ordering within a domain is
-  a matter of ordering those systems, which `C::PRIORITY` makes possible at declaration time.
-  Across domains it is not: a high-priority *fixed* context cannot consume from a low-priority
-  *render* one, because it runs later. Either consumption is defined within a domain only, or
-  evaluation is restructured so that one pass walks every context in priority order. That belongs
-  in [Design.md](./Design.md) before any of it is written.
+Dead Zone's pause menu forced the first three of these, which have landed; what is left is the one
+that only a focused widget wants.
 
 ### 25. Control classes and class bindings
 
@@ -234,41 +173,8 @@ claim an event.
 
 ## Phase VI — the parts a solo developer trips over
 
-Both chunks here are what R24.8 turned from polish into obligation: the long tail cannot verify what
-it does not own, so mistakes have to be caught rather than discovered in QA that nobody is running.
-
-### 11. Conditions and the `Scratch` table **[PARTIAL]**
-
-- **Delivered:** the `Scratch` record and its per-binding allocation; `dt` and scratch reaching
-  modifiers, which discharges chunk 7; the rate-to-delta conversion R2.9 asked for, so a stick and a
-  mouse can drive one look action again; and the condition catalogue — press, release, down, hold,
-  hold-once, hold-and-release, tap, multi-tap, pulse, and a trait for anything else. R6.2's
-  explicit/implicit/blocking composition is Unreal's, adopted as the requirement invites.
-- **`Phase::Started` was added**, because the five phases could not say "a hold abandoned before it
-  ever fired" — which is neither `Completed` nor `Idle`. `Ongoing` now covers both still-firing and
-  still-charging, told apart by the value: firing has one, charging is at rest. A sixth phase was
-  considered and rejected on the grounds that the value already carries it unambiguously.
-- **Also discharged chunk 15's hysteresis item.** A press derived from an axis or a composite now
-  remembers what it decided last tick, per binding, which is what the scratch table was for.
-- **In Dead Zone:** hyperspace on a double-tap, and an afterburner that opens up after holding the
-  throttle — one control driving two actions that differ only in when they count as having fired.
-- **Outstanding → chunk 14:** chord and blocked-by (R6.1). Both read *another action's* state rather
-  than their own value, which is a different shape of condition, and chord in particular is
-  entangled with the arbitration that decides whether a chord beats its own component bindings.
-- **Outstanding → its own decision, then a chunk:** R6.4's sequences and R6.5's buffering and coyote
-  time. Both are `SHOULD`s, both fit the scratch record as the design predicted, and neither has a
-  consumer yet. R6.5 in particular is called out as a frequent reason teams abandon a general input
-  crate, so it wants a real game asking for it rather than a speculative API.
-- **Outstanding → chunk 17, and R3.4 is a MUST:** an action does not expose its **elapsed time** in
-  its current state, nor R3.5's **progress toward firing**. Both only became meaningful with
-  conditions — before this chunk there was nothing to be part-way through — and both are now sitting
-  in the scratch record already, since a hold's timer is exactly R3.4's elapsed and its ratio to the
-  hold duration is exactly R3.5's progress. What is missing is carrying them out to where a caller
-  can read them, which means widening `ActionState` and is therefore worth doing alongside the other
-  API-shaped work rather than bolted on here. Dead Zone's afterburner is the consumer: it currently
-  shows "charging" as a colour because it cannot show how far along it is.
-- **Review surface:** whether the 24-byte scratch record really covers every condition. So far it
-  does, with `prev`, `time`, `count` and two flag bits between them covering all nine.
+What R24.8 turned from polish into obligation: the long tail cannot verify what it does not own, so
+mistakes have to be caught rather than discovered in QA that nobody is running.
 
 ### 17. The diagnostics tier
 
@@ -388,6 +294,10 @@ can be dismissed. Still nothing rebinds — pressing a row does nothing yet.
 
 - **Why separate from capture:** navigating a menu with a pad is where the awkwardness usually is,
   and mixing it with capture would make it unclear which half was at fault.
+- **Demonstrates R7.3's additive layers,** which chunk 13 predicted would fall out of arbitration
+  rather than need a mechanism of their own, and which nothing in tree has shown. A settings screen
+  sitting over a running game is a higher-priority context binding a subset of the same controls and
+  consuming them. If it needs anything declared beyond that, the prediction was wrong.
 - **Verified by:** operating the whole screen from the Xbox pad without touching the keyboard.
 
 ### 31. The settings screen, rebinding
@@ -469,6 +379,8 @@ to a device, and an unpaired device drives nothing. Plus the join gesture — an
 "a device that just pressed something and is not yet claimed" (R15.4), which is the same read of L1
 that capture uses in chunk 20.
 
+- **Inherited from chunk 14:** R22.1's fifth obstacle, "device not owned by this player", which is
+  unanswerable until something knows who owns what.
 - **The gate here was miscounted.** This sat under "deliberately deferred, gated on a real second
   device", but a keyboard is a device: one pad plus a keyboard is two, and a mixed-scheme pair is the
   arrangement most likely to expose a routing bug, since the two do not share a code path. What
@@ -499,6 +411,33 @@ shared world, one viewport each.
   them.
 
 ---
+
+### 33. Conditions that read other actions
+
+A chord may require another *control* — `with()` — but not another *action*, and `BlockedBy` does
+not exist. Both read a neighbouring slot rather than their own value, which needs the operand
+evaluated first: slots ordered topologically, and a cycle rejected at plan build with a diagnostic
+naming the loop.
+
+- **Why it waits:** self-contained, and nothing in tree wants it. The motivating cases are a
+  modal that blocks an action while it is open, and a chord on an action rather than a key — both
+  of which the settings screen may turn up, and neither of which is worth guessing at first.
+- **Carried from chunks 11 and 14.**
+
+### 34. Forgiveness and sequences
+
+R6.5's **buffering** — accepting an input pressed slightly before it became valid, and firing it
+when it does — and **coyote time**, its mirror image. Plus R6.4's ordered sequences, for combos and
+cheat codes.
+
+- **Why it waits, and why it is not deferred outright:** the requirements name the absence of
+  forgiveness windows as a frequent reason teams abandon a general input crate and hand-roll one.
+  That makes it load-bearing rather than optional — but it is also exactly the kind of thing that
+  goes wrong when guessed at, because the right window lengths and the right *which input* are
+  questions only a real game answers. Dead Zone does not need it. A platformer would, immediately.
+- **Both fit the scratch record** as Design §6 predicted, so this is a condition each, not a
+  redesign.
+- **Carried from chunk 11.**
 
 ### 28. Docs that run
 

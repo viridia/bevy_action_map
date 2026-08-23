@@ -196,6 +196,9 @@ pub(crate) struct BindingSpec {
     pub(crate) source: BindingSource,
     pub(crate) modifiers: Vec<BindingModifier>,
     pub(crate) conditions: Vec<BindingCondition>,
+    pub(crate) consume: bool,
+    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+    pub(crate) chord: Vec<ButtonControl>,
 }
 
 /// Mouse motion as a binding source.
@@ -209,6 +212,39 @@ pub(crate) struct BindingSpec {
 /// so that it does not collide with Bevy's own `MouseMotion` message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MouseMove;
+
+/// One physical control.
+///
+/// A binding names a *source*, which may be a control or an arrangement of several — a directional
+/// composite is four buttons and a stick is two axes. This is what those decompose into, and it is
+/// the granularity at which one context takes a control from another: a menu claiming the movement
+/// keys claims four controls, and a global screenshot key bound to a fifth is unaffected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Control {
+    /// A keyboard key.
+    #[cfg(feature = "keyboard")]
+    Key(KeyCode),
+    /// A gamepad button, including the D-pad and the triggers.
+    #[cfg(feature = "gamepad")]
+    GamepadButton(GamepadButton),
+    /// One axis of a gamepad stick or trigger.
+    #[cfg(feature = "gamepad")]
+    GamepadAxis(GamepadAxis),
+    /// The mouse being moved.
+    MouseMotion,
+}
+
+#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+impl From<ButtonControl> for Control {
+    fn from(control: ButtonControl) -> Self {
+        match control {
+            #[cfg(feature = "keyboard")]
+            ButtonControl::Key(key) => Self::Key(key),
+            #[cfg(feature = "gamepad")]
+            ButtonControl::GamepadButton(button) => Self::GamepadButton(button),
+        }
+    }
+}
 
 /// The binding source used by the first interactive stage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -236,6 +272,51 @@ pub enum BindingSource {
 }
 
 impl BindingSource {
+    /// Calls `visit` with every physical control this source reads.
+    ///
+    /// One for a plain control, four for a directional composite, two for a stick. This is what
+    /// consumption and chord clashes are recorded against, so that taking a composite takes its
+    /// parts rather than an arrangement nothing else can name.
+    ///
+    /// Allocation-free, because it runs per binding per tick (R23.2). Use
+    /// [`controls`](Self::controls) where a collection is more convenient than a callback.
+    pub fn for_each_control(&self, mut visit: impl FnMut(Control)) {
+        match self {
+            #[cfg(feature = "keyboard")]
+            Self::Button(key) => visit(Control::Key(*key)),
+            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            Self::Axis1(parts) => {
+                visit(parts.negative.into());
+                visit(parts.positive.into());
+            }
+            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            Self::Directional2(parts) => {
+                visit(parts.up.into());
+                visit(parts.down.into());
+                visit(parts.left.into());
+                visit(parts.right.into());
+            }
+            Self::MouseMotion => visit(Control::MouseMotion),
+            #[cfg(feature = "gamepad")]
+            Self::GamepadButton(button) => visit(Control::GamepadButton(*button)),
+            #[cfg(feature = "gamepad")]
+            Self::GamepadAxis(axis) => visit(Control::GamepadAxis(*axis)),
+            #[cfg(feature = "gamepad")]
+            Self::GamepadStick(stick) => {
+                let (x, y) = stick.axes();
+                visit(Control::GamepadAxis(x));
+                visit(Control::GamepadAxis(y));
+            }
+        }
+    }
+
+    /// Every physical control this source reads, collected.
+    pub fn controls(&self) -> alloc::vec::Vec<Control> {
+        let mut controls = alloc::vec::Vec::new();
+        self.for_each_control(|control| controls.push(control));
+        controls
+    }
+
     /// The kind of channel this source reports on.
     pub const fn channel_shape(&self) -> ChannelShape {
         match self {
@@ -266,6 +347,17 @@ pub enum Stick {
     Left,
     /// The right stick.
     Right,
+}
+
+#[cfg(feature = "gamepad")]
+impl Stick {
+    /// The horizontal and vertical axes this stick reports on.
+    pub const fn axes(self) -> (GamepadAxis, GamepadAxis) {
+        match self {
+            Self::Left => (GamepadAxis::LeftStickX, GamepadAxis::LeftStickY),
+            Self::Right => (GamepadAxis::RightStickX, GamepadAxis::RightStickY),
+        }
+    }
 }
 
 /// A value that names a control you can bind an action to.
@@ -621,6 +713,40 @@ impl<'a, C> BindingHandle<'a, C> {
         self
     }
 
+    /// Requires another control to be held as well.
+    ///
+    /// This is how `Ctrl+S` is spelled: bind the action to `S`, and add `Ctrl` with this. Call it
+    /// more than once for a longer chord.
+    ///
+    /// ```ignore
+    /// context.bind::<Save>(KeyCode::KeyS).with(KeyCode::ControlLeft);
+    /// context.bind::<SaveAs>(KeyCode::KeyS).with(KeyCode::ControlLeft).with(KeyCode::ShiftLeft);
+    /// ```
+    ///
+    /// **A longer chord wins.** When several bindings read the same control, the one requiring the
+    /// most held alongside it takes the control and the shorter ones do not fire — so `Ctrl+S` does
+    /// not also trigger a plain `S` binding, and `Ctrl+Shift+S` does not trigger either of the
+    /// other two. Nothing has to be declared for that; it follows from the lengths.
+    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+    pub fn with(self, control: impl Into<ButtonControl>) -> Self {
+        self.builder.bindings[self.index].chord.push(control.into());
+        self
+    }
+
+    /// Takes this binding's controls, so that lower-priority contexts do not see them.
+    ///
+    /// Opt-in per binding rather than per context, because a context usually wants to claim only
+    /// some of what it reads: a menu should take `Escape` from the game behind it, while a global
+    /// screenshot key on `F12` goes on working whatever is on screen.
+    ///
+    /// The claim lasts for the rest of the frame, and reaches only contexts that evaluate after
+    /// this one — which means later in priority order, and never backwards across a tick domain.
+    /// A control is claimed only on the ticks the binding actually fires.
+    pub fn consume(self) -> Self {
+        self.builder.bindings[self.index].consume = true;
+        self
+    }
+
     /// Adds an application-defined condition.
     pub fn when<K: Condition>(mut self, condition: K) -> Self {
         self.push_condition(BindingCondition::Custom(Box::new(condition)));
@@ -719,6 +845,9 @@ impl<C> InputContextBuilder<C> {
             source,
             modifiers: Vec::new(),
             conditions: Vec::new(),
+            consume: false,
+            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            chord: Vec::new(),
         });
         let index = self.bindings.len() - 1;
         BindingHandle {
