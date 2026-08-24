@@ -305,7 +305,7 @@ sources of different kinds feed one action (R2.9, §13.R13.2).
   R22.2's inspector dump, and a value that remembers its origin by R2.6. What remained was a second
   storage shape carried by every action so that a few could use it. If a case appears that genuinely
   needs it, it should arrive as its own requirement with that case attached.
-  ([Log](./Log.md#the-review-and-the-requirements-amendments-it-produced))
+  ([Log](./Log-archive.md#the-review-and-the-requirements-amendments-it-produced))
 
 - **R2.5 (SHOULD)** Values must not be normalized/clamped implicitly; clamping is an explicit modifier
   so that e.g. mouse deltas and analog sticks can share a pipeline (§5).

@@ -130,8 +130,8 @@ step and a real game is a better acceptance test than a synthetic one.
 ## What has landed
 
 Twenty-seven chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
-where it fell short of its own description; this table is only an index, and the sequence below is
-what remains.
+where it fell short of its own description — Phase VII onward there, and everything before it in the
+[archive](./Log-archive.md). This table is only an index, and the sequence below is what remains.
 
 | # | Chunk | State |
 | --- | --- | --- |
@@ -693,6 +693,41 @@ Input actually is and settles the three places its model disagrees with ours.
   falsifiable by this chunk — a backend-owned action that accepts a `.hold()` without a diagnostic,
   two modal contexts that must be live on one pad at once, or an input observed twice — and a
   decision this chunk cannot break is a decision that was not made.
+
+### 46. Documents an outsider will read
+
+`Requirements.md` and `Design.md` are 30,000 words between them, and the point of writing them was
+to get them critiqued by people who know Bevy — who owe this project nothing and will not read
+30,000 words to do us a favour. Length is the barrier, and it has to come down before the ask, not
+after. Numbered here rather than left as an intention, because a documentation pass with no chunk
+number is the thing ground rule 5 says will be dropped.
+
+Two questions it has to **answer rather than assume**, since the obvious framing — "remove the
+redundancy" — may be the wrong job:
+
+- **Which document does an outsider actually read?** A reviewer needs one entry point, not two, and
+  neither of these is it: one is a specification and the other is an architecture. What the ask
+  probably wants is a *third*, much shorter document — the argument, not the spec — that says what
+  problem this crate solves, which decisions are load-bearing, and where a reader who disagrees
+  should aim. The other two become the appendix it cites. That is a different job from shortening,
+  and a cheaper one; if it is the right job, most of the rest of this chunk evaporates.
+- **Is the problem redundancy, or is it staleness?** Some duplication is deliberate and should
+  survive: R19.10 is normative and §9.7 is explanatory, they overlap on purpose, and collapsing them
+  costs more than it saves. What is worth hunting is the copy that *did not follow* when a decision
+  moved — chunk 43 found two of those in prose the chunk 39 rename had missed, and neither was
+  visible from the diff. That sweep is worth doing on its own terms whatever happens to the length.
+
+- **The sweep is a reading, not a grep.** This is chunk 39's lesson arriving again: a protect-list
+  keyed on identifiers does not cover prose, and both regressions were found by reading around the
+  change rather than by searching for it.
+- **Not doing: shortening for its own sake.** The rationale given in place is why these documents
+  are worth reading at all, and a requirement stripped to its `MUST` clause is one nobody can argue
+  with — which is the opposite of what the ask is for.
+- **Why this late.** The documents are still moving. Phase VII rewrites the player-facing half of
+  both, and a redundancy pass run before it lands gets redone.
+- **Review surface:** hand it to someone who has read none of it and watch where they stop. That is
+  the only measurement of this chunk that means anything, and it is available cheaply — the same
+  people who would eventually give the critique will give the *first ten minutes* of one for free.
 
 ### 28. Docs that run
 

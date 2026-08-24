@@ -14,7 +14,7 @@ Read them in this order:
 | [Requirements.md](./Requirements.md) | 204 numbered requirements across 24 areas, with prior art from LWIM, bevy_enhanced_input, Unreal, Unity, Steam Input, and Godot. Settled decisions are tagged `(D1)`…`(D7)`; requirements are `R<section>.<n>`. |
 | [Design.md](./Design.md)             | How the requirements are to be satisfied: architecture, data flow, object model, evaluation pipeline, and the developer-experience surface. Commits to positions on the open questions.                         |
 | [Roadmap.md](./Roadmap.md)           | What is left to build, in order. **Start here to write code.**                                                                                                                                                  |
-| [Log.md](./Log.md)                   | What has been built and what building it taught us. Optional: the three above are self-contained, and this exists so they do not have to carry their own history. Read it when a decision looks arbitrary.       |
+| [Log.md](./Log.md)                   | What has been built and what building it taught us, from Phase VII on. Optional: the three above are self-contained, and this exists so they do not have to carry their own history. Read it when a decision looks arbitrary. Phases I–VI are in [Log-archive.md](./Log-archive.md). |
 
 ## Layout
 
