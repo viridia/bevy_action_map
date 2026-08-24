@@ -48,6 +48,7 @@ pub mod plan;
 pub mod player;
 
 // L3
+pub mod capture;
 pub mod inspect;
 pub mod present;
 pub mod rebind;
@@ -75,6 +76,12 @@ pub enum ActionMapSystems {
     Evaluate,
     /// Delivers what changed to observers.
     Dispatch,
+    /// Reads the frame on behalf of a live rebinding capture.
+    ///
+    /// Between [`Sample`](ActionMapSystems::Sample) and
+    /// [`Evaluate`](ActionMapSystems::Evaluate), which is what lets a capture take a control before
+    /// any context acts on it.
+    Capture,
 }
 
 /// The plugin entry point for the mapping layer.
@@ -96,13 +103,20 @@ impl bevy_app::Plugin for ActionMapPlugin {
 
         app.init_resource::<binding::ButtonThreshold>();
         app.init_resource::<eval::ConsumedControls>();
+        app.init_resource::<capture::ReservedControls>();
+
+        // After the release below, or a capture's claim would be cleared the moment it was made.
+        app.add_systems(
+            bevy_app::PreUpdate,
+            capture::run_captures.in_set(ActionMapSystems::Capture),
+        );
 
         // Two clearing points, per Design §5.2. The frame's starts everything from nothing; the
         // fixed one lets a schedule that runs several times decide afresh each run while what
         // `PreUpdate` claimed still stands.
         app.add_systems(
             bevy_app::PreUpdate,
-            eval::release_consumed_controls.before(ActionMapSystems::Evaluate),
+            eval::release_consumed_controls.before(ActionMapSystems::Capture),
         );
         app.add_systems(
             bevy_app::FixedPreUpdate,
@@ -119,7 +133,8 @@ impl bevy_app::Plugin for ActionMapPlugin {
         app.configure_sets(
             bevy_app::PreUpdate,
             (
-                ActionMapSystems::Evaluate.after(ActionMapSystems::Sample),
+                ActionMapSystems::Capture.after(ActionMapSystems::Sample),
+                ActionMapSystems::Evaluate.after(ActionMapSystems::Capture),
                 ActionMapSystems::Dispatch.after(ActionMapSystems::Evaluate),
             ),
         );
@@ -149,6 +164,10 @@ pub mod prelude {
     pub use crate::binding::{AxisButtons, DirectionalButtons};
     // `MouseMove` is ungated because `BindingSource::MouseMotion` is.
     pub use crate::binding::{ButtonThreshold, Control, DeadZone, MouseMove, Part};
+    pub use crate::capture::{
+        CaptureSession, Captured, Conflict, ControlClass, Overlap, Refused, RefusedReason,
+        ReservedControls, conflicts,
+    };
     pub use crate::condition::{Condition, ConditionKind, Verdict};
     pub use crate::context::{ActionMapAppExt, Actions, ActionsQuery, InputContextState, Obstacle};
     pub use crate::event::{Canceled, Completed, Fired, Started};

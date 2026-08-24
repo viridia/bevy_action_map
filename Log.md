@@ -837,4 +837,79 @@ round-trip, but §10.1 stores controls rather than modifier chains, so a custom 
 reaches a saved override file. What still needs it is serializing whole binding definitions, which
 is deferred — so nothing scheduled depends on 17c any more.
 
+### Chunk 20: interactive capture
+
+The chunk as written covered five things, and reading it against the code found that two of them
+could not be built: conflict *policies* and reset-to-default both need somewhere to write an answer,
+and the overrides store §10.1 designs belongs to chunk 23. So the chunk split. Capture, the class
+vocabulary, exclusions, reserved controls and conflict *detection* landed here; applying a rebind
+became chunk 38, sitting where chunk 31 needs it. Detection is a pure query over the slot list and
+was buildable today, which is where the seam naturally was.
+
+**A session is a component, and the first framing of that was wrong.** The proposal said "on the
+entity being rebound", which read as the player or context entity — and a settings screen reached
+from the main menu has neither, so the objection was fair on the words used. What was meant is any
+entity the caller picks, normally the settings row the player activated, which exists from the main
+menu exactly as it does from a pause menu. Capture touches no context entity at all: it reads L1,
+which the sampler fills whether or not anything is spawned. What the component buys over a global
+session is that "which row is listening" is answered by where it *is*, rather than by the screen
+keeping that state beside a session and holding the two in step.
+
+**Arming costs a frame, and the frame is the feature.** The press that opened the capture is still in
+the queue when the session arrives, so a session reading the queue immediately binds whichever key
+the player activated the row with — the classic version of this bug. A session skips what is already
+queued on its first run.
+
+**Excluded and reserved both refuse, and conflating them would have lost the useful half.** An
+excluded control is silent, because it is not being refused: it is busy doing its normal job, which
+is precisely how the key that cancels a capture reaches the thing that cancels it. A reserved control
+is loud, because a player who pressed it meant to bind it and is owed the reason. The example makes
+the distinction visible — `Escape` skips a row while `F1` is refused out loud — and it is read from
+Bevy's own button state there, with no context spawned anywhere, which is R19.5 demonstrated rather
+than asserted.
+
+**Reserving's second half is the half that matters,** and it is what settles OQ-10. Taking no slot
+stops a player rebinding the settings key away; refusing it across the scheme stops them binding
+something else *over* it. Only the first is the obvious reading, and only the first is useless alone.
+Reserving and declaring a slot contradict each other, which is a new plan-build error and a new row
+in the diagnostics catalogue.
+
+**Writing the example found a real bug, which is what examples are for.** Binding one action to a key
+and to a pad button, both mappable, was reported as a duplicate slot key — but R19.15 says uniqueness
+is per *scheme*, and §10.1 stores the two in separate tables. The check was stricter than the
+requirement, in the direction that refuses the ordinary way to write a game offering rebinding on
+both devices. Both collision checks are now keyed by scheme and name together.
+
+**The class vocabulary came out one short of what the roadmap expected.** There is no any-directional
+class, because no single *control* reports a position in two dimensions — a stick is two axes, a
+directional composite is four buttons. Since a player rebinds one part at a time, the case it would
+serve never reaches capture, and a slot that accepts `Axis2` is a stick bound whole, which §9.7 gives
+a tunable instead. `CaptureSession::for_slot` returns `None` there rather than offering a capture
+nothing could satisfy.
+
+**The crate touched an entity after handing it to an observer, which is a rule rather than a
+detail.** Capture triggered `Captured` and *then* queued the removal of the session component. An
+observer is entitled to do anything to the entity it is answered on, including despawning it — a
+settings row that closes when it is answered is ordinary — and the example did exactly that: it
+despawned the answered row and spawned the next one, which took the freed index, so the crate's
+queued removal found a live entity of the wrong generation. Removal now precedes the trigger, and is
+fallible besides, since one run can answer several sessions and the first observer may despawn a
+later one's entity. The observer also now sees the component already gone, so "is this row still
+listening" reads the same from inside an observer as from outside.
+
+Worth recording because the reproduction failed: the same observer, writing the same deferred
+despawn-and-replace, does not error in a small headless app, because whether an observer's deferred
+commands run before or after the ones already queued differs between that and a real `DefaultPlugins`
+game. The unit test that does pin the fix asserts the *contract* — the component is gone by the time
+the observer runs — rather than the crash. A test asserting the crash would have passed before the
+fix, and a test that cannot fail is worse than no test.
+
+**Conflicts are detected and deliberately not carried on the event.** Answering "what else holds
+this" means reading every declared context, which capture cannot do from the middle of the input
+pipeline — and it is the caller's question anyway, since what to do about a clash is a policy. Two
+limits are stated rather than hidden: comparison is at control granularity, so chord-differentiated
+bindings are reported as overlapping (a false positive, which is the safe direction), and a clash
+across two contexts is reported as *possible*, because whether two contexts are ever live together is
+a fact about the game's activation rules and not about its bindings.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

@@ -986,7 +986,12 @@ fn report_slot_collisions<C: InputContext + Component>(app: &App, slots: &[crate
 
     for context in &declared.0 {
         for taken in (context.slots)(app.world()) {
-            if let Some(clash) = slots.iter().find(|slot| slot.key == taken.key) {
+            // Per scheme, like the within-a-context check: one action mappable on both the keyboard
+            // and the pad is two rows in two tables, not a collision.
+            if let Some(clash) = slots
+                .iter()
+                .find(|slot| slot.key == taken.key && slot.scheme == taken.scheme)
+            {
                 panic!(
                     "context `{}` declares a mappable slot named `{}`, which context `{}` already \
                      uses. A saved rebinding of one would land on the other; give one of them a \
@@ -1034,6 +1039,13 @@ fn declare_context<C: InputContext + Component>(
 
     let slots = builder.slots(C::PATH);
     report_slot_collisions::<C>(app, &slots);
+
+    // Flat and global, unlike slots: reserving withholds a control from every capture in its
+    // scheme, including captures for slots declared in other contexts.
+    app.world_mut()
+        .get_resource_or_insert_with(crate::capture::ReservedControls::default)
+        .0
+        .extend(builder.reserved(C::PATH));
 
     // Recorded while `C` is still available: after this, nothing can name the type, so a tool that
     // walks every context has to be handed the way in now.

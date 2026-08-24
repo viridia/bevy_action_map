@@ -796,6 +796,12 @@ the binding's own controls already say which. Declaring it would be a third chan
 what is actually bound. A binding whose parts span both is refused when the context is declared,
 since there is then no one scheme to rebind it in — which is a thing nobody writes on purpose.
 
+*Uniqueness is per scheme, not per context.* Binding one action to a key and to a pad button, both
+mappable, derives the same slot name twice — and is the ordinary way to write a game that offers
+rebinding on both devices. The two are rebound independently (R19.7) and stored in separate tables
+(§10.1), so only a repeat *within* one scheme is a collision. Both collision checks are keyed by
+scheme and name together for that reason.
+
 An explicit name stays available for the case that needs it: `mappable_as("gameplay.strafe")`
 replaces the derived prefix, and is the remedy the collision diagnostic names.
 
@@ -972,6 +978,58 @@ here rather than solved, because the solution is a chunk of its own.
 **Composite structure is not built.** R18.3 also asks for "hold" and "chord of A and B" as structure
 a renderer can compose. Nothing shows a chord yet; when something does, it is a descriptor wrapping
 these names rather than a change to them.
+
+### 10.4 Capture
+
+Every other path through the crate turns a control into a value and discards the control on the way.
+Rebinding wants exactly the discarded half, so capture reads L1 directly rather than going through a
+binding (R19.1) — which is also what makes R19.5 structural: a main-menu settings screen has no
+gameplay contexts spawned and no evaluator stepping, and capture does not notice.
+
+**A session is a component, and it goes on whatever entity the caller picks.** Usually the settings
+row the player activated, so that "which row is listening" is answered by where the component is
+rather than by the screen keeping that state beside a global session. The crate answers with a
+`Captured` event on that same entity and removes the component; removing it yourself cancels. It
+never touches the player or context entities, which is why a screen reached from the main menu works
+the same as one reached from a pause menu.
+
+**Arming costs a frame, deliberately.** The press that opened the capture is still in the queue when
+the session arrives, so a session that read the queue immediately would bind whichever key the player
+activated the row with. A session therefore skips whatever is already queued on its first run.
+
+**Three refusals that look alike and are not.** *Shape and scheme* are the slot's own constraints — a
+keyboard row takes a key, not a pad button, because a rebind is scoped to one scheme (R19.7) and
+crossing schemes would mean a different slot. *Excluded* is the screen's own controls (R19.2), and is
+silent: an excluded control is not being refused, it is busy doing its normal job, which is how the
+key that cancels a capture reaches the thing that cancels it. *Reserved* is declared on a binding and
+is loud, because a player who pressed it meant to bind it.
+
+**Reserving settles OQ-10, and the second half is the half that matters.** A reserved binding takes
+no slot *and* its controls are refused by capture across the scheme. Without the second half a player
+cannot rebind the settings key away but can still bind something else over it, which is the same trap
+through another door. Reserving and declaring a slot contradict each other, and declaring both is a
+plan-build error.
+
+**Only deliberate arrivals are refused out loud.** A stick drifts and a mouse twitches; a screen that
+complained about every reading past its threshold would do nothing else. A press is refused loudly, a
+continuous reading is dropped quietly, and both are claimed so that neither also plays the game.
+
+**Conflicts are detected, not resolved.** Which slots already hold a control is a pure query over the
+slot list, answerable before anything is committed to (R8.6). It is deliberately not carried on the
+`Captured` event: answering it means reading every declared context, which capture cannot do from the
+middle of the input pipeline, and what to *do* about a clash — reject, swap, unbind the other — is a
+policy that needs somewhere to write the answer. Two limits are worth stating. Comparison is at
+control granularity, so two bindings differing only in their chords are reported as overlapping even
+though arbitration would separate them — a false positive rather than a false negative. And a clash
+across two contexts is reported as *possible* rather than certain, because whether two contexts are
+ever live together is a question about the game's own activation rules.
+
+**There is no class of two-dimensional controls,** though R4.9's vocabulary was expected to have one.
+No single control reports a position in two dimensions: a stick is two axes and a directional
+composite is four buttons. Since a player rebinds one part at a time (R19.9), the case it would serve
+never reaches capture — and a slot that accepts `Axis2` is a stick or mouse bound whole, which §9.7
+gives a tunable rather than a rebinding row. `CaptureSession::for_slot` returns `None` for one rather
+than offering a capture that can never be satisfied.
 
 ---
 

@@ -201,6 +201,8 @@ pub(crate) struct BindingSpec {
     // `None` until the binding is declared mappable, which is what makes rebindability opt-in
     // rather than a flag hiding a binding from a screen.
     pub(crate) mappable: Option<SlotDecl>,
+    // Whether the controls this binding reads are withheld from capture across their scheme.
+    pub(crate) reserved: bool,
     #[cfg(any(feature = "keyboard", feature = "gamepad"))]
     pub(crate) chord: Vec<ButtonControl>,
 }
@@ -301,6 +303,28 @@ impl Control {
             Self::MouseMotion => crate::rebind::Scheme::KeyboardMouse,
             #[cfg(feature = "gamepad")]
             Self::GamepadButton(_) | Self::GamepadAxis(_) => crate::rebind::Scheme::Gamepad,
+        }
+    }
+
+    /// The kind of channel this one control reports on.
+    ///
+    /// The counterpart of [`BindingSource::channel_shape`] for a single control rather than an
+    /// arrangement of them, and what decides whether a captured control fits the slot it was
+    /// captured for (R19.1).
+    ///
+    /// Note what is missing: no control answers [`Axis2`](ChannelShape::Axis2). A stick is two
+    /// axes and a directional composite is four buttons, so a two-dimensional reading is always
+    /// something several controls produce together and never something one of them is.
+    pub const fn shape(self) -> ChannelShape {
+        match self {
+            #[cfg(feature = "keyboard")]
+            Self::Key(_) => ChannelShape::Button,
+            // Including the triggers, which carry a fraction on this channel.
+            #[cfg(feature = "gamepad")]
+            Self::GamepadButton(_) => ChannelShape::Button,
+            #[cfg(feature = "gamepad")]
+            Self::GamepadAxis(_) => ChannelShape::Axis1,
+            Self::MouseMotion => ChannelShape::Delta2,
         }
     }
 }
@@ -904,6 +928,35 @@ impl<'a, C> BindingHandle<'a, C> {
         self
     }
 
+    /// Withholds this binding's controls from capture, everywhere in its scheme.
+    ///
+    /// The control that opens the rebinding screen is the case this exists for. It gets no slot of
+    /// its own, so a player cannot rebind it away, and no *other* slot can capture it either, so it
+    /// cannot be quietly shadowed by something bound over the top of it. Without the second half
+    /// the first is worth little: a screen you can still open but whose controls now do two things
+    /// is the same trap arriving by a different door.
+    ///
+    /// ```ignore
+    /// controls.bind::<OpenSettings>(KeyCode::F1).reserved();
+    /// controls.bind::<OpenSettings>(GamepadButton::Select).reserved();
+    /// ```
+    ///
+    /// Reserving is per scheme, because that is the scope a control is unambiguous in: reserving
+    /// `F1` says nothing about the gamepad, and the pad binding above is what reserves `Select`.
+    ///
+    /// Capture refuses a reserved control out loud, with
+    /// [`RefusedReason::Reserved`](crate::capture::RefusedReason::Reserved), rather than ignoring
+    /// it — a player who has just pressed it is owed the reason. That is what separates this from
+    /// [`excluding`](crate::capture::CaptureSession::excluding), which is silent because the
+    /// control is busy doing its normal job.
+    ///
+    /// Reserving and [`mappable`](Self::mappable) contradict each other, and declaring both is
+    /// refused when the context is declared.
+    pub fn reserved(self) -> Self {
+        self.builder.bindings[self.index].reserved = true;
+        self
+    }
+
     /// Adds an application-defined condition.
     pub fn when<K: Condition>(mut self, condition: K) -> Self {
         self.push_condition(BindingCondition::Custom(Box::new(condition)));
@@ -1011,6 +1064,7 @@ impl<C> InputContextBuilder<C> {
             // The action's default, which a binding can then make an exception of either way.
             consume: A::CONSUMES,
             mappable: None,
+            reserved: false,
             #[cfg(any(feature = "keyboard", feature = "gamepad"))]
             chord: Vec::new(),
         });
@@ -1089,6 +1143,27 @@ impl<C> InputContextBuilder<C> {
             });
         }
         slots
+    }
+
+    /// The controls this context withholds from capture.
+    ///
+    /// Flat rather than per-context, because reserving is global across a scheme: a screen key
+    /// reserved in one context must be refused while capturing for a slot declared in another.
+    pub(crate) fn reserved(&self, context: &'static str) -> Vec<crate::capture::ReservedControl> {
+        let mut reserved = Vec::new();
+        for binding in self.bindings.iter().filter(|binding| binding.reserved) {
+            binding.source.for_each_control(|control| {
+                reserved.push(crate::capture::ReservedControl {
+                    control,
+                    action_path: binding.path,
+                    context,
+                });
+            });
+            // A chord's modifier keys are not reserved by reserving the chord. `Ctrl+F1` reserves
+            // `F1`, and reserving `Ctrl` as well would take a modifier out of circulation for
+            // every other binding in the game on the strength of one chord mentioning it.
+        }
+        reserved
     }
 
     pub(crate) fn finish(self) -> Vec<BindingSpec> {

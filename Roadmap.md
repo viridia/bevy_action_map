@@ -121,15 +121,15 @@ step and a real game is a better acceptance test than a synthetic one.
 
 | | |
 | --- | --- |
-| **Works today** | Actions and contexts as types; keyboard, mouse and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled. |
+| **Works today** | Actions and contexts as types; keyboard, mouse and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappable slots and the names to render them with; interactive capture, with reserved and excluded controls and read-only conflict detection. |
 | **Known wrong today** | Nothing outstanding is wrong so much as absent; the player-facing half of the crate does not exist yet. |
-| **Never built** | The whole player-facing model: slots, capture, rebinding, persistence, prompts. |
+| **Never built** | Rebinding itself: nothing can yet change what a control is bound to, or save the change. Also tunables, presets, prompts, and every screen a player would meet. |
 
 ---
 
 ## What has landed
 
-Twenty-three chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
+Twenty-four chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
 fell short of its own description; this table is only an index, and the sequence below is what
 remains.
 
@@ -158,6 +158,7 @@ remains.
 | 18 | Derive completion | done |
 | 19 | Mappable slots and localization keys | done; tunables and presets → 23 and later |
 | 37 | Naming a control | done; composite structure → §18 |
+| 20 | Interactive capture, conflicts, reserved controls | done; the mutation half → 38 |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -171,9 +172,10 @@ that only a focused widget wants.
 
 ### 25. Control classes and class bindings
 
-The binding half of R4.9, which chunk 20 only needs as a filter. A binding may target a class; the
-plan grows the second list Design §4.1 describes, consulted when the per-control index does not
-claim an event.
+The binding half of R4.9. Chunk 20 landed the shape half — `ControlClass`, decided by the channel a
+control reports on — as capture's filter language; what is left is a *binding* that targets a class,
+which means the plan grows the second list Design §4.1 describes, consulted when the per-control
+index does not claim an event.
 
 - **Not doing:** focus integration. Nothing in-tree binds a class until a focused widget does, so
   this chunk lands the mechanism and its tests, and text input follows when D4 does.
@@ -277,26 +279,6 @@ navigable, then something that rebinds. Navigation sits between the first two, s
 cannot move around is a help screen rather than a settings screen — which is exactly why the first
 pass is worth having on its own.
 
-### 20. Interactive capture, conflicts, and reserved controls
-
-Capture filtered by the target slot's intent and shape (R19.1); exclusion lists (R19.2); conflict
-detection against chunk 14's real arbitration rules with a policy the app selects (R19.3); reset to
-default at every scope (R19.4).
-
-- **Settles OQ-10.** A binding declared *reserved* takes no slot **and** its control is refused by
-  capture across the scheme, so the button that opens the rebinding screen cannot be rebound away
-  nor quietly shadowed by something else. Whether a reachability guarantee sits above that is the
-  open half.
-- **Capture reads L1 directly** (R19.1). It is a query over the input frame — "the first event
-  matching this intent, this shape, not excluded, not reserved" — rather than a binding, because
-  what it reports is a control identity that a binding would have thrown away. That also means an
-  evaluator that never runs cannot fire a gameplay action, which is R19.5 for free.
-- **Introduces the shape half of R4.9's class vocabulary** — any-button, any-analog, any-directional
-  — as the filter's language. Exclusion lists and reserved controls use the same vocabulary, so
-  there is one way of naming a set of controls rather than three.
-- **Verified by:** capturing from the **gamepad**, not only the keyboard, which is the case that
-  finds the mistakes.
-
 ### 21. The settings screen, read-only
 
 In Dead Zone: a screen listing every mappable slot with what is currently bound to it. A help
@@ -346,10 +328,33 @@ can be dismissed. Still nothing rebinds — pressing a row does nothing yet.
   consuming them. If it needs anything declared beyond that, the prediction was wrong.
 - **Verified by:** operating the whole screen from the Xbox pad without touching the keyboard.
 
+### 38. Applying a rebind
+
+The mutation half of what chunk 20 was originally written to cover, split out because it needs
+something chunk 20 does not: somewhere to write an answer. **Depends on Design §10.1**, which
+designs the structure it writes into.
+
+- **The overrides store, in memory.** §10.1's structure — rows keyed by slot, valued by control,
+  separated per scheme — plus applying a set to a live context: compiling a variant plan and
+  swapping it into that entity's state, which cancels what was in flight and re-arms require-reset
+  exactly as `deactivate`/`activate` already do. Chunk 23 then adds a file at one end and changes
+  nothing else.
+- **The four conflict policies** (R19.3): reject, swap, duplicate-allowed, unbind-the-other, chosen
+  by the app. Chunk 20 delivered the detection these act on.
+- **Reset to default per binding, per action, per context, and globally** (R19.4). Trivial without a
+  store — "reset" means "remove a row" — and impossible with one that does not exist, which is why
+  it moved here rather than shipping as a no-op.
+- **Inherited from chunk 20: chords are invisible to conflict detection.** Two bindings that share a
+  control and differ in their chords are reported as overlapping. Conservative, so it errs toward
+  mentioning something harmless; whether a policy should act on it is this chunk's call.
+- **Review surface:** whether applying mid-session is genuinely the same path as applying at
+  startup. §10.1 says it must be, because an authority backend rewrites bindings while the game runs
+  (R18.10), and a startup path with a reload bolted on afterwards gets it wrong twice.
+
 ### 31. The settings screen, rebinding
 
 Pressing a row enters capture, the next control pressed takes the slot, and conflicts are reported
-per chunk 20's policy.
+per chunk 38's policy.
 
 ### 23. Persistence of overrides
 
@@ -360,7 +365,8 @@ what remains here is what building it has to get right and what to look at in re
   the `serialize` feature; a game embeds it in its own settings resource, an account payload, or
   anywhere else. `bevy_settings` is one vehicle rather than the vehicle.
 - **Rows keyed by slot, valued by control** — not by action, and not by binding. Which makes this
-  chunk depend on 19 for the keys and on 20 for the capture that produces the values.
+  chunk depend on 19 for the keys, on 20 for the capture that produces the values, and on 38 for the
+  structure itself: by the time this runs, the only thing missing is the file.
 - **Three states per slot** (R17.7): absent, cleared, and owned by someone else. A format with two
   cannot express a player deliberately unbinding something, because absence already means default.
 - **No device identity in it** (R17.8). Bindings name a device class; pairing and calibration are

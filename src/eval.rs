@@ -58,6 +58,16 @@ impl ConsumedControls {
             .insert(control, by);
     }
 
+    /// Takes a control on behalf of a live capture, so that what a player presses at a rebinding
+    /// screen does not also play the game (R19.5).
+    ///
+    /// Claimed under `PreUpdate`, where capture runs, which is what carries it through to the fixed
+    /// schedules: a fixed tick releases only its own claims, so this one still stands when a
+    /// fixed-tick context evaluates later in the frame.
+    pub(crate) fn claim_for_capture(&mut self, control: Control) {
+        self.claim::<bevy_app::PreUpdate>(control, "capture");
+    }
+
     /// Forgets what one schedule claimed, which it does on entry so that each run decides afresh.
     fn release<S: bevy_ecs::schedule::ScheduleLabel>(&mut self) {
         if let Some(set) = self.by_schedule.get_mut(&core::any::TypeId::of::<S>()) {

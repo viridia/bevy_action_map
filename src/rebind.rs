@@ -265,6 +265,32 @@ mod tests {
         });
     }
 
+    /// The same name in two schemes is not a collision, and this is the ordinary way to write a
+    /// game that offers rebinding on both devices: one key and one button, both mappable, both
+    /// called `jump`. They land in separate tables (§10.1), so nothing can be confused for anything.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn one_name_in_two_schemes_is_two_rows_rather_than_a_collision() {
+        use bevy_input::gamepad::GamepadButton;
+
+        #[derive(InputContext)]
+        #[context(path = "rebind_tests.both_devices", tick = Fixed)]
+        struct BothDevices;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<BothDevices>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.bind::<Jump>(GamepadButton::South).mappable();
+        });
+
+        let slots = slots(app.world());
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slots[0].key, slots[1].key, "one name…");
+        assert_eq!(slots[0].scheme, Scheme::KeyboardMouse);
+        assert_eq!(slots[1].scheme, Scheme::Gamepad, "…two schemes");
+    }
+
     /// And the same collision across two contexts, which no single plan can see.
     #[test]
     #[should_panic(expected = "already uses")]

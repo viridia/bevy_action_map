@@ -47,9 +47,9 @@ impl BindingDiagnostic {
             DiagnosticKind::IntentMismatch { .. }
             | DiagnosticKind::RateFromDelta { .. }
             | DiagnosticKind::ChainedRescaling { .. } => Severity::Error,
-            DiagnosticKind::MixedSchemeSlot | DiagnosticKind::DuplicateSlotKey { .. } => {
-                Severity::Error
-            }
+            DiagnosticKind::MixedSchemeSlot
+            | DiagnosticKind::DuplicateSlotKey { .. }
+            | DiagnosticKind::ReservedAndMappable => Severity::Error,
             DiagnosticKind::DuplicateBinding { .. }
             | DiagnosticKind::ConsumeDisagreement { .. } => Severity::Warning,
         }
@@ -105,6 +105,8 @@ pub enum DiagnosticKind {
     },
     /// A mappable binding reads controls from more than one kind of device.
     MixedSchemeSlot,
+    /// A binding is declared both rebindable and reserved, which cannot both be true.
+    ReservedAndMappable,
 }
 
 impl core::fmt::Display for BindingDiagnostic {
@@ -157,6 +159,13 @@ impl core::fmt::Display for BindingDiagnostic {
                  binding each",
                 self.action
             ),
+            DiagnosticKind::ReservedAndMappable => write!(
+                f,
+                "`{}` is declared both mappable and reserved. Reserving withholds a control from \
+                 capture so that it cannot be rebound; a slot exists so that it can. Keep whichever \
+                 one you meant",
+                self.action
+            ),
         }
     }
 }
@@ -185,7 +194,9 @@ fn effective_shape(binding: &BindingSpec) -> Result<ChannelShape, DiagnosticKind
 pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
     let mut found = Vec::new();
     // Slot keys have to be unique across the whole context, so they are gathered as we go rather
-    // than compared pairwise like the checks below.
+    // than compared pairwise like the checks below. Keyed by scheme as well as by name, because
+    // uniqueness is per scheme (R19.15) — binding one action to a key and to a pad button, both
+    // mappable, is the ordinary way to write it, and the two rows live in separate tables.
     let mut keys = alloc::collections::BTreeSet::new();
 
     for (index, binding) in bindings.iter().enumerate() {
@@ -214,13 +225,17 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
             found.push(at(DiagnosticKind::ChainedRescaling { count: rescaling }));
         }
 
+        if binding.reserved && binding.mappable.is_some() {
+            found.push(at(DiagnosticKind::ReservedAndMappable));
+        }
+
         if let Some(declaration) = binding.mappable {
             let prefix = declaration.prefix.unwrap_or(binding.path);
             let mut scheme = None;
             let mut mixed = false;
             binding.source.for_each_part(|part, control| {
                 let key = crate::rebind::SlotKey::new(prefix, part);
-                if !keys.insert(key) {
+                if !keys.insert((control.scheme(), key)) {
                     found.push(at(DiagnosticKind::DuplicateSlotKey { key }));
                 }
                 match scheme {
