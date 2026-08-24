@@ -20,15 +20,11 @@ pub enum Game {
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Simulating;
 
-#[derive(Component, Default, Clone)]
-struct PausedBanner;
-
 pub fn plugin(app: &mut App) {
     app.init_state::<Game>();
     app.configure_sets(Update, Simulating.run_if(in_state(Game::Playing)));
     app.configure_sets(FixedUpdate, Simulating.run_if(in_state(Game::Playing)));
     app.add_systems(OnEnter(Game::Paused), banner.spawn());
-    app.add_systems(OnExit(Game::Paused), hide_banner);
 }
 
 /// Flips the state; the flying context follows on its own.
@@ -55,9 +51,10 @@ pub(crate) fn toggle(
 ///
 /// `.spawn()` is normally reserved for `Startup`, but `OnEnter` is the same kind of schedule for
 /// this purpose: it runs once each time the game is paused, and spawns one banner when it does.
+/// Unpausing needs no system at all: the banner is scoped to the state that spawned it.
 fn banner() -> impl Scene {
     bsn! {
-        PausedBanner
+        DespawnOnExit::<Game>(Game::Paused)
         Text::new("PAUSED")
         TextFont { font_size: 48.0_f32 }
         // A patch: only the three fields that differ are named, and the rest of `Node` keeps its
@@ -67,11 +64,5 @@ fn banner() -> impl Scene {
             top: Val::Percent(42.0),
             left: Val::Percent(40.0),
         }
-    }
-}
-
-fn hide_banner(mut commands: Commands, banner: Query<Entity, With<PausedBanner>>) {
-    for entity in banner {
-        commands.entity(entity).try_despawn();
     }
 }

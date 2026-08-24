@@ -1,12 +1,15 @@
 //! Dead Zone — an asteroids-like game, playable on the keyboard or a gamepad.
 //!
-//! The point of the example is [`actions`], which holds the entire input layer: six actions, two
+//! The point of the example is [`actions`], which holds the entire input layer: seven actions, two
 //! contexts, and the bindings that drive them from either device. Nothing else in the game mentions
 //! a key or a button.
 //!
 //! Fly with `W`/arrow-up and `A`/`D` or the arrow keys, fire with space, jump with left shift, and
 //! pause with escape. On a pad, the right trigger is the throttle and it is analog — the ship burns
 //! as hard as you pull it.
+//!
+//! `F2`, or Y on a pad, opens [`settings`] — the controls screen, which lists every one of those
+//! bindings without being told about any of them.
 //!
 //! The two contexts are the arrangement worth copying. Flying is live only while the game is
 //! playing, so pausing stands it down and whatever the player was holding is canceled rather than
@@ -16,12 +19,14 @@
 #![allow(missing_docs)]
 
 use bevy::prelude::*;
+use bevy_action_map::prelude::*;
 
 mod actions;
 mod asteroids;
 mod field;
 mod overlay;
 mod pause;
+mod settings;
 mod ship;
 
 fn main() {
@@ -48,9 +53,10 @@ fn main() {
             asteroids::plugin,
             pause::plugin,
             overlay::plugin,
+            settings::plugin,
         ))
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))
-        .add_systems(Startup, camera.spawn())
+        .add_systems(Startup, (camera.spawn(), hint))
         .run();
 }
 
@@ -61,4 +67,35 @@ fn main() {
 /// mid-game. `bsn!` is doing very little here, but the shape is the same at every size.
 fn camera() -> impl Scene {
     bsn! { Camera2d }
+}
+
+/// A line in the corner naming the two screens, since a game with no menu advertises nothing.
+///
+/// The keys in it are read out of the mapping list rather than written down here, which is the same
+/// reason the controls screen captions its own close button that way: text naming a control goes
+/// stale the moment somebody changes what the control is.
+fn hint(world: &World, mut commands: Commands) {
+    let all = mappings(world);
+    let key_for = |action| {
+        all.iter()
+            .find(|mapping| mapping.action == action && mapping.scheme == Scheme::KeyboardMouse)
+            .and_then(|mapping| mapping.slots.first())
+            .map_or_else(String::new, |control| control.fallback_label().into_owned())
+    };
+
+    let text = format!(
+        "{} debug overlay   {} controls",
+        key_for(actions::ToggleOverlay::id()),
+        key_for(actions::ToggleSettings::id()),
+    );
+    commands.spawn_scene(bsn! {
+        Text({text})
+        TextFont { font_size: 13.0_f32 }
+        TextColor({Color::srgb(0.35, 0.4, 0.42)})
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(8.0),
+            left: Val::Px(8.0),
+        }
+    });
 }

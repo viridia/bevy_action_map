@@ -121,15 +121,15 @@ step and a real game is a better acceptance test than a synthetic one.
 
 | | |
 | --- | --- |
-| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection. |
-| **Known wrong today** | Nothing outstanding is wrong so much as absent; the player-facing half of the crate does not exist yet. |
-| **Never built** | Rebinding itself: nothing can yet change what a control is bound to, or save the change. Also tunables, presets, prompts, and every screen a player would meet. |
+| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; and the first screen a player sees — Dead Zone's controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout. |
+| **Known wrong today** | The controls screen does not take the controls: the game hears them through it, because nothing yet declares a context for the screen (chunk 30). Otherwise nothing is wrong so much as absent — the player-facing half of the crate is one read-only list and no way to change anything on it. |
+| **Never built** | Rebinding itself: nothing can yet change what a control is bound to, or save the change. Also tunables, presets, prompts, and every screen that does more than list what is already there. |
 
 ---
 
 ## What has landed
 
-Twenty-seven chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+Twenty-eight chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
 where it fell short of its own description — Phase VII onward there, and everything before it in the
 [archive](./Log-archive.md). This table is only an index, and the sequence below is what remains.
 
@@ -162,6 +162,7 @@ where it fell short of its own description — Phase VII onward there, and every
 | 39 | A mapping holds a list of slots | done; reverse lookup → 40, mouse buttons → 41 |
 | 41 | Mouse buttons | done; scroll wheel still unclaimed |
 | 43 | Listed by default | done; the gap it found → 44 |
+| 21 | The settings screen, read-only | done; the caption's reverse lookup → 40, taking the controls → 30 |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -280,7 +281,7 @@ must stay additive: a game that declares none of it keeps working exactly as bef
 mixing them would make it unclear which half was at fault: first a read-only list, then something
 navigable, then something that rebinds. Navigation sits between the first two, since a screen you
 cannot move around is a help screen rather than a settings screen — which is exactly why the first
-pass is worth having on its own.
+pass was worth having on its own. That pass has landed; the two that follow have not.
 
 **The screen Dead Zone is building, stated once.** These are the acceptance criteria for 21, 29, 30
 and 31 together, written down here so that each pass can be judged against the finished thing rather
@@ -300,7 +301,7 @@ than against its own description:
 - **Confirm and Cancel at the bottom**, activatable three ways: mouse click; directional navigation
   then A; and a shortcut, B for cancel and X for confirm. **The button caption includes the
   shortcut**, which is R18.1's reverse lookup showing up as a UI requirement rather than a nicety —
-  see chunk 40.
+  chunk 40 answers it and chunk 47 is how the caption says so without formatting a string by hand.
 - **Two-stage cancel.** B *during a capture* cancels only the capture. B again, with no capture
   live, leaves the screen **without committing**.
 - **Working-copy semantics**, which follow from having a Confirm at all: the screen renders
@@ -308,24 +309,8 @@ than against its own description:
   consult the pending set rather than only what is committed. Chunk 38 owns making it able to.
 
 Chunk 39 built the model half of the three-column table — a mapping holds an ordered list with a
-capacity, and a capture names the slot it fills — and 43 put the fixed rows on it, so 21 draws cells
-for slots that already exist and a gamepad table with something in it.
-
-### 21. The settings screen, read-only
-
-In Dead Zone: a screen listing every mapping with what is currently bound to it. A help
-screen, and nothing more — no buttons, no focus, dismissed by the same control that opened it.
-
-- **Why this first:** it is the smallest thing that exercises iterating the mapping list and
-  rendering a binding as text, which are the two halves of D7 a UI actually needs. If either is
-  awkward here it is awkward everywhere, and there is no capture machinery in the way to obscure it.
-- **Both tables, and the keyboard one has its cells.** `mapping.capacity.slots()` says how many
-  columns to draw and `mapping.slots` fills them in order, so an empty secondary is a blank cell
-  rather than an absent one. Dead Zone ships two-control rows for Thrust, Turn and Fire — the last
-  of them a key and a mouse button in one row — and a spare slot on Hyperspace, so the read-only
-  pass already has every case to draw.
-- **Review surface:** whether a UI author can build this without reaching past the mapping list into
-  this crate's internals. If they cannot, D7 has leaked.
+capacity, and a capture names the slot it fills — 43 put the fixed rows on it, and 21 drew both
+tables from that model alone. What is left is everything that happens when the player presses one.
 
 ### 40. Reverse lookup
 
@@ -340,6 +325,10 @@ needs, and Dead Zone's settings screen needs it for the button captions its own 
 - **It is the inverse of the plan's control index**, which already maps control → bindings, so the
   work is a second index rather than a scan — and building it as a scan first, to see whether the
   index is worth it, is the honest order.
+- **Inherited from chunk 21: the caller already exists, doing it the slow way.** Dead Zone's
+  controls screen captions itself with "Press F2 or North Button to close", which it gets by
+  filtering the mapping list by `ActionId` and reading the controls back out. That is this chunk's
+  scan, written before its index, and it is what the trait has to be able to replace.
 - **Must reflect active contexts and consumption** (R18.2). A prompt for an action a higher-priority
   context is currently consuming is wrong, and this is the part that cannot be answered from the
   plan alone.
@@ -361,6 +350,49 @@ needs, and Dead Zone's settings screen needs it for the button captions its own 
   own. A backend's controls are its own enumeration and cover device families we have no `Control`
   for (R18.9), so a return type of `Vec<Control>` quietly makes the trait ours-only. Getting this
   wrong is cheap to fix here and expensive once callers exist.
+
+### 47. A binding as a text span
+
+The presentation half of R18, made authorable. Bevy's text spans are *entities* — a `Text` is a
+parent and each span below it a child — so a span can carry a component that fills in its own
+string. A component naming an action, with `TextSpan` as a required component, is then everything
+a template needs to say "Press ⟨whatever fires Jump⟩ to jump", with the crate answering the middle
+of the sentence and nothing in the template naming a control.
+
+- **What it replaces, and the acceptance test.** Two callers already format that string by hand:
+  Dead Zone's corner hint and the controls screen's close caption, both of which scan the mapping
+  list and `format!`. Both should become `bsn!` with a span apiece. The button captions chunk 31
+  needs — "Cancel (B)" — are the third caller and the reason the shape has to be authorable rather
+  than a helper function.
+- **Reads through chunk 40's trait**, not through `mappings`. A span asking "what fires this action
+  right now" is exactly R18.1's question, including R18.2's answer about consumption, and going
+  around the trait would give the two callers different answers for the same action.
+- **Disambiguation and formatting are components too**, which is the part worth designing rather
+  than guessing: which scheme, which slot, whether to show one control or all of them joined, and
+  what to do when the action is bound to nothing. Each of those is a reason to add a component
+  beside the first rather than a field nobody sets — but a span with no companions must render
+  something sensible, or the common case pays for the rare one.
+- **This is what makes R18.5 observable, and therefore what owes it.** Live invalidation has sat in
+  the deferred table because nothing displayed a prompt whose staleness could be seen; a span is
+  that thing, and the moment one exists a rebind, a context change or a device change has to reach
+  it. Change detection over the lookup's inputs rather than a per-frame poll, which R18.5 names
+  outright.
+- **And it is where R18.6 stops being theoretical.** A player holding a pad should be shown the pad
+  control, which is the ranking chunk 40 is told to state plainly rather than fake. If that ranking
+  is still "declaration order" when this lands, every prompt in the game is wrong for one of the two
+  devices, so this chunk either wants most-recently-used-device tracking or has to say why not.
+- **A variant per text component, rather than one that guesses.** A span inside a sentence and a
+  whole `Text` that is nothing but the prompt are both ordinary, and they require different things —
+  `TextSpan` for the first, `Text` for the second. Two components requiring one apiece, over shared
+  machinery, beats one component that has to work out which it is in.
+- **Not doing:** glyphs (R18.4). The atlas questions are untouched and the deferred row stands — but
+  the component that resolves an action to *text* is the same component that would later resolve one
+  to an image, so the shape should leave room for a glyph without promising one. Kenney's input
+  prompt set is the candidate atlas and is worth measuring the identifier scheme against; see the
+  deferred table.
+- **Review surface:** what a prompt costs when nothing has changed. Every span in a HUD asking a
+  lookup a question each frame is the thing R18.5 says is not acceptable, and the answer has to be
+  visible in the design rather than assumed from change detection being available.
 
 ### 29. Directional navigation
 
@@ -394,6 +426,11 @@ screen can be dismissed. Still nothing rebinds — pressing a row does nothing y
 
 - **Why separate from capture:** navigating a menu with a pad is where the awkwardness usually is,
   and mixing it with capture would make it unclear which half was at fault.
+- **Inherited from chunk 21: the screen does not take the controls.** It is a state of its own
+  rather than a third `Game` variant, so the ship still answers the throttle while the player reads
+  the table. That was left visible deliberately — standing the flying context down would have hidden
+  the very thing this chunk exists to demonstrate — and it is the acceptance test: with the screen
+  up, the controls it binds must reach it and nothing else.
 - **Demonstrates R7.3's additive layers,** which chunk 13 predicted would fall out of arbitration
   rather than need a mechanism of their own, and which nothing in tree has shown. A settings screen
   sitting over a running game is a higher-priority context binding a subset of the same controls and
@@ -776,6 +813,12 @@ Split Friction does, and because the gate turned out to be met already. Reverse 
 it in chunk 39's grooming, which is also when the §18 row was found to be claiming an asset gate for
 two requirements that have nothing to do with assets.
 
+Those two — live prompt invalidation (R18.5) and most-recently-used device (R18.6) — have now left
+it as well, and their gate is a good example of one that a chunk meets by existing. They waited on
+something that displays a prompt whose staleness could be observed; chunk 47 is that thing, so both
+are written onto it. Glyphs (R18.4) stay, because theirs is an asset-pipeline gate and 47 renders
+text.
+
 Backends (D3) left it in the Steam grooming, and the gate is worth restating because the row used to
 read as though any second implementer would do. It named "one working in-tree path to generalize
 _from_", which is true and was doing no work: what the seam actually waits on is chunks 40 and 38,
@@ -786,9 +829,8 @@ now written onto both, the seam is designed in Design §10.5, and the implemente
 | ------------------------------------------------- | -------------------------------------------------------------------------- |
 | Persistent device identity and calibration (§11)  | two units of the *same kind*, which pad-plus-keyboard does not give         |
 | Mouse wheel as a binding source (R13.3)           | nothing in tree wants it. Chunk 41 landed mouse *buttons* and stopped there deliberately: the wheel is a delta on its own channel, needs the `Line`/`Pixel` normalization R13.3 describes, and shares nothing with a button but the device |
-| Glyph ids (R18.4)                                 | asset-pipeline questions this document does not touch                      |
+| Glyph ids (R18.4)                                 | asset-pipeline questions this document does not touch — but *the art is no longer one of them*: **Kenney's input prompt set** covers keyboard, mouse and the three pad brands and is CC0, so an example can ship one without a licensing conversation. Confirm the licence and the coverage before relying on either. What stays open is the identifier scheme, and Kenney is the way to falsify it: R18.4 wants a key of (brand, control) with a brand → generic → text fallback, and chunk 37's stored names are already the control half — `pad/South` plus a brand is nearly the whole id. If that mapping does not survive contact with a real atlas's file names, R18.4 is wrong rather than merely unbuilt |
 | Tunables (R19.11)                                 | nothing in tree adjusts one. Chunk 19 landed mappings and left tunables reading "23 and later", which is the destination ground rule 5 refuses; chunk 45 needs the preset *format* to leave room for them and does not need them to exist. Wanted by R20.5 and by a game named after a deadzone, so this row is a question to reopen rather than a settled no |
-| Live prompt invalidation (R18.5), most-recently-used device (R18.6) | nothing that displays a prompt, so there is nothing whose staleness could be observed. Neither is asset-gated; the row above used to claim they were |
 | Glyphs from a backend (R18.9), and origins that are not our `Control` | the same asset-pipeline questions as the R18.4 row, arriving from the other side. The seam that has to accommodate them is settled — Design §10.5, and chunk 40's second review surface — so what is deferred is rendering one, not making room for it |
 | Netcode injection and rollback (§10)              | a testbed that actually rolls back; also wants held device state made snapshot-able (R10.3), which chunk 9 left as `BTreeSet`/`HashMap` |
 | Focus-driven context activation (R22.8) and text input | chunks 14 and 25 — priority, arbitration, and class bindings are what *claiming* a control means. D4's other half, dispatch (R22.7), needs none of that and is chunk 29. |

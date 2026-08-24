@@ -86,22 +86,39 @@ impl MappingKey {
     /// shipping translations is never the price of a legible rebinding screen. Use it as the
     /// fallback when a lookup misses, not in place of one.
     pub fn fallback_label(self) -> String {
-        let mut label = String::new();
         // The namespace is for keeping keys apart, not for reading, so only the last segment of the
         // prefix survives: `dead_zone.toggle_overlay` is "Toggle Overlay" rather than "Dead Zone …".
-        let name = self.prefix.rsplit('.').next().unwrap_or(self.prefix);
-        for word in name.split('_').chain(self.part.name()) {
-            if !label.is_empty() {
-                label.push(' ');
-            }
-            let mut characters = word.chars();
-            if let Some(first) = characters.next() {
-                label.extend(first.to_uppercase());
-                label.push_str(characters.as_str());
-            }
-        }
-        label
+        words_of(last_segment(self.prefix).split('_').chain(self.part.name()))
     }
+}
+
+/// Readable text for a localization key, for a game with no translation catalogue.
+///
+/// A mapping's [`category`](Mapping::category) is a key on the same terms as its name, and a screen
+/// that groups rows under headings has to render it. `dead_zone.flight` reads as "Flight". Use it as
+/// the fallback when a catalogue lookup misses, not in place of one.
+pub fn fallback_label(key: &str) -> String {
+    words_of(last_segment(key).split('_'))
+}
+
+/// The part of a key that is meant to be read: `dead_zone.flight` is about flight, not dead zones.
+fn last_segment(key: &str) -> &str {
+    key.rsplit('.').next().unwrap_or(key)
+}
+
+fn words_of<'a>(words: impl Iterator<Item = &'a str>) -> String {
+    let mut label = String::new();
+    for word in words {
+        if !label.is_empty() {
+            label.push(' ');
+        }
+        let mut characters = word.chars();
+        if let Some(first) = characters.next() {
+            label.extend(first.to_uppercase());
+            label.push_str(characters.as_str());
+        }
+    }
+    label
 }
 
 impl core::fmt::Display for MappingKey {
@@ -407,6 +424,16 @@ mod tests {
             label(MappingKey::new("gameplay.lean", Part::Negative)),
             "Lean Negative"
         );
+    }
+
+    /// A category is a key too, and a screen that draws headings needs the same courtesy the row
+    /// names get.
+    #[test]
+    fn a_category_reads_sensibly_without_a_catalogue() {
+        assert_eq!(fallback_label("dead_zone.flight"), "Flight");
+        assert_eq!(fallback_label("dead_zone.fine_control"), "Fine Control");
+        assert_eq!(fallback_label("weapons"), "Weapons");
+        assert_eq!(fallback_label(""), "");
     }
 
     /// Two mappable bindings of one action in one scheme are a default primary and secondary, which

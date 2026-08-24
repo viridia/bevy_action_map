@@ -63,6 +63,11 @@ pub struct Pause;
 #[action(path = "dead_zone.toggle_overlay", output = bool, intent = Button, category = "dead_zone.system")]
 pub struct ToggleOverlay;
 
+/// Open or close the controls screen.
+#[derive(InputAction)]
+#[action(path = "dead_zone.toggle_settings", output = bool, intent = Button, category = "dead_zone.system")]
+pub struct ToggleSettings;
+
 /// The context a living ship flies under.
 ///
 /// Fixed tick, because the ship integrates its own velocity and a frame-rate-dependent burn would
@@ -176,6 +181,11 @@ pub fn plugin(app: &mut App) {
 
         controls.bind::<ToggleOverlay>(KeyCode::F1);
         controls.bind::<ToggleOverlay>(GamepadButton::Select);
+
+        // Listed and fixed, like the two above: the screen that shows what the controls are is not
+        // itself something the player rebinds from inside it.
+        controls.bind::<ToggleSettings>(KeyCode::F2);
+        controls.bind::<ToggleSettings>(GamepadButton::North);
     });
 
     app.add_systems(Startup, shell.spawn());
@@ -197,5 +207,6 @@ fn shell() -> impl Scene {
         Shell
         on(pause::toggle)
         on(crate::overlay::toggle)
+        on(crate::settings::toggle)
     }
 }

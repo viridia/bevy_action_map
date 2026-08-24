@@ -523,3 +523,52 @@ paragraph says why that is uncomfortable: the jam entry's likely outcome is a ga
 remappable controls. The listing flip pays some of that back for free — a game that declares nothing
 still has controls a player can read, which is the readable half of R20.1 — and the obligation the
 paragraph names, making the accessible path *cheap*, is unchanged.
+
+### Chunk 21: the settings screen, read-only
+
+Dead Zone has a controls screen: `F2` or Y opens it, the same control closes it, and it lists every
+binding the game declared in two tables. It reads nothing but `mappings()` — no action type, no
+context, no key — so the same file would draw a different game's controls unchanged. The one action
+it names is the one that closes it, and it names that to render its own caption.
+
+**The column count is the data's, and the same code draws both tables.** A row says how many
+controls it can hold and the widest row in the table decides how many cells every row draws, which
+comes out as three columns for the keyboard — name, primary, secondary — and two for the pad, with
+the screen saying neither. That falls out of chunk 39's model being right about a fixed row: a
+mapping the player cannot change has exactly the slots its defaults fill, so a table of fixed rows
+is one control wide without anything having to special-case it. Hyperspace's spare secondary is the
+case that proves the other half — an empty cell the player will fill, drawn rather than absent.
+
+**A category had no way to be rendered.** A mapping's name is a `MappingKey` with a fallback label
+and its category is a bare `&'static str`, so the first screen to draw headings had to write its own
+title-casing next to the crate's. `rebind::fallback_label(key)` is now the same courtesy for any
+key, and `MappingKey::fallback_label` is written in terms of it. That was the only thing the screen
+needed that D7 did not already offer, which is the answer to this chunk's review surface.
+
+**The screen is a game state, not a flag.** Proposed as a `Showing(bool)` resource with change
+detection, corrected to a `States` enum on the same terms as `Game::Paused`: there is one fact about
+whether the screen is up rather than a screen and a flag that have to agree. Closing it then needs
+no code at all — `DespawnOnExit` on the root is the whole of it, since closing *is* despawning — and
+the pause banner, which had carried a hand-written despawn system since chunk 13, lost it in the
+same edit. Two idioms for one thing in one example was the worse half of that diff.
+
+**It is a separate state from `Game`, so the game keeps running behind it.** Making it a third
+`Game` variant would have stood `Flying` down for free — and would have destroyed what chunk 30 is
+for. The ship still answers the throttle while the screen is up, which is precisely the arrangement
+that chunk needs: a screen over a live game, binding the same controls at a higher priority and
+consuming them. Leaving the bug visible is what makes the fix demonstrable.
+
+**The caption is a reverse lookup done by hand.** "Press F2 or North Button to close" comes from
+filtering the mapping list by `ActionId` and reading the controls back out, which is chunk 40's job
+done the slow way — and it confirms that chunk's instinct that a scan should be written before an
+index. It is written onto 40 as the caller that already exists.
+
+**A screen nobody can find is not a screen.** `F1` and `F2` were discoverable only by reading the
+source, so the game now carries a dim line in the corner naming both. Its text is read out of the
+mapping list rather than written down — the same move the close caption makes, and for the same
+reason: a string naming a control is wrong the moment somebody changes the control.
+
+**Two label overrides, and they are the app's.** `dead_zone.turn.negative` derives as "Turn
+Negative" and a player should read "Turn Left", which is what a catalogue is for: the screen answers
+for the two keys whose derived text is wrong and leaves the rest to the fallback. That the fallback
+is legible for every other row is the point of it existing.

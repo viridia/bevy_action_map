@@ -890,6 +890,8 @@ for mapping in rebind::mappings(world) {
 
     let label = i18n.get(mapping.key)                 // the app's localization layer...
         .unwrap_or_else(|| mapping.key.fallback_label()); // ...or readable text without one (R19.13)
+    // A category is a key on the same terms, and a screen drawing headings needs the same fallback.
+    let heading = mapping.category.map(|c| rebind::fallback_label(c));
 }
 for t in rebind::tunables(world) {
     // t.key, and a typed range the UI renders as a slider or checkbox
@@ -899,7 +901,9 @@ for t in rebind::tunables(world) {
 The list is a flat one across every context, and nothing in it names an action or a context type —
 it goes through the same type-erased door §10's inspection does, so a screen written against it
 works for a game it was not compiled with. Grouping is the caller's: by `category` for headings,
-by `scheme` for which device's worth to show.
+by `scheme` for which device's worth to show — and because a category is a localization key like
+any other, `rebind::fallback_label` renders one for the game that ships no catalogue, which is the
+same courtesy `MappingKey` gets and is written in terms of.
 
 The keys are the whole player-facing vocabulary, and none of them is a string this crate renders.
 That is what keeps R18.3's "no hard-coded English" honest across a whole rebinding row rather than
