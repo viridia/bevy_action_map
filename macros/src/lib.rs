@@ -51,6 +51,8 @@ struct ActionArgs {
     output: Type,
     intent: Ident,
     path: LitStr,
+    category: Option<LitStr>,
+    consume: bool,
 }
 
 struct ContextArgs {
@@ -67,6 +69,11 @@ fn expand_input_action(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
 
     let output = args.output;
     let intent = args.intent;
+    let category = match args.category {
+        Some(category) => quote!(::core::option::Option::Some(#category)),
+        None => quote!(::core::option::Option::None),
+    };
+    let consume = args.consume;
 
     // Spelled out here rather than in the assertion, because a const assertion's message has to be
     // a literal — so the only chance to name the two halves of the mistake is at expansion time.
@@ -90,13 +97,15 @@ fn expand_input_action(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
             type Output = #output;
             const INTENT: ::bevy_action_map::action::Intent = ::bevy_action_map::action::Intent::#intent;
             const PATH: &'static str = #path;
+            const CATEGORY: ::core::option::Option<&'static str> = #category;
+            const CONSUMES: bool = #consume;
 
             fn id() -> ::bevy_action_map::action::ActionId {
                 // Rust has no generic statics, so the cache cannot live on the trait's default
                 // method — but this impl is concrete, so it can hold one.
                 static ID: ::bevy_action_map::action::ActionIdCache =
                     ::bevy_action_map::action::ActionIdCache::new();
-                ID.get_or_intern(#path)
+                ID.get_or_intern::<Self>()
             }
         }
     })
@@ -113,12 +122,37 @@ fn expand_input_context(input: DeriveInput) -> Result<proc_macro2::TokenStream> 
         .priority
         .unwrap_or_else(|| LitInt::new("0", ident.span()));
 
+    // A context is only usable as a component, so deriving one without the other is never what
+    // was meant. `Default` and `Clone` come along because a scene format needs to construct and
+    // copy the component to spawn it. All three are trivial on a unit struct; a context that needs
+    // to configure its component differently should implement `InputContext` by hand, which is
+    // three associated consts.
     Ok(quote! {
         impl ::bevy_action_map::action::InputContext for #ident {
             const TICK: ::bevy_action_map::action::TickDomain = ::bevy_action_map::action::TickDomain::#tick;
             const PRIORITY: i32 = #priority;
             const PATH: &'static str = #path;
         }
+
+        impl ::bevy_action_map::__macro_exports::Component for #ident {
+            const STORAGE_TYPE: ::bevy_action_map::__macro_exports::StorageType =
+                ::bevy_action_map::__macro_exports::StorageType::Table;
+            type Mutability = ::bevy_action_map::__macro_exports::Mutable;
+        }
+
+        impl ::core::default::Default for #ident {
+            fn default() -> Self {
+                Self
+            }
+        }
+
+        impl ::core::clone::Clone for #ident {
+            fn clone(&self) -> Self {
+                Self
+            }
+        }
+
+        impl ::core::marker::Copy for #ident {}
     })
 }
 
@@ -150,6 +184,8 @@ fn parse_action_args(
     let mut output = None;
     let mut intent = None;
     let mut path = None;
+    let mut category = None;
+    let mut consume = None;
 
     for attribute in attributes
         .iter()
@@ -167,6 +203,17 @@ fn parse_action_args(
                 )
             } else if meta.path.is_ident("path") {
                 set_once(&mut path, meta.value()?.parse::<LitStr>()?, &meta, "path")
+            } else if meta.path.is_ident("category") {
+                set_once(
+                    &mut category,
+                    meta.value()?.parse::<LitStr>()?,
+                    &meta,
+                    "category",
+                )
+            } else if meta.path.is_ident("consume") {
+                // A flag rather than `consume = true`: it reads as the thing it turns on, and
+                // there is no `consume = false` to write because absent already means that.
+                set_once(&mut consume, (), &meta, "consume")
             } else {
                 Err(meta.error("unsupported #[action(...)] argument"))
             }
@@ -184,6 +231,8 @@ fn parse_action_args(
         output,
         intent,
         path,
+        category,
+        consume: consume.is_some(),
     })
 }
 

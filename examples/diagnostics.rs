@@ -29,7 +29,7 @@ struct Jump;
 #[action(path = "diagnostics.menu", output = bool, intent = Button)]
 struct Menu;
 
-#[derive(InputContext, Component)]
+#[derive(InputContext)]
 #[context(path = "diagnostics.example", tick = Render)]
 struct Example;
 

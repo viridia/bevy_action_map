@@ -947,6 +947,31 @@ any of that is stable loses player data silently on the next patch.
 - **R17.5 (SHOULD)** Serialization must go through `Reflect` + the type registry so third-party
   modifiers/conditions (§5.R5.6) round-trip.
 - **R17.6 (MAY)** Bindings as a hot-reloadable asset, for iteration without recompiling.
+- **R17.7 (MUST)** A saved override set distinguishes three states per slot, and a format with only
+  two loses one of them:
+
+  | | Means | Produced by |
+  | --- | --- | --- |
+  | **absent** | use whatever the game shipped | a slot the player never touched |
+  | **cleared** | the player deliberately removed the binding | R19.3's unbind-the-other policy, or an explicit "clear" |
+  | **not ours** | an external backend owns this action (§0.R0.4, R19.8) | Steam Input and equivalents |
+
+  The distinction is easy to miss because a diff against defaults (R17.1) makes absence meaningful:
+  once "missing" already says "default", clearing a binding has nothing left to say with. The third
+  state matters for the same reason — a backend-owned action must not read as one the player
+  cleared, and saving must not invent rows for actions we do not own.
+- **R17.8 (MUST)** Binding overrides must not carry device identity. What a player bound is a
+  control on a device *class*; which physical unit drives which player is pairing state (§15.R15.6),
+  and how a particular stick rests is calibration state (§11.R11.7). Three stores, keyed
+  differently, and conflating them breaks the case they exist for: two players with identical
+  controllers and identical mappings differ only in pairing, and must not need two copies of one
+  binding table to say so.
+- **R17.9 (MUST)** The serialized form of a control is a stable format this crate owns and
+  round-trip tests, not the `Debug` or `serde` representation of an upstream type. A control name is
+  a serialized key with D8's stability obligation, and deriving it from `KeyCode`'s variant names
+  would put that obligation somewhere we do not control — an upstream rename would silently orphan
+  every saved binding. The format must also carry what the binding layer already distinguishes:
+  physical versus logical keys (§12.R12.1) and device class, at minimum.
 
 ---
 
@@ -1101,6 +1126,13 @@ curves ([IGA file][steam-iga]).
   - **A game with no localization layer must still read sensibly** (R19.13). A fallback renderer
     turning a key into presentable text is required, so that shipping a translation catalogue is
     never the price of seeing a readable rebinding screen.
+
+- **R19.15 (MUST)** Slot keys must be unique within a control scheme, and a collision must be
+  reported when the context is declared rather than discovered by a player. Two cases produce one
+  key for two slots: the same action bound in two contexts, each declaring a slot; and two bindings
+  of one action in one scheme. Both are ordinary things to write, and in a saved file both mean a
+  rebind of one slot silently lands on the other. R19.14's explicit override is the remedy; this is
+  what makes an author reach for it.
 
 ---
 

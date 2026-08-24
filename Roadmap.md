@@ -129,7 +129,7 @@ step and a real game is a better acceptance test than a synthetic one.
 
 ## What has landed
 
-Twenty chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
+Twenty-one chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
 fell short of its own description; this table is only an index, and the sequence below is what
 remains.
 
@@ -155,6 +155,7 @@ remains.
 | 17a | Runtime failures (R24.4) | done; the silence it creates → 17b |
 | 17b | Plan-build diagnostics | done; unknown controls → 23, observers → 36 |
 | 36 | Type-erased inspection and the overlay | done |
+| 18 | Derive completion | done |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -256,11 +257,6 @@ the other remaps a range and therefore falls under D6's one-rescaling-stage rule
 - **Why separate:** neither is a diagnostic, and both were riding in 17 because it was the open
   chunk when they were found.
 
-### 18. Derive completion
-
-`category` and `consume` on the action (R1.6), and type-registry registration so persistence and
-external backends can resolve an action by name (R1.7). Small, and needed by chunk 19.
-
 ---
 
 ## Phase VII — the player-facing model
@@ -280,6 +276,12 @@ Slots as the unit of rebinding, one per composite part (R19.9, R19.10). Name key
 action path plus the part name, with an override, and a fallback renderer so a game with no
 localization layer still reads sensibly (R19.14, R19.13).
 
+- **Slot keys must be unique within a scheme, and the collision is silent** (R19.15). Two cases
+  produce one key for two slots: the same action bound in two contexts, and two bindings of one
+  action in one scheme. Both are ordinary, and in a saved file both mean a rebind of one lands on
+  the other. A plan-build diagnostic in 17b's shape, naming both slots.
+- **The keys are what chunk 23 persists,** so this chunk settles the shape of the file whether or
+  not it means to. Design §10.1 is what it has to satisfy.
 - **Review surface:** whether declaring a whole context's buttons mappable is genuinely one line.
   The audience commitment says where a default trades away accessibility the accessible path must be
   cheap, and slots being opt-in is exactly that trade (R20.1).
@@ -360,19 +362,34 @@ per chunk 20's policy.
 
 ### 23. Persistence of overrides
 
-A rebind that does not survive a restart is a demo, not a feature. Diff against defaults, unknown
-entries reported rather than dropped, a version field (R17.1–R17.3).
+A rebind that does not survive a restart is a demo, not a feature. **Designed in Design §10.1**;
+what remains here is what building it has to get right and what to look at in review.
 
-- **Intended vehicle: `bevy_settings`** — overrides live in a reflected resource carrying its
-  derives, so the file format and its location are somebody else's problem.
+- **The crate defines the structure and never learns where it goes.** `Reflect` plus serde behind
+  the `serialize` feature; a game embeds it in its own settings resource, an account payload, or
+  anywhere else. `bevy_settings` is one vehicle rather than the vehicle.
+- **Rows keyed by slot, valued by control** — not by action, and not by binding. Which makes this
+  chunk depend on 19 for the keys and on 20 for the capture that produces the values.
+- **Three states per slot** (R17.7): absent, cleared, and owned by someone else. A format with two
+  cannot express a player deliberately unbinding something, because absence already means default.
+- **No device identity in it** (R17.8). Bindings name a device class; pairing and calibration are
+  separate stores keyed by persistent identity. Two players with identical pads and identical
+  mappings differ only in pairing.
+- **The control encoding is ours** (R17.9), round-trip tested, carrying the physical/logical key
+  distinction (R12.1). Not `Debug`, and not serde on `KeyCode` — those names belong to Bevy.
+- **Applying to a live context is the only path in,** with startup as the first call. An authority
+  backend can rewrite bindings mid-session (R18.10), so a startup-only path would be wrong on at
+  least one platform before it shipped.
 - **Inherited from chunk 17b: unknown controls.** R4.8 names them, and 17b could not write the
-  check — `Control` is a typed enum, so a control that does not exist cannot be spelled. A binding
-  read from a file can name one, which is where the check belongs.
-- **Check before committing to it:** R17.2 requires an entry that no longer resolves to be
-  **reported rather than dropped**, which is what stops a renamed action silently discarding a
-  player's rebind. A settings crate that deserializes and quietly ignores what it does not
+  check — `Control` is a typed enum, so a control that does not exist cannot be spelled. A name
+  read from a file can be anything, which is where the check belongs.
+- **Check before committing to `bevy_settings`:** R17.2 requires an entry that no longer resolves
+  to be **reported rather than dropped**, which is what stops a renamed action silently discarding
+  a player's rebind. A settings crate that deserializes and quietly ignores what it does not
   recognise cannot satisfy that, and most do exactly that. If it cannot be made to, the diff layer
   is ours and only the file handling is theirs.
+- **Review surface:** open the file in a text editor and see whether you can tell what it says. It
+  is a format players will edit by hand whatever we intend.
 
 ---
 

@@ -41,6 +41,23 @@
 //! - **Changing a path is a save-data change, not a refactor.** Every binding a player has
 //!   customized is stored against the old string, so plan a migration the same way you would for
 //!   any other change to a save format.
+//!
+//! # Grouping actions
+//!
+//! `#[action(category = "...")]` says what to file an action under in a rebinding screen, so that
+//! the four parts of a movement action appear together rather than scattered among everything else.
+//!
+//! It is a **localization key**, not display text: this crate never decides what a player reads,
+//! and a category that said "Movement" would be one string your translators cannot reach. Give the
+//! key the same treatment as a path — chosen deliberately, in the same `namespace.name` style, and
+//! stable once anything outside the code refers to it:
+//!
+//! ```text
+//! gameplay.movement      gameplay.combat        menu.navigation
+//! ```
+//!
+//! Actions with no category are ungrouped, which is the right answer for a game that shows no
+//! rebinding screen.
 
 use alloc::vec::Vec;
 use bevy_math::{Vec2, Vec3};
@@ -66,6 +83,44 @@ impl ActionId {
     pub const fn index(self) -> u32 {
         self.0
     }
+
+    /// Finds an action by the path it declared.
+    ///
+    /// This is how a name read from a settings file becomes something you can look up. It answers
+    /// `None` for a path no action in this build declares, which is what happens to a binding
+    /// saved against an action that has since been renamed or removed — worth reporting to the
+    /// player rather than discarding in silence.
+    ///
+    /// Only actions that have been used are registered, which in practice means any action bound
+    /// in a context.
+    pub fn from_path(path: &str) -> Option<Self> {
+        with_registry(|registry| {
+            registry
+                .entries
+                .iter()
+                .find(|(info, _)| info.path == path)
+                .map(|(_, id)| *id)
+        })
+    }
+
+    /// Returns what the action declared about itself.
+    pub fn info(self) -> Option<ActionInfo> {
+        with_registry(|registry| {
+            registry
+                .entries
+                .iter()
+                .find(|(_, id)| *id == self)
+                .map(|(info, _)| *info)
+        })
+    }
+}
+
+/// Every action registered so far, in the order they were first used.
+///
+/// For a screen that lists actions it was not compiled against. Note the order is the order they
+/// happened to be reached, not a declaration order anyone chose, so sort it before showing it.
+pub fn registered_actions() -> alloc::vec::Vec<ActionInfo> {
+    with_registry(|registry| registry.entries.iter().map(|(info, _)| *info).collect())
 }
 
 impl fmt::Debug for ActionId {
@@ -438,6 +493,11 @@ pub trait ActionOutput: Copy + Send + Sync + 'static {
 ///
 /// Give the context a stable, user-chosen path with `#[context(path = "...")]`.
 ///
+/// The derive also makes the type a `Component`, because a context is something an entity carries
+/// — put it on the player, on one entity per local player, or on an entity of its own — and it can
+/// be spawned from a scene like any other component. Write the `InputContext` impl by hand if you
+/// need to configure the component differently; it is three associated constants.
+///
 /// ```rust
 /// use bevy_action_map::prelude::*;
 ///
@@ -524,20 +584,64 @@ pub trait InputAction: Send + Sync + 'static {
     /// Stable path used to identify the action across runs.
     const PATH: &'static str;
 
+    /// What to group this action under in a rebinding screen.
+    ///
+    /// A localization key rather than display text, on the same terms as the action's path: it is
+    /// a name that appears outside your code, so it should survive a refactor. Actions that share a
+    /// category are shown together — the four parts of a movement action, say, under "Movement".
+    ///
+    /// Actions in the same group should give the same key, which is why it lives here rather than
+    /// on each binding: one place to change, and no way for two of them to disagree.
+    const CATEGORY: Option<&'static str> = None;
+
+    /// Whether bindings of this action take their controls away from lower-priority contexts.
+    ///
+    /// A menu's `Back` action wants this: while the menu is up, the control it uses should not also
+    /// reach the game behind it. A global screenshot key does not, since nothing should stop it
+    /// working. Bindings inherit this and can say otherwise one at a time.
+    const CONSUMES: bool = false;
+
     /// Returns the registered id for this action type.
     ///
     /// The derive overrides this with a cached version, so reading an action costs an atomic load
     /// rather than a registry lookup. A hand-written impl gets the uncached path unless it does the
     /// same — see [`ActionIdCache`].
     fn id() -> ActionId {
-        intern_action(Self::PATH)
+        intern_action(ActionInfo::of::<Self>())
+    }
+}
+
+/// What is known about one action without naming its type.
+///
+/// A rebinding screen groups rows by category and labels them from the path; a settings file names
+/// an action by path and has to find it again. Both need this, and neither can name the Rust type
+/// that declared it.
+#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ActionInfo {
+    /// The declared path, which is the action's identity everywhere outside the code.
+    pub path: &'static str,
+    /// What to group it under in a rebinding screen, if the game says.
+    pub category: Option<&'static str>,
+    /// The kind of control that should drive it.
+    pub intent: Intent,
+}
+
+impl ActionInfo {
+    /// Reads the metadata an action type declares.
+    pub const fn of<A: InputAction + ?Sized>() -> Self {
+        Self {
+            path: A::PATH,
+            category: A::CATEGORY,
+            intent: A::INTENT,
+        }
     }
 }
 
 #[derive(Default)]
 struct ActionRegistry {
     next_id: u32,
-    entries: Vec<(&'static str, ActionId)>,
+    entries: Vec<(ActionInfo, ActionId)>,
 }
 
 static ACTION_REGISTRY: bevy_platform::sync::OnceLock<bevy_platform::sync::Mutex<ActionRegistry>> =
@@ -546,7 +650,7 @@ static ACTION_REGISTRY: bevy_platform::sync::OnceLock<bevy_platform::sync::Mutex
 /// The index [`ActionIdCache`] uses to mean "not resolved yet", and therefore never a real id.
 const UNRESOLVED: u32 = u32::MAX;
 
-fn intern_action(path: &'static str) -> ActionId {
+fn intern_action(info: ActionInfo) -> ActionId {
     let mut registry = ACTION_REGISTRY
         .get_or_init(|| bevy_platform::sync::Mutex::new(ActionRegistry::default()))
         .lock()
@@ -555,7 +659,7 @@ fn intern_action(path: &'static str) -> ActionId {
     if let Some((_, id)) = registry
         .entries
         .iter()
-        .find(|(registered_path, _)| *registered_path == path)
+        .find(|(registered, _)| registered.path == info.path)
     {
         return *id;
     }
@@ -564,8 +668,17 @@ fn intern_action(path: &'static str) -> ActionId {
     assert!(index < UNRESOLVED, "action registry exhausted u32 ids");
     registry.next_id = index + 1;
     let id = ActionId(index);
-    registry.entries.push((path, id));
+    registry.entries.push((info, id));
     id
+}
+
+/// Reads the registry, which is global and behind a lock.
+fn with_registry<T>(read: impl FnOnce(&ActionRegistry) -> T) -> T {
+    let registry = ACTION_REGISTRY
+        .get_or_init(|| bevy_platform::sync::Mutex::new(ActionRegistry::default()))
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    read(&registry)
 }
 
 /// Remembers the [`ActionId`] for one action so it is resolved once rather than on every read.
@@ -586,7 +699,7 @@ fn intern_action(path: &'static str) -> ActionId {
 ///
 ///     fn id() -> ActionId {
 ///         static ID: ActionIdCache = ActionIdCache::new();
-///         ID.get_or_intern(Self::PATH)
+///         ID.get_or_intern::<Self>()
 ///     }
 /// }
 /// ```
@@ -598,14 +711,14 @@ impl ActionIdCache {
         Self(AtomicU32::new(UNRESOLVED))
     }
 
-    /// Returns the id for `path`, registering it the first time and reusing it after.
-    pub fn get_or_intern(&self, path: &'static str) -> ActionId {
+    /// Returns the id for an action, registering it the first time and reusing it after.
+    pub fn get_or_intern<A: InputAction + ?Sized>(&self) -> ActionId {
         // Relaxed is enough: nothing is published through this value. It is either the sentinel or
         // the right id, and two threads racing both resolve the same path to the same number, so
         // the worst case is interning once more than necessary.
         match self.0.load(Ordering::Relaxed) {
             UNRESOLVED => {
-                let id = intern_action(path);
+                let id = intern_action(ActionInfo::of::<A>());
                 self.0.store(id.index(), Ordering::Relaxed);
                 id
             }
@@ -685,9 +798,9 @@ mod tests {
         static ID: ActionIdCache = ActionIdCache::new();
 
         // The first call resolves through the registry; later ones must not disagree with it.
-        let first = ID.get_or_intern(Jump::PATH);
-        assert_eq!(first, intern_action(Jump::PATH));
-        assert_eq!(first, ID.get_or_intern(Jump::PATH));
+        let first = ID.get_or_intern::<Jump>();
+        assert_eq!(first, intern_action(ActionInfo::of::<Jump>()));
+        assert_eq!(first, ID.get_or_intern::<Jump>());
         assert_eq!(first, Jump::id());
     }
 
@@ -697,8 +810,8 @@ mod tests {
         static SECOND: ActionIdCache = ActionIdCache::new();
 
         assert_ne!(
-            FIRST.get_or_intern("tests::CacheA"),
-            SECOND.get_or_intern("tests::CacheB")
+            FIRST.get_or_intern::<Jump>(),
+            SECOND.get_or_intern::<Look>()
         );
     }
 
@@ -710,8 +823,54 @@ mod tests {
 
         // Whatever the derive generated has to agree with the registry, or a plan compiled from
         // one and read through the other would silently address the wrong slot.
-        assert_eq!(Derived::id(), intern_action("tests.derived_cache"));
+        assert_eq!(Derived::id(), intern_action(ActionInfo::of::<Derived>()));
         assert_eq!(Derived::id(), Derived::id());
+    }
+
+    /// What a rebinding screen needs and cannot get from the type: the group to file an action
+    /// under, and the way back from a name in a settings file to the action it meant.
+    #[test]
+    fn an_action_registers_what_it_declared_about_itself() {
+        #[derive(crate::InputAction)]
+        #[action(
+            path = "tests.registered_move",
+            output = Vec2,
+            intent = Directional2,
+            category = "tests.movement"
+        )]
+        struct RegisteredMove;
+
+        assert_eq!(RegisteredMove::CATEGORY, Some("tests.movement"));
+        const { assert!(!RegisteredMove::CONSUMES, "not asked for, so not on") };
+
+        // Nothing is registered until the action is used, which binding it does.
+        let id = RegisteredMove::id();
+        assert_eq!(ActionId::from_path("tests.registered_move"), Some(id));
+
+        let info = id.info().expect("a registered action knows itself");
+        assert_eq!(info.path, "tests.registered_move");
+        assert_eq!(info.category, Some("tests.movement"));
+        assert_eq!(info.intent, Intent::Directional2);
+
+        assert!(registered_actions().contains(&info));
+    }
+
+    /// A path nobody declared is the shape of a binding saved against an action that has since been
+    /// renamed. Answering `None` is what lets that be reported rather than mistaken for something.
+    #[test]
+    fn an_unknown_path_resolves_to_nothing() {
+        assert_eq!(ActionId::from_path("tests.no_such_action_anywhere"), None);
+    }
+
+    /// Declared once on the action rather than repeated on each of its bindings, because the
+    /// bindings of one action should not be able to disagree about it by accident.
+    #[test]
+    fn an_action_can_ask_that_its_bindings_consume() {
+        #[derive(crate::InputAction)]
+        #[action(path = "tests.consuming", output = bool, intent = Button, consume)]
+        struct Consuming;
+
+        const { assert!(Consuming::CONSUMES) };
     }
 
     #[test]

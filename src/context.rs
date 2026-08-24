@@ -1089,7 +1089,7 @@ mod tests {
     #[action(path = "tests.jump", output = bool, intent = Button)]
     struct Jump;
 
-    #[derive(InputContext, Component)]
+    #[derive(InputContext)]
     #[context(path = "tests.on_foot", tick = Fixed)]
     struct OnFoot;
 
@@ -1167,7 +1167,7 @@ mod tests {
     #[action(path = "tests.turn", output = f32, intent = Analog1)]
     struct Turn;
 
-    #[derive(InputContext, Component)]
+    #[derive(InputContext)]
     #[context(path = "tests.free_look", tick = Render)]
     struct FreeLook;
 
@@ -1868,11 +1868,11 @@ mod tests {
     fn a_context_nobody_carries_says_so_once_it_is_sure() {
         use bevy_ecs::schedule::common_conditions::resource_exists;
 
-        #[derive(InputContext, Component)]
+        #[derive(InputContext)]
         #[context(path = "tests.carried", tick = Render)]
         struct Carried;
 
-        #[derive(InputContext, Component)]
+        #[derive(InputContext)]
         #[context(path = "tests.never_spawned", tick = Render)]
         struct NeverSpawned;
 
@@ -1941,6 +1941,76 @@ mod tests {
         );
     }
 
+    /// The same rule reached the other way: an action that always claims what it reads says so
+    /// once, on itself, rather than on each of its bindings — and a binding can still make an
+    /// exception of itself in either direction.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn an_action_can_consume_by_declaration_and_a_binding_can_opt_out() {
+        #[derive(InputAction)]
+        #[action(path = "tests.back", output = bool, intent = Button, consume)]
+        struct Back;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.crouch", output = bool, intent = Button)]
+        struct Crouch;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.over", tick = Render, priority = 10)]
+        struct Over;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.under", tick = Render, priority = 0)]
+        struct Under;
+
+        #[derive(Resource, Default)]
+        struct Seen {
+            under_saw_escape: bool,
+            under_saw_backspace: bool,
+        }
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Over>(|context| {
+            // Neither says `consume`; the action already did.
+            context.bind::<Back>(KeyCode::Escape);
+            context.bind::<Back>(KeyCode::Backspace).without_consuming();
+        });
+        app.add_context::<Under>(|context| {
+            context.bind::<Jump>(KeyCode::Escape);
+            context.bind::<Crouch>(KeyCode::Backspace);
+        });
+        app.world_mut().spawn(Over);
+        app.world_mut().spawn(Under);
+        app.init_resource::<Seen>();
+        app.add_systems(
+            Update,
+            |under: Actions<Under>, mut seen: bevy_ecs::system::ResMut<'_, Seen>| {
+                seen.under_saw_escape = under.value::<Jump>();
+                seen.under_saw_backspace = under.value::<Crouch>();
+            },
+        );
+
+        app.world_mut()
+            .write_message(press(KeyCode::Escape, Key::Escape, ButtonState::Pressed));
+        app.world_mut().write_message(press(
+            KeyCode::Backspace,
+            Key::Backspace,
+            ButtonState::Pressed,
+        ));
+        app.update();
+
+        let seen = app.world().resource::<Seen>();
+        assert!(
+            !seen.under_saw_escape,
+            "the action asked to consume, so its binding did"
+        );
+        assert!(
+            seen.under_saw_backspace,
+            "and the binding that opted out let this one through"
+        );
+    }
+
     /// R8.2, in the words the requirement uses: a menu consumes `Escape` so the game behind it does
     /// not also act on it, while a global screenshot key on `F12` goes on working. Consumption is
     /// per binding rather than per context precisely so those two can differ.
@@ -1958,11 +2028,11 @@ mod tests {
         #[action(path = "tests.screenshot", output = bool, intent = Button)]
         struct Screenshot;
 
-        #[derive(InputContext, Component)]
+        #[derive(InputContext)]
         #[context(path = "tests.menu", tick = Render, priority = 10)]
         struct Menu;
 
-        #[derive(InputContext, Component)]
+        #[derive(InputContext)]
         #[context(path = "tests.behind", tick = Render, priority = 0)]
         struct Behind;
 
@@ -2027,11 +2097,11 @@ mod tests {
         #[action(path = "tests.charged", output = bool, intent = Button)]
         struct Charged;
 
-        #[derive(InputContext, Component)]
+        #[derive(InputContext)]
         #[context(path = "tests.taker", tick = Render, priority = 10)]
         struct Taker;
 
-        #[derive(InputContext, Component)]
+        #[derive(InputContext)]
         #[context(path = "tests.asker", tick = Render, priority = 0)]
         struct Asker;
 

@@ -619,11 +619,21 @@ hold conditions are testable without sleeping (R21.2).
 #[derive(InputAction)] #[action(path = "gameplay.move", output = Vec2, intent = Directional2)] struct Move;
 ```
 expands to an `InputAction` impl carrying `type Output = Vec2`, `INTENT`, the declared `PATH`, and a
-cached interned `id()`, plus registration in the type registry so persistence and external backends
-can resolve it by name (R1.7). `path` is required and unchecked against the Rust type (D8), so §3.1's
-convention is what keeps it collision-free. Attributes cover the rest of R1.6 — `name`, `category`,
-`consume`. Note that rebindability is deliberately *not* here: it belongs to a slot, not an action
-(§9.6).
+cached interned `id()`, plus registration in the **action registry** — path, category and intent
+against the id — so persistence and external backends can resolve an action by name (R1.7). `path`
+is required and unchecked against the Rust type (D8), so §3.1's convention is what keeps it
+collision-free. `category` and `consume` cover the rest of R1.6, both as associated constants with
+defaults so a hand-written impl need not mention them. Note that rebindability is deliberately *not*
+here: it belongs to a slot, not an action (§9.6).
+
+_Not the **reflect** type registry, which an earlier draft of this section named. That keys types by
+their Rust type path, which is the identity D8 exists to reject: what a settings file holds is the
+declared path, and resolving it has to go through a table keyed the same way._
+
+`#[derive(InputContext)]` additionally emits `Component`, `Default`, `Clone` and `Copy`. A context
+that is not a component cannot be used — every entry point requires it — and a scene format needs
+the other three to spawn one. A context needing different component configuration implements
+`InputContext` by hand, which is three constants.
 
 ### 9.4 Binding combinators
 
@@ -827,9 +837,90 @@ Enough to show the architecture accommodates them; each deserves its own documen
 - **Presentation** (Requirements §18)**.** The plan's reverse index answers "what is bound to `Jump`" without scanning;
   filtering by the player's active device class and by consumption gives the prompt. Glyph resolution
   returns an identifier, or an opaque handle when an authority backend supplies it.
-- **Persistence** (Requirements §17)**.** Overrides serialize as a diff against the compiled defaults, keyed by action
-  path and control identity, with unresolved entries reported rather than dropped.
+- **Persistence** (Requirements §17)**.** Designed in §10.1 rather than sketched.
 - **Rebinding** (Requirements §19)**.** Designed in §9.7 rather than sketched, because D7 changed what it operates on.
+
+### 10.1 The overrides structure
+
+Overrides are a diff against the compiled defaults (R17.1), and the crate defines the structure that
+holds them — `Reflect` and serde behind the `serialize` feature — while knowing nothing about where
+it ends up. A game drops it inside its own settings resource, sends it to an account service, or
+writes it wherever it likes.
+
+**Rows are keyed by slot, and hold a control.** Three properties decide that, and each rules out the
+obvious alternative of one row per action:
+
+- an action has several bindings (R4.1), so `Jump` is Space *and* South;
+- the unit of rebinding is the slot, not the action (R19.9) — the player rebinds "move forward",
+  never `Move`;
+- only the source belongs to the player. Modifiers, conditions and chord structure are developer
+  data (R5.8), and the knobs a player does get are tunables (R19.11), which are typed and live in
+  their own table.
+
+So a row's key is the slot key R19.14 already derives — the action's path plus the part name — and
+its value is an encoded control, not an encoded binding. Add the per-scheme separation R17.4
+requires and the whole thing is scalar-valued, which is what keeps it legible in whatever format
+the app writes:
+
+```toml
+version = 1
+
+[bindings.kbm]
+"gameplay.move.forward" = "key/KeyW"
+"gameplay.jump"         = "key/Space"
+"editor.save"           = "key/ControlLeft+key/KeyS"
+
+[bindings.gamepad]
+"gameplay.jump" = "pad/South"
+
+[tunables.gamepad]
+"gameplay.look.sensitivity" = 2.5
+```
+
+**Three states, not two** (R17.7). Because absence already means "use the default", a player who
+clears a binding has nothing left to say with unless clearing has its own value — and an action an
+external backend owns (D3) must read as neither. The loader therefore distinguishes absent, cleared,
+and not ours, and the writer never invents a row for the third.
+
+**No device identity anywhere in it** (R17.8). A row names a control on a device *class*. Which
+physical unit drives which player is pairing state and which stick rests where is calibration state,
+and both are keyed by persistent device identity rather than by profile. That separation is what
+makes two players with identical controllers and identical mappings share one override table and
+differ only in pairing.
+
+**The control encoding is a format we own** (R17.9), not `Debug` and not serde on `KeyCode`: those
+names belong to Bevy, and a rename upstream would silently orphan every saved binding. It has to
+carry the physical/logical distinction (R12.1) and the device class, and it is round-trip tested
+like any other serialized identity.
+
+**Applying is the only path in.** An override set is applied to a live context — compiling a variant
+plan and swapping it into that entity's state — and startup is simply the first call. This is not a
+convenience: an authority backend can rewrite its bindings mid-session (R18.10), so mid-session
+application is the normal case on at least one platform, and building a startup path plus a reload
+path bolted on afterwards would get it wrong twice. Swapping cancels in-flight actions and re-arms
+require-reset, which is what `deactivate` and `activate` already do (R7.4, R7.5).
+
+**Loading is pure and reports rather than drops** (R17.2). It is a function from (defaults,
+overrides) to (bindings, problems), where a problem is an unknown action path, an unknown control
+name, a slot that no longer exists, or a control whose shape the slot cannot accept — the same
+diagnostic shape §9.5's plan-build tier produces, and reportable through the same type.
+
+### 10.2 What Steam's IGA file is, and is not
+
+Worth recording because it is easy to reach for as a model for the above, and it is a model for
+something else entirely. The [IGA file][steam-iga] declares **action sets, layers, and actions with
+their types**; the bindings live per-user in Steam's own storage, authored in its overlay. It is
+therefore the counterpart of our action *declarations* rather than of our overrides, and we already
+match it: their `Button` / `AnalogTrigger` / `StickPadGyro` plus `input_mode` is our `Intent`,
+existing for the same reason of constraining what a binding UI may offer (R2.8, R19.1), and their
+localization block is R19.14's decision that player-visible names are keys.
+
+Two differences are worth carrying forward. Steam requires the action names in that file to match
+the names in the game's code exactly, with nothing checking it — which is why R1.7 exists, and which
+we avoid by declaring the path once in the derive rather than growing a second file to keep in step.
+And a Steam action belongs to exactly one action set, while ours may be bound in any number of
+contexts: the same tension as R19.15's colliding slot keys, arriving from another direction, and
+worth settling once rather than twice.
 
 ---
 
@@ -1016,3 +1107,4 @@ exists, the split is speculative, and the module layout above makes it a move ra
 [bevy-9087]: https://github.com/bevyengine/bevy/issues/9087
 [bevy-12635]: https://github.com/bevyengine/bevy/issues/12635
 [winit-1194]: https://github.com/rust-windowing/winit/issues/1194
+[steam-iga]: https://partner.steamgames.com/doc/features/steam_controller/iga_file

@@ -742,8 +742,21 @@ impl<'a, C> BindingHandle<'a, C> {
     /// The claim lasts for the rest of the frame, and reaches only contexts that evaluate after
     /// this one — which means later in priority order, and never backwards across a tick domain.
     /// A control is claimed only on the ticks the binding actually fires.
+    ///
+    /// An action can ask for this on all of its bindings at once with `#[action(consume)]`, which
+    /// is usually what a menu action wants. This is the same switch, one binding at a time.
     pub fn consume(self) -> Self {
         self.builder.bindings[self.index].consume = true;
+        self
+    }
+
+    /// Leaves this binding's controls for lower-priority contexts to see.
+    ///
+    /// Only needed to make an exception of one binding on an action declared with
+    /// `#[action(consume)]` — say a menu action that claims its keyboard key but shares the
+    /// gamepad button with the game behind it.
+    pub fn without_consuming(self) -> Self {
+        self.builder.bindings[self.index].consume = false;
         self
     }
 
@@ -850,7 +863,8 @@ impl<C> InputContextBuilder<C> {
             source,
             modifiers: Vec::new(),
             conditions: Vec::new(),
-            consume: false,
+            // The action's default, which a binding can then make an exception of either way.
+            consume: A::CONSUMES,
             #[cfg(any(feature = "keyboard", feature = "gamepad"))]
             chord: Vec::new(),
         });

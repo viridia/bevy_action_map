@@ -679,4 +679,80 @@ the Shell doc comment predicted, arriving sooner than expected and costing nothi
 **Not doing:** an editor integration. R22.2 asks that the same data be sufficient to drive an
 overlay, not that we ship an inspector, and `InputDump` is plain enough for anyone else's.
 
+## Phase VII — the player-facing model
+
+### Chunk 18: derive completion
+
+Small, as advertised, and it made three things smaller.
+
+**`category` and `consume` are associated constants with defaults**, so every hand-written
+`InputAction` impl in the tests kept compiling without knowing they exist. `CATEGORY` is a
+localization key on the same terms as the path, and it lives on the action rather than on each
+binding because four movement bindings sharing one category is four chances to disagree. `CONSUMES`
+is the action-level default that bindings inherit; `without_consuming` is the exception one binding
+at a time, which is the direction R8.2 did not have a way to say before.
+
+**The registry grew metadata rather than a second registry.** It already mapped path to `ActionId`;
+it now holds an `ActionInfo` beside each, and `ActionId::from_path` is what turns a name read from a
+settings file back into something to look up. It answers `None` for a path this build does not
+declare, which is exactly the case R17.2 wants reported rather than dropped — a binding saved
+against an action since renamed.
+
+**`#[derive(InputContext)]` now emits `Component`, `Default`, `Clone` and `Copy`.** A context that
+is not a component is unusable — every entry point in the crate requires it — and the scene work in
+Dead Zone had already forced `Default` and `Clone` onto every one by hand. Four derives became one,
+across the tree. The `Component` impl is written out rather than delegated, which is two associated
+items in this version of Bevy and will break loudly if that changes; the escape hatch is to
+implement `InputContext` by hand, which is three constants.
+
+Worth noting what did *not* happen: Design §9.3 said this chunk would register actions in the
+**reflect** type registry. That would key them by Rust type path, which is the identity D8 spent a
+requirement rejecting. What persistence and a rebinding screen need is a lookup by *declared* path,
+which is our own registry, and it is what was built.
+
+### The persistence design, before any of it was built
+
+Chunk 23 was a paragraph and a vehicle. Talking it through produced enough to design it (Design
+§10.1) and four requirements that were missing, which is a better return than discovering them
+while writing a loader.
+
+**The starting proposal was one row per action path, holding an encoded binding.** Three things
+break that, and each pushes the row in the same direction:
+
+- an action has several bindings, so `Jump` is Space *and* South;
+- the unit of rebinding is the slot rather than the action, which D7 settled and which a composite
+  makes unavoidable — the player rebinds "move forward", never `Move`;
+- only the *source* belongs to the player at all. Modifiers, conditions and chord structure are
+  developer data, and the knobs a player does get are tunables.
+
+So a row is keyed by slot and holds a control, not a binding. Everything stays a scalar, which is
+what keeps the file legible in TOML or anything else.
+
+**The finding that would have cost the most later: absent and cleared are different.** Overrides are
+a diff against defaults, so a missing row already means "use the default" — which leaves a player who
+deliberately unbinds something with nothing to say. It needs its own value. And an action an external
+backend owns is a third state again, neither defaulted nor cleared, or a Steam-bound action reads as
+one the player wiped. That is now R17.7, and it is a table with three rows because a format with two
+loses one of them silently.
+
+**Two players with identical controllers is a persistence question in disguise.** If a stored binding
+could name a device instance, the file would say "player 1 uses the pad with GUID abc123" and break
+when a controller is replaced. It cannot, so bindings name a device *class*, and pairing and
+calibration are separate stores keyed by persistent identity — R17.8. Two players with identical pads
+and identical mappings then share one table and differ only in pairing, which is chunk 26's business
+and correctly invisible here.
+
+**Steam's IGA file is not a binding file**, which is the answer to whether it should inspire the
+format. It declares action sets, layers, and actions with their types; the bindings live per-user in
+Steam's own storage. So it is the counterpart of our action *declarations*, and we already match it —
+their action types are our `Intent`, existing for the same reason, and their localization block is
+R19.14. Two things did come out of reading it that way: an authority backend rewriting bindings
+mid-session is normal rather than exotic, which is why applying to a live context is the only path in
+rather than a reload feature bolted onto a startup path; and a Steam action belongs to exactly one
+action set while ours may be bound in many, which is R19.15's colliding slot keys arriving from
+another direction.
+
+The IGA details here are from the documented format rather than from a file in hand. If the backend
+work leans on them, they want the treatment §14's gamepad claims got.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

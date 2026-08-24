@@ -17,21 +17,24 @@ use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 use crate::pause::{self, Game};
 use crate::ship::RELOAD;
 
+// The categories below are localization keys rather than words on screen: a rebinding screen
+// groups by them, and the game's translation catalogue decides what "dead_zone.flight" reads as.
+
 /// How hard the engine is burning, from 0 to 1.
 ///
 /// Analog on purpose. A trigger gives the player fine control over a ship that keeps its momentum,
 /// and a key gives them all of it at once — the same action either way.
 #[derive(InputAction)]
-#[action(path = "dead_zone.thrust", output = f32, intent = Analog1)]
+#[action(path = "dead_zone.thrust", output = f32, intent = Analog1, category = "dead_zone.flight")]
 pub struct Thrust;
 
 /// Which way the ship is turning, negative for anticlockwise.
 #[derive(InputAction)]
-#[action(path = "dead_zone.turn", output = f32, intent = Analog1)]
+#[action(path = "dead_zone.turn", output = f32, intent = Analog1, category = "dead_zone.flight")]
 pub struct Turn;
 
 #[derive(InputAction)]
-#[action(path = "dead_zone.fire", output = bool, intent = Button)]
+#[action(path = "dead_zone.fire", output = bool, intent = Button, category = "dead_zone.weapons")]
 pub struct Fire;
 
 /// Jump somewhere else on the field, at some risk.
@@ -39,7 +42,7 @@ pub struct Fire;
 /// Double-tapped rather than pressed, so that panicking on the fire button cannot fling the ship
 /// across the screen by accident.
 #[derive(InputAction)]
-#[action(path = "dead_zone.hyperspace", output = bool, intent = Button)]
+#[action(path = "dead_zone.hyperspace", output = bool, intent = Button, category = "dead_zone.flight")]
 pub struct Hyperspace;
 
 /// A harder burn, available once the engine has been running a while.
@@ -47,24 +50,24 @@ pub struct Hyperspace;
 /// Bound to the same controls as [`Thrust`], with a hold condition. One control, two actions, and
 /// the difference between them is entirely in when they are considered to have fired.
 #[derive(InputAction)]
-#[action(path = "dead_zone.afterburner", output = bool, intent = Button)]
+#[action(path = "dead_zone.afterburner", output = bool, intent = Button, category = "dead_zone.flight")]
 pub struct Afterburner;
 
 /// Open or close the pause menu.
 #[derive(InputAction)]
-#[action(path = "dead_zone.pause", output = bool, intent = Button)]
+#[action(path = "dead_zone.pause", output = bool, intent = Button, category = "dead_zone.system")]
 pub struct Pause;
 
 /// Show or hide the debug overlay.
 #[derive(InputAction)]
-#[action(path = "dead_zone.toggle_overlay", output = bool, intent = Button)]
+#[action(path = "dead_zone.toggle_overlay", output = bool, intent = Button, category = "dead_zone.system")]
 pub struct ToggleOverlay;
 
 /// The context a living ship flies under.
 ///
 /// Fixed tick, because the ship integrates its own velocity and a frame-rate-dependent burn would
 /// make the game play differently on different machines.
-#[derive(InputContext, Component, Default, Clone)]
+#[derive(InputContext)]
 #[context(path = "dead_zone.flying", tick = Fixed)]
 pub struct Flying;
 
@@ -77,7 +80,7 @@ pub struct Flying;
 ///
 /// Render tick, because these answer at the frame rate rather than the simulation rate, and while
 /// the game is paused there is no simulation to answer at.
-#[derive(InputContext, Component, Default, Clone)]
+#[derive(InputContext)]
 #[context(path = "dead_zone.shell", tick = Render)]
 pub struct Shell;
 

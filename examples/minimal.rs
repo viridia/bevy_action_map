@@ -7,7 +7,7 @@ use bevy_action_map::prelude::*;
 #[action(path = "gameplay.jump", output = bool, intent = Button)]
 struct Jump;
 
-#[derive(InputContext, Component)]
+#[derive(InputContext)]
 #[context(path = "gameplay.on_foot", tick = Render)]
 struct OnFoot;
 

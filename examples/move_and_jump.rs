@@ -16,11 +16,11 @@ struct Look;
 #[action(path = "gameplay.jump", output = bool, intent = Button)]
 struct Jump;
 
-#[derive(InputContext, Component)]
+#[derive(InputContext)]
 #[context(path = "gameplay.on_foot", tick = Fixed)]
 struct OnFoot;
 
-#[derive(InputContext, Component)]
+#[derive(InputContext)]
 #[context(path = "gameplay.free_look", tick = Render)]
 struct FreeLook;
 

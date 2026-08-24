@@ -125,7 +125,6 @@ mod tests {
     use super::*;
 
     use bevy_app::App;
-    use bevy_ecs::prelude::Component;
     use bevy_input::keyboard::KeyCode;
 
     use crate::context::ActionMapAppExt;
@@ -139,11 +138,11 @@ mod tests {
     #[action(path = "inspect_tests.crouch", output = bool, intent = Button)]
     struct Crouch;
 
-    #[derive(InputContext, Component)]
+    #[derive(InputContext)]
     #[context(path = "inspect_tests.on_foot", tick = Fixed)]
     struct OnFoot;
 
-    #[derive(InputContext, Component)]
+    #[derive(InputContext)]
     #[context(path = "inspect_tests.menu", tick = Render, priority = 10)]
     struct Menu;
 
