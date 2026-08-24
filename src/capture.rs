@@ -10,13 +10,16 @@
 //! stepping, and capture does not care: the frame is filled by the sampler either way.
 //!
 //! ```ignore
-//! // The player activated a row on the settings screen.
-//! commands.entity(row).insert(CaptureSession::for_slot(&slot));
+//! // The player activated a table cell on the settings screen. A mapping holds an ordered list of
+//! // slots, so `for_slot` says which one this capture is going to fill — `for_mapping` takes the
+//! // first, which is the only one a single-column table has.
+//! commands.entity(cell).insert(CaptureSession::for_slot(&mapping, column));
 //!
 //! // …and the crate answers on that same entity, once.
-//! commands.entity(row).observe(|captured: On<Captured>, world: &World| {
+//! commands.entity(cell).observe(|captured: On<Captured>, world: &World| {
 //!     let name = captured.control.fallback_label();
-//!     let clashes = conflicts(world, captured.control, captured.slot);
+//!     let clashes = conflicts(world, captured.control, captured.mapping);
+//!     // `captured.slot` comes back too, which is where the new control belongs in the row.
 //! });
 //! ```
 //!
@@ -29,10 +32,10 @@
 //!
 //! Three separate refusals, which look alike and are not:
 //!
-//! - **Shape and scheme.** A slot holding a key accepts another key, not a stick axis and not a
+//! - **Shape and scheme.** A mapping holding a key accepts another key, not a stick axis and not a
 //!   gamepad button — the first because the action cannot use it, the second because a rebind is
 //!   scoped to one control scheme (R19.7) and moving a binding across schemes would mean moving it
-//!   to a different slot.
+//!   to a different mapping.
 //! - **Excluded** ([`excluding`](CaptureSession::excluding)): the screen's own controls, so that it
 //!   stays operable while listening (R19.2). Silent, and deliberately so — an excluded control is
 //!   not being refused, it is busy doing its normal job, which is how the key that cancels a
@@ -50,7 +53,7 @@ use bevy_ecs::world::World;
 use crate::action::ChannelShape;
 use crate::binding::{ButtonThreshold, Control};
 use crate::frame::{InputFrame, RawEvent, Timestamp};
-use crate::rebind::{Scheme, Slot, SlotKey};
+use crate::rebind::{Mapping, MappingKey, Scheme};
 
 /// How far a stick or trigger must be pushed before capture treats it as a choice.
 ///
@@ -103,10 +106,10 @@ impl ControlClass {
         )
     }
 
-    /// The class of controls that can fill a slot expecting this channel.
+    /// The class of controls that can fill a mapping expecting this channel.
     ///
     /// `None` for [`Axis2`](ChannelShape::Axis2), because no one control reports one — see the note
-    /// on this type. A slot that accepts `Axis2` is a stick or a mouse bound whole, which §9.7
+    /// on this type. A mapping that accepts `Axis2` is a stick or a mouse bound whole, which §9.7
     /// gives a tunable rather than a rebinding row.
     pub const fn of(shape: ChannelShape) -> Option<Self> {
         match shape {
@@ -132,7 +135,7 @@ pub struct ReservedControl {
 /// Every control any context has reserved.
 ///
 /// Flat and global rather than per-context, because that is the scope reserving has: the control
-/// that opens the settings screen must be refused while capturing for a slot declared anywhere.
+/// that opens the settings screen must be refused while capturing for a mapping declared anywhere.
 #[derive(Resource, Default, Debug)]
 pub struct ReservedControls(pub(crate) Vec<ReservedControl>);
 
@@ -159,7 +162,8 @@ impl ReservedControls {
 /// removes the component. Remove it yourself to cancel.
 #[derive(Component, Clone, Debug)]
 pub struct CaptureSession {
-    slot: Option<SlotKey>,
+    mapping: Option<MappingKey>,
+    slot: usize,
     accepts: ControlClass,
     scheme: Option<Scheme>,
     excluded: Vec<Control>,
@@ -172,24 +176,45 @@ pub struct CaptureSession {
 }
 
 impl CaptureSession {
-    /// Listens for a control that could fill this slot.
+    /// Listens for a control for this mapping's first slot.
     ///
-    /// Takes the shape and the scheme from the slot, which is what makes a keyboard row accept a
-    /// key and not a gamepad button. Returns `None` for a slot no single control can fill — a stick
-    /// or a mouse bound whole — because there is nothing for capture to offer there.
-    pub fn for_slot(slot: &Slot) -> Option<Self> {
-        Some(Self::accepting(ControlClass::of(slot.accepts)?).within(slot.scheme)).map(|session| {
-            Self {
-                slot: Some(slot.key),
-                ..session
-            }
+    /// Takes the shape and the scheme from the mapping, which is what makes a keyboard row accept a
+    /// key and not a gamepad button. Returns `None` for a mapping no single control can fill — a
+    /// stick or a mouse bound whole — because there is nothing for capture to offer there.
+    ///
+    /// A mapping holds a list of slots, and this addresses the front of it — the "primary" column
+    /// of a table with more than one. Use [`for_slot`](Self::for_slot) for the others.
+    pub fn for_mapping(mapping: &Mapping) -> Option<Self> {
+        Self::for_slot(mapping, 0)
+    }
+
+    /// Listens for a control for one numbered slot of this mapping.
+    ///
+    /// A mapping holds an ordered list of slots, and a "primary and secondary" table is that list
+    /// drawn as columns — so which slot the player activated is what a capture has to carry, or the
+    /// answer has nowhere to go but the front of the row.
+    ///
+    /// Returns `None` for a slot the mapping does not have: past its
+    /// [`capacity`](crate::rebind::Mapping::capacity), or more than one past the controls it holds
+    /// now. The second is what stops a capture leaving a hole in a list whose *order* is what
+    /// primary and secondary mean. It also returns `None` for a mapping no single control can fill,
+    /// exactly as [`for_mapping`](Self::for_mapping) does.
+    pub fn for_slot(mapping: &Mapping, slot: usize) -> Option<Self> {
+        if !mapping.capacity.has_room_for(slot) || slot > mapping.slots.len() {
+            return None;
+        }
+        Some(Self {
+            mapping: Some(mapping.key),
+            slot,
+            ..Self::accepting(ControlClass::of(mapping.accepts)?).within(mapping.scheme)
         })
     }
 
-    /// Listens for any control of a class, without a slot in mind.
+    /// Listens for any control of a class, without a mapping in mind.
     pub fn accepting(class: ControlClass) -> Self {
         Self {
-            slot: None,
+            mapping: None,
+            slot: 0,
             accepts: class,
             scheme: None,
             excluded: Vec::new(),
@@ -214,8 +239,13 @@ impl CaptureSession {
         self
     }
 
-    /// The slot this capture is for, if it was made for one.
-    pub fn slot(&self) -> Option<SlotKey> {
+    /// The mapping this capture is for, if it was made for one.
+    pub fn mapping(&self) -> Option<MappingKey> {
+        self.mapping
+    }
+
+    /// Which slot of that mapping it is for. Zero for a session made without a mapping.
+    pub fn slot(&self) -> usize {
         self.slot
     }
 
@@ -280,8 +310,14 @@ enum Verdict {
 pub struct Captured {
     /// The entity whose capture this was.
     pub entity: Entity,
-    /// The slot it was for, if it was made for one.
-    pub slot: Option<SlotKey>,
+    /// The mapping it was for, if it was made for one.
+    pub mapping: Option<MappingKey>,
+    /// Which slot of that mapping the control belongs in.
+    ///
+    /// Zero unless the session named another, which is what a "primary and secondary" table does.
+    /// Carried here because a mapping holds a list: without it, an override has nowhere to go but
+    /// front of the row, and the secondary column could never be filled.
+    pub slot: usize,
     /// The control the player chose.
     pub control: Control,
 }
@@ -295,8 +331,8 @@ pub struct Captured {
 pub struct Refused {
     /// The entity whose capture this is.
     pub entity: Entity,
-    /// The slot it is for, if it was made for one.
-    pub slot: Option<SlotKey>,
+    /// The mapping it is for, if it was made for one.
+    pub mapping: Option<MappingKey>,
     /// The control that was refused.
     pub control: Control,
     /// Why it was refused.
@@ -306,7 +342,7 @@ pub struct Refused {
 /// Why capture would not take a control.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefusedReason {
-    /// It reports on a channel the slot's action cannot use.
+    /// It reports on a channel the mapping's action cannot use.
     Shape,
     /// It belongs to a different control scheme than the one being rebound.
     Scheme,
@@ -314,12 +350,12 @@ pub enum RefusedReason {
     Reserved,
 }
 
-/// A slot that already holds the control in question.
+/// A mapping that already holds the control in question.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Conflict {
-    /// The slot that holds it.
-    pub slot: SlotKey,
-    /// The declared path of the action that slot drives.
+    /// The mapping that holds it.
+    pub mapping: MappingKey,
+    /// The declared path of the action that mapping drives.
     pub action_path: &'static str,
     /// The declared path of the context it lives in.
     pub context: &'static str,
@@ -330,45 +366,48 @@ pub struct Conflict {
 /// How much of a problem a [`Conflict`] is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Overlap {
-    /// Both slots are in one context, so both are always live together and the clash is real.
+    /// Both mappings are in one context, so both are always live together and the clash is real.
     SameContext,
-    /// The slots are in different contexts, which may never be active at the same time — a menu
+    /// The mappings are in different contexts, which may never be active at the same time — a menu
     /// key and a gameplay key can share a control quite deliberately. Whether this matters is a
     /// question about the game's own activation rules, which this crate does not know.
     OtherContext,
 }
 
-/// Which slots already hold a control.
+/// Which mappings already hold a control.
 ///
 /// The read-only half of R19.3, and the half that can be answered before anything is committed to:
 /// a screen calls this with what capture just reported and decides what to say. Deciding what to
 /// *do* — reject, swap, unbind the other — needs somewhere to write the answer, which is a
 /// separate matter.
 ///
-/// `target` is the slot being rebound, and is excluded from the result: a slot does not conflict
-/// with itself, and rebinding a control to where it already is should report nothing.
+/// `target` is the mapping being rebound, and is excluded from the result: a mapping does not
+/// conflict with itself, and rebinding a control to where it already is should report nothing. The
+/// whole mapping is excluded rather than the one slot, so putting a control in a row's second slot
+/// while its first already holds it is not reported here — a repeat *within* one row is a question
+/// for the conflict policy that applies a rebind, not for the detection that precedes it.
 ///
 /// Conflicts are per scheme, so a keyboard binding never clashes with a gamepad one (R19.3).
 /// Comparison is at control granularity: two bindings that share a control but differ in their
 /// chords are reported as an overlap even though arbitration would separate them. That errs toward
 /// telling a player about something harmless rather than staying quiet about something real.
-pub fn conflicts(world: &World, control: Control, target: Option<SlotKey>) -> Vec<Conflict> {
-    let slots = crate::rebind::slots(world);
+pub fn conflicts(world: &World, control: Control, target: Option<MappingKey>) -> Vec<Conflict> {
+    let mappings = crate::rebind::mappings(world);
     let target_context = target.and_then(|key| {
-        slots
+        mappings
             .iter()
-            .find(|slot| slot.key == key)
-            .map(|slot| slot.context)
+            .find(|mapping| mapping.key == key)
+            .map(|mapping| mapping.context)
     });
 
-    slots
+    mappings
         .iter()
-        .filter(|slot| slot.current == control && Some(slot.key) != target)
-        .map(|slot| Conflict {
-            slot: slot.key,
-            action_path: slot.action_path,
-            context: slot.context,
-            overlap: if Some(slot.context) == target_context {
+        .filter(|mapping| mapping.slots.contains(&control) && Some(mapping.key) != target)
+        .map(|mapping| Conflict {
+            mapping: mapping.key,
+            action_path: mapping.action_path,
+            context: mapping.context,
+            overlap: if Some(mapping.context) == target_context {
                 Overlap::SameContext
             } else {
                 Overlap::OtherContext
@@ -458,7 +497,7 @@ pub fn run_captures(
                     if arrival.deliberate {
                         commands.trigger(Refused {
                             entity,
-                            slot: session.slot,
+                            mapping: session.mapping,
                             control: arrival.control,
                             reason,
                         });
@@ -478,6 +517,7 @@ pub fn run_captures(
                     commands.entity(entity).try_remove::<CaptureSession>();
                     commands.trigger(Captured {
                         entity,
+                        mapping: session.mapping,
                         slot: session.slot,
                         control: arrival.control,
                     });
@@ -521,6 +561,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct Heard {
         captured: Vec<Control>,
+        slots: Vec<usize>,
         refused: Vec<(Control, RefusedReason)>,
     }
 
@@ -530,6 +571,7 @@ mod tests {
         app.init_resource::<Heard>();
         app.add_observer(|event: On<Captured>, mut heard: ResMut<'_, Heard>| {
             heard.captured.push(event.control);
+            heard.slots.push(event.slot);
         });
         app.add_observer(|event: On<Refused>, mut heard: ResMut<'_, Heard>| {
             heard.refused.push((event.control, event.reason));
@@ -538,7 +580,9 @@ mod tests {
             controls
                 .bind::<Move>(crate::binding::DirectionalButtons::wasd())
                 .mappable();
-            controls.bind::<Jump>(KeyCode::Space).mappable();
+            // Room for a secondary, with only the primary shipped — so the tests below have both
+            // a full slot and an empty one to aim at.
+            controls.bind::<Jump>(KeyCode::Space).mappable_upto(2);
             controls.bind::<OpenSettings>(KeyCode::F1).reserved();
         });
         app
@@ -555,11 +599,11 @@ mod tests {
         });
     }
 
-    fn slot(app: &App, key: &str) -> Slot {
-        crate::rebind::slots(app.world())
+    fn mapping(app: &App, key: &str) -> Mapping {
+        crate::rebind::mappings(app.world())
             .into_iter()
-            .find(|slot| alloc::string::ToString::to_string(&slot.key) == key)
-            .expect("no such slot")
+            .find(|mapping| alloc::string::ToString::to_string(&mapping.key) == key)
+            .expect("no such mapping")
     }
 
     /// The whole point: what comes back is the control's identity, which a binding would have
@@ -567,10 +611,10 @@ mod tests {
     #[test]
     fn a_capture_reports_the_control_that_was_pressed() {
         let mut app = app();
-        let target = slot(&app, "capture_tests.move.up");
+        let target = mapping(&app, "capture_tests.move.up");
         let row = app
             .world_mut()
-            .spawn(CaptureSession::for_slot(&target).expect("a button slot"))
+            .spawn(CaptureSession::for_mapping(&target).expect("a button mapping"))
             .id();
 
         // The frame it arms in takes nothing, which is what stops it binding the key that opened it.
@@ -595,7 +639,7 @@ mod tests {
     #[test]
     fn capture_works_with_no_context_spawned() {
         let mut app = app();
-        assert!(crate::rebind::slots(app.world()).len() > 1);
+        assert!(crate::rebind::mappings(app.world()).len() > 1);
 
         app.world_mut()
             .spawn(CaptureSession::accepting(ControlClass::AnyButton));
@@ -610,13 +654,13 @@ mod tests {
     }
 
     /// The half of OQ-10 that does the work. Reserving would be worth little if the screen key
-    /// merely had no slot of its own — anything else could still be bound over the top of it.
+    /// merely had no mapping of its own — anything else could still be bound over the top of it.
     #[test]
     fn a_reserved_control_is_refused_out_loud() {
         let mut app = app();
-        let target = slot(&app, "capture_tests.jump");
+        let target = mapping(&app, "capture_tests.jump");
         app.world_mut()
-            .spawn(CaptureSession::for_slot(&target).expect("a button slot"));
+            .spawn(CaptureSession::for_mapping(&target).expect("a button mapping"));
         app.update();
 
         press(&mut app, KeyCode::F1);
@@ -656,16 +700,16 @@ mod tests {
         assert!(heard.refused.is_empty(), "silent, not refused");
     }
 
-    /// A slot is rebound within its scheme (R19.7), so the pad cannot answer for the keyboard.
+    /// A mapping is rebound within its scheme (R19.7), so the pad cannot answer for the keyboard.
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_control_from_the_other_scheme_is_refused() {
         use bevy_input::gamepad::{GamepadButton, RawGamepadButtonChangedEvent};
 
         let mut app = app();
-        let target = slot(&app, "capture_tests.jump");
+        let target = mapping(&app, "capture_tests.jump");
         app.world_mut()
-            .spawn(CaptureSession::for_slot(&target).expect("a button slot"));
+            .spawn(CaptureSession::for_mapping(&target).expect("a button mapping"));
         app.update();
 
         app.world_mut()
@@ -707,12 +751,12 @@ mod tests {
     #[test]
     fn conflicts_name_the_slots_that_already_hold_a_control() {
         let app = app();
-        let jump = slot(&app, "capture_tests.jump").key;
+        let jump = mapping(&app, "capture_tests.jump").key;
 
         let found = conflicts(app.world(), Control::Key(KeyCode::KeyW), Some(jump));
         assert_eq!(found.len(), 1);
         assert_eq!(
-            alloc::string::ToString::to_string(&found[0].slot),
+            alloc::string::ToString::to_string(&found[0].mapping),
             "capture_tests.move.up"
         );
         assert_eq!(found[0].action_path, "capture_tests.move");
@@ -725,9 +769,111 @@ mod tests {
         // Nothing holds this one.
         assert!(conflicts(app.world(), Control::Key(KeyCode::KeyZ), Some(jump)).is_empty());
 
-        // And a slot does not conflict with itself, so rebinding a control to where it already is
+        // And a mapping does not conflict with itself, so rebinding a control to where it already
         // reports nothing rather than reporting the row the player is looking at.
         assert!(conflicts(app.world(), Control::Key(KeyCode::Space), Some(jump)).is_empty());
+    }
+
+    /// A row holds a list, so *any* slot of it holding the control is a clash — a secondary binding
+    /// is no less bound than a primary one.
+    #[test]
+    fn a_conflict_is_found_in_any_slot_of_a_row() {
+        #[derive(InputContext)]
+        #[context(path = "capture_tests.two_defaults", tick = Render)]
+        struct TwoDefaults;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<TwoDefaults>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.bind::<Jump>(KeyCode::Enter).mappable();
+            controls.bind::<OpenSettings>(KeyCode::F1).mappable();
+        });
+
+        let settings = crate::rebind::mappings(app.world())[1].key;
+        // The secondary, which a `==` against a single control would have missed.
+        let found = conflicts(app.world(), Control::Key(KeyCode::Enter), Some(settings));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].action_path, "capture_tests.jump");
+    }
+
+    /// A mapping holds a list, so a capture says which slot it fills — otherwise the answer has
+    /// nowhere to go but the front of the row and a secondary column could never be filled.
+    #[test]
+    fn a_capture_reports_the_slot_it_was_made_for() {
+        let mut app = app();
+        let target = mapping(&app, "capture_tests.jump");
+        assert_eq!(target.slots.len(), 1, "one default…");
+        assert_eq!(
+            target.capacity,
+            crate::rebind::Capacity::UpTo(2),
+            "…two slots"
+        );
+
+        app.world_mut()
+            .spawn(CaptureSession::for_slot(&target, 1).expect("the empty second slot"));
+        app.update();
+        press(&mut app, KeyCode::KeyK);
+        app.update();
+
+        let heard = app.world().resource::<Heard>();
+        assert_eq!(heard.captured, [Control::Key(KeyCode::KeyK)]);
+        assert_eq!(heard.slots, [1]);
+    }
+
+    /// The default, and what a single-column table gets without asking.
+    #[test]
+    fn a_capture_for_a_mapping_is_a_capture_for_its_first_slot() {
+        let app = app();
+        let target = mapping(&app, "capture_tests.jump");
+        assert_eq!(
+            CaptureSession::for_mapping(&target)
+                .expect("a button mapping")
+                .slot(),
+            0
+        );
+    }
+
+    /// A slot the mapping does not have gets no capture, rather than one whose answer is dropped
+    /// or would leave a hole in a list whose order is what primary and secondary mean.
+    #[test]
+    fn a_slot_the_mapping_does_not_have_has_no_capture() {
+        let app = app();
+        let jump = mapping(&app, "capture_tests.jump");
+        // Two slots, so the third is past the end of the row.
+        assert!(CaptureSession::for_slot(&jump, 2).is_none());
+
+        // And one slot, so only the one is addressable — a plain `mappable` said nothing about
+        // wanting a second.
+        let up = mapping(&app, "capture_tests.move.up");
+        assert_eq!(up.capacity, crate::rebind::Capacity::UpTo(1));
+        assert!(CaptureSession::for_slot(&up, 0).is_some());
+        assert!(CaptureSession::for_slot(&up, 1).is_none());
+    }
+
+    /// Capacity is a ceiling, not permission to skip: the next empty slot is reachable and the one
+    /// after it is not, because filling that one would leave the slot between them empty for good.
+    #[test]
+    fn a_capture_cannot_leave_a_hole_in_the_row() {
+        #[derive(InputContext)]
+        #[context(path = "capture_tests.roomy", tick = Render)]
+        struct Roomy;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Roomy>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable_upto(3);
+        });
+
+        let target = &crate::rebind::mappings(app.world())[0];
+        assert!(
+            CaptureSession::for_slot(target, 1).is_some(),
+            "the next one"
+        );
+        assert!(
+            CaptureSession::for_slot(target, 2).is_none(),
+            "within capacity, but it would leave slot 2 empty behind it"
+        );
     }
 
     /// A class is a property, not a list — which is the whole of R4.9's first bullet.
@@ -762,12 +908,12 @@ mod tests {
                 .mappable();
         });
 
-        let target = &crate::rebind::slots(app.world())[0];
+        let target = &crate::rebind::mappings(app.world())[0];
         assert_eq!(target.accepts, ChannelShape::Axis2);
-        assert!(CaptureSession::for_slot(target).is_none());
+        assert!(CaptureSession::for_mapping(target).is_none());
     }
 
-    /// Reserving and declaring a slot say opposite things about one binding.
+    /// Reserving and declaring a mapping say opposite things about one binding.
     #[test]
     #[should_panic(expected = "both mappable and reserved")]
     fn reserving_a_mappable_binding_is_refused() {
@@ -801,7 +947,7 @@ mod tests {
         );
     }
 
-    /// Nothing about capture depends on a slot, so a game can ask "what did they just press" for
+    /// Nothing about capture depends on a mapping, so a game can ask "what did they just press" for
     /// its own reasons.
     #[test]
     fn a_session_without_a_slot_reports_no_slot() {

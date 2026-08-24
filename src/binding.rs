@@ -200,18 +200,38 @@ pub(crate) struct BindingSpec {
     pub(crate) consume: bool,
     // `None` until the binding is declared mappable, which is what makes rebindability opt-in
     // rather than a flag hiding a binding from a screen.
-    pub(crate) mappable: Option<SlotDecl>,
+    pub(crate) mappable: Option<MappingDecl>,
     // Whether the controls this binding reads are withheld from capture across their scheme.
     pub(crate) reserved: bool,
     #[cfg(any(feature = "keyboard", feature = "gamepad"))]
     pub(crate) chord: Vec<ButtonControl>,
 }
 
+/// The more permissive of two capacities.
+///
+/// Several bindings can feed one mapping, and each carries whatever its own combinator asked for.
+/// The mapping takes the widest, because a narrower declaration elsewhere is not a statement that
+/// this mapping must be narrow — it is a statement about a binding that happens to share the row.
+const fn widest(a: crate::rebind::Capacity, b: crate::rebind::Capacity) -> crate::rebind::Capacity {
+    use crate::rebind::Capacity;
+    match (a, b) {
+        (Capacity::Any, _) | (_, Capacity::Any) => Capacity::Any,
+        (Capacity::UpTo(a), Capacity::UpTo(b)) if a >= b => Capacity::UpTo(a),
+        (_, b) => b,
+    }
+}
+
 /// What a binding declared about being player-rebindable.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct SlotDecl {
+pub(crate) struct MappingDecl {
     /// Replaces the action's path in the derived key. `None` derives from the action.
     pub(crate) prefix: Option<&'static str>,
+    /// The most controls a player may put in the mapping this binding contributes to.
+    ///
+    /// Declared per binding but resolved per mapping: several bindings may feed one mapping, and
+    /// what the mapping ends up with is the widest thing any of them asked for, never narrower than
+    /// the defaults it already holds.
+    pub(crate) capacity: crate::rebind::Capacity,
 }
 
 /// Mouse motion as a binding source.
@@ -253,9 +273,9 @@ pub enum Part {
 }
 
 impl Part {
-    /// The name this part contributes to a slot key, or `None` for a whole binding.
+    /// The name this part contributes to a mapping key, or `None` for a whole binding.
     ///
-    /// Slot keys are the action's path plus this — `gameplay.move` plus `up` — so a part that names
+    /// Mapping keys are the action's path plus this — `gameplay.move` plus `up` — so a part naming
     /// itself is what keeps the key derivable rather than declared twice.
     pub const fn name(self) -> Option<&'static str> {
         match self {
@@ -295,7 +315,7 @@ impl Control {
     /// Which set of devices this control belongs to.
     ///
     /// Keyboard and mouse are one scheme because a player uses them together; a gamepad is another.
-    /// Which one a control belongs to is what decides the scheme a slot is rebound in.
+    /// Which one a control belongs to is what decides the scheme a mapping is rebound in.
     pub const fn scheme(self) -> crate::rebind::Scheme {
         match self {
             #[cfg(feature = "keyboard")]
@@ -309,7 +329,7 @@ impl Control {
     /// The kind of channel this one control reports on.
     ///
     /// The counterpart of [`BindingSource::channel_shape`] for a single control rather than an
-    /// arrangement of them, and what decides whether a captured control fits the slot it was
+    /// arrangement of them, and what decides whether a captured control fits the mapping it was
     /// captured for (R19.1).
     ///
     /// Note what is missing: no control answers [`Axis2`](ChannelShape::Axis2). A stick is two
@@ -894,7 +914,7 @@ impl<'a, C> BindingHandle<'a, C> {
 
     /// Lets the player rebind this.
     ///
-    /// Declares a mappable slot for the binding — one for a single control, and one per part for a
+    /// Declares a mapping for the binding — one for a single control, and one per part for a
     /// composite, so a movement binding becomes four rows a player can change independently and the
     /// composite itself is never shown.
     ///
@@ -903,35 +923,90 @@ impl<'a, C> BindingHandle<'a, C> {
     ///
     /// ```ignore
     /// controls.bind::<Jump>(KeyCode::Space).mappable();
-    /// controls.bind::<Jump>(GamepadButton::South);   // no slot, so no row
+    /// controls.bind::<Jump>(GamepadButton::South);   // no mapping, so no row
     /// ```
     ///
-    /// Each slot is named by the action's path plus the part — `gameplay.move.up` — which is a
+    /// Each mapping is named by the action's path plus the part — `gameplay.move.up` — which is a
     /// localization key rather than text to show. Use [`mappable_as`](Self::mappable_as) where that
     /// name would collide or where a catalogue already calls it something else.
+    ///
+    /// **Declaring two of these for one action in one scheme is how you ship a default primary and
+    /// secondary.** They derive the same key, so they are one row holding two controls rather than
+    /// two rows; the mapping's capacity grows to fit them without being asked. Use
+    /// [`mappable_upto`](Self::mappable_upto) to leave a slot for a control the player adds that
+    /// the game does not ship a default for.
+    ///
+    /// ```ignore
+    /// controls.bind::<Jump>(KeyCode::Space).mappable();
+    /// controls.bind::<Jump>(KeyCode::KeyJ).mappable();   // the same row, second slot
+    /// ```
     pub fn mappable(self) -> Self {
-        self.declare_slots(None)
+        self.declare_mapping(None, crate::rebind::Capacity::UpTo(1))
     }
 
     /// Lets the player rebind this, under a name of your choosing.
     ///
     /// As [`mappable`](Self::mappable), with the given key in place of the action's path — so a
-    /// composite declared `mappable_as("gameplay.strafe")` has slots `gameplay.strafe.up` and its
-    /// three neighbours. Reach for it when two slots would otherwise derive the same key, which
+    /// composite declared `mappable_as("gameplay.strafe")` has mappings `gameplay.strafe.up` and
+    /// its three neighbours. Reach for it when two would otherwise derive the same key, which
     /// happens when one action is bound in two contexts.
     pub fn mappable_as(self, key: &'static str) -> Self {
-        self.declare_slots(Some(key))
+        self.declare_mapping(Some(key), crate::rebind::Capacity::UpTo(1))
     }
 
-    fn declare_slots(self, prefix: Option<&'static str>) -> Self {
-        self.builder.bindings[self.index].mappable = Some(SlotDecl { prefix });
+    /// Lets the player rebind this, and put up to `count` controls in the mapping.
+    ///
+    /// What a "primary and secondary" screen declares when the game ships only one default and
+    /// leaves the other slot empty. A mapping never ends up narrower than the defaults it holds, so
+    /// this raises a ceiling rather than setting one.
+    ///
+    /// ```ignore
+    /// controls.bind::<Fire>(KeyCode::ControlLeft).mappable_upto(2);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If `count` is zero. A mapping with no room is a binding that is not mappable, which is what
+    /// leaving `mappable` off already says.
+    pub fn mappable_upto(self, count: usize) -> Self {
+        assert!(
+            count > 0,
+            "a mapping needs room for at least one control; leave `mappable` off instead"
+        );
+        self.declare_mapping(None, crate::rebind::Capacity::UpTo(count))
+    }
+
+    /// Lets the player rebind this, with no limit on how many controls the mapping holds.
+    ///
+    /// For a program whose command set is large and open enough that its shortcuts cannot be laid
+    /// out in a table written in advance — an editor or a tool, where the screen grows an "add
+    /// shortcut" button. A game almost always wants a fixed number of slots instead.
+    pub fn mappable_any(self) -> Self {
+        self.declare_mapping(None, crate::rebind::Capacity::Any)
+    }
+
+    fn declare_mapping(
+        self,
+        prefix: Option<&'static str>,
+        capacity: crate::rebind::Capacity,
+    ) -> Self {
+        let existing = self.builder.bindings[self.index].mappable;
+        self.builder.bindings[self.index].mappable = Some(MappingDecl {
+            // A later call names the mapping; `mappable_as(..).mappable_upto(2)` must not silently
+            // drop the name, and neither order should surprise.
+            prefix: prefix.or(existing.and_then(|decl| decl.prefix)),
+            capacity: match existing {
+                Some(decl) => widest(decl.capacity, capacity),
+                None => capacity,
+            },
+        });
         self
     }
 
     /// Withholds this binding's controls from capture, everywhere in its scheme.
     ///
-    /// The control that opens the rebinding screen is the case this exists for. It gets no slot of
-    /// its own, so a player cannot rebind it away, and no *other* slot can capture it either, so it
+    /// The control that opens the rebinding screen is the case this exists for. It gets no mapping
+    /// of its own, so a player cannot rebind it away, and no *other* mapping can capture it, so it
     /// cannot be quietly shadowed by something bound over the top of it. Without the second half
     /// the first is worth little: a screen you can still open but whose controls now do two things
     /// is the same trap arriving by a different door.
@@ -1114,19 +1189,38 @@ impl<C> InputContextBuilder<C> {
         crate::plan::diagnose(&self.bindings)
     }
 
-    /// The player-facing view of these bindings: one slot per mappable part.
+    /// The player-facing view of these bindings: one mapping per mappable part.
     ///
     /// Empty for a game that declares none, which is the default and costs nothing.
-    pub(crate) fn slots(&self, context: &'static str) -> Vec<crate::rebind::Slot> {
-        let mut slots = Vec::new();
+    ///
+    /// Bindings that derive the same key in the same scheme for the same action are **merged into
+    /// one mapping** holding both controls, because that is what a player sees: one row for Jump
+    /// a primary and a secondary, not two rows both called Jump. Merging is keyed by scheme as well
+    /// as by name, so the keyboard and gamepad rows stay separate (R19.7); and by action, so two
+    /// *different* actions reaching for one name is still the collision R19.15 wants reported.
+    pub(crate) fn mappings(&self, context: &'static str) -> Vec<crate::rebind::Mapping> {
+        let mut mappings: Vec<crate::rebind::Mapping> = Vec::new();
         for binding in &self.bindings {
             let Some(declaration) = binding.mappable else {
                 continue;
             };
             let prefix = declaration.prefix.unwrap_or(binding.path);
             binding.source.for_each_part(|part, control| {
-                slots.push(crate::rebind::Slot {
-                    key: crate::rebind::SlotKey::new(prefix, part),
+                let key = crate::rebind::MappingKey::new(prefix, part);
+                let scheme = control.scheme();
+
+                if let Some(mapping) = mappings.iter_mut().find(|mapping| {
+                    mapping.key == key
+                        && mapping.scheme == scheme
+                        && mapping.action == binding.action
+                }) {
+                    mapping.slots.push(control);
+                    mapping.capacity = widest(mapping.capacity, declaration.capacity);
+                    return;
+                }
+
+                mappings.push(crate::rebind::Mapping {
+                    key,
                     action: binding.action,
                     action_path: binding.path,
                     category: binding.category,
@@ -1136,19 +1230,29 @@ impl<C> InputContextBuilder<C> {
                         Part::Whole => binding.source.channel_shape(),
                         _ => ChannelShape::Button,
                     },
-                    scheme: control.scheme(),
-                    current: control,
+                    scheme,
+                    slots: alloc::vec![control],
+                    capacity: declaration.capacity,
                     context,
                 });
             });
         }
-        slots
+
+        // A mapping is never narrower than the defaults it already holds, so declaring two
+        // bindings is enough on its own to make a two-slot row — nobody has to also say "2".
+        for mapping in &mut mappings {
+            mapping.capacity = widest(
+                mapping.capacity,
+                crate::rebind::Capacity::UpTo(mapping.slots.len()),
+            );
+        }
+        mappings
     }
 
     /// The controls this context withholds from capture.
     ///
     /// Flat rather than per-context, because reserving is global across a scheme: a screen key
-    /// reserved in one context must be refused while capturing for a slot declared in another.
+    /// reserved in one context must be refused while capturing for a mapping declared in another.
     pub(crate) fn reserved(&self, context: &'static str) -> Vec<crate::capture::ReservedControl> {
         let mut reserved = Vec::new();
         for binding in self.bindings.iter().filter(|binding| binding.reserved) {

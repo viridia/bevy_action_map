@@ -69,8 +69,8 @@ fn main() {
     });
 
     report("A binding both reserved and rebindable", |controls| {
-        // Reserving withholds a control from capture so that it cannot be rebound. A slot exists
-        // so that it can. One binding cannot mean both.
+        // Reserving withholds a control from capture so that it cannot be rebound. A mapping
+        // exists so that it can. One binding cannot mean both.
         controls.bind::<Menu>(KeyCode::Escape).mappable().reserved();
     });
 }

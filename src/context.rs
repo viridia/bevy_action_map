@@ -52,7 +52,7 @@ use bevy_platform::collections::HashMap;
 pub(crate) struct InputContextPlan<C> {
     plan: Arc<Plan<C>>,
     // The player-facing view of the same bindings, empty unless some were declared mappable.
-    slots: alloc::vec::Vec<crate::rebind::Slot>,
+    mappings: alloc::vec::Vec<crate::rebind::Mapping>,
     // Whether an instance is live the moment it is spawned. False for a context whose activation
     // follows something else, so that it does not fire for one frame before the something else
     // has had a chance to say otherwise.
@@ -903,11 +903,13 @@ fn order_by_priority(
 /// Reads the instances of one context back out once its type is no longer known.
 ///
 /// Registered per context by `add_context`, which is the last place `C` is available.
-/// Reads the slots of one context back out once its type is no longer known.
-fn read_slots<C: InputContext + Component>(world: &World) -> alloc::vec::Vec<crate::rebind::Slot> {
+/// Reads the mappings of one context back out once its type is no longer known.
+fn read_mappings<C: InputContext + Component>(
+    world: &World,
+) -> alloc::vec::Vec<crate::rebind::Mapping> {
     world
         .get_resource::<InputContextPlan<C>>()
-        .map(|declared| declared.slots.clone())
+        .map(|declared| declared.mappings.clone())
         .unwrap_or_default()
 }
 
@@ -971,12 +973,15 @@ fn report_diagnostics<C: InputContext + Component>(builder: &InputContextBuilder
     );
 }
 
-/// Refuses a slot name another context has already taken.
+/// Refuses a mapping name another context has already taken.
 ///
 /// The within-a-context case is a plan-build diagnostic like any other, but this one cannot be:
 /// a context is compiled without seeing the others, and one action bound in two of them derives
 /// the same key twice. What makes it findable is the registry of what has already been declared.
-fn report_slot_collisions<C: InputContext + Component>(app: &App, slots: &[crate::rebind::Slot]) {
+fn report_mapping_collisions<C: InputContext + Component>(
+    app: &App,
+    mappings: &[crate::rebind::Mapping],
+) {
     let Some(declared) = app
         .world()
         .get_resource::<crate::inspect::DeclaredContexts>()
@@ -985,15 +990,22 @@ fn report_slot_collisions<C: InputContext + Component>(app: &App, slots: &[crate
     };
 
     for context in &declared.0 {
-        for taken in (context.slots)(app.world()) {
+        for taken in (context.mappings)(app.world()) {
             // Per scheme, like the within-a-context check: one action mappable on both the keyboard
             // and the pad is two rows in two tables, not a collision.
-            if let Some(clash) = slots
+            //
+            // Unlike the within-a-context check, the *action* is not consulted, and the asymmetry
+            // is the point. Two mappable bindings of one action inside one context are a primary
+            // and a secondary and merge into one row. The same two in two different contexts are
+            // two rows, in two contexts that may be active at different times — and the overrides
+            // store is keyed by mapping alone (§10.1), so a rebind of one still lands on the other.
+            // Same action, and still a collision.
+            if let Some(clash) = mappings
                 .iter()
-                .find(|slot| slot.key == taken.key && slot.scheme == taken.scheme)
+                .find(|mapping| mapping.key == taken.key && mapping.scheme == taken.scheme)
             {
                 panic!(
-                    "context `{}` declares a mappable slot named `{}`, which context `{}` already \
+                    "context `{}` declares a mapping named `{}`, which context `{}` already \
                      uses. A saved rebinding of one would land on the other; give one of them a \
                      name with `mappable_as`.\n  here:  {}\n  there: {}",
                     C::PATH,
@@ -1037,11 +1049,11 @@ fn declare_context<C: InputContext + Component>(
 
     report_diagnostics::<C>(&builder);
 
-    let slots = builder.slots(C::PATH);
-    report_slot_collisions::<C>(app, &slots);
+    let mappings = builder.mappings(C::PATH);
+    report_mapping_collisions::<C>(app, &mappings);
 
-    // Flat and global, unlike slots: reserving withholds a control from every capture in its
-    // scheme, including captures for slots declared in other contexts.
+    // Flat and global, unlike mappings: reserving withholds a control from every capture in its
+    // scheme, including captures for mappings declared in other contexts.
     app.world_mut()
         .get_resource_or_insert_with(crate::capture::ReservedControls::default)
         .0
@@ -1057,7 +1069,7 @@ fn declare_context<C: InputContext + Component>(
             tick: C::TICK,
             priority: C::PRIORITY,
             read: read_instances::<C>,
-            slots: read_slots::<C>,
+            mappings: read_mappings::<C>,
         });
 
     // A context whose activation follows something else starts inactive and waits to be asked.
@@ -1068,7 +1080,7 @@ fn declare_context<C: InputContext + Component>(
     let plan = Arc::new(Plan::from_bindings(builder.finish()));
     app.insert_resource(InputContextPlan::<C> {
         plan,
-        slots,
+        mappings,
         starts_active,
     });
 

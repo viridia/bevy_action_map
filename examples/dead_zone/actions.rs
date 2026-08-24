@@ -98,10 +98,12 @@ pub fn plugin(app: &mut App) {
         controls.bind::<Thrust>(GamepadButton::RightTrigger2);
         // The keyboard bindings are the ones a player may change. The pad is left alone: console
         // and Steam remapping already own that, and offering both is two answers to one question.
+        //
+        // Two of them, both plainly `mappable`: they derive one mapping name, so this is *one*
+        // row holding a primary and a secondary rather than two rows the player has to be told are
+        // the same thing. Its capacity grows to two because it holds two, with nobody saying so.
         controls.bind::<Thrust>(KeyCode::KeyW).mappable();
-        controls
-            .bind::<Thrust>(KeyCode::ArrowUp)
-            .mappable_as("dead_zone.thrust_alt");
+        controls.bind::<Thrust>(KeyCode::ArrowUp).mappable();
 
         // A stick axis is already signed; two keys need a composite to become one. The deadzone is
         // what stops a worn stick from turning the ship while the player is not touching it.
@@ -109,21 +111,24 @@ pub fn plugin(app: &mut App) {
             .bind::<Turn>(GamepadAxis::LeftStickX)
             .dead_zone(DeadZone::radial(0.15));
         // Two keys make one axis, so the player sees two rows rather than one — "turn negative"
-        // and "turn positive" — which is the same reason a movement composite is four.
+        // and "turn positive" — which is the same reason a movement composite is four. Each of
+        // those two rows then holds two controls, because both composites are mappable and the
+        // parts derive the same names: A and Left share a row, D and Right share the other.
         controls.bind::<Turn>(AxisButtons::ad()).mappable();
-        controls
-            .bind::<Turn>(AxisButtons::left_right())
-            .mappable_as("dead_zone.turn_alt");
+        controls.bind::<Turn>(AxisButtons::left_right()).mappable();
 
         // `pulse` fires the action again every interval for as long as the button is down, so
         // holding fire is a stream of separate `Fired`s rather than one long one — which is what
         // lets `shoot` be an observer with no timer of its own. The interval is the ship's rate of
         // fire, which is the one game number the input layer has to know.
         controls.bind::<Fire>(GamepadButton::South).pulse(RELOAD);
+        // Room for two, one shipped. The other half of what a mapping's capacity is for: the
+        // second slot is one a settings screen draws blank and the player fills, rather than one
+        // the game had to have a default for.
         controls
             .bind::<Fire>(KeyCode::Space)
             .pulse(RELOAD)
-            .mappable();
+            .mappable_upto(2);
 
         // Hold the throttle for three quarters of a second and it opens up. `Started` fires the
         // moment the burn begins, so the exhaust can show it building before it arrives.

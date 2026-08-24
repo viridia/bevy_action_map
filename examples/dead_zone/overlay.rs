@@ -10,7 +10,7 @@
 use bevy::prelude::*;
 use bevy_action_map::inspect::dump;
 use bevy_action_map::prelude::*;
-use bevy_action_map::rebind::slots;
+use bevy_action_map::rebind::mappings;
 use core::fmt::Write;
 
 use crate::actions::ToggleOverlay;
@@ -88,18 +88,37 @@ fn redraw(world: &mut World) {
         }
     }
 
-    // What the player would be shown, from the same world. Nothing below names an action: the slot
-    // list is the whole of what a rebinding screen needs, and this is the smallest thing that reads
-    // it.
+    // What the player would be shown, from the same world. Nothing below names an action: the
+    // mapping list is the whole of what a rebinding screen needs, and this is the smallest thing
+    // that reads it.
     out.push_str("\nrebindable\n");
-    for slot in slots(world) {
+    for mapping in mappings(world) {
         // Both halves of the row are keys with a fallback, so a game that ships a translation
         // catalogue swaps in two lookups here and nothing else changes.
+        //
+        // A mapping holds an ordered *list*, so the second half is every control in it — this is a
+        // read-only dump and there is no reason to hide the secondary. A settings screen draws
+        // them as separate cells; here they are joined, and joining is the app's decision rather
+        // than the crate's.
+        let bound = mapping
+            .slots
+            .iter()
+            .map(|control| control.fallback_label())
+            .collect::<Vec<_>>()
+            .join(", ");
+        // Empty slots the player could still fill, so the dump says how wide the row is rather
+        // than only what is in it.
+        let room = match mapping.capacity.slots() {
+            Some(slots) if slots > mapping.slots.len() => {
+                format!("  (+{} free)", slots - mapping.slots.len())
+            }
+            Some(_) => String::new(),
+            None => "  (+ more)".into(),
+        };
         let _ = writeln!(
             out,
-            "    {:<22} {}",
-            slot.key.fallback_label(),
-            slot.current.fallback_label()
+            "    {:<22} {bound}{room}",
+            mapping.key.fallback_label()
         );
     }
 

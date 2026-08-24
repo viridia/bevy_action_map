@@ -230,7 +230,7 @@ the work that would otherwise be per-frame happens (R23.1, R7.6):
 
 | Compilation produces | Serves |
 | --- | --- |
-| Action → slot assignment | O(1) state access without hashing (R23.5) |
+| Action → mapping assignment | O(1) state access without hashing (R23.5) |
 | Scratch slot assignment per condition and stateful modifier | §6 |
 | Each binding's chord length, and whether the plan has any | The clash pre-pass in §5, skipped entirely when it would find nothing (R8.1) |
 | Reverse index: action → bindings | Prompt lookup without scanning (R18.1) |
@@ -323,8 +323,8 @@ first place intent does load-bearing work rather than describing:
 | `Delta2` | contributions are summed | A delta is a displacement already expressed per frame, so two devices moving at once should move the action by both. |
 
 Ties keep the earlier contribution, so declaration order is the documented tiebreak. The plan groups
-bindings by slot at compile time, which makes the fold one pass over a sorted list with no per-frame
-allocation (R23.2).
+bindings by mapping at compile time, which makes the fold one pass over a sorted list with no
+per-frame allocation (R23.2).
 
 **What makes the mixing impossible rather than merely defined.** Keying the fold off the action's
 intent stops the units error *between* actions, but on its own it would still accept a mouse delta
@@ -422,7 +422,7 @@ Checked against every condition in R6.1 and every stateful modifier in R5.4:
 | tap | `time` |
 | multi-tap / double-tap | `time`, `count` |
 | pulse / repeat | `time`, `count` |
-| chord, blocked-by | `prev` (other operands are read from their own slots) |
+| chord, blocked-by | `prev` (other operands are read from their own mappings) |
 | sequence / combo (R6.4) | `time`, `count` as progress index — the sequence itself is in the plan |
 | smoothing, accumulation, rate limiting (R5.4) | `prev` as accumulator, `time` |
 
@@ -437,7 +437,7 @@ tables are dense arrays of `Copy` types:
 - **Change granularity** is the dirty bitset, avoiding the all-or-nothing change ticks a single
   component would impose (R23.4).
 - **Backends** write into the action table directly (R0.4).
-- **Dynamic actions**, if ever added, get a slot like any other (R1.3).
+- **Dynamic actions**, if ever added, get a mapping like any other (R1.3).
 - Public types stay legible (R24.6) — no offsets, no `[u8; N]`, no unsafe.
 
 `ActionId` being a dense `u32` makes the action→slot map a `Vec<u16>` indexed by id: two array
@@ -624,7 +624,7 @@ against the id — so persistence and external backends can resolve an action by
 is required and unchecked against the Rust type (D8), so §3.1's convention is what keeps it
 collision-free. `category` and `consume` cover the rest of R1.6, both as associated constants with
 defaults so a hand-written impl need not mention them. Note that rebindability is deliberately *not*
-here: it belongs to a slot, not an action (§9.6).
+here: it belongs to a mapping, not an action (§9.6).
 
 _Not the **reflect** type registry, which an earlier draft of this section named. That keys types by
 their Rust type path, which is the identity D8 exists to reject: what a settings file holds is the
@@ -770,15 +770,15 @@ is three additive declarations over bindings that already exist.
 
 ```rust
 app.add_context::<OnFoot>(|c| {
-    // One slot per composite part — `Move` itself is never rebindable (R19.9), and the four parts
+    // One mapping per composite part — `Move` itself is never rebindable (R19.9), and the four parts
     // name themselves, so the keys are `gameplay.move.up` and its three neighbours (R19.14).
     c.bind::<Move>(DirectionalButtons::wasd()).mappable();
 
     c.bind::<Move>(Stick::Left).dead_zone(DeadZone::radial(0.15));
-    // sticks are not per-slot rebindable; they get a tunable instead (R19.11)
+    // sticks are not per-mapping rebindable; they get a tunable instead (R19.11)
 
     c.bind::<Jump>(KeyCode::Space).mappable();
-    c.bind::<Jump>(GamepadButton::South);   // no slot: not player-rebindable
+    c.bind::<Jump>(GamepadButton::South);   // no mapping: not player-rebindable
 });
 ```
 
@@ -791,13 +791,14 @@ parts are up, down, left and right, so the key derives as `gameplay.move.up` and
 where `up` becomes "Move Forward". The author supplying "forward" would be naming the same part
 twice, in a place no translator will look.
 
-*The scheme is inferred from the controls.* A slot belongs to keyboard-and-mouse or to gamepad, and
-the binding's own controls already say which. Declaring it would be a third chance to disagree with
-what is actually bound. A binding whose parts span both is refused when the context is declared,
-since there is then no one scheme to rebind it in — which is a thing nobody writes on purpose.
+*The scheme is inferred from the controls.* A mapping belongs to keyboard-and-mouse or to gamepad,
+and the binding's own controls already say which. Declaring it would be a third chance to disagree
+with what is actually bound. A binding whose parts span both is refused when the context is
+declared, since there is then no one scheme to rebind it in — which is a thing nobody writes on
+purpose.
 
 *Uniqueness is per scheme, not per context.* Binding one action to a key and to a pad button, both
-mappable, derives the same slot name twice — and is the ordinary way to write a game that offers
+mappable, derives the same mapping name twice — and is the ordinary way to write a game that offers
 rebinding on both devices. The two are rebound independently (R19.7) and stored in separate tables
 (§10.1), so only a repeat *within* one scheme is a collision. Both collision checks are keyed by
 scheme and name together for that reason.
@@ -805,18 +806,60 @@ scheme and name together for that reason.
 An explicit name stays available for the case that needs it: `mappable_as("gameplay.strafe")`
 replaces the derived prefix, and is the remedy the collision diagnostic names.
 
+**A mapping holds a list of slots, and that list is what "primary and secondary" is.** A row on a
+shipped game's keyboard table has two cells, and the first model here had one control per mapping,
+which cannot say that at all. The workaround it forced was a second row under an alias name — Dead
+Zone had `dead_zone.thrust` and `dead_zone.thrust_alt`, telling the player two things are separate
+when they are the same thing twice. So `Mapping::slots` is an ordered `Vec<Control>`, and declaring
+two mappable bindings of one action in one scheme is how a game ships both defaults:
+
+```rust
+c.bind::<Thrust>(KeyCode::KeyW).mappable();      // one mapping…
+c.bind::<Thrust>(KeyCode::ArrowUp).mappable();   // …two slots
+```
+
+They derive the same key, and R19.15's collision check now consults the *action* as well: same name
+plus same scheme plus same action is a merge, and what stays an error is two **different** actions
+reaching for one name. Order is data rather than an artefact of iteration, because order is what
+makes the first slot the primary one.
+
+**The two nouns, since the first draft got them the wrong way round.** A *mapping* is the named
+thing a player rebinds — "Move Forward" — and a *slot* is one position in it, holding one control.
+The first version called the row a slot and had to invent a second word for the position; "cell" was
+what it reached for, and a cell belongs to the table a screen draws rather than to the model behind
+it. Naming the position `slot` also agrees with the two uses the word already had in the
+crate, both of which mean an indexed position in a list. **A screen draws one cell per slot**, and
+that sentence is the whole of the relationship: `cell` stays a presentation word and never appears
+in the model.
+
+*Capacity is inferred and raised, never lowered.* `Capacity::UpTo(n)` or `Capacity::Any`, and three
+rules decide it: a plain `mappable` asks for one; several bindings feeding one mapping take the
+widest anything asked for; and afterwards no mapping is narrower than the defaults it already holds.
+So the two lines above produce `UpTo(2)` with nobody saying "2", and `mappable_upto(2)` on a single
+default is how a game ships one control and leaves the second slot for the player to fill.
+
+The alternatives were a fixed two and unbounded-only, and the prior art splits: games use a small
+fixed number and label the columns, tools (Blender, VS Code) grow an "add shortcut" button, engines
+offer unbounded as an authoring surface. A capacity covers all three, and `capacity.slots()` is what
+a table asks to know how many columns to draw — `None` meaning the row grows instead.
+
+*It is a list, not a set.* Nothing stops a player putting one control in two slots of one mapping;
+that is a question for the conflict *policy* that applies a rebind rather than for the model, and
+`conflicts` deliberately excludes the whole target mapping rather than the one slot being filled.
+
 A rebinding UI then needs no knowledge of this crate's internals:
 
 ```rust
-for slot in rebind::slots(world) {
-    // slot.key      -> "gameplay.move.up"        — a key, not text (R19.14)
-    // slot.category -> Some("gameplay.movement") — from the action (R1.6)
-    // slot.current  -> Control::Key(KeyCode::KeyW)
-    // slot.scheme   -> Scheme::KeyboardMouse     — one screenful at a time
-    // slot.accepts  -> ChannelShape::Button      — filters what capture will take (R19.1)
+for mapping in rebind::mappings(world) {
+    // mapping.key      -> "gameplay.move.up"        — a key, not text (R19.14)
+    // mapping.category -> Some("gameplay.movement") — from the action (R1.6)
+    // mapping.slots    -> [Control::Key(KeyCode::KeyW)]  — ordered; slot 0 is the primary
+    // mapping.capacity -> Capacity::UpTo(2)         — how many slots, so how many columns
+    // mapping.scheme   -> Scheme::KeyboardMouse     — one screenful at a time
+    // mapping.accepts  -> ChannelShape::Button      — filters what capture will take (R19.1)
 
-    let label = i18n.get(slot.key)                 // the app's localization layer...
-        .unwrap_or_else(|| slot.key.fallback_label()); // ...or readable text without one (R19.13)
+    let label = i18n.get(mapping.key)                 // the app's localization layer...
+        .unwrap_or_else(|| mapping.key.fallback_label()); // ...or readable text without one (R19.13)
 }
 for t in rebind::tunables(world) {
     // t.key, and a typed range the UI renders as a slider or checkbox
@@ -830,24 +873,25 @@ by `scheme` for which device's worth to show.
 
 The keys are the whole player-facing vocabulary, and none of them is a string this crate renders.
 That is what keeps R18.3's "no hard-coded English" honest across a whole rebinding row rather than
-only the control column — and it is why a slot carries a key rather than a label: a
+only the control column — and it is why a mapping carries a key rather than a label: a
 label would be a second string to translate, sitting in the binding declaration where no translator
 will look for it.
 
 Three properties worth noting:
 
-- **Composites are invisible.** `Move` is one action with a 2D value, but the player sees four button
-  slots, which is how every shipped game presents it. The composite exists only on the developer side.
-- **Rebindability is opt-in and per binding**, not per action. The gamepad `Jump` binding above has no
-  slot, so it does not appear in the UI — the right default, given that gamepad remapping is usually
-  handled by the console OS or Steam anyway.
+- **Composites are invisible.** `Move` is one action with a 2D value, but the player sees four
+  button mappings, which is how every shipped game presents it. The composite exists only on the
+  developer side.
+- **Rebindability is opt-in and per binding**, not per action. The gamepad `Jump` binding above
+  has no mapping, so it does not appear in the UI — the right default, given that gamepad remapping
+  is usually handled by the console OS or Steam anyway.
 - **Tunables are typed, so the UI is generic.** `DeadzoneAmount` with a range renders as a slider
   without the UI knowing it drives a modifier parameter. This is what R20.5 needs and what keeps R5.8
   (modifiers never shown to players) satisfiable.
 
-**Presets** (R19.12) are a named set of slot assignments and tunable values applied as a unit — how
-"Southpaw" is actually shipped, and the only remapping story for device classes where per-slot
-rebinding is not offered.
+**Presets** (R19.12) are a named set of mapping assignments and tunable values applied as a unit —
+how "Southpaw" is actually shipped, and the only remapping story for device classes where
+per-mapping rebinding is not offered.
 
 ---
 
@@ -874,27 +918,26 @@ holds them — `Reflect` and serde behind the `serialize` feature — while know
 it ends up. A game drops it inside its own settings resource, sends it to an account service, or
 writes it wherever it likes.
 
-**Rows are keyed by slot, and hold a control.** Three properties decide that, and each rules out the
-obvious alternative of one row per action:
+**Rows are keyed by mapping, and hold that mapping's list of controls.** Three properties decide
+that, and each rules out the obvious alternative of one row per action:
 
 - an action has several bindings (R4.1), so `Jump` is Space *and* South;
-- the unit of rebinding is the slot, not the action (R19.9) — the player rebinds "move forward",
+- the unit of rebinding is the mapping, not the action (R19.9) — the player rebinds "move forward",
   never `Move`;
 - only the source belongs to the player. Modifiers, conditions and chord structure are developer
   data (R5.8), and the knobs a player does get are tunables (R19.11), which are typed and live in
   their own table.
 
-So a row's key is the slot key R19.14 already derives — the action's path plus the part name — and
-its value is an encoded control, not an encoded binding. Add the per-scheme separation R17.4
-requires and the whole thing is scalar-valued, which is what keeps it legible in whatever format
-the app writes:
+So a row's key is the mapping key R19.14 already derives — the action's path plus the part name —
+and its value is encoded controls, not an encoded binding. Add the per-scheme separation R17.4
+requires and the whole thing is legible in whatever format the app writes:
 
 ```toml
 version = 1
 
 [bindings.kbm]
 "gameplay.move.forward" = "key/KeyW"
-"gameplay.jump"         = "key/Space"
+"gameplay.jump"         = ["key/Space", "key/KeyJ"]   # primary, secondary
 "editor.save"           = "key/ControlLeft+key/KeyS"
 
 [bindings.gamepad]
@@ -903,6 +946,20 @@ version = 1
 [tunables.gamepad]
 "gameplay.look.sensitivity" = 2.5
 ```
+
+**A row holds a list because a mapping does** (R19.9), and the two must agree or a secondary could
+be bound and not saved. **A scalar is the same thing as a one-element list**, and the format should
+accept both on the way in and write the shorter form out: most rows hold one control, and a file a
+player edits by hand should not make them type brackets to say so. **Position in the list is
+meaningful** — it is which slot the control sits in — so the list is written in order and a cleared
+middle slot needs the cleared marker R17.7 already requires rather than a shortened list, which
+would silently promote the secondary to primary.
+
+**A row is a whole mapping, not one slot.** Applying an override replaces the mapping's list, and
+the slot-level edit a screen performs — "put this in the secondary" — is done by the screen against
+the list before it writes the row. That keeps the store's unit the same as the requirement's unit,
+and keeps a row from meaning something different depending on how many slots the build happens to
+have.
 
 **Three states, not two** (R17.7). Because absence already means "use the default", a player who
 clears a binding has nothing left to say with unless clearing has its own value — and an action an
@@ -929,7 +986,7 @@ require-reset, which is what `deactivate` and `activate` already do (R7.4, R7.5)
 
 **Loading is pure and reports rather than drops** (R17.2). It is a function from (defaults,
 overrides) to (bindings, problems), where a problem is an unknown action path, an unknown control
-name, a slot that no longer exists, or a control whose shape the slot cannot accept — the same
+name, a mapping that no longer exists, or a control whose shape the mapping cannot accept — the same
 diagnostic shape §9.5's plan-build tier produces, and reportable through the same type.
 
 ### 10.2 What Steam's IGA file is, and is not
@@ -946,7 +1003,7 @@ Two differences are worth carrying forward. Steam requires the action names in t
 the names in the game's code exactly, with nothing checking it — which is why R1.7 exists, and which
 we avoid by declaring the path once in the derive rather than growing a second file to keep in step.
 And a Steam action belongs to exactly one action set, while ours may be bound in any number of
-contexts: the same tension as R19.15's colliding slot keys, arriving from another direction, and
+contexts: the same tension as R19.15's colliding mapping keys, arriving from another direction, and
 worth settling once rather than twice.
 
 ### 10.3 Naming a control
@@ -957,7 +1014,7 @@ readable in the player's language.
 
 **One name serves as both the stored identity and the localization key.** `key/KeyW` is what a
 settings file holds (R17.9) and what an app's catalogue answers to (R18.3), which is the same
-economy `SlotKey` already gets — a rebinding row is then two keys and two lookups, with nothing
+economy `MappingKey` already gets — a rebinding row is then two keys and two lookups, with nothing
 in it this crate renders. `fallback_label` is the readable text for a game with no catalogue,
 required by R19.13 so that shipping translations is never the price of a legible screen.
 
@@ -986,9 +1043,18 @@ Rebinding wants exactly the discarded half, so capture reads L1 directly rather 
 binding (R19.1) — which is also what makes R19.5 structural: a main-menu settings screen has no
 gameplay contexts spawned and no evaluator stepping, and capture does not notice.
 
+**A capture fills a slot, not a mapping.** A mapping holds an ordered list of slots (§9.7), so a
+session carries which one the player activated and `Captured` echoes that back — without it the
+answer has nowhere to go but the front of the row, and the secondary column could never be filled at
+all. `CaptureSession::for_mapping` takes the first slot and `for_slot` names another; a slot past
+the mapping's capacity, or more than one past what it currently holds, is refused, which is what
+stops a capture leaving a hole in a list whose *order* is what primary and secondary mean.
+
 **A session is a component, and it goes on whatever entity the caller picks.** Usually the settings
 row the player activated, so that "which row is listening" is answered by where the component is
-rather than by the screen keeping that state beside a global session. The crate answers with a
+rather than by the screen keeping that state beside a global session. With several slots per row,
+that entity is usually the individual cell button — so the slot on the event is for the *override*
+the observer writes rather than for finding the widget again. The crate answers with a
 `Captured` event on that same entity and removes the component; removing it yourself cancels. It
 never touches the player or context entities, which is why a screen reached from the main menu works
 the same as one reached from a pause menu.
@@ -997,39 +1063,42 @@ the same as one reached from a pause menu.
 the session arrives, so a session that read the queue immediately would bind whichever key the player
 activated the row with. A session therefore skips whatever is already queued on its first run.
 
-**Three refusals that look alike and are not.** *Shape and scheme* are the slot's own constraints — a
-keyboard row takes a key, not a pad button, because a rebind is scoped to one scheme (R19.7) and
-crossing schemes would mean a different slot. *Excluded* is the screen's own controls (R19.2), and is
-silent: an excluded control is not being refused, it is busy doing its normal job, which is how the
-key that cancels a capture reaches the thing that cancels it. *Reserved* is declared on a binding and
-is loud, because a player who pressed it meant to bind it.
+**Three refusals that look alike and are not.** *Shape and scheme* are the mapping's own constraints
+— a keyboard row takes a key, not a pad button, because a rebind is scoped to one scheme (R19.7) and
+crossing schemes would mean a different mapping. *Excluded* is the screen's own controls (R19.2),
+and is silent: an excluded control is not being refused, it is busy doing its normal job, which is
+how the key that cancels a capture reaches the thing that cancels it. *Reserved* is declared on a
+binding and is loud, because a player who pressed it meant to bind it.
 
 **Reserving settles OQ-10, and the second half is the half that matters.** A reserved binding takes
-no slot *and* its controls are refused by capture across the scheme. Without the second half a player
-cannot rebind the settings key away but can still bind something else over it, which is the same trap
-through another door. Reserving and declaring a slot contradict each other, and declaring both is a
-plan-build error.
+no mapping *and* its controls are refused by capture across the scheme. Without the second half a
+player cannot rebind the settings key away but can still bind something else over it, which is the
+same trap through another door. Reserving and declaring a mapping contradict each other, and
+declaring both is a plan-build error.
 
 **Only deliberate arrivals are refused out loud.** A stick drifts and a mouse twitches; a screen that
 complained about every reading past its threshold would do nothing else. A press is refused loudly, a
 continuous reading is dropped quietly, and both are claimed so that neither also plays the game.
 
-**Conflicts are detected, not resolved.** Which slots already hold a control is a pure query over the
-slot list, answerable before anything is committed to (R8.6). It is deliberately not carried on the
-`Captured` event: answering it means reading every declared context, which capture cannot do from the
-middle of the input pipeline, and what to *do* about a clash — reject, swap, unbind the other — is a
-policy that needs somewhere to write the answer. Two limits are worth stating. Comparison is at
-control granularity, so two bindings differing only in their chords are reported as overlapping even
-though arbitration would separate them — a false positive rather than a false negative. And a clash
-across two contexts is reported as *possible* rather than certain, because whether two contexts are
-ever live together is a question about the game's own activation rules.
+**Conflicts are detected, not resolved.** Which mappings already hold a control is a pure query over
+the mapping list, answerable before anything is committed to (R8.6). It is deliberately not carried
+on the `Captured` event: answering it means reading every declared context, which capture cannot do
+from the middle of the input pipeline, and what to *do* about a clash — reject, swap, unbind the
+other — is a policy that needs somewhere to write the answer. Three limits are worth stating.
+Comparison is at control granularity, so two bindings differing only in their chords are reported as
+overlapping even though arbitration would separate them — a false positive rather than a false
+negative. A clash across two contexts is reported as *possible* rather than certain, because whether
+two contexts are ever live together is a question about the game's own activation rules. And the
+*whole* target mapping is excluded rather than the one slot being filled, so a control repeated
+across two slots of one row is not reported here — a repeat within one row is a policy question, and
+belongs with the others.
 
-**There is no class of two-dimensional controls,** though R4.9's vocabulary was expected to have one.
-No single control reports a position in two dimensions: a stick is two axes and a directional
-composite is four buttons. Since a player rebinds one part at a time (R19.9), the case it would serve
-never reaches capture — and a slot that accepts `Axis2` is a stick or mouse bound whole, which §9.7
-gives a tunable rather than a rebinding row. `CaptureSession::for_slot` returns `None` for one rather
-than offering a capture that can never be satisfied.
+**There is no class of two-dimensional controls,** though R4.9's vocabulary was expected to have
+one. No single control reports a position in two dimensions: a stick is two axes and a directional
+composite is four buttons. Since a player rebinds one part at a time (R19.9), the case it would
+serve never reaches capture — and a mapping that accepts `Axis2` is a stick or mouse bound whole,
+which §9.7 gives a tunable rather than a rebinding row. `CaptureSession::for_slot` returns `None`
+for one rather than offering a capture that can never be satisfied.
 
 ---
 
@@ -1065,7 +1134,7 @@ bevy_action_map/
     inspect/        type-erased read of contexts and actions    (R22.2)
     player/         device pairing, control schemes             (§15)
     present/    L3  prompts, display descriptors, glyph ids     (§18)
-    rebind/         mappable slots, tunables, presets           (D7)
+    rebind/         mappings, tunables, presets           (D7)
     backend/        source + authority backend traits           (D3)
     focus/          bevy_input_focus integration  [feature]     (D4)
 bevy_action_map_macros/   #[derive(InputAction)], #[derive(InputContext)]
@@ -1140,10 +1209,10 @@ Two consequences worth carrying into the design:
 defect worth reporting upstream on its own merits. It does not block us — D6 has us reading
 `RawGamepadEvent` regardless — so it is a bug report, not a dependency.
 
-**3. A device identity and capability model.** Requirements §11 wants persistent device
-identity, capability queries, and third-party device registration. None of that is specific to action
-mapping, and `bevy_input` is where it would eventually belong. But proposing it upstream before it has
-been proven against real devices is the wrong order; build it here, donate it if it earns its way.
+**3. A device identity and capability model.** Requirements §11 wants persistent device identity,
+capability queries, and third-party device registration. None of that is specific to action mapping,
+and `bevy_input` is where it would eventually belong. But proposing it upstream before it has been
+proven against real devices is the wrong order; build it here, donate it if it earns its way.
 
 ### What must not move upstream
 
@@ -1196,7 +1265,7 @@ exists, the split is speculative, and the module layout above makes it a move ra
   *hypothetical* binding with nothing held, which means the rule has to become a function of
   (bindings, controls-held) that both callers can use, rather than a loop the evaluator owns. It is
   a small refactor while there is one caller and an awkward one after there are two, so it should
-  happen when §19's slots arrive rather than when §20 discovers it.
+  happen when §19's mappings arrive rather than when §20 discovers it.
 - **R23.2 is unenforced.** Two allocations reached the per-tick path during §8's work and were caught
   by reading rather than by tooling — both times a helper that returned a collection, which is the
   ordinary way to write one. A rule this easy to break by accident wants a check.

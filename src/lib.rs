@@ -172,7 +172,7 @@ pub mod prelude {
     pub use crate::context::{ActionMapAppExt, Actions, ActionsQuery, InputContextState, Obstacle};
     pub use crate::event::{Canceled, Completed, Fired, Started};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
-    pub use crate::rebind::{Scheme, Slot, SlotKey};
+    pub use crate::rebind::{Capacity, Mapping, MappingKey, Scheme};
     // The derives share their names with the traits above, which is fine — a derive macro and a
     // trait live in different namespaces. Without these, a glob import of this prelude gives you
     // the trait and leaves `#[derive(InputAction)]` unresolved.

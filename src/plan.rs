@@ -47,8 +47,8 @@ impl BindingDiagnostic {
             DiagnosticKind::IntentMismatch { .. }
             | DiagnosticKind::RateFromDelta { .. }
             | DiagnosticKind::ChainedRescaling { .. } => Severity::Error,
-            DiagnosticKind::MixedSchemeSlot
-            | DiagnosticKind::DuplicateSlotKey { .. }
+            DiagnosticKind::MixedSchemeMapping
+            | DiagnosticKind::DuplicateMappingKey { .. }
             | DiagnosticKind::ReservedAndMappable => Severity::Error,
             DiagnosticKind::DuplicateBinding { .. }
             | DiagnosticKind::ConsumeDisagreement { .. } => Severity::Warning,
@@ -98,13 +98,13 @@ pub enum DiagnosticKind {
         /// The action on the other side of the disagreement.
         other: &'static str,
     },
-    /// Two mappable slots would answer to the same name.
-    DuplicateSlotKey {
+    /// Two mappings would answer to the same name.
+    DuplicateMappingKey {
         /// The name they share.
-        key: crate::rebind::SlotKey,
+        key: crate::rebind::MappingKey,
     },
     /// A mappable binding reads controls from more than one kind of device.
-    MixedSchemeSlot,
+    MixedSchemeMapping,
     /// A binding is declared both rebindable and reserved, which cannot both be true.
     ReservedAndMappable,
 }
@@ -145,14 +145,14 @@ impl core::fmt::Display for BindingDiagnostic {
                  fired",
                 self.action
             ),
-            DiagnosticKind::DuplicateSlotKey { key } => write!(
+            DiagnosticKind::DuplicateMappingKey { key } => write!(
                 f,
-                "`{}` declares a mappable slot named `{key}`, and so does something else. A saved \
+                "`{}` declares a mapping named `{key}`, and so does something else. A saved \
                  rebinding of one would land on the other; give one of them a name with \
                  `mappable_as`",
                 self.action
             ),
-            DiagnosticKind::MixedSchemeSlot => write!(
+            DiagnosticKind::MixedSchemeMapping => write!(
                 f,
                 "`{}` is mappable but reads controls from more than one kind of device, so there \
                  is no one scheme to rebind it in. Bind the devices separately, one mappable \
@@ -162,7 +162,7 @@ impl core::fmt::Display for BindingDiagnostic {
             DiagnosticKind::ReservedAndMappable => write!(
                 f,
                 "`{}` is declared both mappable and reserved. Reserving withholds a control from \
-                 capture so that it cannot be rebound; a slot exists so that it can. Keep whichever \
+                 capture so that it cannot be rebound; a mapping exists so that it can. Keep whichever \
                  one you meant",
                 self.action
             ),
@@ -193,11 +193,16 @@ fn effective_shape(binding: &BindingSpec) -> Result<ChannelShape, DiagnosticKind
 /// player has not committed to yet.
 pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
     let mut found = Vec::new();
-    // Slot keys have to be unique across the whole context, so they are gathered as we go rather
-    // than compared pairwise like the checks below. Keyed by scheme as well as by name, because
-    // uniqueness is per scheme (R19.15) — binding one action to a key and to a pad button, both
-    // mappable, is the ordinary way to write it, and the two rows live in separate tables.
-    let mut keys = alloc::collections::BTreeSet::new();
+    // Mapping keys have to be unique across the whole context, so they are gathered as we go
+    // than compared pairwise like the checks below.
+    //
+    // Keyed by scheme as well as by name, and remembering *which action* claimed each, because
+    // neither kind of repeat is a mistake on its own. Uniqueness is per scheme (R19.15), so one
+    // action on a key and on a pad button is two rows in two tables. And one action reaching a name
+    // twice within one scheme is a primary and a secondary, which merge into a single row holding
+    // both. What is left — two *different* actions answering to one name — is the case where a
+    // saved rebinding of one would land on the other, and is what R19.15 wants reported.
+    let mut keys = alloc::collections::BTreeMap::new();
 
     for (index, binding) in bindings.iter().enumerate() {
         let at = |kind| BindingDiagnostic {
@@ -234,9 +239,12 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
             let mut scheme = None;
             let mut mixed = false;
             binding.source.for_each_part(|part, control| {
-                let key = crate::rebind::SlotKey::new(prefix, part);
-                if !keys.insert((control.scheme(), key)) {
-                    found.push(at(DiagnosticKind::DuplicateSlotKey { key }));
+                let key = crate::rebind::MappingKey::new(prefix, part);
+                let claimant = keys
+                    .entry((control.scheme(), key))
+                    .or_insert(binding.action);
+                if *claimant != binding.action {
+                    found.push(at(DiagnosticKind::DuplicateMappingKey { key }));
                 }
                 match scheme {
                     Some(seen) if seen != control.scheme() => mixed = true,
@@ -245,7 +253,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
                 }
             });
             if mixed {
-                found.push(at(DiagnosticKind::MixedSchemeSlot));
+                found.push(at(DiagnosticKind::MixedSchemeMapping));
             }
         }
 

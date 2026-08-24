@@ -46,7 +46,7 @@ When it was finally run, two structural defects surfaced:
 - **Context state was a singleton resource**, which R0.3 forbids. The requirement caught a real
   defect rather than describing one: it is what identified the choice as structural rather than
   stylistic.
-- **Slots were allocated per binding rather than per action**, so a second binding on an action
+- **Mappings were allocated per binding rather than per action**, so a second binding on an action
   silently disabled the first. This is R4.1, which sounds too obvious to write down, and which was
   violated in a way that disabled the keyboard half of the crate's own worked example.
 
@@ -119,7 +119,7 @@ are recorded here rather than annotated in place, so that the requirements read 
 | R9.2 | Reworded to describe the guarantee, not the layout | The design gives one state per context per domain, which the original wording forbade. |
 | R23.2 | Adds "no synchronization" | The first real violation was a lock, not an allocation. |
 | R24.4 | Distinguishes runtime from app-build failure | Panicking during plugin setup is right, and the rule forbade it. |
-| R1.6 / R19.6 / R19.9 | Name moves to the slot, category stays on the action | Both claimed the same two fields (OQ-9). |
+| R1.6 / R19.6 / R19.9 | Name moves to the mapping, category stays on the action | Both claimed the same two fields (OQ-9). |
 | R19.14 | **New** — player-visible names are localization keys | R18.3 localized half a rebinding row and left the other half a baked literal. |
 | Scope | **New** — "Who this is for" | The studio/long-tail tension drives most decisions here and was never named, so it was being rediscovered per section. |
 | R24.6 | `SHOULD` → `MUST`, plus new R24.7 and R24.8 | The enforceable half of that commitment; a `SHOULD` made one constituency optional. |
@@ -273,7 +273,7 @@ Delivered the log itself, `Fired<A>`/`Completed<A>`/`Canceled<A>` as generic `En
 the context entity, and the dispatch system that turns one into the other. `Started<A>` waits for
 conditions, since without them it would be indistinguishable from `Fired<A>`.
 
-**How a slot finds its action type.** The evaluator works in `ActionId`s and slot indices, and
+**How a mapping finds its action type.** The evaluator works in `ActionId`s and mapping indices, and
 neither can name a generic event. `bind::<A>()` is the only place the concrete type exists, so it
 records a `dispatch_for::<A>` function pointer that the plan keeps per slot. One monomorphised
 function per action, resolved at bind time — no registry and no downcasting. The generic
@@ -284,12 +284,12 @@ state: a press and release inside one window cancel in the held state, and a sin
 sees *nothing happen* — not one transition, zero. The fix is to replay events one at a time and fold
 after each.
 
-That collides with deltas, which have no value at an instant, only a total over an interval — folding
-per event would hand a mouse-look action partial movements. What makes the two reconcilable is
-chunk 15's legality table: `Intent::accepts` lets a `Delta2` action take only delta-shaped sources
-and every other intent take none, so **no slot can want both treatments**. The fold runs in two
-passes over a partition that was already guaranteed to exist. A constraint added to prevent a units
-error turned out to be what made this tractable.
+That collides with deltas, which have no value at an instant, only a total over an interval —
+folding per event would hand a mouse-look action partial movements. What makes the two reconcilable
+is chunk 15's legality table: `Intent::accepts` lets a `Delta2` action take only delta-shaped
+sources and every other intent take none, so **no mapping can want both treatments**. The fold runs
+in two passes over a partition that was already guaranteed to exist. A constraint added to prevent a
+units error turned out to be what made this tractable.
 
 **A test that was true but vacuous.** The first version of "a held key is silent" asserted over
 observers, and passed even when `Ongoing` was deliberately added to the logged phases — because
@@ -720,12 +720,12 @@ while writing a loader.
 break that, and each pushes the row in the same direction:
 
 - an action has several bindings, so `Jump` is Space *and* South;
-- the unit of rebinding is the slot rather than the action, which D7 settled and which a composite
-  makes unavoidable — the player rebinds "move forward", never `Move`;
+- the unit of rebinding is the mapping rather than the action, which D7 settled and which a
+  composite makes unavoidable — the player rebinds "move forward", never `Move`;
 - only the *source* belongs to the player at all. Modifiers, conditions and chord structure are
   developer data, and the knobs a player does get are tunables.
 
-So a row is keyed by slot and holds a control, not a binding. Everything stays a scalar, which is
+So a row is keyed by mapping and holds a control, not a binding. Everything stays a scalar, which is
 what keeps the file legible in TOML or anything else.
 
 **The finding that would have cost the most later: absent and cleared are different.** Overrides are
@@ -735,37 +735,38 @@ backend owns is a third state again, neither defaulted nor cleared, or a Steam-b
 one the player wiped. That is now R17.7, and it is a table with three rows because a format with two
 loses one of them silently.
 
-**Two players with identical controllers is a persistence question in disguise.** If a stored binding
-could name a device instance, the file would say "player 1 uses the pad with GUID abc123" and break
-when a controller is replaced. It cannot, so bindings name a device *class*, and pairing and
-calibration are separate stores keyed by persistent identity — R17.8. Two players with identical pads
-and identical mappings then share one table and differ only in pairing, which is chunk 26's business
-and correctly invisible here.
+**Two players with identical controllers is a persistence question in disguise.** If a stored
+binding could name a device instance, the file would say "player 1 uses the pad with GUID abc123"
+and break when a controller is replaced. It cannot, so bindings name a device *class*, and pairing
+and calibration are separate stores keyed by persistent identity — R17.8. Two players with identical
+pads and identical mappings then share one table and differ only in pairing, which is chunk 26's
+business and correctly invisible here.
 
 **Steam's IGA file is not a binding file**, which is the answer to whether it should inspire the
 format. It declares action sets, layers, and actions with their types; the bindings live per-user in
-Steam's own storage. So it is the counterpart of our action *declarations*, and we already match it —
-their action types are our `Intent`, existing for the same reason, and their localization block is
+Steam's own storage. So it is the counterpart of our action *declarations*, and we already match it
+— their action types are our `Intent`, existing for the same reason, and their localization block is
 R19.14. Two things did come out of reading it that way: an authority backend rewriting bindings
-mid-session is normal rather than exotic, which is why applying to a live context is the only path in
-rather than a reload feature bolted onto a startup path; and a Steam action belongs to exactly one
-action set while ours may be bound in many, which is R19.15's colliding slot keys arriving from
-another direction.
+mid-session is normal rather than exotic, which is why applying to a live context is the only path
+in rather than a reload feature bolted onto a startup path; and a Steam action belongs to exactly
+one action set while ours may be bound in many, which is R19.15's colliding mapping keys arriving
+from another direction.
 
 The IGA details here are from the documented format rather than from a file in hand. If the backend
 work leans on them, they want the treatment §14's gamepad claims got.
 
-### Chunk 19: mappable slots
+### Chunk 19: mappings
 
 The chunk existed to answer one question, and the answer was better than the design's own sketch.
 
-**Could a slot address one part of a composite?** `BindingSource::Directional2(DirectionalButtons)`
-compiles the four keys as one thing, and `for_each_control` visited them in order without naming
-them — so nothing in the model could say "the key that moves you forward". The fix was small once
-stated: parts are a named enum, and `for_each_part` yields the name beside the control. Up, down,
-left, right; negative and positive for a two-button axis; `Whole` for a binding that reads one
-control. A stick and the mouse report `Whole` too, which is the right answer rather than a shrug —
-they are one thing to a player, and what they get instead of per-part rebinding is a tunable.
+**Could a mapping address one part of a composite?**
+`BindingSource::Directional2(DirectionalButtons)` compiles the four keys as one thing, and
+`for_each_control` visited them in order without naming them — so nothing in the model could say
+"the key that moves you forward". The fix was small once stated: parts are a named enum, and
+`for_each_part` yields the name beside the control. Up, down, left, right; negative and positive for
+a two-button axis; `Whole` for a binding that reads one control. A stick and the mouse report
+`Whole` too, which is the right answer rather than a shrug — they are one thing to a player, and
+what they get instead of per-part rebinding is a tunable.
 
 **`mappable()` takes no arguments, and both halves of that are decisions Design §9.7 had the other
 way.** It sketched `mappable_parts(Scheme::Kbm, ["forward", "back", "left", "right"])`:
@@ -789,10 +790,11 @@ not: a plan is compiled without seeing the others. What made it findable was chu
 declared contexts — built for a debug overlay, and now the only thing in the crate that can see two
 contexts at once. Both tests pass, and the second would have been unwriteable a chunk ago.
 
-**Slots ride the type-erased door too.** `rebind::slots(world)` walks the same registry, needing
-only `&World` because slots come from the plan resource rather than from anything an entity carries.
-Dead Zone's overlay grew four lines that list what a player would be shown — the smallest possible
-consumer of D7's model, and enough to see that the keys read correctly without a catalogue.
+**Mappings ride the type-erased door too.** `rebind::mappings(world)` walks the same registry,
+needing only `&World` because mappings come from the plan resource rather than from anything an
+entity carries. Dead Zone's overlay grew four lines that list what a player would be shown — the
+smallest possible consumer of D7's model, and enough to see that the keys read correctly without a
+catalogue.
 
 **Not doing:** tunables and presets. R19.11 and R19.12 are declarations over the same bindings and
 neither is needed until something adjusts a value; capture (chunk 20) is what turns this list into a
@@ -808,7 +810,7 @@ which asks for a structured descriptor plus a fallback renderer, was claimed by 
 destination-less item found this way, after R3.7, unknown controls and R22.2.
 
 **One name, two jobs.** `key/KeyW` is both what a settings file stores (R17.9) and the key an app's
-catalogue answers to (R18.3). That is the same economy `SlotKey` already has, and it means a
+catalogue answers to (R18.3). That is the same economy `MappingKey` already has, and it means a
 rebinding row is two keys and two lookups with nothing in it this crate renders.
 `fallback_label` is the readable half for a game with no catalogue.
 
@@ -843,8 +845,8 @@ The chunk as written covered five things, and reading it against the code found 
 could not be built: conflict *policies* and reset-to-default both need somewhere to write an answer,
 and the overrides store §10.1 designs belongs to chunk 23. So the chunk split. Capture, the class
 vocabulary, exclusions, reserved controls and conflict *detection* landed here; applying a rebind
-became chunk 38, sitting where chunk 31 needs it. Detection is a pure query over the slot list and
-was buildable today, which is where the seam naturally was.
+became chunk 38, sitting where chunk 31 needs it. Detection is a pure query over the mapping list
+and was buildable today, which is where the seam naturally was.
 
 **A session is a component, and the first framing of that was wrong.** The proposal said "on the
 entity being rebound", which read as the player or context entity — and a settings screen reached
@@ -868,24 +870,24 @@ the distinction visible — `Escape` skips a row while `F1` is refused out loud 
 Bevy's own button state there, with no context spawned anywhere, which is R19.5 demonstrated rather
 than asserted.
 
-**Reserving's second half is the half that matters,** and it is what settles OQ-10. Taking no slot
-stops a player rebinding the settings key away; refusing it across the scheme stops them binding
-something else *over* it. Only the first is the obvious reading, and only the first is useless alone.
-Reserving and declaring a slot contradict each other, which is a new plan-build error and a new row
-in the diagnostics catalogue.
+**Reserving's second half is the half that matters,** and it is what settles OQ-10. Taking no
+mapping stops a player rebinding the settings key away; refusing it across the scheme stops them
+binding something else *over* it. Only the first is the obvious reading, and only the first is
+useless alone. Reserving and declaring a mapping contradict each other, which is a new plan-build
+error and a new row in the diagnostics catalogue.
 
-**Writing the example found a real bug, which is what examples are for.** Binding one action to a key
-and to a pad button, both mappable, was reported as a duplicate slot key — but R19.15 says uniqueness
-is per *scheme*, and §10.1 stores the two in separate tables. The check was stricter than the
-requirement, in the direction that refuses the ordinary way to write a game offering rebinding on
-both devices. Both collision checks are now keyed by scheme and name together.
+**Writing the example found a real bug, which is what examples are for.** Binding one action to a
+key and to a pad button, both mappable, was reported as a duplicate mapping key — but R19.15 says
+uniqueness is per *scheme*, and §10.1 stores the two in separate tables. The check was stricter than
+the requirement, in the direction that refuses the ordinary way to write a game offering rebinding
+on both devices. Both collision checks are now keyed by scheme and name together.
 
-**The class vocabulary came out one short of what the roadmap expected.** There is no any-directional
-class, because no single *control* reports a position in two dimensions — a stick is two axes, a
-directional composite is four buttons. Since a player rebinds one part at a time, the case it would
-serve never reaches capture, and a slot that accepts `Axis2` is a stick bound whole, which §9.7 gives
-a tunable instead. `CaptureSession::for_slot` returns `None` there rather than offering a capture
-nothing could satisfy.
+**The class vocabulary came out one short of what the roadmap expected.** There is no
+any-directional class, because no single *control* reports a position in two dimensions — a stick is
+two axes, a directional composite is four buttons. Since a player rebinds one part at a time, the
+case it would serve never reaches capture, and a mapping that accepts `Axis2` is a stick bound
+whole, which §9.7 gives a tunable instead. `CaptureSession::for_slot` returns `None` there rather
+than offering a capture nothing could satisfy.
 
 **The crate touched an entity after handing it to an observer, which is a rule rather than a
 detail.** Capture triggered `Captured` and *then* queued the removal of the session component. An
@@ -911,5 +913,97 @@ limits are stated rather than hidden: comparison is at control granularity, so c
 bindings are reported as overlapping (a false positive, which is the safe direction), and a clash
 across two contexts is reported as *possible*, because whether two contexts are ever live together is
 a fact about the game's activation rules and not about its bindings.
+
+### Chunk 39: a mapping holds a list
+
+The model could not express "Jump has two keyboard bindings in one row", which is the arrangement
+every shipped game's keyboard table has. A mapping held one control, so two mappable bindings of one
+action in one scheme were a *collision*, and the only way to ship "W or Up Arrow" was a second row
+under an alias name.
+
+**The proof it was wrong was already in the tree.** Dead Zone had `dead_zone.thrust` and
+`dead_zone.thrust_alt`, and `dead_zone.turn` and `dead_zone.turn_alt` — four rows telling a player
+that two things are separate when they are the same thing bound twice. That was not written as a
+workaround, it was written as the only thing that compiled, which is the more useful kind of
+evidence. Both aliases are gone; each is now one row holding two controls.
+
+**A list with a capacity, rather than a fixed two or an unbounded list.** The prior art splits three
+ways — games use a small fixed number and label the columns "Primary" and "Secondary", tools
+(Blender, VS Code) grow an "add shortcut" button, engines offer unbounded as an authoring surface —
+and a capacity covers all three without making a game pay for the editor's case. `Capacity::UpTo(n)`
+or `Capacity::Any`, and `slots()` is what a table asks to know how many columns to draw.
+
+**Capacity is inferred and raised, never lowered,** which is the part that keeps the common case
+free of ceremony. A plain `mappable` asks for one; several bindings feeding one mapping take the
+widest anything asked for; and afterwards no mapping is narrower than the defaults it already holds.
+So declaring two mappable bindings produces a two-slot row with nobody writing "2", and
+`mappable_upto` exists for the other case — one default shipped, a second slot left for the player.
+
+**The collision check inverted before it was right, and the mistake is worth recording** because the
+obvious edit is the wrong one. Keying the uniqueness set by `(scheme, key, action)` reads like "a
+repeat of the same action is fine", and does the exact opposite: the same action inserting the same
+tuple twice is still a duplicate, so the merge case was refused and the collision case passed. What
+it needs is a *map* from `(scheme, key)` to the action that claimed it, reported only when a later
+claimant differs. Two tests said so immediately, in opposite directions, which is why there were two.
+
+**The cross-context check does not consult the action, and the asymmetry is deliberate.** Two
+mappable bindings of one action inside one context are a primary and a secondary and merge. The same
+two in two different contexts stay a collision, same action or not, because they are separate rows
+in contexts that may be live at different times while the overrides store is keyed by mapping alone.
+It is worth stating in the source next to the check, because "same action, and still an error" reads
+as a bug otherwise.
+
+**Capture had to name a slot.** A mapping holding a list means a capture has to say *which* slot it
+is filling, or the answer has nowhere to go but the front of the row and the secondary column can
+never be filled. `CaptureSession::for_slot` names one and `for_mapping` takes slot zero; `Captured`
+echoes it back. Slots past the capacity are refused, and so is any slot more than one past what the
+mapping holds now — a hole in a list whose order is what primary and secondary *mean* would be a
+silent promotion of the secondary later on.
+
+**What is not answered, and where it went.** A control repeated across two slots of one mapping is
+not reported by `conflicts`, which excludes the whole target mapping rather than the one slot.
+That is a policy question and the policies are chunk 38's, so it is written onto chunk 38 rather
+than left as a comment — along with the fact that 38's pending-override set now holds a list per
+row, which a set valued by one control would get away with until someone edited a secondary.
+
+**The public docs cite documents the reader does not have, and this chunk only found it.** Around
+forty doc comments name an `R`-number, a `§`, an `OQ` or a `D`-decision — eighteen in `capture.rs`
+alone, several of them in the module-level block that is its docs.rs landing page. On docs.rs the
+requirements and the design document do not exist, so a developer is told that something satisfies
+R19.5 and has no way to find out what R19.5 is. The house style already draws this line; nothing had
+been checking it. None of chunk 39's own additions are affected, which is how it was noticed at all
+— writing to the rule made the surrounding text look wrong. It goes to chunk 28 rather than here,
+because it spans four files and none of it changes behaviour, and folding it in would have made this
+diff unreadable for the thing it is actually about.
+
+**The two nouns were the wrong way round, and finding out cost the chunk a rename.** The first
+version called the row a `Slot` and then needed a second word for one position in it; "cell" was
+what came to hand, and it never sat right — a cell belongs to the table a screen draws, so "a slot
+holds cells" reads as a drawing inside a data structure. Chasing that discomfort turned up the
+actual fault: `slot` already meant *an indexed position in a list* twice over in this crate, in the
+plan's per-action state array and in the evaluator, and the public `Slot` was the one use that meant
+something else. The good name was on the wrong thing.
+
+So the row became `Mapping` — which also repairs a verb/noun mismatch nobody had noticed, since
+`.mappable()` had been declaring a `Slot` — and `slot` moved to the position, where it agrees with
+both existing uses. `cell` survives only as a presentation word: **a screen draws one cell per
+slot**, and that sentence is the whole of the relationship.
+
+Worth recording how it was done, because the obvious way is a trap. Renaming both nouns at once
+would have meant a window in which `slot` meant the row in some files and the position in others,
+with nothing to tell a reader or a compiler which. It went in two passes instead — `Slot`→`Mapping`
+everywhere first, green, then `cell`→`slot` — so at no point did one word have two live meanings.
+The checks after each pass are also why the state-array `slot` in `plan.rs` and `eval.rs` came
+through untouched: it was enumerated first and protected explicitly, rather than trusted to a
+regex.
+
+**Grooming found three things with no destination, which is two more than expected.** Reverse lookup
+(R18.1) had none at all and is now chunk 40 — it is what "Cancel (B)" needs, and Dead Zone's own
+screen spec asks for shortcut captions on its buttons. Mouse buttons are chunk 41: `Control` has no
+variant for them, `InputFrame` never samples `MouseButtonInput`, and the requirements do not mention
+them, so the crate claims keyboard-and-mouse and supports half of it. That one has a hard ordering
+constraint — `Control::name` is the stored persistence identity, so it must land before chunk 23 or
+the save format needs migrating on its first day. And §18's deferral reason was wrong: it claimed an
+asset-pipeline gate, which is true of glyphs and false of R18.5 and R18.6.
 
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

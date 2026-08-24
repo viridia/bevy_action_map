@@ -5,12 +5,12 @@
 > requirements that follow from a settled decision — see [Resolved decisions](#resolved-decisions) at
 > the end, alongside the questions still open.
 
-A greenfield input-mapping system for Bevy, incorporating lessons from leafwing-input-manager (LWIM),
-bevy_enhanced_input (BEI), Unreal Enhanced Input, Unity's Input System, Steam Input, and Godot. This
-document catalogs the design issues before any code exists, so that nothing structural is discovered
-late. It is a requirements document: it states what the system must do and why, and defers *how* to a
-design phase — where it does record a decision, that decision constrains the design space rather than
-describing an implementation.
+A greenfield input-mapping system for Bevy, incorporating lessons from leafwing-input-manager
+(LWIM), bevy_enhanced_input (BEI), Unreal Enhanced Input, Unity's Input System, Steam Input, and
+Godot. This document catalogs the design issues before any code exists, so that nothing structural
+is discovered late. It is a requirements document: it states what the system must do and why, and
+defers *how* to a design phase — where it does record a decision, that decision constrains the
+design space rather than describing an implementation.
 
 ## Scope
 
@@ -44,14 +44,14 @@ floor: setup that must be completed before anything works at all.
 **The commitment is that the ceiling must not raise the floor.** Every mechanism in this document
 that exists for the studio must be _additive_ — absent until declared, with defaulted behaviour that
 is correct when it is absent. A solo developer should be able to bind WASD and ship, never having
-learned that mappable slots, control schemes, or localization keys exist, and a studio should be able
+learned that mappings, control schemes, or localization keys exist, and a studio should be able
 to reach all three without leaving the crate.
 
 Three consequences, each of which this document already obeys in places and should obey everywhere:
 
-- **Additive, never prerequisite.** Slots (R19.10), tunables and presets (R19.13), localization keys
-  (R19.14), pairing (§15), and persistence (§17) are declarations a game opts into. None may become
-  a step you must perform before an action fires.
+- **Additive, never prerequisite.** Mappings (R19.10), tunables and presets (R19.13), localization
+  keys (R19.14), pairing (§15), and persistence (§17) are declarations a game opts into. None may
+  become a step you must perform before an action fires.
 - **Defaults must be right without being tested.** The long tail cannot verify what it does not
   own — a second gamepad, a Steam Deck, an AZERTY keyboard, a right-to-left locale. So a default
   that is merely _reasonable_ is not good enough; it has to be the one that survives hardware and
@@ -92,7 +92,7 @@ too late, are §9 (timing), §14 (deadzones), §15 (pairing), and §17 (persiste
 The crate translates _physical input_ into _semantic actions_, tracks the devices that produce it,
 and can report back what is currently bound to what. It is explicitly four layers, and the seam
 between each pair must be a public, replaceable API — this is what lets a Steam Input backend, a
-replay system, or a test harness slot in.
+replay system, or a test harness mapping in.
 
 ```
 L0  Sources        device enumeration, identity, capabilities, hot-plug, calibration
@@ -123,10 +123,10 @@ must be delegable to the backend's own UI.
   external binding backends all depend on it.
 - **R0.3 (MUST)** No layer may require a `World` singleton resource that prevents multiple
   independent instances (per player, per replay stream, per test).
-- **R0.4 (MUST)** A backend may act as an _authority_ for a subset of actions: their state is written
-  by the backend and our mapping pipeline must not also compute them. The split must be per-action or
-  per-context, not all-or-nothing — a game using Steam Input for gameplay may still map its own debug
-  and editor bindings.
+- **R0.4 (MUST)** A backend may act as an _authority_ for a subset of actions: their state is
+  written by the backend and our mapping pipeline must not also compute them. The split must be
+  per-action or per-context, not all-or-nothing — a game using Steam Input for gameplay may still
+  map its own debug and editor bindings.
 - **R0.5 (MUST)** Consumers of action state (gameplay code, prompts) must not need to know which
   backend produced it. Backend identity is queryable but never required at the call site.
 
@@ -191,11 +191,11 @@ actions into generic well-known units — so that arbitrary new actions become e
 combinations of primitives — trades a clear model for a vague one.
 
 The one case that genuinely escapes the argument is a consumer that _has_ a priori knowledge but is
-**not Rust code**: a scripting or modding layer where the script knows about its own action but cannot
-declare a Rust type. Even there, the conventional answer is not dynamic declaration but _indirection_
-— ship well-known slot actions (`Ability1..8`, `CustomBind1..N`) that mods attach behavior to. That is
-indirection at the binding layer, not decomposition of actions into primitives, and it covers most of
-the territory.
+**not Rust code**: a scripting or modding layer where the script knows about its own action but
+cannot declare a Rust type. Even there, the conventional answer is not dynamic declaration but
+_indirection_ — ship well-known mapping actions (`Ability1..8`, `CustomBind1..N`) that mods attach
+behavior to. That is indirection at the binding layer, not decomposition of actions into primitives,
+and it covers most of the territory.
 
 Conclusion: dynamic declaration is **not a v1 feature**. The door stays open at essentially zero cost
 because R1.1 already forces the id to be decoupled from the type.
@@ -214,15 +214,15 @@ because R1.1 already forces the id to be decoupled from the type.
 - **R1.5 (SHOULD)** Namespacing to avoid collisions between crates. _(Under D8 this is a property of
   the declared path rather than of the type path, so it is carried by the naming convention in R1.8
   rather than enforced by the compiler.)_
-- **R1.6 (MUST)** The derive must be able to express, at minimum: output shape and intent (§2.R2.3,
-  R2.7), a **category** for grouping in a rebinding UI (§19.R19.6), and default consume behavior
-  (§8.R8.2). Rebindability is _not_ on the action — it is a property of a declared slot (§19.R19.10),
-  since one action can have several bindings of which only some are player-mappable.
+- **R1.6 (MUST)** The derive must be able to express, at minimum: output shape and intent
+  (§2.R2.3, R2.7), a **category** for grouping in a rebinding UI (§19.R19.6), and default consume
+  behavior (§8.R8.2). Rebindability is _not_ on the action — it is a property of a declared mapping
+  (§19.R19.10), since one action can have several bindings of which only some are player-mappable.
 
-  _(The player-visible **name** belongs to the slot (R19.9) rather than here, because a composite
-  settles it: `Move` has four slots and the player must be shown "Move Forward", never "Move". The
-  category stays here, because four movement slots share one category and repeating it per slot is
-  four chances to disagree. Both are localization keys per R19.14, not display text.)_
+  _(The player-visible **name** belongs to the mapping (R19.9) rather than here, because a composite
+  settles it: `Move` has four mappings and the player must be shown "Move Forward", never "Move".
+  The category stays here, because four movement mappings share one category and repeating it per
+  mapping is four chances to disagree. Both are localization keys per R19.14, not display text.)_
 - **R1.7 (MUST)** Action names must be expressible in an external backend's namespace (Steam IGA
   action names are authored in a separate file and must match exactly), which is a second reason the
   path is declared rather than derived (D8): the author has to be able to spell the name the backend
@@ -246,15 +246,15 @@ BEI/Unreal: `ActionValue::{Bool, Axis1D, Axis2D, Axis3D}` with defined lossy con
 dimensions (a bool feeding a 2D action, etc.). Unity: Value / Button / PassThrough — the PassThrough
 distinction (no conflict arbitration between concurrent controls) is often overlooked.
 
-**Shape is not intent.** All of the above describe the *size* of a value, not what it means, and that
-is not enough. A mouse delta and a stick deflection are both `Vec2`, but the first is a displacement
-already expressed per frame and the second is a position that implies a rate — summing them produces a
-value whose units are undefined. Steam makes the distinction first-class: an action is declared as
-`StickPadGyro`, `AnalogTrigger`, or `Button`, and a two-axis action further declares an `input_mode` of
-`joystick_move` or `absolute_mouse`, which Steam's binding UI then uses to decide which physical
-controls may drive it ([IGA file][steam-iga]). Two things in this document need that distinction: what
-a rebinding UI may legally offer for a slot (§19.R19.1), and what happens when sources of different
-kinds feed one action (R2.9, §13.R13.2).
+**Shape is not intent.** All of the above describe the *size* of a value, not what it means, and
+that is not enough. A mouse delta and a stick deflection are both `Vec2`, but the first is a
+displacement already expressed per frame and the second is a position that implies a rate — summing
+them produces a value whose units are undefined. Steam makes the distinction first-class: an action
+is declared as `StickPadGyro`, `AnalogTrigger`, or `Button`, and a two-axis action further declares
+an `input_mode` of `joystick_move` or `absolute_mouse`, which Steam's binding UI then uses to decide
+which physical controls may drive it ([IGA file][steam-iga]). Two things in this document need that
+distinction: what a rebinding UI may legally offer for a mapping (§19.R19.1), and what happens when
+sources of different kinds feed one action (R2.9, §13.R13.2).
 
 - **R2.1 (MUST)** Support bool, 1D, 2D, 3D value shapes in one runtime value type.
 - **R2.2 (MUST)** Dimension conversion rules must be explicit, documented, and total, and the
@@ -405,9 +405,9 @@ modifiers). Steam moves the whole binding layer out of the game.
   needs different deadzones for stick vs. mouse.
 - **R4.6 (MUST)** Bindings are data: constructible at runtime, serializable, diffable against
   defaults (§17).
-- **R4.7 (SHOULD)** Whether a binding is player-rebindable is expressed by declaring a mappable slot
-  for it (§19.R19.9, R19.10), not by a flag on the binding. Bindings are developer data by default and
-  invisible to players until a slot says otherwise.
+- **R4.7 (SHOULD)** Whether a binding is player-rebindable is expressed by declaring a mapping for
+  it (§19.R19.9, R19.10), not by a flag on the binding. Bindings are developer data by default and
+  invisible to players until a mapping says otherwise.
 - **R4.8 (MUST)** Building or mutating bindings must produce actionable errors (unknown control,
   shape mismatch, duplicate) rather than silently doing nothing.
 - **R4.9 (MUST)** A binding may target a **control class** — a named set of controls — as well as a
@@ -536,10 +536,11 @@ inputs (quarter-circle) and input buffering, which none of the above handle nati
 transition itself has semantics.
 
 **Prior art.** Unreal `InputMappingContext` added to a subsystem with an integer priority; higher
-priority consumes keys from lower. BEI: contexts are components with `ContextPriority`. [Steam][steam-controller]: Action
-Sets plus _Action Set Layers_ (additive overlays rather than replacements) — the layer concept is
-underused elsewhere and is exactly right for "while aiming" or "while holding an item". Unity: action
-maps enabled/disabled individually, with no built-in priority — a known pain point.
+priority consumes keys from lower. BEI: contexts are components with `ContextPriority`.
+[Steam][steam-controller]: Action Sets plus _Action Set Layers_ (additive overlays rather than
+replacements) — the layer concept is underused elsewhere and is exactly right for "while aiming" or
+"while holding an item". Unity: action maps enabled/disabled individually, with no built-in priority
+— a known pain point.
 
 - **R7.1 (MUST)** Multiple contexts active simultaneously, ordered by an explicit, inspectable
   priority. That order is total **within a tick domain** and not across one: a context evaluated at
@@ -682,9 +683,10 @@ unmodeled.
 - **R11.5 (MUST)** Stable persistent device identity where the platform allows (vendor/product/serial
   or SDL GUID), distinct from the ephemeral runtime handle, so per-device settings and player
   assignments survive a reconnect or a restart.
-- **R11.6 (MUST)** Device _class_ and _brand_ resolution (Xbox / PlayStation / Nintendo / generic) with
-  an app-overridable mapping seeded from a database such as [SDL_GameControllerDB][sdl-db], since glyph
-  choice depends on it and `vendor_id`/`product_id` are `Option` and often absent (notably on wasm and some Linux setups).
+- **R11.6 (MUST)** Device _class_ and _brand_ resolution (Xbox / PlayStation / Nintendo / generic)
+  with an app-overridable mapping seeded from a database such as [SDL_GameControllerDB][sdl-db],
+  since glyph choice depends on it and `vendor_id`/`product_id` are `Option` and often absent
+  (notably on wasm and some Linux setups).
 - **R11.7 (MUST)** Per-device calibration (stage 1 of D6: center offset and rest envelope) stored
   separately from bindings and keyed by persistent device identity (R11.5). Note this _supersedes_
   rather than interoperates with Bevy's `GamepadSettings` deadzone, per R14.9 — the two must not both
@@ -947,12 +949,12 @@ any of that is stable loses player data silently on the next patch.
 - **R17.5 (SHOULD)** Serialization must go through `Reflect` + the type registry so third-party
   modifiers/conditions (§5.R5.6) round-trip.
 - **R17.6 (MAY)** Bindings as a hot-reloadable asset, for iteration without recompiling.
-- **R17.7 (MUST)** A saved override set distinguishes three states per slot, and a format with only
-  two loses one of them:
+- **R17.7 (MUST)** A saved override set distinguishes three states per mapping, and a format with
+  only two loses one of them:
 
   | | Means | Produced by |
   | --- | --- | --- |
-  | **absent** | use whatever the game shipped | a slot the player never touched |
+  | **absent** | use whatever the game shipped | a mapping the player never touched |
   | **cleared** | the player deliberately removed the binding | R19.3's unbind-the-other policy, or an explicit "clear" |
   | **not ours** | an external backend owns this action (§0.R0.4, R19.8) | Steam Input and equivalents |
 
@@ -1045,16 +1047,16 @@ suggest, and the narrowness is not a limitation players complain about:
 - **Look and aim are not rebindable at all.** What players get instead is a small set of typed
   parameters: sensitivity, invert-Y, a response-curve preset, deadzone size.
 - **Gamepad remapping is increasingly solved below the game** — PlayStation and Xbox both provide
-  system-level controller remapping, and [Steam Input][steam-controller] replaces the game's binding UI
-  outright. In-game rebinding is therefore primarily a keyboard-and-mouse concern.
+  system-level controller remapping, and [Steam Input][steam-controller] replaces the game's binding
+  UI outright. In-game rebinding is therefore primarily a keyboard-and-mouse concern.
 
 Steam draws the same developer/player line this section adopts: the game declares an action's category
 and intent, and the binding UI owns which physical control drives it, along with deadzones and response
 curves ([IGA file][steam-iga]).
 
 - **R19.1 (MUST)** Interactive capture ("press a key now") that reports the control that would be
-  bound and can be canceled. Capture must be filtered by the target slot's intent and shape (§2.R2.7),
-  so a slot expecting a button only accepts buttons.
+  bound and can be canceled. Capture must be filtered by the target mapping's intent and shape
+  (§2.R2.7), so a mapping expecting a button only accepts buttons.
 
   **Capture reads L1 directly; it is not a binding.** What it reports is a control _identity_, which
   a binding would have discarded on the way to producing a value — recovering it afterwards would
@@ -1082,29 +1084,43 @@ curves ([IGA file][steam-iga]).
 
 ### The player-facing model
 
-- **R19.9 (MUST)** The unit of rebinding is a **mappable slot**, not a binding. For a composite, each
-  _part_ is its own slot — "move forward" is a slot, `Move` is not — so the composite is never exposed
-  to the player. A slot carries a **name key** (R19.14), the intent and shape it accepts (R19.1), and
-  the control scheme it belongs to. Its category comes from the action it belongs to (R1.6).
-- **R19.10 (MUST)** Slots are **opt-in by the developer**. An action with bindings has zero mappable
-  slots until some are declared. This supersedes the weaker framing in R4.7: rebindability is not a
-  flag hiding a binding from the UI, it is the presence or absence of a slot.
+- **R19.9 (MUST)** The unit of rebinding is a **mapping**, not a binding. For a composite, each
+  _part_ is its own mapping — "move forward" is a mapping, `Move` is not — so the composite is never
+  exposed to the player. A mapping carries a **name key** (R19.14), the intent and shape it accepts
+  (R19.1), and the control scheme it belongs to. Its category comes from the action it belongs to
+  (R1.6).
+
+  A mapping holds an **ordered list of slots**, each holding one control, with a **capacity** saying
+  how many slots it has. "Primary and secondary" is the commercial arrangement — a keyboard row with
+  two cells — and a model holding one control per mapping cannot express it at all: the workaround
+  is a second row under an alias name, which tells the player two things are separate when they are
+  the same. Order is what makes the first slot primary, so it is part of the data rather than an
+  artefact of iteration. A screen draws one cell per slot; "cell" is the drawing and never the data.
+
+  Capacity is **inferred from the declared defaults and raisable by the author**, never inferred
+  downward: a mapping holding two defaults has room for two without anyone saying so, and an author
+  who ships one default and wants a spare slot says so once. An unbounded capacity exists for the
+  other kind of program — a tool whose command set is too large and open to lay out in a table — and
+  is not what a game reaches for.
+- **R19.10 (MUST)** Mappings are **opt-in by the developer**. An action with bindings has zero
+  mappings until some are declared. This supersedes the weaker framing in R4.7: rebindability is not
+  a flag hiding a binding from the UI, it is the presence or absence of a mapping.
 - **R19.11 (MUST)** Player-adjustable parameters are exposed as **named tunables**, not as modifier
   chains. A tunable is a declared, typed, named, range-bounded parameter on a binding — `sensitivity:
   f32 in 0.1..=10.0`, `invert_y: bool`, `deadzone: f32 in 0.0..=0.5`, `hold_or_toggle: enum`,
   `curve: enum of presets` — that a generic UI can render as a slider, checkbox, or dropdown without
   knowing what it drives. **Modifiers (§5) must never be surfaced directly to players**; a tunable that
   happens to drive a modifier parameter is the supported path, and it is what satisfies R20.5.
-- **R19.12 (SHOULD)** **Presets**: named alternative arrangements of slots and tunables ("Default",
-  "Southpaw", "Lefty") that a player selects as a unit. For device classes where per-slot rebinding is
-  not offered — sticks especially — a preset is the entire remapping story, and it is also how a game
-  ships a sensible starting point per control scheme.
-- **R19.13 (SHOULD)** A game that offers no rebinding UI at all must still work: slots, tunables, and
-  presets are additive declarations, never a precondition for binding an action.
-- **R19.14 (MUST)** Every player-visible name this crate carries — slot names (R19.9), action
-  categories (R1.6), tunable and preset names (R19.11, R19.12) — is a **localization key, not display
-  text**. Rendering it is the app's business, exactly as R18.3 already requires for the control half
-  of a rebinding row.
+- **R19.12 (SHOULD)** **Presets**: named alternative arrangements of mappings and tunables
+  ("Default", "Southpaw", "Lefty") that a player selects as a unit. For device classes where
+  per-mapping rebinding is not offered — sticks especially — a preset is the entire remapping story,
+  and it is also how a game ships a sensible starting point per control scheme.
+- **R19.13 (SHOULD)** A game that offers no rebinding UI at all must still work: mappings,
+  tunables, and presets are additive declarations, never a precondition for binding an action.
+- **R19.14 (MUST)** Every player-visible name this crate carries — mapping names (R19.9), action
+  categories (R1.6), tunable and preset names (R19.11, R19.12) — is a **localization key, not
+  display text**. Rendering it is the app's business, exactly as R18.3 already requires for the
+  control half of a rebinding row.
 
   Without this the rebinding screen is half-localized: R18.3 makes "Space" and "A button"
   translatable while the "Move Forward" beside them is a literal baked into the binding declaration.
@@ -1117,22 +1133,31 @@ curves ([IGA file][steam-iga]).
     catalogue rather than a save — and renaming one silently drops the game back to fallback text
     with no compile error. Keys need the same deliberate, convention-governed treatment as action
     paths (R1.8), and the convention should cover both.
-  - **A key SHOULD be derivable rather than declared twice.** A slot's natural key is its action's
-    path plus its part name — `gameplay.move` plus `forward` — and both already exist and are
-    already stable. Note this does _not_ reopen D8: what D8 rejected was deriving identity from the
-    Rust module path, which tracks code structure. Deriving from an author-declared path does not,
-    because the thing being derived from is itself stable by declaration. An explicit override must
-    remain available.
+  - **A key SHOULD be derivable rather than declared twice.** A mapping's natural key is its
+    action's path plus its part name — `gameplay.move` plus `forward` — and both already exist and
+    are already stable. Note this does _not_ reopen D8: what D8 rejected was deriving identity from
+    the Rust module path, which tracks code structure. Deriving from an author-declared path does
+    not, because the thing being derived from is itself stable by declaration. An explicit override
+    must remain available.
   - **A game with no localization layer must still read sensibly** (R19.13). A fallback renderer
     turning a key into presentable text is required, so that shipping a translation catalogue is
     never the price of seeing a readable rebinding screen.
 
-- **R19.15 (MUST)** Slot keys must be unique within a control scheme, and a collision must be
-  reported when the context is declared rather than discovered by a player. Two cases produce one
-  key for two slots: the same action bound in two contexts, each declaring a slot; and two bindings
-  of one action in one scheme. Both are ordinary things to write, and in a saved file both mean a
-  rebind of one slot silently lands on the other. R19.14's explicit override is the remedy; this is
-  what makes an author reach for it.
+- **R19.15 (MUST)** Mapping keys must be unique within a control scheme, and a collision must be
+  reported when the context is declared rather than discovered by a player, since in a saved file a
+  rebind of one mapping silently lands on the other. R19.14's explicit override is the remedy; this
+  is what makes an author reach for it.
+
+  Two cases derive one key twice, and only one of them is a collision:
+
+  - **Two mappable bindings of one action, in one scheme, in one context** are a default primary and
+    secondary. They are one mapping holding two controls (R19.9), not two mappings, and must merge
+    silently — this is the ordinary way to ship "W or Up Arrow", and refusing it forces the alias
+    row R19.9 exists to remove.
+  - **Two different actions answering to one name**, and **the same action mappable in two
+    contexts**, are both collisions. The second is a collision even though the action is the same,
+    because the two are separate rows in contexts that may be live at different times, while the
+    override store is keyed by mapping alone (§17).
 
 ---
 
@@ -1226,8 +1251,9 @@ character keys.
   a focus entity despawned while focused.
 - **R22.9 (MUST)** **Neither crate may depend on the other.** A widget library must not gain a
   dependency on this crate, and this crate must not require a widget library — using widgets without
-  input mapping, and input mapping without widgets, are both first-class. This rules out any mechanism
-  that requires widgets to implement our traits, carry our components, or name our contexts.
+  input mapping, and input mapping without widgets, are both first-class. This rules out any
+  mechanism that requires widgets to implement our traits, carry our components, or name our
+  contexts.
 
   Consequences worth stating, since they constrain the design rather than describe it:
 
@@ -1293,7 +1319,7 @@ editor, or serialized template gets the same benefit.
   with `on(...)`. This is why R3.2's delivery mechanism is constrained rather than left open: a global
   event stream, a resource-level callback, or an event targeted at an internal entity cannot be
   attached declaratively.
-- **R22.16 (MAY)** Binding sets, mappable slots (§19.R19.9), and tunables (§19.R19.11) may themselves
+- **R22.16 (MAY)** Binding sets, mappings (§19.R19.9), and tunables (§19.R19.11) may themselves
   be authorable as scene or asset data, letting a game ship alternative control schemes without
   recompiling. Lower priority than R22.14 and R22.15, and it must remain optional — code-defined
   bindings stay the primary path (§17.R17.6).
@@ -1322,12 +1348,12 @@ properties that constrain the state layout left open in OQ-3.
 - **R23.3 (MUST)** Context activation/deactivation must not cause structural ECS churn proportional to
   the number of actions — activating a context should not spawn, despawn, insert, or remove per
   action. A layout that does so must show the cost is acceptable at the action counts in §23.R23.1.
-- **R23.4 (SHOULD)** Change detection on action state, so that UI which reacts to bindings or action
-  values (§18 prompts especially) can subscribe rather than poll; unchanged actions must not mark
-  themselves changed every frame. Note that if state
-  is one component, Bevy's change ticks are all-or-nothing across it — per-action granularity must
-  then be built in (a dirty set or per-slot change tick), or every prompt wakes whenever any action
-  moves. This is an evaluation criterion for OQ-3, not a settled cost.
+- **R23.4 (SHOULD)** Change detection on action state, so that UI which reacts to bindings or
+  action values (§18 prompts especially) can subscribe rather than poll; unchanged actions must not
+  mark themselves changed every frame. Note that if state is one component, Bevy's change ticks are
+  all-or-nothing across it — per-action granularity must then be built in (a dirty set or
+  per-mapping change tick), or every prompt wakes whenever any action moves. This is an evaluation
+  criterion for OQ-3, not a settled cost.
 - **R23.5 (MUST)** Action state must be snapshot-able and restorable cheaply enough to run per
   rollback tick (§10.R10.3), and reachable from an `ActionId` in O(1) without a hash lookup on the hot
   path. _How_ — see OQ-3.
@@ -1391,7 +1417,7 @@ produce APIs in which the simplest case stops being simple.
 | **D4** | **Focus integration is by action, not by suppression**: dispatch-to-focus is an action effect, and focus _type_ drives context activation.                                 | §8, §22           |
 | **D5** | **Interception is static only.** A focus-activated context claims a control before dispatch; a widget never decides at handling time whether to let an input fall through. | §8, §22           |
 | **D6** | **We own the whole deadzone chain**, consuming Bevy's _raw_ gamepad events, and model it as three separate stages rather than one negotiated number.                       | §5, §11, §14      |
-| **D7** | **The player-facing model is separate from the binding model**: players see opt-in _mappable slots_, _named tunables_, and _presets_; modifiers and composites stay developer-only. | §2, §4, §5, §19, §20 |
+| **D7** | **The player-facing model is separate from the binding model**: players see opt-in _mappings_, _named tunables_, and _presets_; modifiers and composites stay developer-only. | §2, §4, §5, §19, §20 |
 | **D8** | **Serialized identity is a declared path, not the Rust type path**, and the derive requires it — a saved binding must not depend on where a type lives. Namespacing moves to the naming convention (R1.8). | §1, §17, §18 |
 
 There is deliberately no decision here about how action state is stored, or about whether actions are
@@ -1408,7 +1434,7 @@ These are the forks where the choice cascades; everything else is comparatively 
 2. ~~**OQ-2 — Action identity representation**~~ _Resolved as **D1**: types + derive macro, with an
    interned `ActionId` as the runtime representation and the reflected type path as the serialized
    identity. Sub-question also resolved: dynamic declaration is out of scope for v1 (§1), with the
-   slot-action pattern as the answer for modding._
+   mapping-action pattern as the answer for modding._
 3. **OQ-3 — State layout** (§23), **open**. The real axis is _when the layout of a context's state
    record is decided_:
 
@@ -1465,10 +1491,11 @@ These are the forks where the choice cascades; everything else is comparatively 
    presentation concern. New open sub-question: whether an authority backend's actions participate in
    §10 determinism at all, since Steam's action state is not reproducible from our input frames and so
    cannot be resimulated during rollback._
-9. ~~**OQ-9 — Where the player-facing name and category live**~~ _Resolved: the **slot owns the name,
-   the action owns the category**. A composite settles the first — `Move` has four slots and the
-   player must be shown "Move Forward", never "Move" — and repetition settles the second, since four
-   movement slots share one category and hanging it on each is four chances to disagree._
+9. ~~**OQ-9 — Where the player-facing name and category live**~~ _Resolved: the **mapping owns
+   the name, the action owns the category**. A composite settles the first — `Move` has four
+   mappings and the player must be shown "Move Forward", never "Move" — and repetition settles the
+   second, since four movement mappings share one category and hanging it on each is four chances to
+   disagree._
 
    _Resolving it turned up a larger point, now **R19.14**: neither field is display text. Both are
    **localization keys**, because R18.3 already requires the control half of a rebinding row to be
