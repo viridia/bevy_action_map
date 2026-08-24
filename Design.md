@@ -230,7 +230,7 @@ the work that would otherwise be per-frame happens (R23.1, R7.6):
 
 | Compilation produces | Serves |
 | --- | --- |
-| Action → mapping assignment | O(1) state access without hashing (R23.5) |
+| Action → slot assignment | O(1) state access without hashing (R23.5) |
 | Scratch slot assignment per condition and stateful modifier | §6 |
 | Each binding's chord length, and whether the plan has any | The clash pre-pass in §5, skipped entirely when it would find nothing (R8.1) |
 | Reverse index: action → bindings | Prompt lookup without scanning (R18.1) |
@@ -778,9 +778,32 @@ app.add_context::<OnFoot>(|c| {
     // sticks are not per-mapping rebindable; they get a tunable instead (R19.11)
 
     c.bind::<Jump>(KeyCode::Space).mappable();
-    c.bind::<Jump>(GamepadButton::South);   // no mapping: not player-rebindable
+    c.bind::<Jump>(GamepadButton::South);   // listed on the controls screen, but not rebindable
 });
 ```
+
+**Three states, not two.** A binding is *listed and fixed* unless it says otherwise, *listed and
+rebindable* if it declares a mapping, and *unlisted* only if it asks:
+
+| declaration | listed | rebindable |
+| --- | --- | --- |
+| (none) | yes | no |
+| `mappable` | yes | yes |
+| `private` | no | no |
+
+The first draft had two states and made listing follow rebindability, so the gamepad `Jump` above
+vanished from the screen entirely. That is backwards for the commonest gamepad screen there is: the
+console or Steam owns the remapping, the game still wants to *show* the player what the pad does,
+and under opt-in listing there was no data to draw it from — the crate knew the binding and refused
+to say so. Rebindability is the developer's call because a fixed binding is a design decision;
+seeing the controls is the player's business, and the default belongs to them (R19.10).
+
+`private` is for where listing is genuinely wrong: a binding that reads a control already shown
+under another name, so a screen listing it again shows one key twice under two headings. Dead Zone's
+`Afterburner` — the throttle, held — is the example, and it is also the example of what the model
+cannot yet say. Those bindings do not merely duplicate `Thrust`'s keys, they *follow* them, and
+nothing here makes a rebind of one move the other; `private` hides the duplicate row without linking
+the two, which is a stopgap rather than the answer.
 
 **`mappable` takes no arguments, and both halves of that are decisions.**
 
@@ -802,6 +825,12 @@ mappable, derives the same mapping name twice — and is the ordinary way to wri
 rebinding on both devices. The two are rebound independently (R19.7) and stored in separate tables
 (§10.1), so only a repeat *within* one scheme is a collision. Both collision checks are keyed by
 scheme and name together for that reason.
+
+*And only where something is rebindable.* Listing by default means one action bound in two contexts
+now produces two listed rows under one name without anyone asking for it, and that is not a fault:
+the store a duplicate key could corrupt holds rebinds (§10.1), and a fixed row never reaches it. So
+both checks require at least one side to be rebindable, and the error appears the moment a `mappable`
+is added to either — which is when it starts to mean something.
 
 An explicit name stays available for the case that needs it: `mappable_as("gameplay.strafe")`
 replaces the derived prefix, and is the remedy the collision diagnostic names.
@@ -857,6 +886,7 @@ for mapping in rebind::mappings(world) {
     // mapping.capacity -> Capacity::UpTo(2)         — how many slots, so how many columns
     // mapping.scheme   -> Scheme::KeyboardMouse     — one screenful at a time
     // mapping.accepts  -> ChannelShape::Button      — filters what capture will take (R19.1)
+    // mapping.rebinding-> Rebinding::Here           — or `Fixed`: draw the row, offer no button
 
     let label = i18n.get(mapping.key)                 // the app's localization layer...
         .unwrap_or_else(|| mapping.key.fallback_label()); // ...or readable text without one (R19.13)
@@ -882,9 +912,9 @@ Three properties worth noting:
 - **Composites are invisible.** `Move` is one action with a 2D value, but the player sees four
   button mappings, which is how every shipped game presents it. The composite exists only on the
   developer side.
-- **Rebindability is opt-in and per binding**, not per action. The gamepad `Jump` binding above
-  has no mapping, so it does not appear in the UI — the right default, given that gamepad remapping
-  is usually handled by the console OS or Steam anyway.
+- **Rebindability is opt-in and per binding**, not per action. The gamepad `Jump` binding above has
+  no mapping, so the UI draws its row without a button to press — the right default, given that
+  gamepad remapping is usually handled by the console OS or Steam anyway.
 - **Tunables are typed, so the UI is generic.** `DeadzoneAmount` with a range renders as a slider
   without the UI knowing it drives a modifier parameter. This is what R20.5 needs and what keeps R5.8
   (modifiers never shown to players) satisfiable.
@@ -1004,7 +1034,15 @@ the names in the game's code exactly, with nothing checking it — which is why 
 we avoid by declaring the path once in the derive rather than growing a second file to keep in step.
 And a Steam action belongs to exactly one action set, while ours may be bound in any number of
 contexts: the same tension as R19.15's colliding mapping keys, arriving from another direction, and
-worth settling once rather than twice.
+worth settling once rather than twice. _(Settled in §10.5: a context is a layer, and an action bound
+in several contexts is declared once in the base set.)_
+
+The correspondence with `Intent` is close but not exact, in one place. `Button` and `AnalogTrigger`
+are our `Button` and `Analog1`, but `StickPadGyro` carries an `input_mode` that selects between
+`joystick_move` and `absolute_mouse` — our `Axis2` and our `Delta2`, which chunk 15 deliberately
+separated because a position and a rate need different modifiers and answer differently to a
+deadzone. A backend therefore declares one Steam action where we declare one of two intents, and it
+is `input_mode` rather than the type that says which.
 
 ### 10.3 Naming a control
 
@@ -1104,6 +1142,102 @@ composite is four buttons. Since a player rebinds one part at a time (R19.9), th
 serve never reaches capture — and a mapping that accepts `Axis2` is a stick or mouse bound whole,
 which §9.7 gives a tunable rather than a rebinding row. `CaptureSession::for_slot` returns `None`
 for one rather than offering a capture that can never be satisfied.
+
+### 10.5 The backend seam, concretely
+
+D3 is the one structural commitment in §0 that had never been checked against the thing it exists
+for. This section does that: it records what Steam Input is, settles the three places its model
+genuinely disagrees with ours, and states the dependency position so it is not relitigated. It does
+not design the traits — `backend/` is still a stub, and the traits want the second implementer §11's
+gate asks for.
+
+**What the API is.** [`ISteamInput`][steam-isteaminput] is an action API, not a device API, which is
+why §0 classes it as an *authority* backend rather than a source. The game ships an [IGA
+file][steam-iga] declaring action sets and actions by name and type; the bindings live per-user in
+Steam's storage, authored in its overlay. At runtime the game calls `RunFrame` each tick and polls,
+per controller and per action:
+
+| Steam | Returns | Ours |
+| --- | --- | --- |
+| `GetDigitalActionData` | `{ bState, bActive }` | a `Button` level, with no edge and no timestamp |
+| `GetAnalogActionData` | `{ eMode, x, y, bActive }` | `Analog1`/`Axis2`/`Delta2`, `eMode` saying which |
+| `GetDigitalActionOrigins` | up to eight `EInputActionOrigin` | R18.1's reverse lookup, already ranked |
+| `GetGlyphPNGForActionOrigin` | a **path to a file on disk** | R18.4's glyph id |
+| `ShowBindingPanel` | opens the overlay | R19.8's delegation |
+| `SteamInputConfigurationLoaded_t` | fires when the user saves | R18.5's invalidation, driven from outside |
+
+`bActive` is worth naming on its own, because it does not mean "the value is zero": it means *this
+action has no binding in the active set*, which is our `why_not` diagnostic arriving from the far
+side of the seam. A backend must be able to report it and a prompt must be able to render it, or a
+player who unbound something in the overlay reads a caption for a control that does nothing.
+
+**An authority backend writes a value, not a state.** Steam returns a level, sampled when asked, with
+no edge and no timestamp, so §9's timing is unsatisfiable from it — a press and release inside one
+tick collapse, and `.hold()` and `.multi_tap()` have nothing to measure. But `fired()` and `Phase`
+have to keep working or R0.5 is false. Both hold if the backend's write enters the pipeline **at the
+button state machine rather than after it**: the backend supplies the value that the fold would
+otherwise have produced, and our existing transition code diffs it and synthesizes the edges.
+Bindings, modifiers and conditions are skipped, which is what R0.4 and R14.10 already require, and
+the deadzone stages are not reapplied because there is no binding to apply them from.
+
+This also settles what per-action authority *is* mechanically. It is a per-slot substitution of the
+fold's output inside the evaluator, not a second write path into `InputContextState::actions` — which
+matters, because a second write path would have to reimplement the state machine, and two
+implementations of R6.1 is exactly the drift R0.5 forbids.
+
+The corollary is that Steam's activators are where hold and multi-tap go, and they are the reason the
+overlay has them. So a condition or modifier attached to a backend-owned action is a **plan-build
+diagnostic at §9.5's error tier**, not a silent no-op: the game asked for behaviour the backend will
+not deliver and nothing else would tell it. Dead Zone is already the test case — `Hyperspace` carries
+`.multi_tap(2, 0.3)` and `Afterburner` a `.hold(0.75)` on the same trigger as `Thrust`.
+
+**Contexts become one action set plus a layer each.** Steam allows exactly one action set active per
+controller, plus a stack of layers; we run any number of contexts at once, priority-ordered, with
+consumption between them. Layers are the fit: they stack, and they override in the direction our
+priorities already do, so a backend activates one base set for the game and pushes and pops a layer
+as each context activates and deactivates.
+
+The finding worth recording beside it is that the mismatch §10.2 flagged is narrower than it looked,
+because **a context that is always active is not a mode**. Dead Zone's `Shell` holds `Pause`
+unconditionally, so `Pause` belongs in the base set and there is no layer at all; only `Flying`, which
+is gated on a state, becomes one. The tension survives for genuinely overlapping modal contexts and
+for consumption, which layers cannot express — a lower layer's action is shadowed or it is not, and
+there is no equivalent of one context claiming a control for a frame. That is the same problem as
+R19.15's colliding mapping keys seen from another direction, and it is now settled in one place
+rather than two: **a context is a layer, and an action bound in several contexts is one Steam action
+declared once in the base set.**
+
+**The seam needs L0 suppression, and nothing provides it.** When Steam drives a pad in gamepad
+emulation the OS exposes a virtual pad that Bevy enumerates, so `sample_input` records
+`RawGamepadEvent` for the same physical motion the backend is reporting, and every input arrives
+twice. Steam stops emulating for controllers whose configuration is of the Steam Input API type once
+the game declares support in the partner backend — but that is a shipping-time property, not one that
+holds while the feature is being built, and it never covers a pad the game does not own.
+
+R0.4 covers L2: our pipeline must not also *compute* a backend-owned action. Nothing covers L0, where
+the raw events are still being sampled, so R0.6 says a backend authoritative for a device can
+suppress that device before the frame. It is not a Steam workaround — a replay backend has to mute
+live hardware for exactly the same reason, and it is the difference between a demo that works and one
+that reads every input twice. The filter's key is whatever §11's persistent `DeviceId` becomes; until
+that exists the runtime gamepad entity is the stopgap, which is enough for one process and wrong
+across a reconnect.
+
+**The real backend is out of tree, and that constrains the seam rather than the packaging.**
+`steamworks` is `std`-only, is `unsafe` FFI beneath, and wants the Steamworks redistributable at link
+time; this crate is `no_std`, `forbid(unsafe_code)`, and deliberately minimal in its dependency
+surface because it is a candidate for upstream. So `bevy_action_map_steam` is someone else's crate,
+and **nothing under `src/` may name Steam** — not a feature, not a variant, not a trait method. The
+test of whether the seam is sufficient without being Steam-shaped is a mock authority backend living
+entirely in `examples/`, which is what the roadmap's gate asks for and what will find the places this
+section guessed.
+
+Four things about the SDK that cost a day if they are discovered rather than read. Handles are zero
+until the controller's configuration loads, so `GetActionSetHandle` is retried rather than fetched
+once at startup. `RunFrame` is per tick and skipping it silently freezes every value. The IGA file
+lives at `<install>/controller_config/game_actions_<appid>.vdf`, which means a real appid — or
+Spacewar's 480 with a `steam_appid.txt` beside the binary, for experiments. And origins are Steam's
+own enumeration of physical controls, not ours: `EInputActionOrigin` covers device families we have
+no `Control` for and never will, which is R18.9's point and chunk 40's review surface.
 
 ---
 
@@ -1291,3 +1425,4 @@ exists, the split is speculative, and the module layout above makes it a move ra
 [bevy-12635]: https://github.com/bevyengine/bevy/issues/12635
 [winit-1194]: https://github.com/rust-windowing/winit/issues/1194
 [steam-iga]: https://partner.steamgames.com/doc/features/steam_controller/iga_file
+[steam-isteaminput]: https://partner.steamgames.com/doc/api/ISteamInput

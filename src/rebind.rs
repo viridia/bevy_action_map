@@ -2,8 +2,8 @@
 //!
 //! The binding model is a developer's model. Negate, swizzle and response curves are adapters for
 //! fitting a control to an action, and nobody rebinding "move forward" should meet one. What a
-//! player gets is deliberately smaller: a list of **mappings**, each a named thing they can change
-//! the controls for.
+//! player gets is deliberately smaller: a list of **mappings**, each a named thing with the controls
+//! that drive it.
 //!
 //! A mapping holds an ordered list of **slots**, each holding one control, because a rebinding row
 //! usually has more than one — "Primary" and "Secondary" is the arrangement almost every game ships.
@@ -14,17 +14,20 @@
 //! movement binding is four keys — so each *part* of it becomes a mapping of its own, which is how
 //! every shipped game presents movement and is why the composite never reaches the player.
 //!
-//! Mappings are opt-in. Bindings are developer data until
-//! [`mappable`](crate::binding::BindingHandle::mappable) says otherwise, so a game that offers no
-//! rebinding screen declares none and nothing changes.
+//! **Every binding is listed; changing one is what has to be asked for.** A player is entitled to
+//! see what their controls do, so a binding appears here by saying nothing at all — as a row they
+//! can read and not change. [`mappable`](crate::binding::BindingHandle::mappable) is what makes a
+//! row changeable, and [`private`](crate::binding::BindingHandle::private) is what keeps a binding
+//! out of the list altogether, for the ones that are genuinely the game's own business.
 //!
 //! ```ignore
 //! app.add_context::<OnFoot>(|controls| {
-//!     controls.bind::<Move>(DirectionalButtons::wasd()).mappable();  // four mappings
+//!     controls.bind::<Move>(DirectionalButtons::wasd()).mappable();  // four mappings…
 //!     controls.bind::<Jump>(KeyCode::Space).mappable();              // one mapping…
 //!     controls.bind::<Jump>(KeyCode::KeyJ).mappable();               // …with a second slot
 //!     controls.bind::<Fire>(KeyCode::ControlLeft).mappable_upto(2);  // one control, two slots
-//!     controls.bind::<Look>(MouseMove);                              // none: not rebindable
+//!     controls.bind::<Look>(MouseMove);                              // listed; not changeable
+//!     controls.bind::<Lunge>(KeyCode::Space).hold(0.4).private();    // not listed at all
 //! });
 //! ```
 //!
@@ -150,6 +153,37 @@ impl Capacity {
     }
 }
 
+/// Whether the player may change what a mapping holds.
+///
+/// Appearing on a controls screen and being changeable there are two different things, and a great
+/// many games want the first without the second. A pad's bindings are the usual case: a player still
+/// needs to see what the buttons do, while the remapping itself belongs to a preset, to the console's
+/// own settings, or to whatever software is driving the pad.
+///
+/// A screen reads this to decide whether a row is a button or a label. It is never a security
+/// boundary — a game that does not want a control changed simply does not offer it — and it says
+/// nothing about whether the binding *works*.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Rebinding {
+    /// The player may change it, in this game's own screen.
+    ///
+    /// What [`mappable`](crate::binding::BindingHandle::mappable) declares.
+    Here,
+    /// Shown so the player can see what the control does, and not changeable here.
+    ///
+    /// What a binding gets by saying nothing. Where the player *does* change it — a preset, a
+    /// console's own settings, whatever software drives the pad — is the game's business to explain
+    /// and its screen's to offer.
+    Fixed,
+}
+
+impl Rebinding {
+    /// Whether a capture may fill this mapping's slots.
+    pub const fn is_rebindable(self) -> bool {
+        matches!(self, Self::Here)
+    }
+}
+
 /// One row of a rebinding screen.
 ///
 /// Everything a screen needs to draw a row and file it under a heading, and nothing about how the
@@ -175,7 +209,16 @@ pub struct Mapping {
     /// slots filled rather than as two rows.
     pub slots: Vec<Control>,
     /// How many slots this mapping has.
+    ///
+    /// Meaningful only where [`rebinding`](Self::rebinding) is
+    /// [`Here`](Rebinding::Here): a mapping the player cannot change has exactly the slots its
+    /// defaults fill, since nothing can ever add another.
     pub capacity: Capacity,
+    /// Whether the player may change what is in those slots.
+    ///
+    /// A screen draws a row of buttons for [`Here`](Rebinding::Here) and a row of labels for
+    /// [`Fixed`](Rebinding::Fixed).
+    pub rebinding: Rebinding,
     /// The path of the context the binding lives in.
     pub context: &'static str,
 }
@@ -236,8 +279,9 @@ mod tests {
         app.add_context::<OnFoot>(|controls| {
             controls.bind::<Move>(DirectionalButtons::wasd()).mappable();
             controls.bind::<Jump>(KeyCode::Space).mappable();
-            // Declared but not mappable, so the player never sees it.
-            controls.bind::<Jump>(KeyCode::Enter);
+            // Declared `private`, so the player never sees it. Without that it would be listed and
+            // would disagree with the line above about being rebindable, which is an error.
+            controls.bind::<Jump>(KeyCode::Enter).private();
         });
 
         let mappings = mappings(app.world());
@@ -275,10 +319,11 @@ mod tests {
         assert_eq!(mappings[0].scheme, Scheme::KeyboardMouse);
     }
 
-    /// A game that declares no mappings has no player-facing surface at all, which is the default
-    /// is what keeps the whole player-facing model additive.
+    /// A binding nobody said anything about is *listed and fixed*: the player can read what it does
+    /// and cannot change it. Seeing your controls is not something a game should have to opt into;
+    /// changing them is.
     #[test]
-    fn declaring_nothing_mappable_leaves_no_slots() {
+    fn a_binding_is_listed_but_not_rebindable_by_default() {
         #[derive(InputContext)]
         #[context(path = "rebind_tests.silent", tick = Fixed)]
         struct Silent;
@@ -289,7 +334,61 @@ mod tests {
             controls.bind::<Jump>(KeyCode::Space);
         });
 
+        let mappings = mappings(app.world());
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].slots, [Control::Key(KeyCode::Space)]);
+        assert_eq!(mappings[0].rebinding, Rebinding::Fixed);
+        assert!(!mappings[0].rebinding.is_rebindable());
+    }
+
+    /// `private` is the way out of the list, and the only way: a game with an internal binding it
+    /// would rather not explain says so once.
+    #[test]
+    fn a_private_binding_is_not_listed_at_all() {
+        #[derive(InputContext)]
+        #[context(path = "rebind_tests.hidden", tick = Fixed)]
+        struct Hidden;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<Hidden>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).private();
+        });
+
         assert!(mappings(app.world()).is_empty());
+    }
+
+    /// One binding cannot be both hidden from the player and changeable by them, and saying so is an
+    /// authoring mistake catchable in the expression that makes it.
+    #[test]
+    #[should_panic(expected = "both `mappable` and `private`")]
+    fn a_binding_cannot_be_private_and_mappable() {
+        #[derive(InputContext)]
+        #[context(path = "rebind_tests.contradictory", tick = Fixed)]
+        struct Contradictory;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<Contradictory>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable().private();
+        });
+    }
+
+    /// And two bindings feeding one row cannot disagree about it either, which the builder cannot
+    /// see and the plan can.
+    #[test]
+    #[should_panic(expected = "disagree about whether the")]
+    fn two_bindings_feeding_one_mapping_cannot_disagree() {
+        #[derive(InputContext)]
+        #[context(path = "rebind_tests.disagreeing", tick = Fixed)]
+        struct Disagreeing;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<Disagreeing>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.bind::<Jump>(KeyCode::Enter);
+        });
     }
 
     /// Shipping a translation catalogue must not be the price of a legible screen.

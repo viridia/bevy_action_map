@@ -1008,10 +1008,17 @@ fn report_mapping_collisions<C: InputContext + Component>(
             // two rows, in two contexts that may be active at different times — and the overrides
             // store is keyed by mapping alone (§10.1), so a rebind of one still lands on the other.
             // Same action, and still a collision.
-            if let Some(clash) = mappings
-                .iter()
-                .find(|mapping| mapping.key == taken.key && mapping.scheme == taken.scheme)
-            {
+            //
+            // Rebindable rows only, for the reason the within-a-context check gives: the hazard is a
+            // *saved* rebind landing on the wrong row, and a fixed row is never saved. Since listing
+            // is the default, anything stricter would fail the build of any game binding one action
+            // in two contexts — which is ordinary, and which R19.13 promises keeps working for a
+            // game that offers no rebinding at all.
+            if let Some(clash) = mappings.iter().find(|mapping| {
+                mapping.key == taken.key
+                    && mapping.scheme == taken.scheme
+                    && (mapping.rebinding.is_rebindable() || taken.rebinding.is_rebindable())
+            }) {
                 panic!(
                     "context `{}` declares a mapping named `{}`, which context `{}` already \
                      uses. A saved rebinding of one would land on the other; give one of them a \

@@ -198,8 +198,15 @@ impl CaptureSession {
     /// [`capacity`](crate::rebind::Mapping::capacity), or more than one past the controls it holds
     /// now. The second is what stops a capture leaving a hole in a list whose *order* is what
     /// primary and secondary mean. It also returns `None` for a mapping no single control can fill,
-    /// exactly as [`for_mapping`](Self::for_mapping) does.
+    /// exactly as [`for_mapping`](Self::for_mapping) does, and for one the player may not change at
+    /// all — see [`Rebinding`](crate::rebind::Rebinding).
     pub fn for_slot(mapping: &Mapping, slot: usize) -> Option<Self> {
+        // A mapping the player cannot change has nothing to capture *for*. It is on the screen so
+        // they can read it, and a screen that asked anyway would be offering a rebind it could not
+        // then apply.
+        if !mapping.rebinding.is_rebindable() {
+            return None;
+        }
         if !mapping.capacity.has_room_for(slot) || slot > mapping.slots.len() {
             return None;
         }

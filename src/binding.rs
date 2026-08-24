@@ -210,9 +210,9 @@ pub(crate) struct BindingSpec {
     pub(crate) modifiers: Vec<BindingModifier>,
     pub(crate) conditions: Vec<BindingCondition>,
     pub(crate) consume: bool,
-    // `None` until the binding is declared mappable, which is what makes rebindability opt-in
-    // rather than a flag hiding a binding from a screen.
-    pub(crate) mappable: Option<MappingDecl>,
+    // `None` only for a binding declared `private`. Listing is the default: a player is entitled to
+    // see what their controls do, and it is *changing* one that has to be asked for.
+    pub(crate) mapping: Option<MappingDecl>,
     // Whether the controls this binding reads are withheld from capture across their scheme.
     pub(crate) reserved: bool,
     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
@@ -233,7 +233,10 @@ const fn widest(a: crate::rebind::Capacity, b: crate::rebind::Capacity) -> crate
     }
 }
 
-/// What a binding declared about being player-rebindable.
+/// What a binding contributes to the player-facing list.
+///
+/// Every binding has one of these unless it was declared `private`, because a controls screen that
+/// shows only the rebindable half is a controls screen with holes in it.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct MappingDecl {
     /// Replaces the action's path in the derived key. `None` derives from the action.
@@ -242,8 +245,23 @@ pub(crate) struct MappingDecl {
     ///
     /// Declared per binding but resolved per mapping: several bindings may feed one mapping, and
     /// what the mapping ends up with is the widest thing any of them asked for, never narrower than
-    /// the defaults it already holds.
+    /// the defaults it already holds. Meaningless unless `rebinding` is `Here`, since nothing can
+    /// add a control to a mapping the player cannot change.
     pub(crate) capacity: crate::rebind::Capacity,
+    /// Whether the player may change it, or is only being shown what it does.
+    pub(crate) rebinding: crate::rebind::Rebinding,
+}
+
+impl MappingDecl {
+    /// What a binding gets by saying nothing: listed, so the player can see what it does, and not
+    /// changeable, because changing it is the thing that has to be asked for.
+    const fn listed() -> Self {
+        Self {
+            prefix: None,
+            capacity: crate::rebind::Capacity::UpTo(1),
+            rebinding: crate::rebind::Rebinding::Fixed,
+        }
+    }
 }
 
 /// Mouse motion as a binding source.
@@ -960,7 +978,7 @@ impl<'a, C> BindingHandle<'a, C> {
     ///
     /// ```ignore
     /// controls.bind::<Jump>(KeyCode::Space).mappable();
-    /// controls.bind::<Jump>(GamepadButton::South);   // no mapping, so no row
+    /// controls.bind::<Jump>(GamepadButton::South);   // listed, but the player cannot change it
     /// ```
     ///
     /// Each mapping is named by the action's path plus the part — `gameplay.move.up` — which is a
@@ -979,6 +997,37 @@ impl<'a, C> BindingHandle<'a, C> {
     /// ```
     pub fn mappable(self) -> Self {
         self.declare_mapping(None, crate::rebind::Capacity::UpTo(1))
+    }
+
+    /// Keeps this binding out of the player-facing list entirely.
+    ///
+    /// Listing is the default, because a player is entitled to see what their controls do and a
+    /// screen that shows only the rebindable half has holes in it. This is the exception: a binding
+    /// that is genuinely the game's own business and would only confuse a controls screen.
+    ///
+    /// Reach for it where a binding is an implementation detail of another one — a second reading of
+    /// a control that already appears under a different name — rather than a control the player
+    /// operates.
+    ///
+    /// ```ignore
+    /// // `Afterburner` is the throttle held down, on the same keys `Thrust` already shows.
+    /// controls.bind::<Afterburner>(KeyCode::KeyW).hold(0.75).private();
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If the same binding was also declared `mappable`. One binding cannot be both hidden from the
+    /// player and rebindable by them.
+    pub fn private(self) -> Self {
+        assert!(
+            !self.builder.bindings[self.index]
+                .mapping
+                .is_some_and(|decl| decl.rebinding.is_rebindable()),
+            "a binding cannot be both `mappable` and `private`: one says the player may change it, \
+             the other says they may not see it"
+        );
+        self.builder.bindings[self.index].mapping = None;
+        self
     }
 
     /// Lets the player rebind this, under a name of your choosing.
@@ -1003,8 +1052,8 @@ impl<'a, C> BindingHandle<'a, C> {
     ///
     /// # Panics
     ///
-    /// If `count` is zero. A mapping with no room is a binding that is not mappable, which is what
-    /// leaving `mappable` off already says.
+    /// If `count` is zero. A mapping with no room is a binding the player cannot change, which is
+    /// what leaving `mappable` off already says.
     pub fn mappable_upto(self, count: usize) -> Self {
         assert!(
             count > 0,
@@ -1027,8 +1076,13 @@ impl<'a, C> BindingHandle<'a, C> {
         prefix: Option<&'static str>,
         capacity: crate::rebind::Capacity,
     ) -> Self {
-        let existing = self.builder.bindings[self.index].mappable;
-        self.builder.bindings[self.index].mappable = Some(MappingDecl {
+        let existing = self.builder.bindings[self.index].mapping;
+        assert!(
+            existing.is_some(),
+            "a binding cannot be both `private` and `mappable`: one says the player may not see it, \
+             the other says they may change it"
+        );
+        self.builder.bindings[self.index].mapping = Some(MappingDecl {
             // A later call names the mapping; `mappable_as(..).mappable_upto(2)` must not silently
             // drop the name, and neither order should surprise.
             prefix: prefix.or(existing.and_then(|decl| decl.prefix)),
@@ -1036,17 +1090,24 @@ impl<'a, C> BindingHandle<'a, C> {
                 Some(decl) => widest(decl.capacity, capacity),
                 None => capacity,
             },
+            // Every one of this method's callers is a `mappable*`, so reaching here is the author
+            // asking for the upgrade from the listed-but-fixed default.
+            rebinding: crate::rebind::Rebinding::Here,
         });
         self
     }
 
     /// Withholds this binding's controls from capture, everywhere in its scheme.
     ///
-    /// The control that opens the rebinding screen is the case this exists for. It gets no mapping
-    /// of its own, so a player cannot rebind it away, and no *other* mapping can capture it, so it
-    /// cannot be quietly shadowed by something bound over the top of it. Without the second half
-    /// the first is worth little: a screen you can still open but whose controls now do two things
-    /// is the same trap arriving by a different door.
+    /// The control that opens the rebinding screen is the case this exists for. It is not rebindable,
+    /// so a player cannot move it away, and no *other* mapping can capture it, so it cannot be
+    /// quietly shadowed by something bound over the top of it. Without the second half the first is
+    /// worth little: a screen you can still open but whose controls now do two things is the same
+    /// trap arriving by a different door.
+    ///
+    /// It stays *listed*, which is usually what you want — a player looking for the key that opens
+    /// this screen should be able to find it written down. Add [`private`](Self::private) to keep it
+    /// out of the list as well.
     ///
     /// ```ignore
     /// controls.bind::<OpenSettings>(KeyCode::F1).reserved();
@@ -1175,7 +1236,7 @@ impl<C> InputContextBuilder<C> {
             conditions: Vec::new(),
             // The action's default, which a binding can then make an exception of either way.
             consume: A::CONSUMES,
-            mappable: None,
+            mapping: Some(MappingDecl::listed()),
             reserved: false,
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             chord: Vec::new(),
@@ -1238,7 +1299,7 @@ impl<C> InputContextBuilder<C> {
     pub(crate) fn mappings(&self, context: &'static str) -> Vec<crate::rebind::Mapping> {
         let mut mappings: Vec<crate::rebind::Mapping> = Vec::new();
         for binding in &self.bindings {
-            let Some(declaration) = binding.mappable else {
+            let Some(declaration) = binding.mapping else {
                 continue;
             };
             let prefix = declaration.prefix.unwrap_or(binding.path);
@@ -1253,6 +1314,9 @@ impl<C> InputContextBuilder<C> {
                 }) {
                     mapping.slots.push(control);
                     mapping.capacity = widest(mapping.capacity, declaration.capacity);
+                    // Bindings that disagree about this are a plan-build error, so the first one
+                    // wins here only so that the value is deterministic while the context is
+                    // being refused.
                     return;
                 }
 
@@ -1270,6 +1334,7 @@ impl<C> InputContextBuilder<C> {
                     scheme,
                     slots: alloc::vec![control],
                     capacity: declaration.capacity,
+                    rebinding: declaration.rebinding,
                     context,
                 });
             });

@@ -1060,4 +1060,121 @@ badly here.
 and R13.0 gives mouse buttons the section they should always have had — §13 separates position,
 motion and buttons in its own problem statement and then had requirements for only the first two.
 
+### The Steam grooming, before chunks 40 and 38
+
+No code. D3 was the one structural commitment in §0 that had never been checked against the thing it
+exists for, and the reason to check it now rather than when a backend gets written is that **chunks
+40 and 38 build the two surfaces it needs**. R18.8 says reverse lookup is a trait with our binding
+table as one implementation; R19.8 says rebinding must be able to answer "not ours, delegate". Both
+are decisions those chunks make by default if nobody has looked at the second implementer, and both
+are cheap while the type is being written and awkward afterwards. Doing this after them would have
+meant discovering it as a refactor, which is the shape §12 already warns about for R8.6.
+
+**Four requirements survived unchanged**, which is the more useful half of the result. R0.4's
+per-action authority, R14.10's "the backend's deadzone is the backend's", R18.8's trait, and R19.8's
+delegation all describe Steam correctly, and they were written before anyone here had read the SDK.
+The layering held: an API that returns action values and owns its own binding UI is exactly the
+authority case §0 predicted, and nothing about the four-layer split had to move.
+
+**What did not survive is the assumption that L2 is where a backend takes over.** Steam presents a
+pad it is driving as an emulated gamepad, so the platform enumerates it and `sample_input` records it
+while the backend is also reporting it — every input twice. R0.4 stops us *computing* the action; it
+never said anything about sampling the hardware underneath. That is R0.6, and it is not a Steam
+workaround: a replay backend needs the same verb for the same reason, and the demo is unusable
+without it. Worth noting how it was found — by asking what the first five minutes of running the
+thing would look like, not by reading the requirements again.
+
+**Three decisions, each written to be falsifiable by chunk 42** (Design §10.5):
+
+- **A backend writes a value, not a state.** Steam returns a level with no edge and no timestamp, so
+  §9's timing cannot be reconstructed from it — but `fired()` has to keep working or R0.5 is false.
+  Both hold if the write substitutes for the fold's output *inside* the evaluator, letting our
+  existing state machine synthesize the edges. The alternative, a second write path into
+  `InputContextState::actions`, would need its own copy of R6.1, and two implementations of the
+  button state machine is precisely the drift R0.5 exists to prevent. Falsified if a backend-owned
+  action can be given a `.hold()` without a plan-build diagnostic.
+- **A context is a layer.** Steam runs one action set per pad plus a stack of layers, we run many
+  contexts at once. The mismatch §10.2 flagged turned out narrower than it read, because a context
+  that is always active is not a mode — Dead Zone's `Shell` holds `Pause` unconditionally and belongs
+  in the base set, leaving only the state-gated `Flying` as a layer. What genuinely does not
+  translate is consumption: a layer shadows or it does not, and there is no equivalent of one context
+  claiming a control for a frame. Recorded rather than solved. §10.2 asked for this to be settled
+  once rather than twice and it now is, in the same place as R19.15.
+- **Suppression is L0.** Above.
+
+**The dependency question answered itself.** `steamworks` is `std`-only, `unsafe` FFI beneath, and
+wants the redistributable at link time; this crate is `no_std`, `forbid(unsafe_code)`, and minimal by
+manifest comment. So the real backend is someone else's crate and nothing under `src/` may name
+Steam — which is a constraint on the seam, not a packaging note, and the thing that tests it is a
+mock living entirely in `examples/`. That is chunk 42, and its acceptance criterion is a non-diff:
+Dead Zone's pad becomes backend-owned and every file except `actions.rs` is untouched.
+`actions.rs:96` already says "the pad is left alone: console and Steam remapping already own that",
+which was written as policy and becomes true.
+
+**One correction.** R18.9 said backend glyphs arrive as opaque handles or raw image bytes. Steam
+returns a filesystem path, which is neither and which the app has to load. The requirement's
+substance was right and only its enumeration of shapes was short — but the same gap one level up is
+load-bearing: a backend's *origins* are its own enumeration of physical controls, covering device
+families we have no `Control` for, so a reverse lookup returning `Vec<Control>` quietly makes the
+trait ours-only. That is now chunk 40's second review surface.
+
+### Chunk 43: listed by default
+
+The player-facing list was opt-in in both senses at once. A binding with no mapping was neither
+rebindable nor *visible*, so the only rows a screen could draw were the ones a game had already
+offered for remapping — and the commonest gamepad screen in the industry is a read-only list of what
+the pad does, with the remapping owned by the platform. We could not draw it from our own data. Dead
+Zone's gamepad table is exactly that screen, which is why this had to come before 21 rather than
+after it.
+
+**Two questions had been fused into one flag.** *May the player change this* is the developer's call,
+because a fixed binding is a design decision. *May the player see this* is the player's business, and
+the two want opposite defaults. Splitting them gives three states — listed and fixed, listed and
+rebindable, unlisted — and `Rebinding { Here, Fixed }` on the mapping is what a screen reads to
+decide whether the row gets a button. R19.10 was rewritten around the split; R4.7 now says only the
+rebindable half, which is all it ever meant.
+
+**The flip was proposed as `.listed()` and is better as `.private()`.** An opt-in verb would have
+been the third thing to remember to write, and the failure mode of forgetting it is invisible: the
+binding works and simply never appears. Opt-out fails the other way — the wrong thing shows up on a
+screen, which is a bug you see. The escape hatch is named for what it means rather than for the
+mechanism, since a game author's question is "is this the player's business", not "is this listed".
+
+**Four checks had to narrow, and three existing tests found it.** Key uniqueness, the
+rebinding-disagreement check, the cross-context collision report and `conflicts` all exist to protect
+the override store, and a fixed row never reaches it. Left as they were, they turned an ordinary
+arrangement into an error the moment listing became the default: one action bound in two contexts is
+now two listed rows under one name, which is what R19.13 promises a game that offers no rebinding at
+all. So all four require at least one side to be rebindable, and the diagnostic returns the moment a
+`mappable` is added to either — which is the moment it can do harm. Worth noting that the tests
+failed for the *right* reason and I nearly widened the exception instead of narrowing the check.
+
+**`private` and `mappable` panic on each other, in both orders.** One says the player may not see it
+and the other says they may change it, and a builder chain that quietly picked a winner would be a
+silent wrong answer in the one place a wrong answer is invisible. `.private()` asserts the binding is
+not already rebindable; `declare_mapping` asserts the mapping is still there, which covers
+`.private().mappable()` without a second check.
+
+**It found the gap chunk 44 exists for.** Listing by default put `Afterburner` on the screen beside
+`Thrust`, under its own name, holding the same three controls — and the question it raised was not
+about listing at all: if those are two mappings, a player can rebind `Thrust` to `J` and leave the
+afterburner on `W`, and then put `Fire` on `W` and afterburn by holding fire. Nothing collides, so
+`conflicts()` cannot see it; the failure is a *separation* that should not have been possible.
+Afterburner is a logical extension of Thrust and should move with it, which the model has no way to
+say. That is chunk 44, and Dead Zone carries `private` on those three bindings until it lands —
+which produces the right screen and none of the linkage, and the comment there says so.
+
+**Two rename regressions from chunk 39, found on the way.** `slot` had two live meanings before that
+chunk renamed one of them, and my protect-list missed two places where the surviving meaning — the
+state-array position — was written in prose: Design's "Action → slot assignment" and chunk 33's
+"slots ordered topologically". Both had been silently converted to "mapping" and both were wrong.
+The lesson is that a protect-list keyed on identifiers does not cover prose, and the sweep for a
+rename this size has to be a reading rather than a grep.
+
+**What is still opt-in, and deliberately.** Rebinding stays a declaration, and §0's accessibility
+paragraph says why that is uncomfortable: the jam entry's likely outcome is a game with zero
+remappable controls. The listing flip pays some of that back for free — a game that declares nothing
+still has controls a player can read, which is the readable half of R20.1 — and the obligation the
+paragraph names, making the accessible path *cheap*, is unchanged.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

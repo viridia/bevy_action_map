@@ -96,8 +96,10 @@ pub fn plugin(app: &mut App) {
         // directly. A key has only two positions, which is a coarse analog control rather than a
         // different kind of thing.
         controls.bind::<Thrust>(GamepadButton::RightTrigger2);
-        // The keyboard bindings are the ones a player may change. The pad is left alone: console
-        // and Steam remapping already own that, and offering both is two answers to one question.
+        // The keyboard bindings are the ones a player may change. The pad binding above is listed
+        // and fixed — the screen shows what the trigger does and offers no button to change it,
+        // because console and Steam remapping already own the pad and offering both is two answers
+        // to one question.
         //
         // Two of them, both plainly `mappable`: they derive one mapping name, so this is *one*
         // row holding a primary and a secondary rather than two rows the player has to be told are
@@ -136,11 +138,24 @@ pub fn plugin(app: &mut App) {
 
         // Hold the throttle for three quarters of a second and it opens up. `Started` fires the
         // moment the burn begins, so the exhaust can show it building before it arrives.
+        //
+        // `private`, because these are the throttle controls a second time and a controls screen
+        // listing them again would show the same keys under two names. What it *should* say is that
+        // they ride the Thrust row and move with it when the player rebinds that — which the crate
+        // cannot express yet, so this hides the duplicate row without linking the two. Until it
+        // can, rebinding Thrust leaves the afterburner on the old key.
         controls
             .bind::<Afterburner>(GamepadButton::RightTrigger2)
-            .hold(0.75);
-        controls.bind::<Afterburner>(KeyCode::KeyW).hold(0.75);
-        controls.bind::<Afterburner>(KeyCode::ArrowUp).hold(0.75);
+            .hold(0.75)
+            .private();
+        controls
+            .bind::<Afterburner>(KeyCode::KeyW)
+            .hold(0.75)
+            .private();
+        controls
+            .bind::<Afterburner>(KeyCode::ArrowUp)
+            .hold(0.75)
+            .private();
 
         controls
             .bind::<Hyperspace>(GamepadButton::East)

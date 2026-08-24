@@ -115,10 +115,16 @@ fn redraw(world: &mut World) {
             Some(_) => String::new(),
             None => "  (+ more)".into(),
         };
+        // Whether the row is a button or a label on the real screen. Everything is listed; only
+        // some of it is changeable, which is what `mappable` declares and what this column shows.
         let _ = writeln!(
             out,
-            "    {:<22} {bound}{room}",
-            mapping.key.fallback_label()
+            "    {:<22} {:<9} {bound}{room}",
+            mapping.key.fallback_label(),
+            match mapping.rebinding {
+                Rebinding::Here => "[rebind]",
+                Rebinding::Fixed => "[fixed]",
+            },
         );
     }
 

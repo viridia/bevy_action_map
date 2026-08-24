@@ -49,6 +49,7 @@ impl BindingDiagnostic {
             | DiagnosticKind::ChainedRescaling { .. } => Severity::Error,
             DiagnosticKind::MixedSchemeMapping
             | DiagnosticKind::DuplicateMappingKey { .. }
+            | DiagnosticKind::RebindingDisagreement { .. }
             | DiagnosticKind::ReservedAndMappable => Severity::Error,
             DiagnosticKind::DuplicateBinding { .. }
             | DiagnosticKind::ConsumeDisagreement { .. } => Severity::Warning,
@@ -103,6 +104,11 @@ pub enum DiagnosticKind {
         /// The name they share.
         key: crate::rebind::MappingKey,
     },
+    /// Two bindings feeding one mapping disagree about whether the player may change it.
+    RebindingDisagreement {
+        /// The name they share.
+        key: crate::rebind::MappingKey,
+    },
     /// A mappable binding reads controls from more than one kind of device.
     MixedSchemeMapping,
     /// A binding is declared both rebindable and reserved, which cannot both be true.
@@ -150,6 +156,13 @@ impl core::fmt::Display for BindingDiagnostic {
                 "`{}` declares a mapping named `{key}`, and so does something else. A saved \
                  rebinding of one would land on the other; give one of them a name with \
                  `mappable_as`",
+                self.action
+            ),
+            DiagnosticKind::RebindingDisagreement { key } => write!(
+                f,
+                "`{}` feeds the mapping `{key}` from two bindings that disagree about whether the \
+                 player may change it — one is `mappable` and the other is not. One row cannot be \
+                 both; say the same thing on every binding that feeds it",
                 self.action
             ),
             DiagnosticKind::MixedSchemeMapping => write!(
@@ -230,21 +243,36 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
             found.push(at(DiagnosticKind::ChainedRescaling { count: rescaling }));
         }
 
-        if binding.reserved && binding.mappable.is_some() {
+        // Reserving contradicts *rebindability*, not listing: a reserved control is one nothing may
+        // be bound over, and showing the player which control that is helps rather than hurts.
+        if binding.reserved
+            && binding
+                .mapping
+                .is_some_and(|decl| decl.rebinding.is_rebindable())
+        {
             found.push(at(DiagnosticKind::ReservedAndMappable));
         }
 
-        if let Some(declaration) = binding.mappable {
+        if let Some(declaration) = binding.mapping {
             let prefix = declaration.prefix.unwrap_or(binding.path);
+            let rebindable = declaration.rebinding.is_rebindable();
             let mut scheme = None;
             let mut mixed = false;
             binding.source.for_each_part(|part, control| {
                 let key = crate::rebind::MappingKey::new(prefix, part);
-                let claimant = keys
+                let (claimant, claimed_as) = keys
                     .entry((control.scheme(), key))
-                    .or_insert(binding.action);
+                    .or_insert((binding.action, declaration.rebinding));
                 if *claimant != binding.action {
-                    found.push(at(DiagnosticKind::DuplicateMappingKey { key }));
+                    // Only where something is rebindable, because the hazard is a *saved* rebind of
+                    // one row landing on another and a fixed row is never saved. Two fixed rows
+                    // under one name are a display oddity; erroring on them would fail the build of
+                    // games that want nothing to do with rebinding at all (R19.13).
+                    if rebindable || claimed_as.is_rebindable() {
+                        found.push(at(DiagnosticKind::DuplicateMappingKey { key }));
+                    }
+                } else if *claimed_as != declaration.rebinding {
+                    found.push(at(DiagnosticKind::RebindingDisagreement { key }));
                 }
                 match scheme {
                     Some(seen) if seen != control.scheme() => mixed = true,
@@ -252,7 +280,9 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
                     None => scheme = Some(control.scheme()),
                 }
             });
-            if mixed {
+            // A mapping the player cannot change needs no one scheme to change it *in*; it is a row
+            // in whichever table its first control belongs to, which is odd but harmless.
+            if mixed && rebindable {
                 found.push(at(DiagnosticKind::MixedSchemeMapping));
             }
         }

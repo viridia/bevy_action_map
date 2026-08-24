@@ -121,7 +121,7 @@ step and a real game is a better acceptance test than a synthetic one.
 
 | | |
 | --- | --- |
-| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is; interactive capture per slot, with reserved and excluded controls and read-only conflict detection. |
+| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection. |
 | **Known wrong today** | Nothing outstanding is wrong so much as absent; the player-facing half of the crate does not exist yet. |
 | **Never built** | Rebinding itself: nothing can yet change what a control is bound to, or save the change. Also tunables, presets, prompts, and every screen a player would meet. |
 
@@ -129,7 +129,7 @@ step and a real game is a better acceptance test than a synthetic one.
 
 ## What has landed
 
-Twenty-six chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+Twenty-seven chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
 where it fell short of its own description; this table is only an index, and the sequence below is
 what remains.
 
@@ -156,11 +156,12 @@ what remains.
 | 17b | Plan-build diagnostics | done; unknown controls → 23, observers → 36 |
 | 36 | Type-erased inspection and the overlay | done |
 | 18 | Derive completion | done |
-| 19 | Mappings and localization keys | done; tunables and presets → 23 and later |
+| 19 | Mappings and localization keys | done; presets → 45, tunables → deferred table |
 | 37 | Naming a control | done; composite structure → §18 |
 | 20 | Interactive capture, conflicts, reserved controls | done; the mutation half → 38 |
 | 39 | A mapping holds a list of slots | done; reverse lookup → 40, mouse buttons → 41 |
 | 41 | Mouse buttons | done; scroll wheel still unclaimed |
+| 43 | Listed by default | done; the gap it found → 44 |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -290,7 +291,12 @@ than against its own description:
 - **The keyboard table has three columns**: description, **primary**, **secondary**. Both cells are
   buttons that initiate a capture. This is also what makes the screen demonstrate horizontal *and*
   vertical navigation, which one column would not.
-- **The gamepad table has two columns** — only a primary binding is offered there.
+- **The gamepad table is read-only**, and has two columns: description and control. Neither fork of
+  the audience rebinds a pad row from here. A game shipping on Steam or a console has the platform's
+  own remapper and should link to it; a game with neither gets **presets** — Default and Southpaw as
+  buttons under the table (chunk 45). That is the whole gamepad story, and it is why the pad rows
+  are listed-and-fixed rather than absent (R19.10): without chunk 43 there would be no table here at
+  all.
 - **Confirm and Cancel at the bottom**, activatable three ways: mouse click; directional navigation
   then A; and a shortcut, B for cancel and X for confirm. **The button caption includes the
   shortcut**, which is R18.1's reverse lookup showing up as a UI requirement rather than a nicety —
@@ -302,7 +308,8 @@ than against its own description:
   consult the pending set rather than only what is committed. Chunk 38 owns making it able to.
 
 Chunk 39 built the model half of the three-column table — a mapping holds an ordered list with a
-capacity, and a capture names the slot it fills — so 21 draws cells for slots that already exist.
+capacity, and a capture names the slot it fills — and 43 put the fixed rows on it, so 21 draws cells
+for slots that already exist and a gamepad table with something in it.
 
 ### 21. The settings screen, read-only
 
@@ -336,6 +343,11 @@ needs, and Dead Zone's settings screen needs it for the button captions its own 
 - **Must reflect active contexts and consumption** (R18.2). A prompt for an action a higher-priority
   context is currently consuming is wrong, and this is the part that cannot be answered from the
   plan alone.
+- **It lands as a trait, with our binding table as one implementation** (R18.8), not as a free
+  function over `DeclaredContexts`. This is the chunk that either makes that decision or forecloses
+  it, and Design §10.5 is what it should be designed against. The trait is about *who is asked*, not
+  how it answers — the scan-first instinct above is unaffected, and the concrete implementation is
+  the one this chunk writes.
 - **Not doing:** R18.3's structured descriptor for composite structure — "hold", "chord of A and B".
   Chunk 37 left that half unbuilt and Design §10.3 records why; it wants a descriptor type wrapping
   the names, and nothing in tree renders one yet. It stays without a chunk, which ground rule 5 says
@@ -345,6 +357,10 @@ needs, and Dead Zone's settings screen needs it for the button captions its own 
   should see the pad control first — and R18.6's most-recently-used-device tracking is what would
   decide it. That is not built either, so this chunk should say plainly what its ranking is based on
   rather than implying it knows which device the player is holding.
+- **Second review surface:** whether the trait can answer for an action whose origins it does not
+  own. A backend's controls are its own enumeration and cover device families we have no `Control`
+  for (R18.9), so a return type of `Vec<Control>` quietly makes the trait ours-only. Getting this
+  wrong is cheap to fix here and expensive once callers exist.
 
 ### 29. Directional navigation
 
@@ -384,6 +400,37 @@ screen can be dismissed. Still nothing rebinds — pressing a row does nothing y
   consuming them. If it needs anything declared beyond that, the prediction was wrong.
 - **Verified by:** operating the whole screen from the Xbox pad without touching the keyboard.
 
+### 44. Bindings that travel together
+
+Several actions may deliberately share one physical control — tap to dodge, hold to sprint — and
+the player rebinds *the control*, not one of the actions. The model has no way to say so: the unit of
+rebinding is the action's path plus a part (R19.9), which assumes one action per binding, so the two
+get separate rows and a rebind moves only one of them.
+
+- **`.follows::<A>()` on the binding.** It rides `A`'s mapping: contributes no slots of its own, is
+  not listed separately, and applying a rebind to that mapping rewrites it too.
+- **Why before 38.** The bug is latent until a rebind can be applied, and then it is immediate:
+  rebind Thrust to `J` and the afterburner stays on `W`, and if the player later puts Fire on `W`,
+  holding Fire afterburns. Chunk 38 is the deadline rather than the discoverer.
+- **Conflict detection cannot catch it**, which is why it needs saying in the model rather than in a
+  diagnostic. Nothing collides — the failure is a *separation* that should not have been possible,
+  and `conflicts()` only looks for two rows holding one control.
+- **Found by chunk 43**, which made it visible: listing by default put Afterburner on the screen
+  under its own name, next to Thrust, holding the same keys. It was equally broken before and simply
+  could not be seen.
+- **Checkable at plan build:** the target must exist, be `mappable`, be in the same scheme, and read
+  the same controls. A `follows` that reads different controls is a different binding, not a linked
+  one, and saying so early is cheaper than a player finding it.
+- **Dead Zone is the test case**, and carries a stopgap in the meantime: its three `Afterburner`
+  bindings are `private`, which produces the same screen this chunk will and none of the linkage.
+  Replacing those three calls with `follows::<Thrust>()` is this chunk's acceptance test.
+- **Not doing:** inferring the link from two bindings happening to read one control. That is true of
+  coincidences as well as intentions, and the two want opposite handling.
+- **Review surface:** whether `follows` is the right shape for the *other* case it resembles —
+  chunk 33's conditions that read another action. Afterburner is genuinely "Thrust, still held", and
+  a game that could say that would need no link at all. If 33 subsumes enough of this, the two
+  should be looked at together before both are built.
+
 ### 38. Applying a rebind
 
 The mutation half of what chunk 20 was originally written to cover, split out because it needs
@@ -397,6 +444,11 @@ designs the structure it writes into.
   adds a file at one end and changes nothing else.
 - **The four conflict policies** (R19.3): reject, swap, duplicate-allowed, unbind-the-other, chosen
   by the app. Chunk 20 delivered the detection these act on.
+- **A fifth outcome: "not ours, delegate"** (R19.8). When a backend is authoritative for an action,
+  rebinding is its overlay's job and conflict detection does not run, because we do not own the
+  rules. This is a variant of the outcome type the four policies already need, so it costs a line
+  here and a signature change afterwards. §10.1's third override state — "not ours" — is the same
+  distinction already made on the persistence side, and Design §10.5 says what is on the other end.
 - **Reset to default per binding, per action, per context, and globally** (R19.4). Trivial without a
   store — "reset" means "remove a row" — and impossible with one that does not exist, which is why
   it moved here rather than shipping as a no-op.
@@ -421,6 +473,35 @@ designs the structure it writes into.
 Pressing a row enters capture, the next control pressed takes the mapping, and conflicts are
 reported per chunk 38's policy.
 
+### 45. Presets
+
+R19.12, which had no chunk until the gamepad table needed one. A preset is a named arrangement of
+mappings and tunables applied as a unit — "Default", "Southpaw", "Lefty" — and for the device
+classes where per-mapping rebinding is not offered it is not a convenience but *the entire remapping
+story*. A stick has no row to press.
+
+- **Why after 38.** A preset is a set of assignments, so it applies through the same path a rebind
+  does (§10.1) rather than a second writer. Building it before there is an apply path means
+  inventing one, and then having two.
+- **Dead Zone is the acceptance test, and the fork is the lesson.** Its gamepad table is read-only
+  either way; what sits under it is the choice. A game on Steam or a console links to the platform's
+  remapper; a game with neither gets Default and Southpaw as buttons, which is the arrangement most
+  shipped games actually have. Dead Zone teaches the second, since the first is chunk 42's territory
+  and a demo cannot show both without becoming a lecture.
+- **Southpaw is the honest test case** — it swaps two *sticks*, so it cannot be expressed as a
+  keyboard-style rebind at all, and a preset mechanism that only rearranges buttons would pass a
+  weaker one.
+- **What has to be decided: whether a preset is a starting point or a layer.** If a player picks
+  Southpaw and then rebinds one row, does a later "Southpaw" reapply discard their edit? Both
+  answers ship in real games. This is the chunk that has to pick one, and 23 stores whichever it is:
+  a preset name, or a preset name plus a diff against it.
+- **Tunables are in scope by R19.12 and may not be in scope here.** They are a separate declaration
+  that does not exist yet, so the mapping half can land first — but the preset *format* has to leave
+  room, since retrofitting a second kind of entry into a saved file is the migration R17 exists to
+  avoid.
+- **Review surface:** whether a game with one preset pays anything. R19.13 says presets are additive,
+  and the shape that satisfies it is a default preset that no one has to declare.
+
 ### 23. Persistence of overrides
 
 A rebind that does not survive a restart is a demo, not a feature. **Designed in Design §10.1**;
@@ -432,6 +513,10 @@ what remains here is what building it has to get right and what to look at in re
 - **Rows keyed by mapping, valued by control** — not by action, and not by binding. Which makes this
   chunk depend on 19 for the keys, on 20 for the capture that produces the values, and on 38 for the
   structure itself: by the time this runs, the only thing missing is the file.
+- **Plus whatever chunk 45 decides a preset selection is** — a name, or a name and a diff against
+  it. That is one field or two, but it is the difference between reapplying a preset discarding the
+  player's edits and preserving them, and a file written before the question is answered answers it
+  by accident.
 - **Three states per mapping** (R17.7): absent, cleared, and owned by someone else. A format with
   two cannot express a player deliberately unbinding something, because absence already means
   default.
@@ -533,8 +618,8 @@ shared world, one viewport each.
 ### 33. Conditions that read other actions
 
 A chord may require another *control* — `with()` — but not another *action*, and `BlockedBy` does
-not exist. Both read a neighbouring mapping rather than their own value, which needs the operand
-evaluated first: mappings ordered topologically, and a cycle rejected at plan build with a
+not exist. Both read a neighbouring slot rather than their own value, which needs the operand
+evaluated first: slots ordered topologically, and a cycle rejected at plan build with a
 diagnostic naming the loop.
 
 - **Why it waits:** self-contained, and nothing in tree wants it. The motivating cases are a
@@ -570,6 +655,44 @@ one level down.
 - **The mechanism is probably already there.** `require_reset` is per slot and `StateFlags` has
   room; what is missing is the public verb and what it means for a disabled action's in-flight
   state — cancel, on the same terms as deactivating a context, is the answer to beat.
+
+### 42. The authority backend, faked
+
+D3 made real against something that is not Steam, because the seam is only proven by a second
+implementer and the real one cannot live here. **Depends on Design §10.5**, which records what Steam
+Input actually is and settles the three places its model disagrees with ours.
+
+- **The traits land in `src/backend.rs`**, which has been a doc comment and no code since chunk 1.
+  An authority backend supplies an `ActionValue` per owned action, substituted for the fold's output
+  inside the evaluator so our state machine still synthesizes the edges (§10.5). A source backend
+  needs nothing new — `InputFrame::record` is already public and already the door.
+- **The mock lives entirely in `examples/`**, not in `src/` behind a feature. The traits are public
+  API and carry a maintenance promise; the fake is a test fixture and gets deleted when a real
+  backend exists. Ground rule 3 already makes the examples the acceptance test.
+- **It must fake the API, not the concept.** Level-only reads with no timestamps, an "is this bound"
+  flag distinct from a zero value, origins as a type that is deliberately not `Control`, a glyph as a
+  path, and a binding panel that is ugly on purpose. A mock nicer than Steam proves nothing, and
+  every one of those is a place §10.5 guessed.
+- **The acceptance criterion is a non-diff, and it is no longer Dead Zone's pad.** The original had
+  Dead Zone's pad become backend-owned with every other file in the example untouched. The preset
+  fork rules that out: Dead Zone's pad is where presets get taught (chunk 45), and a pad the backend
+  owns has no presets of ours to show. The proof still has to be a non-diff — screen code running
+  unchanged against a backend-owned context — but it needs a vehicle that is not already spoken for.
+  Choosing one is part of this chunk, and the awkward part is that sharing the settings screen
+  between two examples is a `#[path]` trick rather than a module.
+- **R0.6, the half that is not about Steam.** A backend suppresses its devices at L0 so their raw
+  events never reach the frame. This is what makes the demo usable at all — without it Dead Zone
+  reads the pad twice — and it is why this chunk sits after 26 rather than after 38: the filter's key
+  is the device identity chunk 26 puts on the frame, and the runtime entity is a stopgap that is
+  wrong across a reconnect.
+- **Blocked on 40 and 38** for the other two halves. Reverse lookup has to be a trait before a
+  backend can answer it (R18.8) and rebinding has to be able to say "not ours" (R19.8); both are
+  written onto those chunks. The authority-write half needs neither and could be split out early if
+  something starts wanting it sooner.
+- **Review surface:** whether §10.5's three decisions survive contact. Each was written to be
+  falsifiable by this chunk — a backend-owned action that accepts a `.hold()` without a diagnostic,
+  two modal contexts that must be live on one pad at once, or an input observed twice — and a
+  decision this chunk cannot break is a decision that was not made.
 
 ### 28. Docs that run
 
@@ -618,13 +741,20 @@ Split Friction does, and because the gate turned out to be met already. Reverse 
 it in chunk 39's grooming, which is also when the §18 row was found to be claiming an asset gate for
 two requirements that have nothing to do with assets.
 
+Backends (D3) left it in the Steam grooming, and the gate is worth restating because the row used to
+read as though any second implementer would do. It named "one working in-tree path to generalize
+_from_", which is true and was doing no work: what the seam actually waits on is chunks 40 and 38,
+because R18.8 and R19.8 are surfaces those two either build as substitutable or foreclose. That is
+now written onto both, the seam is designed in Design §10.5, and the implementer is chunk 42.
+
 | Area                                              | Gated on                                                                   |
 | ------------------------------------------------- | -------------------------------------------------------------------------- |
 | Persistent device identity and calibration (§11)  | two units of the *same kind*, which pad-plus-keyboard does not give         |
 | Mouse wheel as a binding source (R13.3)           | nothing in tree wants it. Chunk 41 landed mouse *buttons* and stopped there deliberately: the wheel is a delta on its own channel, needs the `Line`/`Pixel` normalization R13.3 describes, and shares nothing with a button but the device |
 | Glyph ids (R18.4)                                 | asset-pipeline questions this document does not touch                      |
+| Tunables (R19.11)                                 | nothing in tree adjusts one. Chunk 19 landed mappings and left tunables reading "23 and later", which is the destination ground rule 5 refuses; chunk 45 needs the preset *format* to leave room for them and does not need them to exist. Wanted by R20.5 and by a game named after a deadzone, so this row is a question to reopen rather than a settled no |
 | Live prompt invalidation (R18.5), most-recently-used device (R18.6) | nothing that displays a prompt, so there is nothing whose staleness could be observed. Neither is asset-gated; the row above used to claim they were |
-| Source and authority backends (D3)                | one working in-tree path to generalize _from_                              |
+| Glyphs from a backend (R18.9), and origins that are not our `Control` | the same asset-pipeline questions as the R18.4 row, arriving from the other side. The seam that has to accommodate them is settled — Design §10.5, and chunk 40's second review surface — so what is deferred is rendering one, not making room for it |
 | Netcode injection and rollback (§10)              | a testbed that actually rolls back; also wants held device state made snapshot-able (R10.3), which chunk 9 left as `BTreeSet`/`HashMap` |
 | Focus-driven context activation (R22.8) and text input | chunks 14 and 25 — priority, arbitration, and class bindings are what *claiming* a control means. D4's other half, dispatch (R22.7), needs none of that and is chunk 29. |
 | **Guardian migration**                            | porting guardian from bevy 0.16.1 to 0.20-dev — four versions, its own job |

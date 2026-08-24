@@ -66,6 +66,10 @@ Three consequences, each of which this document already obeys in places and shou
   context's buttons mappable should be one line, not one line per action. Where a default trades
   away accessibility, the obligation is to shorten the accessible path, not to accept the trade.
 
+  The *listing* half of R19.10 went the other way for exactly this reason. A jam entry that declares
+  nothing still has controls a player can read, which is the part of R20.1 that can be had for free;
+  what stays opt-in is only the part that a developer has to have thought about.
+
 ## Orientation: if you have used LWIM or bevy_enhanced_input
 
 Most of this document will be familiar in outline and unfamiliar in the details, because the details
@@ -129,6 +133,12 @@ must be delegable to the backend's own UI.
   map its own debug and editor bindings.
 - **R0.5 (MUST)** Consumers of action state (gameplay code, prompts) must not need to know which
   backend produced it. Backend identity is queryable but never required at the call site.
+- **R0.6 (MUST)** A backend that is authoritative for a device must be able to suppress that device
+  at **L0**, so its raw events never reach the input frame at all. R0.4 stops us computing an action
+  the backend owns; it does not stop us sampling the hardware underneath it, and on the case that
+  motivates D3 the hardware is still there — Steam presents a pad it is driving as an emulated
+  gamepad, which the platform enumerates and we sample, so every input arrives twice. The same
+  capability is what lets a replay backend mute live hardware while it plays.
 
 ### Non-goals
 
@@ -411,9 +421,10 @@ modifiers). Steam moves the whole binding layer out of the game.
   needs different deadzones for stick vs. mouse.
 - **R4.6 (MUST)** Bindings are data: constructible at runtime, serializable, diffable against
   defaults (§17).
-- **R4.7 (SHOULD)** Whether a binding is player-rebindable is expressed by declaring a mapping for
-  it (§19.R19.9, R19.10), not by a flag on the binding. Bindings are developer data by default and
-  invisible to players until a mapping says otherwise.
+- **R4.7 (SHOULD)** Whether a binding is player-_rebindable_ is expressed by declaring a mapping for
+  it (§19.R19.9, R19.10), not by a flag on the binding. Whether it is _listed_ is a separate question
+  with the opposite default (R19.10): a binding is shown to players unless it asks not to be, and
+  only rebinding waits to be declared.
 - **R4.8 (MUST)** Building or mutating bindings must produce actionable errors (unknown control,
   shape mismatch, duplicate) rather than silently doing nothing.
 - **R4.9 (MUST)** A binding may target a **control class** — a named set of controls — as well as a
@@ -1029,9 +1040,13 @@ game. Unity `ToDisplayString` + `InputBinding.MaskByGroup`. Unreal's `PlayerMapp
   glyphs; presentation must not assume our own binding tables are authoritative. Reverse lookup
   (R18.1) is therefore a trait method with our binding table as one implementation, not a concrete
   query over our own data.
-- **R18.9 (MUST)** Backend-supplied glyphs arrive as opaque handles or raw image bytes rather than as
-  our own (brand, control) identifiers — Steam returns a PNG/SVG path for an origin. R18.4's
-  identifier scheme must therefore be one variant of a wider glyph-source type, not the only shape.
+- **R18.9 (MUST)** Backend-supplied glyphs arrive as something other than our own (brand, control)
+  identifiers: an opaque handle, raw image bytes, or — the case Steam actually presents — a
+  filesystem path to a PNG or SVG that the app must load itself. R18.4's identifier scheme must
+  therefore be one variant of a wider glyph-source type, not the only shape. The same is true one
+  level up: a backend's *origins* are its own enumeration of physical controls, covering device
+  families we have no `Control` for, so reverse lookup must be able to answer with something that is
+  not one of ours (R18.8).
 - **R18.10 (SHOULD)** When a backend is authoritative, its origins may change without any input from
   us (the user edits bindings in the Steam overlay mid-session). R18.5's invalidation must be
   driveable by the backend, not only by our own binding mutations.
@@ -1120,9 +1135,24 @@ curves ([IGA file][steam-iga]).
   who ships one default and wants a spare slot says so once. An unbounded capacity exists for the
   other kind of program — a tool whose command set is too large and open to lay out in a table — and
   is not what a game reaches for.
-- **R19.10 (MUST)** Mappings are **opt-in by the developer**. An action with bindings has zero
-  mappings until some are declared. This supersedes the weaker framing in R4.7: rebindability is not
-  a flag hiding a binding from the UI, it is the presence or absence of a mapping.
+- **R19.10 (MUST)** A binding is **listed by default and rebindable only when declared**. Three
+  states, and every binding is in exactly one:
+
+  - **Listed and fixed**, which is what saying nothing gets: the player reads it on a controls screen
+    and cannot change it. This is the whole of the gamepad story on a console, and most of it on
+    Steam.
+  - **Listed and rebindable**, which is a declared mapping. Rebindability is the presence or absence
+    of a mapping rather than a flag on the binding, which is R4.7.
+  - **Unlisted**, which must be asked for. Reserved for a binding that is another binding's
+    implementation detail — a second reading of a control that already appears under a different
+    name — rather than a control the player operates.
+
+  The two questions must not be conflated. An earlier framing had listing follow rebindability, so
+  declining to offer a rebind also hid the binding, and the commonest gamepad screen in the industry
+  — a read-only list of what the pad does, with the remapping owned by the platform — could not be
+  drawn from our own data at all. Rebindability is the developer's call because a fixed binding is a
+  design decision; being able to see the controls is the player's business, and the default belongs
+  to them.
 - **R19.11 (MUST)** Player-adjustable parameters are exposed as **named tunables**, not as modifier
   chains. A tunable is a declared, typed, named, range-bounded parameter on a binding — `sensitivity:
   f32 in 0.1..=10.0`, `invert_y: bool`, `deadzone: f32 in 0.0..=0.5`, `hold_or_toggle: enum`,
@@ -1166,16 +1196,22 @@ curves ([IGA file][steam-iga]).
   rebind of one mapping silently lands on the other. R19.14's explicit override is the remedy; this
   is what makes an author reach for it.
 
-  Two cases derive one key twice, and only one of them is a collision:
+  Three cases derive one key twice, and only one of them is a collision:
 
   - **Two mappable bindings of one action, in one scheme, in one context** are a default primary and
     secondary. They are one mapping holding two controls (R19.9), not two mappings, and must merge
     silently — this is the ordinary way to ship "W or Up Arrow", and refusing it forces the alias
     row R19.9 exists to remove.
+  - **Two fixed rows deriving one key** are not a collision either. Uniqueness exists to stop a saved
+    override landing on the wrong row, and a row nobody can rebind is never written to a save (§17).
+    This is what makes listing by default affordable: under R19.10 one action bound in two contexts
+    produces two listed rows under one name, and demanding a distinct key for each would tax every
+    game that never offers a rebind at all. The collision returns the moment either side becomes
+    rebindable, which is the only moment it can do harm.
   - **Two different actions answering to one name**, and **the same action mappable in two
-    contexts**, are both collisions. The second is a collision even though the action is the same,
-    because the two are separate rows in contexts that may be live at different times, while the
-    override store is keyed by mapping alone (§17).
+    contexts**, are collisions when either side is rebindable. The second is a collision even though
+    the action is the same, because the two are separate rows in contexts that may be live at
+    different times, while the override store is keyed by mapping alone (§17).
 
 ---
 
