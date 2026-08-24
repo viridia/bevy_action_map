@@ -438,6 +438,13 @@ fn arrival(event: &RawEvent, threshold: &ButtonThreshold) -> Option<Arrival> {
                 control: Control::Key(key.key_code),
                 deliberate: true,
             }),
+        // A press, like a key: the player meant it, so refusing one is worth saying out loud.
+        #[cfg(feature = "mouse")]
+        RawEvent::MouseButton(button) => (button.state == bevy_input::ButtonState::Pressed)
+            .then_some(Arrival {
+                control: Control::MouseButton(button.button),
+                deliberate: true,
+            }),
         RawEvent::MouseMotion(delta) => (delta.length() >= MOUSE_MOTION).then_some(Arrival {
             control: Control::MouseMotion,
             deliberate: false,
@@ -874,6 +881,57 @@ mod tests {
             CaptureSession::for_slot(target, 2).is_none(),
             "within capacity, but it would leave slot 2 empty behind it"
         );
+    }
+
+    /// The keyboard-and-mouse scheme is one scheme, so a mouse button fills a mapping a key holds.
+    /// That is what a player expects of "fire on left click" and what a scheme check would get
+    /// wrong if it compared devices rather than schemes.
+    #[cfg(feature = "mouse")]
+    #[test]
+    fn a_mouse_button_can_be_captured_for_a_keyboard_mapping() {
+        use bevy_input::mouse::{MouseButton, MouseButtonInput};
+
+        let mut app = app();
+        let target = mapping(&app, "capture_tests.jump");
+        app.world_mut()
+            .spawn(CaptureSession::for_mapping(&target).expect("a button mapping"));
+        app.update();
+
+        app.world_mut().write_message(MouseButtonInput {
+            button: MouseButton::Left,
+            state: ButtonState::Pressed,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Heard>().captured,
+            [Control::MouseButton(MouseButton::Left)]
+        );
+    }
+
+    /// A release is not a choice, for the same reason a key's is not: capturing on one would take a
+    /// button the player is still holding down.
+    #[cfg(feature = "mouse")]
+    #[test]
+    fn releasing_a_mouse_button_is_not_a_capture() {
+        use bevy_input::mouse::{MouseButton, MouseButtonInput};
+
+        let mut app = app();
+        app.world_mut()
+            .spawn(CaptureSession::accepting(ControlClass::AnyButton));
+        app.update();
+
+        app.world_mut().write_message(MouseButtonInput {
+            button: MouseButton::Middle,
+            state: ButtonState::Released,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+
+        let heard = app.world().resource::<Heard>();
+        assert!(heard.captured.is_empty());
+        assert!(heard.refused.is_empty());
     }
 
     /// A class is a property, not a list — which is the whole of R4.9's first bullet.

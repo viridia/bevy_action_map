@@ -1022,7 +1022,12 @@ required by R19.13 so that shipping translations is never the price of a legible
 buys the thing R17.9 asks for: an upstream rename becomes a compile error in an exhaustive match
 while the stored string stays what it was. It also lets the labels say what the controls are rather
 than what Bevy calls them — `LeftTrigger` is a bumper and `LeftTrigger2` is the trigger, which is
-worth correcting in the one place a player reads.
+worth correcting in the one place a player reads. The mouse's thumb buttons are the same call from
+the other direction: they are stored as `mouse/Back` and `mouse/Forward`, because that is what the
+backend reports and the stored string must not drift, and shown as **Mouse 4** and **Mouse 5**,
+because that is what every other settings screen the player has seen calls them. An unnamed button
+reads as "Mouse Button 7" rather than "Mouse 7", so a raw index can never be mistaken for one of
+those two.
 
 **What the fallback cannot do, stated rather than papered over.** It answers for a US keyboard, so a
 binding to a physical key shows an AZERTY player the wrong letter — R12.2 calls that a bug, and it

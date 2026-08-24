@@ -1006,4 +1006,58 @@ constraint — `Control::name` is the stored persistence identity, so it must la
 the save format needs migrating on its first day. And §18's deferral reason was wrong: it claimed an
 asset-pipeline gate, which is true of glyphs and false of R18.5 and R18.6.
 
+### Chunk 41: mouse buttons
+
+The crate named keyboard-and-mouse as a control scheme and supported half of it. `Control` had no
+variant for a mouse button, `InputFrame` never sampled `MouseButtonInput`, and no requirement
+mentioned them — so "fire on left click", which is the commonest binding in the genre Dead Zone
+belongs to, could not be written at all.
+
+**Why it came before the settings screen and before persistence.** Persistence is the hard
+constraint: `Control::name` is the stored identity (R17.9), so a variant added after a save format
+ships means either a migration or a name chosen to fit around what is already written. The screen is
+the soft one — a rebinding table a player cannot put a mouse button into is a hole they find in the
+first minute, and finding it after the table is drawn means changing the table.
+
+**A variant is never just a variant.** It reached `Control`, `ButtonControl`, `BindingSource`,
+`BindingSourceSpec`, `RawEvent`, the sampler, the plugin's message registration, the evaluator's
+held state and its pressed predicate, `capture::arrival`, and the name and label tables — the same
+spread chunk 37 covered for the variants that already existed. The one place it did *not* need work
+is the mapping model, which is what having a `ButtonControl` abstraction was for: a mouse button is a
+composite part and a chord member for free.
+
+**`MouseButton` is `Hash` but not `Ord`,** so the held set is a `HashSet` where the keyboard's is a
+`BTreeSet`. Worth a comment in the source, because the asymmetry looks like carelessness otherwise
+and R10.3 will eventually want both snapshot-able.
+
+**The stored name and the shown label part company, deliberately, for the thumb buttons.** They are
+stored as `mouse/Back` and `mouse/Forward` — what the backend calls them, and the stored string
+must not drift — and shown as **Mouse 4** and **Mouse 5**, which is what every other settings
+screen the player has seen calls them. Exactly the call §10.3 already made when it decided
+`LeftTrigger` renders as a bumper. An unnamed button reads as "Mouse Button 7" rather than
+"Mouse 7", so a raw index can never be mistaken for one of those two.
+
+**A feature combination nobody had ever built was broken, and only a sweep found it.** Widening the
+`any(keyboard, gamepad)` cfg groups to include `mouse` created a configuration that had not
+existed before — mouse alone, no keyboard, no gamepad — and it did not compile:
+`CompiledBinding::chord` and
+the `ButtonState` import were both gated on keyboard-or-gamepad, and one `cfg(not(...))` fallback had
+been left un-widened, so `chord_len` was specified twice. Building all eight combinations of the
+three device features is now the check that catches this, and it is worth doing whenever a cfg group
+changes rather than only when a feature is added. The `--features libm` build alone would not have
+found it; that configuration has no devices at all.
+
+**Where it shows up.** Dead Zone's `Fire` is now Space *and* left mouse, both mappable — one row
+with both slots filled, and the first two-control row in the game that is not two keys. The
+spare slot moved to `Hyperspace`, so the read-only screen still has a blank cell to draw.
+
+**Not doing the wheel, and it now has a destination.** It is a delta on its own channel rather than a
+button, wants the `Line`/`Pixel` normalization R13.3 describes, and shares nothing with a button but
+the device. Nothing in tree asks for it, so it went to the deferred table rather than being written
+badly here.
+
+**The requirements gap was the real deliverable.** R4.1a states the bindable control set outright,
+and R13.0 gives mouse buttons the section they should always have had — §13 separates position,
+motion and buttons in its own problem statement and then had requirements for only the first two.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

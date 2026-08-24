@@ -290,7 +290,7 @@ pub(crate) struct CompiledBinding {
     pub(crate) modifiers: Vec<BindingModifier>,
     pub(crate) conditions: Vec<BindingCondition>,
     pub(crate) consume: bool,
-    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
     pub(crate) chord: alloc::vec::Vec<crate::binding::ButtonControl>,
     // How specific this binding is: one for the control it names, plus one per control it requires
     // alongside. The clash between two bindings on one control is decided by this and nothing else.
@@ -362,11 +362,11 @@ impl<C> Plan<C> {
                 modifiers: binding.modifiers,
                 conditions: binding.conditions,
                 consume: binding.consume,
-                #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+                #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
                 chord_len: 1 + u8::try_from(binding.chord.len()).unwrap_or(u8::MAX),
-                #[cfg(not(any(feature = "keyboard", feature = "gamepad")))]
+                #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
                 chord_len: 1,
-                #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+                #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
                 chord: binding.chord,
                 scratch_base,
             });

@@ -7,14 +7,18 @@ use alloc::vec::Vec;
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::{Commands, Query, Res};
+#[cfg(any(feature = "keyboard", feature = "mouse"))]
+use bevy_input::ButtonState;
 #[cfg(feature = "gamepad")]
 use bevy_input::gamepad::{GamepadAxis, RawGamepadEvent};
 #[cfg(feature = "keyboard")]
-use bevy_input::{ButtonState, keyboard::KeyboardInput};
+use bevy_input::keyboard::KeyboardInput;
+#[cfg(feature = "mouse")]
+use bevy_input::mouse::MouseButtonInput;
 use bevy_math::{Vec2, Vec3};
 
 use crate::action::{ActionValue, InputContext, Intent, Phase};
-#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 use crate::binding::ButtonControl;
 #[cfg(feature = "gamepad")]
 use crate::binding::Stick;
@@ -232,6 +236,15 @@ impl<C: InputContext> InputContextState<C> {
                     self.held_buttons.remove(key_code);
                 }
             },
+            #[cfg(feature = "mouse")]
+            RawEvent::MouseButton(MouseButtonInput { button, state, .. }) => match state {
+                ButtonState::Pressed => {
+                    self.held_mouse_buttons.insert(*button);
+                }
+                ButtonState::Released => {
+                    self.held_mouse_buttons.remove(button);
+                }
+            },
             // Accumulated by the caller: a delta is not a state.
             RawEvent::MouseMotion(_) => {}
             #[cfg(feature = "gamepad")]
@@ -274,6 +287,8 @@ impl<C: InputContext> InputContextState<C> {
             chord_claims,
             #[cfg(feature = "keyboard")]
             held_buttons,
+            #[cfg(feature = "mouse")]
+            held_mouse_buttons,
             #[cfg(feature = "gamepad")]
             held_gamepad_buttons,
             #[cfg(feature = "gamepad")]
@@ -283,7 +298,7 @@ impl<C: InputContext> InputContextState<C> {
 
         // One predicate for every button-shaped part, so a composite and a plain button binding
         // can never disagree about what "pressed" means.
-        #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         let is_pressed = |control: ButtonControl| {
             // A control another context has taken reads as untouched, rather than being skipped:
             // one part of a composite going away should leave the other three working.
@@ -293,6 +308,8 @@ impl<C: InputContext> InputContextState<C> {
             match control {
                 #[cfg(feature = "keyboard")]
                 ButtonControl::Key(key) => held_buttons.contains(&key),
+                #[cfg(feature = "mouse")]
+                ButtonControl::MouseButton(button) => held_mouse_buttons.contains(&button),
                 #[cfg(feature = "gamepad")]
                 ButtonControl::GamepadButton(button) => held_gamepad_buttons
                     .get(&button)
@@ -304,7 +321,7 @@ impl<C: InputContext> InputContextState<C> {
         // because a binding cannot know it is out-ranked without looking at the others — and it is
         // a pure function of what is held, so it costs nothing stateful and can be redone per fold.
         chord_claims.clear();
-        #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         if plan.has_chords() {
             for binding in plan.bindings() {
                 if !binding.chord.iter().copied().all(&is_pressed) {
@@ -357,10 +374,10 @@ impl<C: InputContext> InputContextState<C> {
 
                 // Two ways to be out of the running before the control is even read: the chord this
                 // binding needs is not held, or a longer one on the same control is (R8.1).
-                #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+                #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
                 let held_back = !binding.chord.iter().copied().all(&is_pressed)
                     || (plan.has_chords() && out_ranked(binding));
-                #[cfg(not(any(feature = "keyboard", feature = "gamepad")))]
+                #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
                 let held_back = false;
 
                 let value = match binding.source {
@@ -369,12 +386,17 @@ impl<C: InputContext> InputContextState<C> {
                         !consumed.contains(Control::Key(key_code))
                             && held_buttons.contains(&key_code),
                     ),
-                    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+                    #[cfg(feature = "mouse")]
+                    BindingSource::MouseButton(button) => ActionValue::Bool(
+                        !consumed.contains(Control::MouseButton(button))
+                            && held_mouse_buttons.contains(&button),
+                    ),
+                    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
                     BindingSource::Axis1(parts) => ActionValue::Axis1(axis_from_buttons(
                         is_pressed(parts.negative),
                         is_pressed(parts.positive),
                     )),
-                    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+                    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
                     BindingSource::Directional2(parts) => {
                         // Four keys and a D-pad reach an action through this same arm, which is
                         // the whole point of the composite.
@@ -547,7 +569,7 @@ fn widen(value: ActionValue) -> Vec3 {
     value.to_axis3()
 }
 
-#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 fn axis_from_buttons(negative: bool, positive: bool) -> f32 {
     match (negative, positive) {
         (true, false) => -1.0,

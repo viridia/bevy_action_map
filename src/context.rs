@@ -43,6 +43,8 @@ use crate::plan::Plan;
 use crate::{ActionMapPlugin, ActionMapSystems};
 #[cfg(feature = "gamepad")]
 use bevy_platform::collections::HashMap;
+#[cfg(feature = "mouse")]
+use bevy_platform::collections::HashSet;
 
 /// The compiled bindings for one context, shared by every instance of it.
 // Instances hold an `Arc` to this rather than a copy: ten local players sharing one binding set
@@ -102,6 +104,10 @@ pub struct InputContextState<C> {
     pub(crate) read_through: Option<Timestamp>,
     #[cfg(feature = "keyboard")]
     pub(crate) held_buttons: BTreeSet<bevy_input::keyboard::KeyCode>,
+    // A `HashSet` rather than the `BTreeSet` the keys get, because `MouseButton` is `Hash` but not
+    // `Ord` upstream.
+    #[cfg(feature = "mouse")]
+    pub(crate) held_mouse_buttons: HashSet<bevy_input::mouse::MouseButton>,
     #[cfg(feature = "gamepad")]
     pub(crate) held_gamepad_buttons: HashMap<bevy_input::gamepad::GamepadButton, ButtonReading>,
     #[cfg(feature = "gamepad")]
@@ -126,6 +132,8 @@ impl<C: InputContext> InputContextState<C> {
             read_through,
             #[cfg(feature = "keyboard")]
             held_buttons: BTreeSet::new(),
+            #[cfg(feature = "mouse")]
+            held_mouse_buttons: HashSet::default(),
             #[cfg(feature = "gamepad")]
             held_gamepad_buttons: HashMap::default(),
             #[cfg(feature = "gamepad")]
@@ -1222,6 +1230,90 @@ mod tests {
         let probe = app.world().resource::<Probe>();
         assert!(!probe.value);
         assert_eq!(probe.phase, Phase::Completed);
+    }
+
+    /// The other half of the keyboard-and-mouse scheme, which until now the crate only claimed to
+    /// support: a mouse button drives an action exactly as a key does.
+    #[cfg(feature = "mouse")]
+    #[test]
+    fn pressing_and_releasing_a_mouse_button_updates_the_action_state() {
+        use bevy_input::mouse::{MouseButton, MouseButtonInput};
+
+        let click = |state| MouseButtonInput {
+            button: MouseButton::Left,
+            state,
+            window: Entity::PLACEHOLDER,
+        };
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context.bind::<Jump>(MouseButton::Left);
+        });
+        app.world_mut().spawn(OnFoot);
+        app.init_resource::<Probe>();
+        app.add_systems(FixedUpdate, probe_jump);
+
+        app.world_mut().write_message(click(ButtonState::Pressed));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        let probe = app.world().resource::<Probe>();
+        assert!(probe.value);
+        assert_eq!(probe.phase, Phase::Fired);
+
+        app.world_mut().write_message(click(ButtonState::Released));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        let probe = app.world().resource::<Probe>();
+        assert!(!probe.value);
+        assert_eq!(probe.phase, Phase::Completed);
+    }
+
+    /// A mouse button is a button, so it serves as a part of a composite — which is what
+    /// `ButtonControl` gaining a variant is for, rather than only `Control`.
+    #[cfg(feature = "mouse")]
+    #[test]
+    fn a_mouse_button_can_be_part_of_a_composite() {
+        use bevy_input::mouse::{MouseButton, MouseButtonInput};
+
+        #[derive(InputAction)]
+        #[action(path = "tests.lean", output = f32, intent = Analog1)]
+        struct Lean;
+
+        #[derive(Resource, Default)]
+        struct LeanProbe(f32);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.bind::<Lean>(AxisButtons::new(MouseButton::Left, MouseButton::Right));
+        });
+        app.world_mut().spawn(FreeLook);
+        app.init_resource::<LeanProbe>();
+        app.add_systems(
+            Update,
+            |input: Actions<FreeLook>, mut probe: bevy_ecs::system::ResMut<'_, LeanProbe>| {
+                probe.0 = input.value::<Lean>();
+            },
+        );
+
+        let click = |app: &mut App, button, state| {
+            app.world_mut().write_message(MouseButtonInput {
+                button,
+                state,
+                window: Entity::PLACEHOLDER,
+            });
+        };
+
+        click(&mut app, MouseButton::Right, ButtonState::Pressed);
+        app.update();
+        assert_eq!(app.world().resource::<LeanProbe>().0, 1.0);
+
+        click(&mut app, MouseButton::Left, ButtonState::Pressed);
+        app.update();
+        assert_eq!(app.world().resource::<LeanProbe>().0, 0.0, "both held");
     }
 
     #[derive(InputAction)]

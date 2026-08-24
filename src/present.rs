@@ -38,6 +38,8 @@ use crate::binding::Control;
 use bevy_input::gamepad::{GamepadAxis, GamepadButton};
 #[cfg(feature = "keyboard")]
 use bevy_input::keyboard::KeyCode;
+#[cfg(feature = "mouse")]
+use bevy_input::mouse::MouseButton;
 
 /// Writes the two directions of a control table from one list of entries.
 ///
@@ -45,7 +47,7 @@ use bevy_input::keyboard::KeyCode;
 ///
 /// Encoding is an exhaustive match, so a variant added or renamed upstream is a compile error
 /// rather than a control that silently stops having a name.
-#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 macro_rules! control_table {
     ($encode:ident, $decode:ident, $label:ident, $kind:ty, $prefix:literal, $all:ident, {
         $($variant:ident => $text:literal,)*
@@ -295,6 +297,17 @@ control_table!(button_name, button_from_name, button_label, GamepadButton, "pad"
     DPadLeft => "D-Pad Left",
     DPadRight => "D-Pad Right",});
 
+// `Back` and `Forward` are the thumb buttons, which every settings screen a player has seen calls
+// Mouse 4 and Mouse 5 — the same choice made for `LeftTrigger` above. `Other` is spelled out as
+// "Mouse Button {n}" rather than "Mouse {n}" so that a raw index can never be read as one of those.
+#[cfg(feature = "mouse")]
+control_table!(mouse_name, mouse_from_name, mouse_label, MouseButton, "mouse", ALL_MOUSE_BUTTONS, {
+    Left => "Left Mouse",
+    Right => "Right Mouse",
+    Middle => "Middle Mouse",
+    Back => "Mouse 4",
+    Forward => "Mouse 5",});
+
 #[cfg(feature = "gamepad")]
 control_table!(axis_name, axis_from_name, axis_label, GamepadAxis, "axis", ALL_AXES, {
     LeftStickX => "Left Stick X",
@@ -338,6 +351,14 @@ impl Control {
                 },
                 Cow::Borrowed,
             ),
+            #[cfg(feature = "mouse")]
+            Self::MouseButton(button) => mouse_name(button).map_or_else(
+                || match button {
+                    MouseButton::Other(index) => Cow::Owned(alloc::format!("mouse/other/{index}")),
+                    _ => Cow::Borrowed("mouse/unknown"),
+                },
+                Cow::Borrowed,
+            ),
             Self::MouseMotion => Cow::Borrowed("mouse/motion"),
         }
     }
@@ -374,6 +395,17 @@ impl Control {
                 .ok()
                 .map(|index| Self::GamepadAxis(GamepadAxis::Other(index)));
         }
+        #[cfg(feature = "mouse")]
+        if let Some(button) = mouse_from_name(name) {
+            return Some(Self::MouseButton(button));
+        }
+        #[cfg(feature = "mouse")]
+        if let Some(index) = name.strip_prefix("mouse/other/") {
+            return index
+                .parse()
+                .ok()
+                .map(|index| Self::MouseButton(MouseButton::Other(index)));
+        }
         match name {
             "mouse/motion" => Some(Self::MouseMotion),
             _ => None,
@@ -404,6 +436,14 @@ impl Control {
                 || match axis {
                     GamepadAxis::Other(index) => Cow::Owned(alloc::format!("Axis {index}")),
                     _ => Cow::Borrowed("Unknown Axis"),
+                },
+                Cow::Borrowed,
+            ),
+            #[cfg(feature = "mouse")]
+            Self::MouseButton(button) => mouse_label(button).map_or_else(
+                || match button {
+                    MouseButton::Other(index) => Cow::Owned(alloc::format!("Mouse Button {index}")),
+                    _ => Cow::Borrowed("Unknown Mouse Button"),
                 },
                 Cow::Borrowed,
             ),
@@ -443,12 +483,18 @@ mod tests {
         for &axis in ALL_AXES {
             round_trip(Control::GamepadAxis(axis));
         }
+        #[cfg(feature = "mouse")]
+        for &button in ALL_MOUSE_BUTTONS {
+            round_trip(Control::MouseButton(button));
+        }
         round_trip(Control::MouseMotion);
         #[cfg(feature = "gamepad")]
         {
             round_trip(Control::GamepadButton(GamepadButton::Other(7)));
             round_trip(Control::GamepadAxis(GamepadAxis::Other(3)));
         }
+        #[cfg(feature = "mouse")]
+        round_trip(Control::MouseButton(MouseButton::Other(9)));
     }
 
     /// Two controls sharing a name would mean one binding reading back as another.
@@ -469,6 +515,12 @@ mod tests {
                 .iter()
                 .map(|&axis| Control::GamepadAxis(axis).name()),
         );
+        #[cfg(feature = "mouse")]
+        names.extend(
+            ALL_MOUSE_BUTTONS
+                .iter()
+                .map(|&button| Control::MouseButton(button).name()),
+        );
         names.push(Control::MouseMotion.name());
 
         let mut sorted = names.clone();
@@ -485,6 +537,9 @@ mod tests {
         assert_eq!(Control::from_name("KeyW"), None, "the prefix is required");
         assert_eq!(Control::from_name(""), None);
         assert_eq!(Control::from_name("pad/other/nine"), None);
+        // `mouse/motion` and `mouse/Left` share a prefix and must not be confusable for each other.
+        assert_eq!(Control::from_name("mouse/Motion"), None);
+        assert_eq!(Control::from_name("mouse/left"), None);
     }
 
     /// The stored name and the shown text are different strings, which is the whole reason there
@@ -543,5 +598,43 @@ mod tests {
         for &button in ALL_BUTTONS {
             assert!(!Control::GamepadButton(button).fallback_label().is_empty());
         }
+        #[cfg(feature = "mouse")]
+        for &button in ALL_MOUSE_BUTTONS {
+            let label = Control::MouseButton(button).fallback_label();
+            assert!(!label.is_empty(), "{button:?} has no label");
+            assert_ne!(
+                label, "Unknown Mouse Button",
+                "{button:?} fell through the table"
+            );
+        }
+    }
+
+    /// The thumb buttons are shown the way a player's other games show them, and the stored name is
+    /// Bevy's word for the same button — the two halves being different strings is the point.
+    #[cfg(feature = "mouse")]
+    #[test]
+    fn a_mouse_button_is_stored_by_name_and_shown_by_convention() {
+        let left = Control::MouseButton(MouseButton::Left);
+        assert_eq!(left.name(), "mouse/Left");
+        assert_eq!(left.fallback_label(), "Left Mouse");
+
+        let back = Control::MouseButton(MouseButton::Back);
+        assert_eq!(back.name(), "mouse/Back", "stored as what Bevy calls it");
+        assert_eq!(back.fallback_label(), "Mouse 4", "shown as players say it");
+        assert_eq!(
+            Control::MouseButton(MouseButton::Forward).fallback_label(),
+            "Mouse 5"
+        );
+
+        // Spelled out, so an unnamed button can never be mistaken for one of the two above.
+        assert_eq!(
+            Control::MouseButton(MouseButton::Other(4)).fallback_label(),
+            "Mouse Button 4"
+        );
+
+        // A mouse button is keyboard-and-mouse and reports on a button channel, which is what lets
+        // it fill a mapping a key could fill.
+        assert_eq!(left.scheme(), crate::rebind::Scheme::KeyboardMouse);
+        assert_eq!(left.shape(), crate::action::ChannelShape::Button);
     }
 }

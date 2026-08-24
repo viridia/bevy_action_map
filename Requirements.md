@@ -393,6 +393,12 @@ LWIM: polled `ActionState` with `current_duration()` and explicit `consume()`.
 modifiers). Steam moves the whole binding layer out of the game.
 
 - **R4.1 (MUST)** An action may have N bindings; a binding may target one control or a composite.
+- **R4.1a (MUST)** The bindable control set covers **keyboard keys, mouse buttons, mouse motion,
+  gamepad buttons and gamepad axes**. Mouse buttons are stated rather than implied: "keyboard and
+  mouse" is one control scheme (§17.R17.4), and a crate that names that scheme while binding only
+  half of it cannot express "fire on left click" — which is not an exotic binding, it is the
+  commonest one in the genre. A mouse button reports on a button channel, so anywhere a key can go
+  a mouse button can: as a whole binding, as a part of a composite, and as a member of a chord.
 - **R4.2 (MUST)** Composites: 1D axis from two buttons, 2D from four (WASD/D-pad), 2D from a stick,
   chord (all-of), and "button with modifier(s)".
 - **R4.3 (MUST)** Bindings must be expressible against a _device class_ (any gamepad) as well as a
@@ -732,6 +738,16 @@ relative motion delta, and a set of buttons. They have different units, differen
 behavior, and different correct handling, and touch adds a fourth case — several simultaneous
 pointers that appear and vanish. Most bugs in this area come from treating one of them as another.
 
+- **R13.0 (MUST)** Mouse **buttons** are bindable controls in their own right, on the same terms as
+  keyboard keys: a whole binding, a part of a composite, a member of a chord, and something capture
+  will take for a mappable slot. They belong to the keyboard-and-mouse scheme (§17.R17.4), so a
+  mouse button may be captured for a mapping a key currently holds and the two never conflict with a
+  gamepad binding. This is the third of the three signals the problem statement above separates, and
+  the only one that behaves like an ordinary button.
+
+  The set is whatever the platform reports: left, right and middle, the two thumb buttons, and
+  indexed buttons beyond them. The thumb buttons are stored under the names the backend gives them
+  and _shown_ as Mouse 4 and Mouse 5, which is what a player's other games call them (R18.3).
 - **R13.1 (MUST)** Distinguish pointer _position_ (absolute, window-relative, UI-scale-aware) from
   pointer _motion_ (relative delta), and never let a binding accidentally use one for the other.
 - **R13.2 (MUST)** Mouse motion for camera look must be frame-rate independent and must not be
@@ -741,6 +757,8 @@ pointers that appear and vanish. Most bugs in this area come from treating one o
   action.
 - **R13.3 (MUST)** Scroll: handle `MouseScrollUnit::{Line, Pixel}` and normalize them with an
   app-configurable lines→pixels factor; high-resolution trackpad scroll must not be quantized away.
+  The wheel is a delta on its own channel rather than a button, so it is a separate matter from
+  R13.0 and is not satisfied by it.
 - **R13.4 (MUST)** Cursor grab / relative mouse mode interaction: entering grab must not produce a
   spurious huge delta; leaving it must restore position; document the interaction with
   `bevy_window::CursorOptions`.

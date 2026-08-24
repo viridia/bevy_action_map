@@ -121,7 +121,7 @@ step and a real game is a better acceptance test than a synthetic one.
 
 | | |
 | --- | --- |
-| **Works today** | Actions and contexts as types; keyboard, mouse and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is; interactive capture per slot, with reserved and excluded controls and read-only conflict detection. |
+| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is; interactive capture per slot, with reserved and excluded controls and read-only conflict detection. |
 | **Known wrong today** | Nothing outstanding is wrong so much as absent; the player-facing half of the crate does not exist yet. |
 | **Never built** | Rebinding itself: nothing can yet change what a control is bound to, or save the change. Also tunables, presets, prompts, and every screen a player would meet. |
 
@@ -129,9 +129,9 @@ step and a real game is a better acceptance test than a synthetic one.
 
 ## What has landed
 
-Twenty-five chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
-fell short of its own description; this table is only an index, and the sequence below is what
-remains.
+Twenty-six chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+where it fell short of its own description; this table is only an index, and the sequence below is
+what remains.
 
 | # | Chunk | State |
 | --- | --- | --- |
@@ -159,7 +159,8 @@ remains.
 | 19 | Mappings and localization keys | done; tunables and presets → 23 and later |
 | 37 | Naming a control | done; composite structure → §18 |
 | 20 | Interactive capture, conflicts, reserved controls | done; the mutation half → 38 |
-| 39 | A mapping holds a list | done; reverse lookup → 40, mouse buttons → 41 |
+| 39 | A mapping holds a list of slots | done; reverse lookup → 40, mouse buttons → 41 |
+| 41 | Mouse buttons | done; scroll wheel still unclaimed |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -303,27 +304,6 @@ than against its own description:
 Chunk 39 built the model half of the three-column table — a mapping holds an ordered list with a
 capacity, and a capture names the slot it fills — so 21 draws cells for slots that already exist.
 
-### 41. Mouse buttons
-
-`Control` has no mouse-button variant, `InputFrame` never samples `MouseButtonInput`, and "mouse
-button" appears in no requirement and no design section. The crate claims keyboard-and-mouse as a
-control scheme and supports half of it.
-
-- **Why it is a chunk rather than a line.** The variant reaches the frame, the plan's control index,
-  arbitration, `ControlClass::AnyButton`, the name table and the fallback labels — the same spread
-  chunk 37 covered for the variants that do exist.
-- **Why before chunk 23**, and this is the binding constraint: `Control::name` is the *stored
-  persistence identity* (R17.9). Adding a variant after a save format ships means either a format
-  migration or a name chosen to fit around what is already written, and both are avoidable by
-  landing it first.
-- **Why before chunk 21** as well, though less firmly: a rebinding screen that cannot show a mouse
-  button is a screen a player will find the hole in immediately, and finding it after the table is
-  drawn means changing the table.
-- **Also fills a requirements gap**, which is the part to review: mouse buttons need saying in §4 and
-  §12 rather than being implied by "keyboard and mouse" appearing in `Scheme`.
-- **Not doing:** mouse wheel. It is a delta on its own channel, not a button, and nothing in tree
-  wants it yet.
-
 ### 21. The settings screen, read-only
 
 In Dead Zone: a screen listing every mapping with what is currently bound to it. A help
@@ -334,8 +314,9 @@ screen, and nothing more — no buttons, no focus, dismissed by the same control
   awkward here it is awkward everywhere, and there is no capture machinery in the way to obscure it.
 - **Both tables, and the keyboard one has its cells.** `mapping.capacity.slots()` says how many
   columns to draw and `mapping.slots` fills them in order, so an empty secondary is a blank cell
-  rather than an absent one. Dead Zone ships two-control rows for Thrust and Turn and a spare slot
-  on Fire, so the read-only pass already has all three cases to draw.
+  rather than an absent one. Dead Zone ships two-control rows for Thrust, Turn and Fire — the last
+  of them a key and a mouse button in one row — and a spare slot on Hyperspace, so the read-only
+  pass already has every case to draw.
 - **Review surface:** whether a UI author can build this without reaching past the mapping list into
   this crate's internals. If they cannot, D7 has leaked.
 
@@ -640,6 +621,7 @@ two requirements that have nothing to do with assets.
 | Area                                              | Gated on                                                                   |
 | ------------------------------------------------- | -------------------------------------------------------------------------- |
 | Persistent device identity and calibration (§11)  | two units of the *same kind*, which pad-plus-keyboard does not give         |
+| Mouse wheel as a binding source (R13.3)           | nothing in tree wants it. Chunk 41 landed mouse *buttons* and stopped there deliberately: the wheel is a delta on its own channel, needs the `Line`/`Pixel` normalization R13.3 describes, and shares nothing with a button but the device |
 | Glyph ids (R18.4)                                 | asset-pipeline questions this document does not touch                      |
 | Live prompt invalidation (R18.5), most-recently-used device (R18.6) | nothing that displays a prompt, so there is nothing whose staleness could be observed. Neither is asset-gated; the row above used to claim they were |
 | Source and authority backends (D3)                | one working in-tree path to generalize _from_                              |

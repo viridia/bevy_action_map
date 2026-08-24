@@ -11,6 +11,8 @@ use core::marker::PhantomData;
 use bevy_input::gamepad::{GamepadAxis, GamepadButton};
 #[cfg(feature = "keyboard")]
 use bevy_input::keyboard::KeyCode;
+#[cfg(feature = "mouse")]
+use bevy_input::mouse::MouseButton;
 use bevy_math::Vec2;
 
 use crate::action::{ActionId, ActionValue, ChannelShape, InputAction, Intent, Scratch};
@@ -26,12 +28,15 @@ use crate::event::{Dispatch, dispatch_for};
 /// You seldom write this type. Anywhere a part is wanted, the control itself will do:
 /// `DirectionalButtons::new(KeyCode::KeyW, ..)` and `DirectionalButtons::new(GamepadButton::DPadUp, ..)`
 /// both convert on the way in.
-#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonControl {
     /// A keyboard key.
     #[cfg(feature = "keyboard")]
     Key(KeyCode),
+    /// A mouse button.
+    #[cfg(feature = "mouse")]
+    MouseButton(MouseButton),
     /// A gamepad button, including the D-pad and the triggers.
     #[cfg(feature = "gamepad")]
     GamepadButton(GamepadButton),
@@ -41,6 +46,13 @@ pub enum ButtonControl {
 impl From<KeyCode> for ButtonControl {
     fn from(key: KeyCode) -> Self {
         Self::Key(key)
+    }
+}
+
+#[cfg(feature = "mouse")]
+impl From<MouseButton> for ButtonControl {
+    fn from(button: MouseButton) -> Self {
+        Self::MouseButton(button)
     }
 }
 
@@ -64,7 +76,7 @@ impl From<GamepadButton> for ButtonControl {
 ///
 /// Note what the second line is doing: a stick axis already reports signed, so it needs no
 /// composite. Both bindings feed the same action, and the player uses whichever they reach for.
-#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AxisButtons {
     /// The button that drives the axis negative.
@@ -73,7 +85,7 @@ pub struct AxisButtons {
     pub positive: ButtonControl,
 }
 
-#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 impl AxisButtons {
     /// Creates an axis from the two buttons that drive it either way.
     pub fn new(negative: impl Into<ButtonControl>, positive: impl Into<ButtonControl>) -> Self {
@@ -115,7 +127,7 @@ impl AxisButtons {
 ///
 /// The parts are named for the direction each one pushes rather than for its position on a device,
 /// which is what a rebinding screen needs in order to say "Move Forward" next to one of them.
-#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DirectionalButtons {
     /// The button that contributes positive Y.
@@ -128,7 +140,7 @@ pub struct DirectionalButtons {
     pub right: ButtonControl,
 }
 
-#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 impl DirectionalButtons {
     /// Creates a directional composite from four buttons.
     ///
@@ -203,7 +215,7 @@ pub(crate) struct BindingSpec {
     pub(crate) mappable: Option<MappingDecl>,
     // Whether the controls this binding reads are withheld from capture across their scheme.
     pub(crate) reserved: bool,
-    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
     pub(crate) chord: Vec<ButtonControl>,
 }
 
@@ -301,6 +313,9 @@ pub enum Control {
     /// A keyboard key.
     #[cfg(feature = "keyboard")]
     Key(KeyCode),
+    /// A mouse button.
+    #[cfg(feature = "mouse")]
+    MouseButton(MouseButton),
     /// A gamepad button, including the D-pad and the triggers.
     #[cfg(feature = "gamepad")]
     GamepadButton(GamepadButton),
@@ -320,6 +335,8 @@ impl Control {
         match self {
             #[cfg(feature = "keyboard")]
             Self::Key(_) => crate::rebind::Scheme::KeyboardMouse,
+            #[cfg(feature = "mouse")]
+            Self::MouseButton(_) => crate::rebind::Scheme::KeyboardMouse,
             Self::MouseMotion => crate::rebind::Scheme::KeyboardMouse,
             #[cfg(feature = "gamepad")]
             Self::GamepadButton(_) | Self::GamepadAxis(_) => crate::rebind::Scheme::Gamepad,
@@ -339,6 +356,8 @@ impl Control {
         match self {
             #[cfg(feature = "keyboard")]
             Self::Key(_) => ChannelShape::Button,
+            #[cfg(feature = "mouse")]
+            Self::MouseButton(_) => ChannelShape::Button,
             // Including the triggers, which carry a fraction on this channel.
             #[cfg(feature = "gamepad")]
             Self::GamepadButton(_) => ChannelShape::Button,
@@ -349,12 +368,14 @@ impl Control {
     }
 }
 
-#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 impl From<ButtonControl> for Control {
     fn from(control: ButtonControl) -> Self {
         match control {
             #[cfg(feature = "keyboard")]
             ButtonControl::Key(key) => Self::Key(key),
+            #[cfg(feature = "mouse")]
+            ButtonControl::MouseButton(button) => Self::MouseButton(button),
             #[cfg(feature = "gamepad")]
             ButtonControl::GamepadButton(button) => Self::GamepadButton(button),
         }
@@ -367,11 +388,14 @@ pub enum BindingSource {
     /// A keyboard key.
     #[cfg(feature = "keyboard")]
     Button(KeyCode),
+    /// A mouse button.
+    #[cfg(feature = "mouse")]
+    MouseButton(MouseButton),
     /// A two-button signed axis composite.
-    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
     Axis1(AxisButtons),
     /// A four-button directional composite.
-    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
     Directional2(DirectionalButtons),
     /// Mouse motion.
     MouseMotion,
@@ -399,12 +423,14 @@ impl BindingSource {
         match self {
             #[cfg(feature = "keyboard")]
             Self::Button(key) => visit(Control::Key(*key)),
-            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            #[cfg(feature = "mouse")]
+            Self::MouseButton(button) => visit(Control::MouseButton(*button)),
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             Self::Axis1(parts) => {
                 visit(parts.negative.into());
                 visit(parts.positive.into());
             }
-            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             Self::Directional2(parts) => {
                 visit(parts.up.into());
                 visit(parts.down.into());
@@ -434,12 +460,14 @@ impl BindingSource {
         match self {
             #[cfg(feature = "keyboard")]
             Self::Button(key) => visit(Part::Whole, Control::Key(*key)),
-            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            #[cfg(feature = "mouse")]
+            Self::MouseButton(button) => visit(Part::Whole, Control::MouseButton(*button)),
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             Self::Axis1(parts) => {
                 visit(Part::Negative, parts.negative.into());
                 visit(Part::Positive, parts.positive.into());
             }
-            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             Self::Directional2(parts) => {
                 visit(Part::Up, parts.up.into());
                 visit(Part::Down, parts.down.into());
@@ -474,10 +502,12 @@ impl BindingSource {
         match self {
             #[cfg(feature = "keyboard")]
             Self::Button(_) => ChannelShape::Button,
+            #[cfg(feature = "mouse")]
+            Self::MouseButton(_) => ChannelShape::Button,
             // Buttons, but an axis and a direction by the time anything binds to them.
-            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             Self::Axis1(_) => ChannelShape::Axis1,
-            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             Self::Directional2(_) => ChannelShape::Axis2,
             Self::MouseMotion => ChannelShape::Delta2,
             // Including the triggers, which carry a fraction on this channel.
@@ -534,14 +564,14 @@ impl BindingSourceSpec for KeyCode {
     }
 }
 
-#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 impl BindingSourceSpec for AxisButtons {
     fn into_binding_source(self) -> BindingSource {
         BindingSource::Axis1(self)
     }
 }
 
-#[cfg(any(feature = "keyboard", feature = "gamepad"))]
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 impl BindingSourceSpec for DirectionalButtons {
     fn into_binding_source(self) -> BindingSource {
         BindingSource::Directional2(self)
@@ -551,6 +581,13 @@ impl BindingSourceSpec for DirectionalButtons {
 impl BindingSourceSpec for MouseMove {
     fn into_binding_source(self) -> BindingSource {
         BindingSource::MouseMotion
+    }
+}
+
+#[cfg(feature = "mouse")]
+impl BindingSourceSpec for MouseButton {
+    fn into_binding_source(self) -> BindingSource {
+        BindingSource::MouseButton(self)
     }
 }
 
@@ -879,7 +916,7 @@ impl<'a, C> BindingHandle<'a, C> {
     /// most held alongside it takes the control and the shorter ones do not fire — so `Ctrl+S` does
     /// not also trigger a plain `S` binding, and `Ctrl+Shift+S` does not trigger either of the
     /// other two. Nothing has to be declared for that; it follows from the lengths.
-    #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
     pub fn with(self, control: impl Into<ButtonControl>) -> Self {
         self.builder.bindings[self.index].chord.push(control.into());
         self
@@ -1140,7 +1177,7 @@ impl<C> InputContextBuilder<C> {
             consume: A::CONSUMES,
             mappable: None,
             reserved: false,
-            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             chord: Vec::new(),
         });
         let index = self.bindings.len() - 1;

@@ -12,7 +12,7 @@
 
 use bevy::prelude::*;
 use bevy_action_map::prelude::*;
-use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
+use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode, mouse::MouseButton};
 
 use crate::pause::{self, Game};
 use crate::ship::RELOAD;
@@ -122,13 +122,17 @@ pub fn plugin(app: &mut App) {
         // lets `shoot` be an observer with no timer of its own. The interval is the ship's rate of
         // fire, which is the one game number the input layer has to know.
         controls.bind::<Fire>(GamepadButton::South).pulse(RELOAD);
-        // Room for two, one shipped. The other half of what a mapping's capacity is for: the
-        // second slot is one a settings screen draws blank and the player fills, rather than one
-        // the game had to have a default for.
+        // Two keyboard-and-mouse defaults, so Fire is one row with both slots filled. A mouse
+        // button is the same kind of thing as a key here — one scheme, one channel — which is why
+        // it needs no special handling to sit in the second slot.
         controls
             .bind::<Fire>(KeyCode::Space)
             .pulse(RELOAD)
-            .mappable_upto(2);
+            .mappable();
+        controls
+            .bind::<Fire>(MouseButton::Left)
+            .pulse(RELOAD)
+            .mappable();
 
         // Hold the throttle for three quarters of a second and it opens up. `Started` fires the
         // moment the burn begins, so the exhaust can show it building before it arrives.
@@ -141,10 +145,12 @@ pub fn plugin(app: &mut App) {
         controls
             .bind::<Hyperspace>(GamepadButton::East)
             .multi_tap(2, 0.3);
+        // Room for two, one shipped: the second slot is one a settings screen draws blank and the
+        // player fills, rather than one the game had to have a default for.
         controls
             .bind::<Hyperspace>(KeyCode::ShiftLeft)
             .multi_tap(2, 0.3)
-            .mappable();
+            .mappable_upto(2);
     });
 
     // No condition, so this one is live from the moment its entity exists and stays that way. Pause

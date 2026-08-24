@@ -42,7 +42,7 @@ use bevy_input::gamepad::RawGamepadEvent;
 #[cfg(feature = "keyboard")]
 use bevy_input::keyboard::KeyboardInput;
 #[cfg(feature = "mouse")]
-use bevy_input::mouse::MouseMotion;
+use bevy_input::mouse::{MouseButtonInput, MouseMotion};
 
 /// A monotonically increasing timestamp tagged with the sampling frame that produced it.
 // Bevy's input events do not carry a stable order or a frame tag, so this wrapper gives us one
@@ -84,6 +84,9 @@ pub enum RawEvent {
     /// A keyboard event sampled from Bevy's keyboard message stream.
     #[cfg(feature = "keyboard")]
     Keyboard(KeyboardInput),
+    /// A mouse button event sampled from Bevy's mouse message stream.
+    #[cfg(feature = "mouse")]
+    MouseButton(MouseButtonInput),
     /// Mouse motion sampled from Bevy's mouse message stream.
     MouseMotion(Vec2),
     /// A raw gamepad event sampled before Bevy's per-axis deadzone processing.
@@ -237,6 +240,7 @@ impl InputFrame {
 pub fn sample_input(
     mut frame: bevy_ecs::system::ResMut<InputFrame>,
     #[cfg(feature = "keyboard")] mut keyboard_inputs: MessageReader<KeyboardInput>,
+    #[cfg(feature = "mouse")] mut mouse_button_inputs: MessageReader<MouseButtonInput>,
     #[cfg(feature = "mouse")] mut mouse_motion_inputs: MessageReader<MouseMotion>,
     #[cfg(feature = "gamepad")] mut gamepad_inputs: MessageReader<RawGamepadEvent>,
 ) {
@@ -244,6 +248,11 @@ pub fn sample_input(
     #[cfg(feature = "keyboard")]
     for event in keyboard_inputs.read() {
         frame.record(RawEvent::Keyboard(event.clone()));
+    }
+
+    #[cfg(feature = "mouse")]
+    for event in mouse_button_inputs.read() {
+        frame.record(RawEvent::MouseButton(*event));
     }
 
     #[cfg(feature = "mouse")]
@@ -292,6 +301,7 @@ impl Plugin for InputFramePlugin {
 
         #[cfg(feature = "mouse")]
         {
+            app.add_message::<MouseButtonInput>();
             app.add_message::<MouseMotion>();
         }
 
