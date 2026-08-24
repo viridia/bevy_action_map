@@ -93,11 +93,13 @@ fn redraw(world: &mut World) {
     // it.
     out.push_str("\nrebindable\n");
     for slot in slots(world) {
+        // Both halves of the row are keys with a fallback, so a game that ships a translation
+        // catalogue swaps in two lookups here and nothing else changes.
         let _ = writeln!(
             out,
-            "    {:<22} {:?}",
+            "    {:<22} {}",
             slot.key.fallback_label(),
-            slot.current
+            slot.current.fallback_label()
         );
     }
 

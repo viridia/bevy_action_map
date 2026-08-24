@@ -148,11 +148,12 @@ pub mod prelude {
     #[cfg(any(feature = "keyboard", feature = "gamepad"))]
     pub use crate::binding::{AxisButtons, DirectionalButtons};
     // `MouseMove` is ungated because `BindingSource::MouseMotion` is.
-    pub use crate::binding::{ButtonThreshold, Control, DeadZone, MouseMove};
+    pub use crate::binding::{ButtonThreshold, Control, DeadZone, MouseMove, Part};
     pub use crate::condition::{Condition, ConditionKind, Verdict};
     pub use crate::context::{ActionMapAppExt, Actions, ActionsQuery, InputContextState, Obstacle};
     pub use crate::event::{Canceled, Completed, Fired, Started};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
+    pub use crate::rebind::{Scheme, Slot, SlotKey};
     // The derives share their names with the traits above, which is fine — a derive macro and a
     // trait live in different namespaces. Without these, a glob import of this prelude gives you
     // the trait and leaves `#[derive(InputAction)]` unresolved.

@@ -129,7 +129,7 @@ step and a real game is a better acceptance test than a synthetic one.
 
 ## What has landed
 
-Twenty-two chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
+Twenty-three chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
 fell short of its own description; this table is only an index, and the sequence below is what
 remains.
 
@@ -157,6 +157,7 @@ remains.
 | 36 | Type-erased inspection and the overlay | done |
 | 18 | Derive completion | done |
 | 19 | Mappable slots and localization keys | done; tunables and presets → 23 and later |
+| 37 | Naming a control | done; composite structure → §18 |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -257,6 +258,11 @@ the other remaps a range and therefore falls under D6's one-rescaling-stage rule
 
 - **Why separate:** neither is a diagnostic, and both were riding in 17 because it was the open
   chunk when they were found.
+- **Smaller than when it was written.** R17.5 wanted `Reflect` so third-party modifiers round-trip
+  through persistence — but the design that settled in §10.1 stores *controls*, so a custom modifier
+  never reaches a saved override file. What still wants it is serializing whole binding
+  *definitions* (R17.6, R22.16), which is deferred, so this is no longer on the path to anything
+  scheduled.
 
 ---
 
@@ -360,8 +366,9 @@ what remains here is what building it has to get right and what to look at in re
 - **No device identity in it** (R17.8). Bindings name a device class; pairing and calibration are
   separate stores keyed by persistent identity. Two players with identical pads and identical
   mappings differ only in pairing.
-- **The control encoding is ours** (R17.9), round-trip tested, carrying the physical/logical key
-  distinction (R12.1). Not `Debug`, and not serde on `KeyCode` — those names belong to Bevy.
+- **The control encoding is ours** (R17.9) and **built in chunk 37**: `Control::name` and
+  `from_name`, round-trip tested over every variant. The `key/` prefix leaves room for the logical
+  half of R12.1, which the binding layer cannot express yet.
 - **Applying to a live context is the only path in,** with startup as the first call. An authority
   backend can rewrite bindings mid-session (R18.10), so a startup-only path would be wrong on at
   least one platform before it shipped.

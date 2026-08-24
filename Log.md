@@ -798,4 +798,43 @@ consumer of D7's model, and enough to see that the keys read correctly without a
 neither is needed until something adjusts a value; capture (chunk 20) is what turns this list into a
 screen that changes anything.
 
+### Chunk 37: naming a control
+
+Unclaimed work, found by asking what chunk 21's screen would actually print. Nothing in the crate
+could turn a control into text — the overlay was printing `Key(KeyW)` through `Debug` — and R18.3,
+which asks for a structured descriptor plus a fallback renderer, was claimed by no chunk at all.
+§18 sits in "deliberately deferred" gated on asset-pipeline questions, but that gate is about
+*glyphs*; the text half is not asset-dependent and was falling through the gap. Fourth
+destination-less item found this way, after R3.7, unknown controls and R22.2.
+
+**One name, two jobs.** `key/KeyW` is both what a settings file stores (R17.9) and the key an app's
+catalogue answers to (R18.3). That is the same economy `SlotKey` already has, and it means a
+rebinding row is two keys and two lookups with nothing in it this crate renders.
+`fallback_label` is the readable half for a game with no catalogue.
+
+**The table is written out rather than derived, and the size is the point.** Two hundred-odd lines
+of `KeyA => "A"` looks like something a macro over Bevy's variant names should generate, which is
+exactly what R17.9 forbids: it would put every saved binding at the mercy of a rename in a crate we
+do not control. Written out, an upstream rename is a compile error in an exhaustive match and the
+stored string stays put. It also let the labels say what controls *are* rather than what Bevy calls
+them — `LeftTrigger` is a bumper and `LeftTrigger2` is the trigger, and a player reading "Left
+Trigger" for the shoulder button would be told something false.
+
+**The `--features libm` build caught another one.** The table macro was defined unconditionally and
+used only behind device features, so the build with no devices at all warned about it. Third time
+that configuration has found something no other build sees.
+
+**What is not fixed, and is now written down where it will be read.** The fallback answers for a US
+keyboard, so a physical binding shows an AZERTY player the wrong letter — R12.2 calls that a bug and
+the crate cannot fix it alone, because nothing in Bevy reports what a physical key produces on the
+current layout outside an event that already happened. Two things can: an app supplying the control
+half of its catalogue per layout, and — once capture exists — remembering the logical key observed
+at the moment a player bound something, which is right for every binding they chose themselves.
+Design §10.3 records both rather than leaving the gap to be rediscovered.
+
+**Also noted while here: 17c shrank again.** R17.5 wants `Reflect` so third-party modifiers
+round-trip, but §10.1 stores controls rather than modifier chains, so a custom modifier never
+reaches a saved override file. What still needs it is serializing whole binding definitions, which
+is deferred — so nothing scheduled depends on 17c any more.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

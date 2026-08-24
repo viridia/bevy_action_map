@@ -856,7 +856,8 @@ Enough to show the architecture accommodates them; each deserves its own documen
   devices.
 - **Presentation** (Requirements §18)**.** The plan's reverse index answers "what is bound to `Jump`" without scanning;
   filtering by the player's active device class and by consumption gives the prompt. Glyph resolution
-  returns an identifier, or an opaque handle when an authority backend supplies it.
+  returns an identifier, or an opaque handle when an authority backend supplies it. The naming half
+  is built — see §10.3.
 - **Persistence** (Requirements §17)**.** Designed in §10.1 rather than sketched.
 - **Rebinding** (Requirements §19)**.** Designed in §9.7 rather than sketched, because D7 changed what it operates on.
 
@@ -941,6 +942,36 @@ we avoid by declaring the path once in the derive rather than growing a second f
 And a Steam action belongs to exactly one action set, while ours may be bound in any number of
 contexts: the same tension as R19.15's colliding slot keys, arriving from another direction, and
 worth settling once rather than twice.
+
+### 10.3 Naming a control
+
+A control needs two strings, and conflating them is the mistake worth designing against: one goes
+into a settings file and must mean the same thing next year, the other goes on screen and must be
+readable in the player's language.
+
+**One name serves as both the stored identity and the localization key.** `key/KeyW` is what a
+settings file holds (R17.9) and what an app's catalogue answers to (R18.3), which is the same
+economy `SlotKey` already gets — a rebinding row is then two keys and two lookups, with nothing
+in it this crate renders. `fallback_label` is the readable text for a game with no catalogue,
+required by R19.13 so that shipping translations is never the price of a legible screen.
+
+**The table is ours rather than derived from Bevy's names**, which costs about two hundred lines and
+buys the thing R17.9 asks for: an upstream rename becomes a compile error in an exhaustive match
+while the stored string stays what it was. It also lets the labels say what the controls are rather
+than what Bevy calls them — `LeftTrigger` is a bumper and `LeftTrigger2` is the trigger, which is
+worth correcting in the one place a player reads.
+
+**What the fallback cannot do, stated rather than papered over.** It answers for a US keyboard, so a
+binding to a physical key shows an AZERTY player the wrong letter — R12.2 calls that a bug, and it
+is one the crate cannot fix alone: nothing in Bevy reports what a physical key produces on the
+current layout outside an event that has already happened. An app supplies the control half of its
+catalogue per layout; and once capture lands, the crate can remember the logical key observed at the
+moment a player bound something, which is right for every binding they chose themselves. Recorded
+here rather than solved, because the solution is a chunk of its own.
+
+**Composite structure is not built.** R18.3 also asks for "hold" and "chord of A and B" as structure
+a renderer can compose. Nothing shows a chord yet; when something does, it is a descriptor wrapping
+these names rather than a change to them.
 
 ---
 
