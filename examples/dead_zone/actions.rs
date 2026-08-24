@@ -96,23 +96,34 @@ pub fn plugin(app: &mut App) {
         // directly. A key has only two positions, which is a coarse analog control rather than a
         // different kind of thing.
         controls.bind::<Thrust>(GamepadButton::RightTrigger2);
-        controls.bind::<Thrust>(KeyCode::KeyW);
-        controls.bind::<Thrust>(KeyCode::ArrowUp);
+        // The keyboard bindings are the ones a player may change. The pad is left alone: console
+        // and Steam remapping already own that, and offering both is two answers to one question.
+        controls.bind::<Thrust>(KeyCode::KeyW).mappable();
+        controls
+            .bind::<Thrust>(KeyCode::ArrowUp)
+            .mappable_as("dead_zone.thrust_alt");
 
         // A stick axis is already signed; two keys need a composite to become one. The deadzone is
         // what stops a worn stick from turning the ship while the player is not touching it.
         controls
             .bind::<Turn>(GamepadAxis::LeftStickX)
             .dead_zone(DeadZone::radial(0.15));
-        controls.bind::<Turn>(AxisButtons::ad());
-        controls.bind::<Turn>(AxisButtons::left_right());
+        // Two keys make one axis, so the player sees two rows rather than one — "turn negative"
+        // and "turn positive" — which is the same reason a movement composite is four.
+        controls.bind::<Turn>(AxisButtons::ad()).mappable();
+        controls
+            .bind::<Turn>(AxisButtons::left_right())
+            .mappable_as("dead_zone.turn_alt");
 
         // `pulse` fires the action again every interval for as long as the button is down, so
         // holding fire is a stream of separate `Fired`s rather than one long one — which is what
         // lets `shoot` be an observer with no timer of its own. The interval is the ship's rate of
         // fire, which is the one game number the input layer has to know.
         controls.bind::<Fire>(GamepadButton::South).pulse(RELOAD);
-        controls.bind::<Fire>(KeyCode::Space).pulse(RELOAD);
+        controls
+            .bind::<Fire>(KeyCode::Space)
+            .pulse(RELOAD)
+            .mappable();
 
         // Hold the throttle for three quarters of a second and it opens up. `Started` fires the
         // moment the burn begins, so the exhaust can show it building before it arrives.
@@ -127,7 +138,8 @@ pub fn plugin(app: &mut App) {
             .multi_tap(2, 0.3);
         controls
             .bind::<Hyperspace>(KeyCode::ShiftLeft)
-            .multi_tap(2, 0.3);
+            .multi_tap(2, 0.3)
+            .mappable();
     });
 
     // No condition, so this one is live from the moment its entity exists and stays that way. Pause

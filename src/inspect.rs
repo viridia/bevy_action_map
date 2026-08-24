@@ -87,6 +87,9 @@ pub(crate) struct DeclaredContext {
     pub(crate) tick: TickDomain,
     pub(crate) priority: i32,
     pub(crate) read: fn(&mut World) -> Vec<InstanceDump>,
+    // Slots come from the context's compiled bindings rather than from anything an entity carries,
+    // so unlike `read` this one needs no query and no exclusive access.
+    pub(crate) slots: fn(&World) -> Vec<crate::rebind::Slot>,
 }
 
 /// Every context declared so far, in declaration order.

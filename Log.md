@@ -755,4 +755,47 @@ another direction.
 The IGA details here are from the documented format rather than from a file in hand. If the backend
 work leans on them, they want the treatment §14's gamepad claims got.
 
+### Chunk 19: mappable slots
+
+The chunk existed to answer one question, and the answer was better than the design's own sketch.
+
+**Could a slot address one part of a composite?** `BindingSource::Directional2(DirectionalButtons)`
+compiles the four keys as one thing, and `for_each_control` visited them in order without naming
+them — so nothing in the model could say "the key that moves you forward". The fix was small once
+stated: parts are a named enum, and `for_each_part` yields the name beside the control. Up, down,
+left, right; negative and positive for a two-button axis; `Whole` for a binding that reads one
+control. A stick and the mouse report `Whole` too, which is the right answer rather than a shrug —
+they are one thing to a player, and what they get instead of per-part rebinding is a tunable.
+
+**`mappable()` takes no arguments, and both halves of that are decisions Design §9.7 had the other
+way.** It sketched `mappable_parts(Scheme::Kbm, ["forward", "back", "left", "right"])`:
+
+- *The part names were the author's.* That is a positional list to keep in step with a struct's
+  fields, and a second vocabulary for four things that already have names. The composite knows its
+  parts; the key derives as `gameplay.move.up`, and the catalogue is where `up` becomes "Move
+  Forward". Supplying "forward" at the binding would be naming the same part twice, in the one place
+  no translator will look.
+- *The scheme was declared.* But the binding's own controls already say whether it is keyboard or
+  gamepad, and declaring it is a third thing that can disagree with what is actually bound. It is
+  now inferred, and a binding whose parts span both devices is refused when the context is declared.
+
+The result is that declaring a whole composite mappable is one call with nothing to get wrong, which
+is what the chunk's review surface asked for. §9.7 has been rewritten to match, with the reasoning,
+rather than left disagreeing with the code.
+
+**The collision R19.15 predicted needed two checks, not one.** Two bindings of one action in one
+context is a plan-build diagnostic like any other. The same action mappable in *two* contexts is
+not: a plan is compiled without seeing the others. What made it findable was chunk 36's registry of
+declared contexts — built for a debug overlay, and now the only thing in the crate that can see two
+contexts at once. Both tests pass, and the second would have been unwriteable a chunk ago.
+
+**Slots ride the type-erased door too.** `rebind::slots(world)` walks the same registry, needing
+only `&World` because slots come from the plan resource rather than from anything an entity carries.
+Dead Zone's overlay grew four lines that list what a player would be shown — the smallest possible
+consumer of D7's model, and enough to see that the keys read correctly without a catalogue.
+
+**Not doing:** tunables and presets. R19.11 and R19.12 are declarations over the same bindings and
+neither is needed until something adjusts a value; capture (chunk 20) is what turns this list into a
+screen that changes anything.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

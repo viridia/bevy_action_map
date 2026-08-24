@@ -129,7 +129,7 @@ step and a real game is a better acceptance test than a synthetic one.
 
 ## What has landed
 
-Twenty-one chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
+Twenty-two chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
 fell short of its own description; this table is only an index, and the sequence below is what
 remains.
 
@@ -156,6 +156,7 @@ remains.
 | 17b | Plan-build diagnostics | done; unknown controls → 23, observers → 36 |
 | 36 | Type-erased inspection and the overlay | done |
 | 18 | Derive completion | done |
+| 19 | Mappable slots and localization keys | done; tunables and presets → 23 and later |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -269,22 +270,6 @@ mixing them would make it unclear which half was at fault: first a read-only lis
 navigable, then something that rebinds. Navigation sits between the first two, since a screen you
 cannot move around is a help screen rather than a settings screen — which is exactly why the first
 pass is worth having on its own.
-
-### 19. Mappable slots and localization keys
-
-Slots as the unit of rebinding, one per composite part (R19.9, R19.10). Name keys derived from the
-action path plus the part name, with an override, and a fallback renderer so a game with no
-localization layer still reads sensibly (R19.14, R19.13).
-
-- **Slot keys must be unique within a scheme, and the collision is silent** (R19.15). Two cases
-  produce one key for two slots: the same action bound in two contexts, and two bindings of one
-  action in one scheme. Both are ordinary, and in a saved file both mean a rebind of one lands on
-  the other. A plan-build diagnostic in 17b's shape, naming both slots.
-- **The keys are what chunk 23 persists,** so this chunk settles the shape of the file whether or
-  not it means to. Design §10.1 is what it has to satisfy.
-- **Review surface:** whether declaring a whole context's buttons mappable is genuinely one line.
-  The audience commitment says where a default trades away accessibility the accessible path must be
-  cheap, and slots being opt-in is exactly that trade (R20.1).
 
 ### 20. Interactive capture, conflicts, and reserved controls
 

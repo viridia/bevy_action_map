@@ -190,6 +190,7 @@ pub(crate) struct BindingSpec {
     // path is here so plan-build diagnostics can name the action a mistake is in.
     pub(crate) intent: Intent,
     pub(crate) path: &'static str,
+    pub(crate) category: Option<&'static str>,
     // The only place the concrete action type survives bind time. Everything downstream works in
     // slots, which cannot name a generic event.
     pub(crate) dispatch: Dispatch,
@@ -197,8 +198,18 @@ pub(crate) struct BindingSpec {
     pub(crate) modifiers: Vec<BindingModifier>,
     pub(crate) conditions: Vec<BindingCondition>,
     pub(crate) consume: bool,
+    // `None` until the binding is declared mappable, which is what makes rebindability opt-in
+    // rather than a flag hiding a binding from a screen.
+    pub(crate) mappable: Option<SlotDecl>,
     #[cfg(any(feature = "keyboard", feature = "gamepad"))]
     pub(crate) chord: Vec<ButtonControl>,
+}
+
+/// What a binding declared about being player-rebindable.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SlotDecl {
+    /// Replaces the action's path in the derived key. `None` derives from the action.
+    pub(crate) prefix: Option<&'static str>,
 }
 
 /// Mouse motion as a binding source.
@@ -212,6 +223,50 @@ pub(crate) struct BindingSpec {
 /// so that it does not collide with Bevy's own `MouseMotion` message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MouseMove;
+
+/// Which part of a binding's source a control is.
+///
+/// A single control is the [`Whole`](Part::Whole) of its binding. A composite has parts, named for
+/// what each one does rather than for where it sits: the four keys of a directional composite are
+/// up, down, left and right whichever keys they happen to be.
+///
+/// This is what a rebinding screen addresses. A player rebinds "move forward", which is one part of
+/// a movement binding — never the movement binding itself, which has no single control to show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Part {
+    /// The binding reads one control, and this is it.
+    Whole,
+    /// The half of a two-button axis that drives it negative.
+    Negative,
+    /// The half that drives it positive.
+    Positive,
+    /// The part of a directional composite that pushes up.
+    Up,
+    /// The part that pushes down.
+    Down,
+    /// The part that pushes left.
+    Left,
+    /// The part that pushes right.
+    Right,
+}
+
+impl Part {
+    /// The name this part contributes to a slot key, or `None` for a whole binding.
+    ///
+    /// Slot keys are the action's path plus this — `gameplay.move` plus `up` — so a part that names
+    /// itself is what keeps the key derivable rather than declared twice.
+    pub const fn name(self) -> Option<&'static str> {
+        match self {
+            Self::Whole => None,
+            Self::Negative => Some("negative"),
+            Self::Positive => Some("positive"),
+            Self::Up => Some("up"),
+            Self::Down => Some("down"),
+            Self::Left => Some("left"),
+            Self::Right => Some("right"),
+        }
+    }
+}
 
 /// One physical control.
 ///
@@ -232,6 +287,22 @@ pub enum Control {
     GamepadAxis(GamepadAxis),
     /// The mouse being moved.
     MouseMotion,
+}
+
+impl Control {
+    /// Which set of devices this control belongs to.
+    ///
+    /// Keyboard and mouse are one scheme because a player uses them together; a gamepad is another.
+    /// Which one a control belongs to is what decides the scheme a slot is rebound in.
+    pub const fn scheme(self) -> crate::rebind::Scheme {
+        match self {
+            #[cfg(feature = "keyboard")]
+            Self::Key(_) => crate::rebind::Scheme::KeyboardMouse,
+            Self::MouseMotion => crate::rebind::Scheme::KeyboardMouse,
+            #[cfg(feature = "gamepad")]
+            Self::GamepadButton(_) | Self::GamepadAxis(_) => crate::rebind::Scheme::Gamepad,
+        }
+    }
 }
 
 #[cfg(any(feature = "keyboard", feature = "gamepad"))]
@@ -306,6 +377,43 @@ impl BindingSource {
                 let (x, y) = stick.axes();
                 visit(Control::GamepadAxis(x));
                 visit(Control::GamepadAxis(y));
+            }
+        }
+    }
+
+    /// Calls `visit` with every control this source reads, and the part of the source it is.
+    ///
+    /// A composite's parts are named for the direction each one pushes rather than for their
+    /// position, which is what lets a rebinding screen address one of them — "the key that moves
+    /// you forward" — without the four being an ordered list somebody has to keep in step.
+    pub fn for_each_part(&self, mut visit: impl FnMut(Part, Control)) {
+        match self {
+            #[cfg(feature = "keyboard")]
+            Self::Button(key) => visit(Part::Whole, Control::Key(*key)),
+            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            Self::Axis1(parts) => {
+                visit(Part::Negative, parts.negative.into());
+                visit(Part::Positive, parts.positive.into());
+            }
+            #[cfg(any(feature = "keyboard", feature = "gamepad"))]
+            Self::Directional2(parts) => {
+                visit(Part::Up, parts.up.into());
+                visit(Part::Down, parts.down.into());
+                visit(Part::Left, parts.left.into());
+                visit(Part::Right, parts.right.into());
+            }
+            // A stick and a mouse have no parts a player would rebind one of. They are one thing
+            // as far as the player-facing model is concerned, and what they get instead of
+            // per-part rebinding is a tunable.
+            Self::MouseMotion => visit(Part::Whole, Control::MouseMotion),
+            #[cfg(feature = "gamepad")]
+            Self::GamepadButton(button) => visit(Part::Whole, Control::GamepadButton(*button)),
+            #[cfg(feature = "gamepad")]
+            Self::GamepadAxis(axis) => visit(Part::Whole, Control::GamepadAxis(*axis)),
+            #[cfg(feature = "gamepad")]
+            Self::GamepadStick(stick) => {
+                let (x, _) = stick.axes();
+                visit(Part::Whole, Control::GamepadAxis(x));
             }
         }
     }
@@ -760,6 +868,42 @@ impl<'a, C> BindingHandle<'a, C> {
         self
     }
 
+    /// Lets the player rebind this.
+    ///
+    /// Declares a mappable slot for the binding — one for a single control, and one per part for a
+    /// composite, so a movement binding becomes four rows a player can change independently and the
+    /// composite itself is never shown.
+    ///
+    /// Rebinding is opt-in per binding rather than per action, which is what lets a game offer its
+    /// keyboard bindings for remapping while leaving the gamepad to the console or to Steam:
+    ///
+    /// ```ignore
+    /// controls.bind::<Jump>(KeyCode::Space).mappable();
+    /// controls.bind::<Jump>(GamepadButton::South);   // no slot, so no row
+    /// ```
+    ///
+    /// Each slot is named by the action's path plus the part — `gameplay.move.up` — which is a
+    /// localization key rather than text to show. Use [`mappable_as`](Self::mappable_as) where that
+    /// name would collide or where a catalogue already calls it something else.
+    pub fn mappable(self) -> Self {
+        self.declare_slots(None)
+    }
+
+    /// Lets the player rebind this, under a name of your choosing.
+    ///
+    /// As [`mappable`](Self::mappable), with the given key in place of the action's path — so a
+    /// composite declared `mappable_as("gameplay.strafe")` has slots `gameplay.strafe.up` and its
+    /// three neighbours. Reach for it when two slots would otherwise derive the same key, which
+    /// happens when one action is bound in two contexts.
+    pub fn mappable_as(self, key: &'static str) -> Self {
+        self.declare_slots(Some(key))
+    }
+
+    fn declare_slots(self, prefix: Option<&'static str>) -> Self {
+        self.builder.bindings[self.index].mappable = Some(SlotDecl { prefix });
+        self
+    }
+
     /// Adds an application-defined condition.
     pub fn when<K: Condition>(mut self, condition: K) -> Self {
         self.push_condition(BindingCondition::Custom(Box::new(condition)));
@@ -859,12 +1003,14 @@ impl<C> InputContextBuilder<C> {
             action: A::id(),
             intent: A::INTENT,
             path: A::PATH,
+            category: A::CATEGORY,
             dispatch: dispatch_for::<A>,
             source,
             modifiers: Vec::new(),
             conditions: Vec::new(),
             // The action's default, which a binding can then make an exception of either way.
             consume: A::CONSUMES,
+            mappable: None,
             #[cfg(any(feature = "keyboard", feature = "gamepad"))]
             chord: Vec::new(),
         });
@@ -912,6 +1058,37 @@ impl<C> InputContextBuilder<C> {
     /// else, and needs no `App`.
     pub fn diagnostics(&self) -> Vec<crate::plan::BindingDiagnostic> {
         crate::plan::diagnose(&self.bindings)
+    }
+
+    /// The player-facing view of these bindings: one slot per mappable part.
+    ///
+    /// Empty for a game that declares none, which is the default and costs nothing.
+    pub(crate) fn slots(&self, context: &'static str) -> Vec<crate::rebind::Slot> {
+        let mut slots = Vec::new();
+        for binding in &self.bindings {
+            let Some(declaration) = binding.mappable else {
+                continue;
+            };
+            let prefix = declaration.prefix.unwrap_or(binding.path);
+            binding.source.for_each_part(|part, control| {
+                slots.push(crate::rebind::Slot {
+                    key: crate::rebind::SlotKey::new(prefix, part),
+                    action: binding.action,
+                    action_path: binding.path,
+                    category: binding.category,
+                    // A part of a composite holds a button, whatever the composite as a whole
+                    // reports; a whole binding holds whatever its own source does.
+                    accepts: match part {
+                        Part::Whole => binding.source.channel_shape(),
+                        _ => ChannelShape::Button,
+                    },
+                    scheme: control.scheme(),
+                    current: control,
+                    context,
+                });
+            });
+        }
+        slots
     }
 
     pub(crate) fn finish(self) -> Vec<BindingSpec> {

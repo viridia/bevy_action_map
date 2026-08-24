@@ -47,6 +47,9 @@ impl BindingDiagnostic {
             DiagnosticKind::IntentMismatch { .. }
             | DiagnosticKind::RateFromDelta { .. }
             | DiagnosticKind::ChainedRescaling { .. } => Severity::Error,
+            DiagnosticKind::MixedSchemeSlot | DiagnosticKind::DuplicateSlotKey { .. } => {
+                Severity::Error
+            }
             DiagnosticKind::DuplicateBinding { .. }
             | DiagnosticKind::ConsumeDisagreement { .. } => Severity::Warning,
         }
@@ -95,6 +98,13 @@ pub enum DiagnosticKind {
         /// The action on the other side of the disagreement.
         other: &'static str,
     },
+    /// Two mappable slots would answer to the same name.
+    DuplicateSlotKey {
+        /// The name they share.
+        key: crate::rebind::SlotKey,
+    },
+    /// A mappable binding reads controls from more than one kind of device.
+    MixedSchemeSlot,
 }
 
 impl core::fmt::Display for BindingDiagnostic {
@@ -133,6 +143,20 @@ impl core::fmt::Display for BindingDiagnostic {
                  fired",
                 self.action
             ),
+            DiagnosticKind::DuplicateSlotKey { key } => write!(
+                f,
+                "`{}` declares a mappable slot named `{key}`, and so does something else. A saved \
+                 rebinding of one would land on the other; give one of them a name with \
+                 `mappable_as`",
+                self.action
+            ),
+            DiagnosticKind::MixedSchemeSlot => write!(
+                f,
+                "`{}` is mappable but reads controls from more than one kind of device, so there \
+                 is no one scheme to rebind it in. Bind the devices separately, one mappable \
+                 binding each",
+                self.action
+            ),
         }
     }
 }
@@ -160,6 +184,9 @@ fn effective_shape(binding: &BindingSpec) -> Result<ChannelShape, DiagnosticKind
 /// player has not committed to yet.
 pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
     let mut found = Vec::new();
+    // Slot keys have to be unique across the whole context, so they are gathered as we go rather
+    // than compared pairwise like the checks below.
+    let mut keys = alloc::collections::BTreeSet::new();
 
     for (index, binding) in bindings.iter().enumerate() {
         let at = |kind| BindingDiagnostic {
@@ -185,6 +212,26 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
             .count();
         if rescaling > 1 {
             found.push(at(DiagnosticKind::ChainedRescaling { count: rescaling }));
+        }
+
+        if let Some(declaration) = binding.mappable {
+            let prefix = declaration.prefix.unwrap_or(binding.path);
+            let mut scheme = None;
+            let mut mixed = false;
+            binding.source.for_each_part(|part, control| {
+                let key = crate::rebind::SlotKey::new(prefix, part);
+                if !keys.insert(key) {
+                    found.push(at(DiagnosticKind::DuplicateSlotKey { key }));
+                }
+                match scheme {
+                    Some(seen) if seen != control.scheme() => mixed = true,
+                    Some(_) => {}
+                    None => scheme = Some(control.scheme()),
+                }
+            });
+            if mixed {
+                found.push(at(DiagnosticKind::MixedSchemeSlot));
+            }
         }
 
         // Against the bindings before this one only, so a duplicated pair is reported once.

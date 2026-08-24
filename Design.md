@@ -769,42 +769,62 @@ swizzle. D7 separates the two, and the separation costs less than it sounds: the
 is three additive declarations over bindings that already exist.
 
 ```rust
-.add_context(OnFoot, |c| {
-    c.bind::<Move>(Wasd)
-        // One slot per composite part — "Move" itself is never rebindable (R19.9). Each part
-        // names itself; its localization key is the action's path plus that name, so
-        // `gameplay.move.forward` needs no second string to keep in sync (R19.14).
-        .mappable_parts(Scheme::Kbm, ["forward", "back", "left", "right"]);
+app.add_context::<OnFoot>(|c| {
+    // One slot per composite part — `Move` itself is never rebindable (R19.9), and the four parts
+    // name themselves, so the keys are `gameplay.move.up` and its three neighbours (R19.14).
+    c.bind::<Move>(DirectionalButtons::wasd()).mappable();
 
-    c.bind::<Move>(Stick::Left.dead_zone(DeadZone::radial(0.15)))
-        // sticks are not per-slot rebindable; they get a tunable instead (R19.11)
-        .tunable("deadzone", DeadzoneAmount, 0.0..=0.5);
+    c.bind::<Move>(Stick::Left).dead_zone(DeadZone::radial(0.15));
+    // sticks are not per-slot rebindable; they get a tunable instead (R19.11)
 
-    c.bind::<Jump>(KeyCode::Space).mappable(Scheme::Kbm);
+    c.bind::<Jump>(KeyCode::Space).mappable();
     c.bind::<Jump>(GamepadButton::South);   // no slot: not player-rebindable
 });
 ```
 
+**`mappable` takes no arguments, and both halves of that are decisions.**
+
+*The parts name themselves.* An earlier draft had the author supply them —
+`mappable_parts(["forward", "back", …])` — which is a positional list to keep in step with a
+struct's fields, and a second vocabulary for the same four things. A composite already knows its
+parts are up, down, left and right, so the key derives as `gameplay.move.up` and the catalogue is
+where `up` becomes "Move Forward". The author supplying "forward" would be naming the same part
+twice, in a place no translator will look.
+
+*The scheme is inferred from the controls.* A slot belongs to keyboard-and-mouse or to gamepad, and
+the binding's own controls already say which. Declaring it would be a third chance to disagree with
+what is actually bound. A binding whose parts span both is refused when the context is declared,
+since there is then no one scheme to rebind it in — which is a thing nobody writes on purpose.
+
+An explicit name stays available for the case that needs it: `mappable_as("gameplay.strafe")`
+replaces the derived prefix, and is the remedy the collision diagnostic names.
+
 A rebinding UI then needs no knowledge of this crate's internals:
 
 ```rust
-for slot in rebinding.slots(Scheme::Kbm) {
-    // slot.name_key  -> "gameplay.move.forward"   — a key, not text (R19.14)
-    // slot.category  -> "gameplay.movement"       — from the action (R1.6)
-    // slot.current   -> Some(KeyCode::KeyW)
-    // slot.accepts   -> Intent::Button            — filters what capture will take (R19.1)
+for slot in rebind::slots(world) {
+    // slot.key      -> "gameplay.move.up"        — a key, not text (R19.14)
+    // slot.category -> Some("gameplay.movement") — from the action (R1.6)
+    // slot.current  -> Control::Key(KeyCode::KeyW)
+    // slot.scheme   -> Scheme::KeyboardMouse     — one screenful at a time
+    // slot.accepts  -> ChannelShape::Button      — filters what capture will take (R19.1)
 
-    let label = i18n.get(slot.name_key)          // the app's localization layer...
-        .unwrap_or_else(|| slot.fallback_label()); // ...or readable text without one (R19.13)
+    let label = i18n.get(slot.key)                 // the app's localization layer...
+        .unwrap_or_else(|| slot.key.fallback_label()); // ...or readable text without one (R19.13)
 }
-for t in rebinding.tunables(Scheme::Gamepad) {
-    // t.name_key, and a typed range the UI renders as a slider or checkbox
+for t in rebind::tunables(world) {
+    // t.key, and a typed range the UI renders as a slider or checkbox
 }
 ```
 
+The list is a flat one across every context, and nothing in it names an action or a context type —
+it goes through the same type-erased door §10's inspection does, so a screen written against it
+works for a game it was not compiled with. Grouping is the caller's: by `category` for headings,
+by `scheme` for which device's worth to show.
+
 The keys are the whole player-facing vocabulary, and none of them is a string this crate renders.
 That is what keeps R18.3's "no hard-coded English" honest across a whole rebinding row rather than
-only the control column — and it is why `mappable_parts` takes part names rather than labels: a
+only the control column — and it is why a slot carries a key rather than a label: a
 label would be a second string to translate, sitting in the binding declaration where no translator
 will look for it.
 

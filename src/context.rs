@@ -51,6 +51,8 @@ use bevy_platform::collections::HashMap;
 #[derive(Resource)]
 pub(crate) struct InputContextPlan<C> {
     plan: Arc<Plan<C>>,
+    // The player-facing view of the same bindings, empty unless some were declared mappable.
+    slots: alloc::vec::Vec<crate::rebind::Slot>,
     // Whether an instance is live the moment it is spawned. False for a context whose activation
     // follows something else, so that it does not fire for one frame before the something else
     // has had a chance to say otherwise.
@@ -901,6 +903,14 @@ fn order_by_priority(
 /// Reads the instances of one context back out once its type is no longer known.
 ///
 /// Registered per context by `add_context`, which is the last place `C` is available.
+/// Reads the slots of one context back out once its type is no longer known.
+fn read_slots<C: InputContext + Component>(world: &World) -> alloc::vec::Vec<crate::rebind::Slot> {
+    world
+        .get_resource::<InputContextPlan<C>>()
+        .map(|declared| declared.slots.clone())
+        .unwrap_or_default()
+}
+
 fn read_instances<C: InputContext + Component>(
     world: &mut World,
 ) -> alloc::vec::Vec<crate::inspect::InstanceDump> {
@@ -961,6 +971,37 @@ fn report_diagnostics<C: InputContext + Component>(builder: &InputContextBuilder
     );
 }
 
+/// Refuses a slot name another context has already taken.
+///
+/// The within-a-context case is a plan-build diagnostic like any other, but this one cannot be:
+/// a context is compiled without seeing the others, and one action bound in two of them derives
+/// the same key twice. What makes it findable is the registry of what has already been declared.
+fn report_slot_collisions<C: InputContext + Component>(app: &App, slots: &[crate::rebind::Slot]) {
+    let Some(declared) = app
+        .world()
+        .get_resource::<crate::inspect::DeclaredContexts>()
+    else {
+        return;
+    };
+
+    for context in &declared.0 {
+        for taken in (context.slots)(app.world()) {
+            if let Some(clash) = slots.iter().find(|slot| slot.key == taken.key) {
+                panic!(
+                    "context `{}` declares a mappable slot named `{}`, which context `{}` already \
+                     uses. A saved rebinding of one would land on the other; give one of them a \
+                     name with `mappable_as`.\n  here:  {}\n  there: {}",
+                    C::PATH,
+                    clash.key,
+                    context.path,
+                    clash.action_path,
+                    taken.action_path,
+                );
+            }
+        }
+    }
+}
+
 /// Formats diagnostics one per line, for a panic message that has to carry several.
 struct Listed<'a>(&'a [crate::plan::BindingDiagnostic]);
 
@@ -991,6 +1032,9 @@ fn declare_context<C: InputContext + Component>(
 
     report_diagnostics::<C>(&builder);
 
+    let slots = builder.slots(C::PATH);
+    report_slot_collisions::<C>(app, &slots);
+
     // Recorded while `C` is still available: after this, nothing can name the type, so a tool that
     // walks every context has to be handed the way in now.
     app.world_mut()
@@ -1001,6 +1045,7 @@ fn declare_context<C: InputContext + Component>(
             tick: C::TICK,
             priority: C::PRIORITY,
             read: read_instances::<C>,
+            slots: read_slots::<C>,
         });
 
     // A context whose activation follows something else starts inactive and waits to be asked.
@@ -1011,6 +1056,7 @@ fn declare_context<C: InputContext + Component>(
     let plan = Arc::new(Plan::from_bindings(builder.finish()));
     app.insert_resource(InputContextPlan::<C> {
         plan,
+        slots,
         starts_active,
     });
 
