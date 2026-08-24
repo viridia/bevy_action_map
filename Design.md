@@ -862,6 +862,7 @@ bevy_action_map/
     plan/           compilation, arbitration order, reverse index
     eval/           evaluator, transition log                   (§5)
     event/          transition events and their dispatch        (§9.6)
+    inspect/        type-erased read of contexts and actions    (R22.2)
     player/         device pairing, control schemes             (§15)
     present/    L3  prompts, display descriptors, glyph ids     (§18)
     rebind/         mappable slots, tunables, presets           (D7)
@@ -872,6 +873,12 @@ bevy_action_map_macros/   #[derive(InputAction)], #[derive(InputContext)]
 
 The macro crate is not a design choice — Rust requires proc macros to live in their own crate. It is
 re-exported so users never name it.
+
+`inspect/` is the one module here that exists for code outside a game: every other read in the
+crate is generic over the action type, which is right for game code and unusable for a debug
+overlay, an editor, or a settings screen that has to render actions it was never compiled against.
+Keeping the type-erased view in its own module is what stops those two vocabularies mixing in
+`context/`.
 
 `context/` was not in the first draft of this tree, which listed context state under `action/`. It
 earned its own module once contexts became components with a lifecycle hook, a shared plan resource

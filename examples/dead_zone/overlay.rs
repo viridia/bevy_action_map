@@ -1,0 +1,103 @@
+//! A debug overlay showing what the input layer thinks is happening.
+//!
+//! Press `F1` (or Select on a pad) to toggle it. It lists every context, whether it is active, and
+//! every action in it with its phase and — the useful part — what is stopping it firing when it is
+//! not.
+//!
+//! Nothing here names an action or a context. `dump` hands back whatever has been declared, so this
+//! file would work unchanged in a different game with different actions.
+
+use bevy::prelude::*;
+use bevy_action_map::inspect::dump;
+use bevy_action_map::prelude::*;
+use core::fmt::Write;
+
+use crate::actions::ToggleOverlay;
+
+#[derive(Component, Default, Clone)]
+struct OverlayText;
+
+#[derive(Resource, Default)]
+pub(crate) struct Showing(bool);
+
+pub fn plugin(app: &mut App) {
+    app.init_resource::<Showing>();
+    app.add_systems(Startup, panel.spawn());
+    // Exclusive, because reading contexts whose types are not known here means asking the world to
+    // build the queries. It is a debug overlay; it can have the world for a moment.
+    app.add_systems(Update, redraw);
+}
+
+/// Flips the overlay on and off.
+///
+/// Attached to the shell context's entity, so it hears the action wherever that lives.
+pub(crate) fn toggle(_: On<Fired<ToggleOverlay>>, mut showing: ResMut<Showing>) {
+    showing.0 = !showing.0;
+}
+
+fn panel() -> impl Scene {
+    bsn! {
+        OverlayText
+        Text::new("")
+        TextFont { font_size: 13.0_f32 }
+        TextColor(Color::srgb(0.6, 0.9, 0.7))
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(8.0),
+            left: Val::Px(8.0),
+        }
+    }
+}
+
+fn redraw(world: &mut World) {
+    if !world.resource::<Showing>().0 {
+        set_text(world, String::new());
+        return;
+    }
+
+    let mut out = String::new();
+    for context in dump(world).contexts {
+        let _ = writeln!(
+            out,
+            "{} [{:?} {}]",
+            context.path, context.tick, context.priority
+        );
+
+        if context.instances.is_empty() {
+            out.push_str("  (nobody is carrying this)\n");
+        }
+
+        for instance in context.instances {
+            let _ = writeln!(
+                out,
+                "  {} {}",
+                if instance.active { "on " } else { "off" },
+                instance.entity
+            );
+            for action in instance.actions {
+                // The obstacle is the whole point: an action that is not firing looks identical
+                // from a call site whether its context is asleep, something outranked it, or the
+                // player simply is not pressing anything.
+                let _ = writeln!(
+                    out,
+                    "    {:<26} {:?} {:?}",
+                    action.path, action.state.phase, action.obstacle
+                );
+            }
+        }
+    }
+
+    set_text(world, out);
+}
+
+fn set_text(world: &mut World, text: String) {
+    let panels: Vec<Entity> = world
+        .query_filtered::<Entity, With<OverlayText>>()
+        .iter(world)
+        .collect();
+    for panel in panels {
+        if let Some(mut target) = world.get_mut::<Text>(panel) {
+            target.0 = text.clone();
+        }
+    }
+}

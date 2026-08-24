@@ -129,7 +129,7 @@ step and a real game is a better acceptance test than a synthetic one.
 
 ## What has landed
 
-Nineteen chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
+Twenty chunks are done. The [work log](./Log.md) says what each delivered, what it found, and where it
 fell short of its own description; this table is only an index, and the sequence below is what
 remains.
 
@@ -154,6 +154,7 @@ remains.
 | 32 | Activation by run condition | done, out of order |
 | 17a | Runtime failures (R24.4) | done; the silence it creates → 17b |
 | 17b | Plan-build diagnostics | done; unknown controls → 23, observers → 36 |
+| 36 | Type-erased inspection and the overlay | done |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.

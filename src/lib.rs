@@ -48,6 +48,7 @@ pub mod plan;
 pub mod player;
 
 // L3
+pub mod inspect;
 pub mod present;
 pub mod rebind;
 

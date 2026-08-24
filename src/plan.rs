@@ -250,6 +250,8 @@ pub struct Plan<C> {
     // Parallel again: the declared path of the action holding this slot, kept for the diagnostics
     // that have to name an action rather than identify one.
     slot_paths: Vec<&'static str>,
+    // And its identity, for the reads that walk a context rather than naming what they want.
+    slot_actions: Vec<ActionId>,
     slot_by_action: BTreeMap<ActionId, usize>,
     scratch_count: usize,
     has_chords: bool,
@@ -267,6 +269,7 @@ impl<C> Plan<C> {
         let mut slot_intents: Vec<Intent> = Vec::new();
         let mut slot_dispatch: Vec<Dispatch> = Vec::new();
         let mut slot_paths: Vec<&'static str> = Vec::new();
+        let mut slot_actions: Vec<ActionId> = Vec::new();
         let mut slot_by_action = BTreeMap::new();
         let mut compiled = Vec::with_capacity(bindings.len());
         let mut scratch_count = 0;
@@ -276,6 +279,7 @@ impl<C> Plan<C> {
                 slot_intents.push(binding.intent);
                 slot_dispatch.push(binding.dispatch);
                 slot_paths.push(binding.path);
+                slot_actions.push(binding.action);
                 slot_intents.len() - 1
             });
 
@@ -309,6 +313,7 @@ impl<C> Plan<C> {
             slot_intents,
             slot_dispatch,
             slot_paths,
+            slot_actions,
             slot_by_action,
             scratch_count,
             has_chords,
@@ -350,6 +355,11 @@ impl<C> Plan<C> {
     /// The declared paths of every action this context binds, in slot order.
     pub(crate) fn bound_paths(&self) -> &[&'static str] {
         &self.slot_paths
+    }
+
+    /// The identity of every action this context binds, in slot order.
+    pub(crate) fn slot_actions(&self) -> &[ActionId] {
+        &self.slot_actions
     }
 }
 

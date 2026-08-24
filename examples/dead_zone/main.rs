@@ -20,6 +20,7 @@ use bevy::prelude::*;
 mod actions;
 mod asteroids;
 mod field;
+mod overlay;
 mod pause;
 mod ship;
 
@@ -46,6 +47,7 @@ fn main() {
             ship::plugin,
             asteroids::plugin,
             pause::plugin,
+            overlay::plugin,
         ))
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))
         .add_systems(Startup, camera.spawn())

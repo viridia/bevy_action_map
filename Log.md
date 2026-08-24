@@ -641,4 +641,42 @@ for a second consecutive empty run. That is a behaviour a test has to observe ra
 this is the first test in the crate to install a `log` logger and count what came out. Removing the
 guard makes it fail on the right assertion, which is what was checked.
 
+### Chunk 36: type-erased inspection, and the overlay that proves it
+
+**Asking how to demonstrate the diagnostics is what turned this up.** The runtime tier — `why_not`,
+the five obstacles that look identical from a call site — was tested and appeared in no example, and
+R22.2, which asks for an inspector-friendly dump sufficient to drive a live overlay, was claimed by
+no chunk. That is the third destination-less item in two sittings, after R3.7 and the unknown-control
+check. Ground rule 5 keeps earning its place.
+
+**The overlay could not be written against the crate as it stood, and that was the real finding.**
+Every public read is generic over `A: InputAction`, and each context's state is a *distinct component
+type*. An overlay built on that would have to name Dead Zone's six actions and two contexts, which is
+the opposite of what R22.2 asks for. So the chunk is not a UI: it is the crate's first view of itself
+that names nothing.
+
+Three pieces, in order of how much thought they took:
+
+- `InputContextState::iter` walks the actions of a context yielding identity, path and state, and
+  `why_not_id` answers the obstacle question for an action named at run time. Both fell out of data
+  the plan already had — one more parallel `Vec<ActionId>` beside the paths added in 17a.
+- A registry of declared contexts, holding a `fn(&mut World) -> Vec<InstanceDump>` recorded at
+  `add_context` — the last moment the type is available. Type erasure by function pointer rather
+  than by trait object, because the only thing being erased is one query.
+- `dump(&mut World)`, which walks the registry and hands back a plain description.
+
+**It takes the world exclusively, and that is not laziness.** A query over a type you cannot name has
+to be built by the world, and `World::query` wants `&mut`. The alternative — storing a `QueryState`
+per context and driving it with `iter_manual` — buys a shared borrow at the cost of archetype-update
+caveats, for a tool that runs once a frame in a debug build. It also allocates, which is stated in
+the module docs rather than hidden: R23.2 governs the path actions travel, and this is not it.
+
+**What the overlay showed about the arrangement chosen last week.** `ToggleOverlay` went into the
+`Shell` context — the always-active one that was created for pause — and needed no new plumbing:
+one action, two bindings, one more `on(...)` line in the same `bsn!` block. That is the second use
+the Shell doc comment predicted, arriving sooner than expected and costing nothing.
+
+**Not doing:** an editor integration. R22.2 asks that the same data be sufficient to drive an
+overlay, not that we ship an inspector, and `InputDump` is plain enough for anyone else's.
+
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087

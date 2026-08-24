@@ -55,6 +55,11 @@ pub struct Afterburner;
 #[action(path = "dead_zone.pause", output = bool, intent = Button)]
 pub struct Pause;
 
+/// Show or hide the debug overlay.
+#[derive(InputAction)]
+#[action(path = "dead_zone.toggle_overlay", output = bool, intent = Button)]
+pub struct ToggleOverlay;
+
 /// The context a living ship flies under.
 ///
 /// Fixed tick, because the ship integrates its own velocity and a frame-rate-dependent burn would
@@ -127,6 +132,9 @@ pub fn plugin(app: &mut App) {
     app.add_context::<Shell>(|controls| {
         controls.bind::<Pause>(KeyCode::Escape);
         controls.bind::<Pause>(GamepadButton::Start);
+
+        controls.bind::<ToggleOverlay>(KeyCode::F1);
+        controls.bind::<ToggleOverlay>(GamepadButton::Select);
     });
 
     app.add_systems(Startup, shell.spawn());
@@ -147,5 +155,6 @@ fn shell() -> impl Scene {
     bsn! {
         Shell
         on(pause::toggle)
+        on(crate::overlay::toggle)
     }
 }

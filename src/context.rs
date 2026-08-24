@@ -30,11 +30,11 @@ use bevy_ecs::lifecycle::HookContext;
 use bevy_ecs::prelude::{Query, Resource};
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_ecs::system::SystemParam;
-use bevy_ecs::world::DeferredWorld;
+use bevy_ecs::world::{DeferredWorld, World};
 use bevy_platform::sync::Arc;
 
 use crate::action::{
-    ActionOutput, ActionState, InputAction, InputContext, Phase, Scratch, TickDomain,
+    ActionId, ActionOutput, ActionState, InputAction, InputContext, Phase, Scratch, TickDomain,
 };
 use crate::binding::InputContextBuilder;
 use crate::eval::{Transition, dispatch_transitions, evaluate_context};
@@ -238,7 +238,19 @@ impl<C: InputContext> InputContextState<C> {
     where
         A: InputAction,
     {
-        let Some(slot) = self.plan.slot_for_action(A::id()) else {
+        self.why_not_id(A::id(), consumed)
+    }
+
+    /// Explains why an action named at run time is not firing.
+    ///
+    /// As [`why_not`](Self::why_not), for a debug overlay or an editor that walks a context's
+    /// actions rather than naming one.
+    pub fn why_not_id(
+        &self,
+        action: ActionId,
+        consumed: &crate::eval::ConsumedControls,
+    ) -> Obstacle {
+        let Some(slot) = self.plan.slot_for_action(action) else {
             return Obstacle::Unbound;
         };
         if !self.active {
@@ -281,6 +293,27 @@ impl<C: InputContext> InputContextState<C> {
             return Obstacle::AwaitingRelease;
         }
         Obstacle::NoInput
+    }
+
+    /// Walks every action this context binds, without naming any of them.
+    ///
+    /// For code that has to work with whatever actions it is given rather than actions it was
+    /// compiled against — a debug overlay, an editor, a settings screen. The typed reads are the
+    /// ones to use where the action is known.
+    ///
+    /// The order is stable for a given set of bindings: actions appear in the order they were first
+    /// bound.
+    pub fn iter(&self) -> impl Iterator<Item = ActionReading<'_>> {
+        self.plan
+            .slot_actions()
+            .iter()
+            .zip(self.plan.bound_paths())
+            .zip(&self.actions)
+            .map(|((&action, &path), state)| ActionReading {
+                action,
+                path,
+                state,
+            })
     }
 
     /// Whether this context is currently driving its actions.
@@ -378,6 +411,19 @@ fn rest_like(value: crate::action::ActionValue) -> crate::action::ActionValue {
         ActionValue::Axis2(_) => ActionValue::Axis2(bevy_math::Vec2::ZERO),
         ActionValue::Axis3(_) => ActionValue::Axis3(bevy_math::Vec3::ZERO),
     }
+}
+
+/// One action's identity and current state, as read by code that did not name it.
+///
+/// Produced by [`InputContextState::iter`].
+#[derive(Clone, Copy, Debug)]
+pub struct ActionReading<'a> {
+    /// The action's runtime identity.
+    pub action: ActionId,
+    /// Its declared path, which is what to show a human.
+    pub path: &'static str,
+    /// What it is currently doing.
+    pub state: &'a ActionState,
 }
 
 /// Why an action is not firing.
@@ -852,6 +898,41 @@ fn order_by_priority(
     );
 }
 
+/// Reads the instances of one context back out once its type is no longer known.
+///
+/// Registered per context by `add_context`, which is the last place `C` is available.
+fn read_instances<C: InputContext + Component>(
+    world: &mut World,
+) -> alloc::vec::Vec<crate::inspect::InstanceDump> {
+    use crate::inspect::{ActionDump, InstanceDump};
+
+    // Stands in when the plugin is absent, which is only reachable from a test that built the
+    // world by hand. Held here so the borrow below has something to point at.
+    let nothing_consumed = crate::eval::ConsumedControls::default();
+
+    let mut instances = world.query::<(Entity, &InputContextState<C>)>();
+    let consumed = world
+        .get_resource::<crate::eval::ConsumedControls>()
+        .unwrap_or(&nothing_consumed);
+
+    instances
+        .iter(world)
+        .map(|(entity, state)| InstanceDump {
+            entity,
+            active: state.is_active(),
+            actions: state
+                .iter()
+                .map(|reading| ActionDump {
+                    action: reading.action,
+                    path: reading.path,
+                    state: *reading.state,
+                    obstacle: state.why_not_id(reading.action, consumed),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 /// Warns about every suspicious binding in a context, and refuses one that cannot work.
 ///
 /// All of them at once: a context with three mistakes should cost one run to find all three, not
@@ -909,6 +990,18 @@ fn declare_context<C: InputContext + Component>(
     configure(&mut builder);
 
     report_diagnostics::<C>(&builder);
+
+    // Recorded while `C` is still available: after this, nothing can name the type, so a tool that
+    // walks every context has to be handed the way in now.
+    app.world_mut()
+        .get_resource_or_insert_with(crate::inspect::DeclaredContexts::default)
+        .0
+        .push(crate::inspect::DeclaredContext {
+            path: C::PATH,
+            tick: C::TICK,
+            priority: C::PRIORITY,
+            read: read_instances::<C>,
+        });
 
     // A context whose activation follows something else starts inactive and waits to be asked.
     // That is also what catches an instance spawned once the answer is already yes.
