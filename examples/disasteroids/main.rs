@@ -1,4 +1,4 @@
-//! Dead Zone — an asteroids-like game, playable on the keyboard or a gamepad.
+//! Disasteroids — an asteroids-like game, playable on the keyboard or a gamepad.
 //!
 //! The point of the example is [`actions`], which holds the entire input layer: seven actions, two
 //! contexts, and the bindings that drive them from either device. Nothing else in the game mentions
@@ -39,7 +39,7 @@ fn main() {
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "Dead Zone".into(),
+                    title: "Disasteroids".into(),
                     resolution: (
                         field::HALF_EXTENT.x as u32 * 2,
                         field::HALF_EXTENT.y as u32 * 2,
@@ -62,7 +62,7 @@ fn main() {
             prompt_ui::plugin,
         ))
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))
-        // Dead Zone is a desktop game: its prompts name keys even when a pad is plugged in, and
+        // Disasteroids is a desktop game: its prompts name keys even when a pad is plugged in, and
         // the pad's own controls are listed on the settings screen rather than advertised in the
         // corner. Nothing infers this — a crate guessing it would be wrong silently.
         .insert_resource(PromptDevice(Some(Scheme::KeyboardMouse)))

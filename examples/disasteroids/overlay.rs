@@ -5,7 +5,8 @@
 //! not.
 //!
 //! Nothing here names an action or a context. `dump` hands back whatever has been declared, so this
-//! file would work unchanged in a different game with different actions.
+//! file would work unchanged in a different game with different actions. The debris count at the top
+//! is the one game-specific line, and it is there for the joke.
 
 use bevy::prelude::*;
 use bevy_action_map::inspect::dump;
@@ -14,6 +15,7 @@ use bevy_action_map::rebind::mappings;
 use core::fmt::Write;
 
 use crate::actions::ToggleOverlay;
+use crate::asteroids::Asteroid;
 
 #[derive(Component, Default, Clone)]
 struct OverlayText;
@@ -57,6 +59,13 @@ fn redraw(world: &mut World) {
     }
 
     let mut out = String::new();
+
+    let rocks = world
+        .query_filtered::<Entity, With<Asteroid>>()
+        .iter(world)
+        .count();
+    let _ = writeln!(out, "kessler index: {rocks} ({})\n", debris_forecast(rocks));
+
     for context in dump(world).contexts {
         let _ = writeln!(
             out,
@@ -129,6 +138,21 @@ fn redraw(world: &mut World) {
     }
 
     set_text(world, out);
+}
+
+/// How alarmed to be about the current debris count.
+///
+/// Kessler syndrome is the runaway case where orbital debris is dense enough that each collision
+/// produces the fragments that cause the next one. Shooting a rock in half is that, deliberately —
+/// six rocks become twenty-four if the player is thorough, and the forecast keeps up.
+fn debris_forecast(rocks: usize) -> &'static str {
+    match rocks {
+        0 => "orbit clear",
+        1..=6 => "nominal",
+        7..=12 => "elevated",
+        13..=18 => "cascading",
+        _ => "Kessler syndrome",
+    }
 }
 
 fn set_text(world: &mut World, text: String) {

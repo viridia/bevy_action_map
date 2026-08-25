@@ -799,11 +799,11 @@ to say so. Rebindability is the developer's call because a fixed binding is a de
 seeing the controls is the player's business, and the default belongs to them (R19.10).
 
 `private` is for where listing is genuinely wrong: a binding that reads a control already shown
-under another name, so a screen listing it again shows one key twice under two headings. Dead Zone's
-`Afterburner` — the throttle, held — is the example, and it is also the example of what the model
-cannot yet say. Those bindings do not merely duplicate `Thrust`'s keys, they *follow* them, and
-nothing here makes a rebind of one move the other; `private` hides the duplicate row without linking
-the two, which is a stopgap rather than the answer.
+under another name, so a screen listing it again shows one key twice under two headings.
+Disasteroids' `Afterburner` — the throttle, held — is the example, and it is also the example of
+what the model cannot yet say. Those bindings do not merely duplicate `Thrust`'s keys, they *follow*
+them, and nothing here makes a rebind of one move the other; `private` hides the duplicate row
+without linking the two, which is a stopgap rather than the answer.
 
 **`mappable` takes no arguments, and both halves of that are decisions.**
 
@@ -837,10 +837,10 @@ replaces the derived prefix, and is the remedy the collision diagnostic names.
 
 **A mapping holds a list of slots, and that list is what "primary and secondary" is.** A row on a
 shipped game's keyboard table has two cells, and the first model here had one control per mapping,
-which cannot say that at all. The workaround it forced was a second row under an alias name — Dead
-Zone had `dead_zone.thrust` and `dead_zone.thrust_alt`, telling the player two things are separate
-when they are the same thing twice. So `Mapping::slots` is an ordered `Vec<Control>`, and declaring
-two mappable bindings of one action in one scheme is how a game ships both defaults:
+which cannot say that at all. The workaround it forced was a second row under an alias name —
+Disasteroids had `disasteroids.thrust` and `disasteroids.thrust_alt`, telling the player two things
+are separate when they are the same thing twice. So `Mapping::slots` is an ordered `Vec<Control>`,
+and declaring two mappable bindings of one action in one scheme is how a game ships both defaults:
 
 ```rust
 c.bind::<Thrust>(KeyCode::KeyW).mappable();      // one mapping…
@@ -1188,11 +1188,12 @@ fold's output inside the evaluator, not a second write path into `InputContextSt
 matters, because a second write path would have to reimplement the state machine, and two
 implementations of R6.1 is exactly the drift R0.5 forbids.
 
-The corollary is that Steam's activators are where hold and multi-tap go, and they are the reason the
-overlay has them. So a condition or modifier attached to a backend-owned action is a **plan-build
-diagnostic at §9.5's error tier**, not a silent no-op: the game asked for behaviour the backend will
-not deliver and nothing else would tell it. Dead Zone is already the test case — `Hyperspace` carries
-`.multi_tap(2, 0.3)` and `Afterburner` a `.hold(0.75)` on the same trigger as `Thrust`.
+The corollary is that Steam's activators are where hold and multi-tap go, and they are the reason
+the overlay has them. So a condition or modifier attached to a backend-owned action is a
+**plan-build diagnostic at §9.5's error tier**, not a silent no-op: the game asked for behaviour the
+backend will not deliver and nothing else would tell it. Disasteroids is already the test case —
+`Hyperspace` carries `.multi_tap(2, 0.3)` and `Afterburner` a `.hold(0.75)` on the same trigger as
+`Thrust`.
 
 **Contexts become one action set plus a layer each.** Steam allows exactly one action set active per
 controller, plus a stack of layers; we run any number of contexts at once, priority-ordered, with
@@ -1201,14 +1202,14 @@ priorities already do, so a backend activates one base set for the game and push
 as each context activates and deactivates.
 
 The finding worth recording beside it is that the mismatch §10.2 flagged is narrower than it looked,
-because **a context that is always active is not a mode**. Dead Zone's `Shell` holds `Pause`
-unconditionally, so `Pause` belongs in the base set and there is no layer at all; only `Flying`, which
-is gated on a state, becomes one. The tension survives for genuinely overlapping modal contexts and
-for consumption, which layers cannot express — a lower layer's action is shadowed or it is not, and
-there is no equivalent of one context claiming a control for a frame. That is the same problem as
-R19.15's colliding mapping keys seen from another direction, and it is now settled in one place
-rather than two: **a context is a layer, and an action bound in several contexts is one Steam action
-declared once in the base set.**
+because **a context that is always active is not a mode**. Disasteroids' `Shell` holds `Pause`
+unconditionally, so `Pause` belongs in the base set and there is no layer at all; only `Flying`,
+which is gated on a state, becomes one. The tension survives for genuinely overlapping modal
+contexts and for consumption, which layers cannot express — a lower layer's action is shadowed or it
+is not, and there is no equivalent of one context claiming a control for a frame. That is the same
+problem as R19.15's colliding mapping keys seen from another direction, and it is now settled in one
+place rather than two: **a context is a layer, and an action bound in several contexts is one Steam
+action declared once in the base set.**
 
 **The seam needs L0 suppression, and nothing provides it.** When Steam drives a pad in gamepad
 emulation the OS exposes a virtual pad that Bevy enumerates, so `sample_input` records
@@ -1300,7 +1301,7 @@ B" — is still absent, and §10.3 records why. What *is* carried is the chord i
 requires a modifier alongside its own control reports both, because dropping the modifier makes
 `Ctrl+S` render as "S", which is a wrong prompt rather than an unpolished one. Condition structure
 is the part that stays missing: a held binding and a tapped one on the same key produce the same
-prompt, and Dead Zone's `Afterburner` is the case in tree.
+prompt, and Disasteroids' `Afterburner` is the case in tree.
 
 ### 10.7 Prompts on screen, and keeping them true
 

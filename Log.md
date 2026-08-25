@@ -47,10 +47,10 @@ against an action since renamed.
 
 **`#[derive(InputContext)]` now emits `Component`, `Default`, `Clone` and `Copy`.** A context that
 is not a component is unusable — every entry point in the crate requires it — and the scene work in
-Dead Zone had already forced `Default` and `Clone` onto every one by hand. Four derives became one,
-across the tree. The `Component` impl is written out rather than delegated, which is two associated
-items in this version of Bevy and will break loudly if that changes; the escape hatch is to
-implement `InputContext` by hand, which is three constants.
+Disasteroids had already forced `Default` and `Clone` onto every one by hand. Four derives became
+one, across the tree. The `Component` impl is written out rather than delegated, which is two
+associated items in this version of Bevy and will break loudly if that changes; the escape hatch is
+to implement `InputContext` by hand, which is three constants.
 
 Worth noting what did *not* happen: Design §9.3 said this chunk would register actions in the
 **reflect** type registry. That would key them by Rust type path, which is the identity D8 spent a
@@ -139,7 +139,7 @@ contexts at once. Both tests pass, and the second would have been unwriteable a 
 
 **Mappings ride the type-erased door too.** `rebind::mappings(world)` walks the same registry,
 needing only `&World` because mappings come from the plan resource rather than from anything an
-entity carries. Dead Zone's overlay grew four lines that list what a player would be shown — the
+entity carries. Disasteroids' overlay grew four lines that list what a player would be shown — the
 smallest possible consumer of D7's model, and enough to see that the keys read correctly without a
 catalogue.
 
@@ -268,10 +268,10 @@ every shipped game's keyboard table has. A mapping held one control, so two mapp
 action in one scheme were a *collision*, and the only way to ship "W or Up Arrow" was a second row
 under an alias name.
 
-**The proof it was wrong was already in the tree.** Dead Zone had `dead_zone.thrust` and
-`dead_zone.thrust_alt`, and `dead_zone.turn` and `dead_zone.turn_alt` — four rows telling a player
-that two things are separate when they are the same thing bound twice. That was not written as a
-workaround, it was written as the only thing that compiled, which is the more useful kind of
+**The proof it was wrong was already in the tree.** Disasteroids had `disasteroids.thrust` and
+`disasteroids.thrust_alt`, and `disasteroids.turn` and `disasteroids.turn_alt` — four rows telling a
+player that two things are separate when they are the same thing bound twice. That was not written
+as a workaround, it was written as the only thing that compiled, which is the more useful kind of
 evidence. Both aliases are gone; each is now one row holding two controls.
 
 **A list with a capacity, rather than a fixed two or an unbounded list.** The prior art splits three
@@ -345,7 +345,7 @@ through untouched: it was enumerated first and protected explicitly, rather than
 regex.
 
 **Grooming found three things with no destination, which is two more than expected.** Reverse lookup
-(R18.1) had none at all and is now chunk 40 — it is what "Cancel (B)" needs, and Dead Zone's own
+(R18.1) had none at all and is now chunk 40 — it is what "Cancel (B)" needs, and Disasteroids' own
 screen spec asks for shortcut captions on its buttons. Mouse buttons are chunk 41: `Control` has no
 variant for them, `InputFrame` never samples `MouseButtonInput`, and the requirements do not mention
 them, so the crate claims keyboard-and-mouse and supports half of it. That one has a hard ordering
@@ -357,7 +357,7 @@ asset-pipeline gate, which is true of glyphs and false of R18.5 and R18.6.
 
 The crate named keyboard-and-mouse as a control scheme and supported half of it. `Control` had no
 variant for a mouse button, `InputFrame` never sampled `MouseButtonInput`, and no requirement
-mentioned them — so "fire on left click", which is the commonest binding in the genre Dead Zone
+mentioned them — so "fire on left click", which is the commonest binding in the genre Disasteroids
 belongs to, could not be written at all.
 
 **Why it came before the settings screen and before persistence.** Persistence is the hard
@@ -394,9 +394,9 @@ three device features is now the check that catches this, and it is worth doing 
 changes rather than only when a feature is added. The `--features libm` build alone would not have
 found it; that configuration has no devices at all.
 
-**Where it shows up.** Dead Zone's `Fire` is now Space *and* left mouse, both mappable — one row
-with both slots filled, and the first two-control row in the game that is not two keys. The
-spare slot moved to `Hyperspace`, so the read-only screen still has a blank cell to draw.
+**Where it shows up.** Disasteroids' `Fire` is now Space *and* left mouse, both mappable — one row
+with both slots filled, and the first two-control row in the game that is not two keys. The spare
+slot moved to `Hyperspace`, so the read-only screen still has a blank cell to draw.
 
 **Not doing the wheel, and it now has a destination.** It is a delta on its own channel rather than a
 button, wants the `Line`/`Pixel` normalization R13.3 describes, and shares nothing with a button but
@@ -442,19 +442,19 @@ thing would look like, not by reading the requirements again.
   action can be given a `.hold()` without a plan-build diagnostic.
 - **A context is a layer.** Steam runs one action set per pad plus a stack of layers, we run many
   contexts at once. The mismatch §10.2 flagged turned out narrower than it read, because a context
-  that is always active is not a mode — Dead Zone's `Shell` holds `Pause` unconditionally and belongs
-  in the base set, leaving only the state-gated `Flying` as a layer. What genuinely does not
-  translate is consumption: a layer shadows or it does not, and there is no equivalent of one context
-  claiming a control for a frame. Recorded rather than solved. §10.2 asked for this to be settled
-  once rather than twice and it now is, in the same place as R19.15.
+  that is always active is not a mode — Disasteroids' `Shell` holds `Pause` unconditionally and
+  belongs in the base set, leaving only the state-gated `Flying` as a layer. What genuinely does not
+  translate is consumption: a layer shadows or it does not, and there is no equivalent of one
+  context claiming a control for a frame. Recorded rather than solved. §10.2 asked for this to be
+  settled once rather than twice and it now is, in the same place as R19.15.
 - **Suppression is L0.** Above.
 
 **The dependency question answered itself.** `steamworks` is `std`-only, `unsafe` FFI beneath, and
-wants the redistributable at link time; this crate is `no_std`, `forbid(unsafe_code)`, and minimal by
-manifest comment. So the real backend is someone else's crate and nothing under `src/` may name
+wants the redistributable at link time; this crate is `no_std`, `forbid(unsafe_code)`, and minimal
+by manifest comment. So the real backend is someone else's crate and nothing under `src/` may name
 Steam — which is a constraint on the seam, not a packaging note, and the thing that tests it is a
 mock living entirely in `examples/`. That is chunk 42, and its acceptance criterion is a non-diff:
-Dead Zone's pad becomes backend-owned and every file except `actions.rs` is untouched.
+Disasteroids' pad becomes backend-owned and every file except `actions.rs` is untouched.
 `actions.rs:96` already says "the pad is left alone: console and Steam remapping already own that",
 which was written as policy and becomes true.
 
@@ -470,9 +470,9 @@ trait ours-only. That is now chunk 40's second review surface.
 The player-facing list was opt-in in both senses at once. A binding with no mapping was neither
 rebindable nor *visible*, so the only rows a screen could draw were the ones a game had already
 offered for remapping — and the commonest gamepad screen in the industry is a read-only list of what
-the pad does, with the remapping owned by the platform. We could not draw it from our own data. Dead
-Zone's gamepad table is exactly that screen, which is why this had to come before 21 rather than
-after it.
+the pad does, with the remapping owned by the platform. We could not draw it from our own data.
+Disasteroids' gamepad table is exactly that screen, which is why this had to come before 21 rather
+than after it.
 
 **Two questions had been fused into one flag.** *May the player change this* is the developer's call,
 because a fixed binding is a design decision. *May the player see this* is the player's business, and
@@ -508,7 +508,7 @@ about listing at all: if those are two mappings, a player can rebind `Thrust` to
 afterburner on `W`, and then put `Fire` on `W` and afterburn by holding fire. Nothing collides, so
 `conflicts()` cannot see it; the failure is a *separation* that should not have been possible.
 Afterburner is a logical extension of Thrust and should move with it, which the model has no way to
-say. That is chunk 44, and Dead Zone carries `private` on those three bindings until it lands —
+say. That is chunk 44, and Disasteroids carries `private` on those three bindings until it lands —
 which produces the right screen and none of the linkage, and the comment there says so.
 
 **Two rename regressions from chunk 39, found on the way.** `slot` had two live meanings before that
@@ -526,10 +526,10 @@ paragraph names, making the accessible path *cheap*, is unchanged.
 
 ### Chunk 21: the settings screen, read-only
 
-Dead Zone has a controls screen: `F2` or Y opens it, the same control closes it, and it lists every
-binding the game declared in two tables. It reads nothing but `mappings()` — no action type, no
-context, no key — so the same file would draw a different game's controls unchanged. The one action
-it names is the one that closes it, and it names that to render its own caption.
+Disasteroids has a controls screen: `F2` or Y opens it, the same control closes it, and it lists
+every binding the game declared in two tables. It reads nothing but `mappings()` — no action type,
+no context, no key — so the same file would draw a different game's controls unchanged. The one
+action it names is the one that closes it, and it names that to render its own caption.
 
 **The column count is the data's, and the same code draws both tables.** A row says how many
 controls it can hold and the widest row in the table decides how many cells every row draws, which
@@ -568,7 +568,7 @@ source, so the game now carries a dim line in the corner naming both. Its text i
 mapping list rather than written down — the same move the close caption makes, and for the same
 reason: a string naming a control is wrong the moment somebody changes the control.
 
-**Two label overrides, and they are the app's.** `dead_zone.turn.negative` derives as "Turn
+**Two label overrides, and they are the app's.** `disasteroids.turn.negative` derives as "Turn
 Negative" and a player should read "Turn Left", which is what a catalogue is for: the screen answers
 for the two keys whose derived text is wrong and leaves the rest to the fallback. That the fallback
 is legible for every other row is the point of it existing.
@@ -576,7 +576,7 @@ is legible for every other row is the point of it existing.
 
 The question every other path through the crate throws away the answer to. `Prompts` is a trait with
 one method — given an action and a scope, the controls that would fire it now — and `BindingTable`
-is this crate's answer to it. Dead Zone's two hand-rolled captions read through it instead of
+is this crate's answer to it. Disasteroids' two hand-rolled captions read through it instead of
 scanning the mapping list.
 
 **The two lists diverged, and that is the finding.** `mappings()` and a reverse lookup look like the
@@ -589,7 +589,7 @@ works. Once that was clear the implementation followed: the lookup reads the com
 its own type-erased door rather than filtering `mappings()`, and the two doors sit beside each other
 on `DeclaredContext`.
 
-**The first thing it broke was the caller it was built for.** Dead Zone's corner hint ran in
+**The first thing it broke was the caller it was built for.** Disasteroids' corner hint ran in
 `Startup`, alongside — and unordered against — the `Startup` system that spawns the context whose
 controls it names. The mapping list did not care, so nothing had ever needed that ordering; a lookup
 that asks what is live does, and an unordered pair is a coin toss the build makes rather than a bug
@@ -610,10 +610,10 @@ result.
 **The ranking says what it does not know.** Contexts rank, bindings rank within a context, and
 devices do not rank at all, because nothing tracks which one the player is holding (R18.6). Ordering
 keyboard before gamepad would have been a guess wearing a ranking's clothes. A caller that knows
-passes a `Scope`; Dead Zone's corner hint passes `Scheme::KeyboardMouse` and takes the first, which
-is the shape a caller that *does* know has. *Groomed straight afterwards:* the hole is not a hole.
-R18.6 is withdrawn and the device is the caller's parameter for good, so this is the answer rather
-than a placeholder for one.
+passes a `Scope`; Disasteroids' corner hint passes `Scheme::KeyboardMouse` and takes the first,
+which is the shape a caller that *does* know has. *Groomed straight afterwards:* the hole is not a
+hole. R18.6 is withdrawn and the device is the caller's parameter for good, so this is the answer
+rather than a placeholder for one.
 
 **The return type is not a `Control`, and this was the cheap moment.** R18.9's point is that a
 backend's origins are its own enumeration, covering device families we have no variant for, so
@@ -638,7 +638,7 @@ fails, not before.
 
 The presentation half of R18, made authorable. A component beside `TextSpan` names an action and
 fills in its own string, so a template says "Press ⟨whatever fires this⟩" with nothing in it naming
-a control. Dead Zone's two hand-formatted captions are now spans, and the `format!` and the `join`
+a control. Disasteroids' two hand-formatted captions are now spans, and the `format!` and the `join`
 are gone from both.
 
 **The dependency graph decided where this lives, and that was not the plan.** The chunk was written

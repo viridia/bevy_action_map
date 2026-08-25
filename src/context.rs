@@ -239,7 +239,7 @@ impl<C: InputContext> InputContextState<C> {
     /// ```ignore
     /// // Why is the ship not thrusting?
     /// info!("{:?}", input.why_not::<Thrust>());
-    /// // Consumed { control: Key(KeyW), by: "dead_zone.shell" }
+    /// // Consumed { control: Key(KeyW), by: "disasteroids.shell" }
     /// ```
     ///
     /// Checked in the order the obstacles apply, so what comes back is the first thing in the way
@@ -2187,12 +2187,15 @@ mod tests {
         use alloc::format;
 
         assert_eq!(
-            format!("{}", BoundPaths(&["dead_zone.turn", "dead_zone.fire"])),
-            "dead_zone.turn, dead_zone.fire"
+            format!(
+                "{}",
+                BoundPaths(&["disasteroids.turn", "disasteroids.fire"])
+            ),
+            "disasteroids.turn, disasteroids.fire"
         );
         assert_eq!(
-            format!("{}", BoundPaths(&["dead_zone.turn"])),
-            "dead_zone.turn"
+            format!("{}", BoundPaths(&["disasteroids.turn"])),
+            "disasteroids.turn"
         );
         assert_eq!(
             format!("{}", BoundPaths(&[])),

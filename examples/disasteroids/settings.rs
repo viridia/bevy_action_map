@@ -234,8 +234,8 @@ fn cells(mapping: &Mapping, columns: usize) -> Vec<Cell> {
 /// Zone has none, and answers for the two keys whose derived text is not what a player should read.
 fn label(key: MappingKey) -> String {
     match key.to_string().as_str() {
-        "dead_zone.turn.negative" => String::from("Turn Left"),
-        "dead_zone.turn.positive" => String::from("Turn Right"),
+        "disasteroids.turn.negative" => String::from("Turn Left"),
+        "disasteroids.turn.positive" => String::from("Turn Right"),
         _ => key.fallback_label(),
     }
 }

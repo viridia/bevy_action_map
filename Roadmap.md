@@ -113,7 +113,7 @@ Chunk numbers are **stable identities, not positions**. Ground rule 1 lets a chu
 the one before it has been read, and several have been; the phase headings below carry the sequence
 so that "chunk 8" still means what it meant in the discussion that produced it.
 
-The target the remaining sequence aims at is **Dead Zone** — an asteroids-like game in primitive
+The target the remaining sequence aims at is **Disasteroids** — an asteroids-like game in primitive
 shapes, playable on keyboard or gamepad, eventually with a rebinding screen built on
 `bevy_ui_widgets` and operable from the controller. It is not a phase of its own. It arrives early,
 badly, and grows a capability per chunk, because ground rule 3 wants something runnable at every
@@ -121,7 +121,7 @@ step and a real game is a better acceptance test than a synthetic one.
 
 | | |
 | --- | --- |
-| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Dead Zone's controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves. |
+| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves. |
 | **Known wrong today** | The controls screen does not take the controls: the game hears them through it, because nothing yet declares a context for the screen (chunk 30). A prompt cannot tell a held binding from a tapped one, which is R18.3's structured descriptor and still unbuilt. The prelude exports a dozen bare English nouns that a glob import drops into a template beside Bevy's own (chunk 48). Otherwise nothing is wrong so much as absent — the player-facing half of the crate is one read-only list and no way to change anything on it. |
 | **Never built** | Rebinding itself: nothing can yet change what a control is bound to, or save the change. Also tunables, presets, glyphs, and every screen that does more than list what is already there. |
 
@@ -146,7 +146,7 @@ where it fell short of its own description — Phase VII onward there, and every
 | 24 | Housekeeping | done; doctests still deferred |
 | 9 | Tick domains and the windowed drain | done; the L2 half of R9.3 → 12 |
 | 15 | Source channel shape | done |
-| 16 | Dead Zone, first playable | playable; no death, which is polish |
+| 16 | Disasteroids, first playable | playable; no death, which is polish |
 | 12 | Transition log and observers | done |
 | 13 | Context activation lifecycle | done |
 | 11 | Conditions and the scratch table | done; forgiveness windows → 34 |
@@ -173,7 +173,7 @@ than by the chunk that incurred it — so what a chunk must do is stated in one 
 
 ## Phase V — multiple contexts
 
-Dead Zone's pause menu forced the first three of these, which have landed; what is left is the one
+Disasteroids' pause menu forced the first three of these, which have landed; what is left is the one
 that only a focused widget wants.
 
 ### 25. Control classes and class bindings
@@ -229,9 +229,9 @@ navigable, then something that rebinds. Navigation sits between the first two, s
 cannot move around is a help screen rather than a settings screen — which is exactly why the first
 pass was worth having on its own. That pass has landed; the two that follow have not.
 
-**The screen Dead Zone is building, stated once.** These are the acceptance criteria for 21, 29, 30
-and 31 together, written down here so that each pass can be judged against the finished thing rather
-than against its own description:
+**The screen Disasteroids is building, stated once.** These are the acceptance criteria for 21, 29,
+30 and 31 together, written down here so that each pass can be judged against the finished thing
+rather than against its own description:
 
 - **Two tables**, one keyboard and one gamepad, because a rebind is scoped to a scheme (R19.7) and
   device tabs are near-universal in shipped games.
@@ -281,7 +281,7 @@ going further. So what is chosen here is a candidate for what lands upstream.
   upstream beside `handle_tab_navigation`, where the interception cases live.
 - **Not doing:** `InputFocusVisible`. It exists to hide focus rings from desktop mouse users, and a
   pad-driven game has no such ambiguity.
-- **In Dead Zone:** a focus ring on the settings screen, drawn with `Outline`.
+- **In Disasteroids:** a focus ring on the settings screen, drawn with `Outline`.
 - **Review surface:** the two names, more carefully than usual. If bevy_input_focus ends up
   depending on these concepts, renaming them afterwards is somebody else's breaking change.
 
@@ -324,15 +324,15 @@ get separate rows and a rebind moves only one of them.
 - **Checkable at plan build:** the target must exist, be `mappable`, be in the same scheme, and read
   the same controls. A `follows` that reads different controls is a different binding, not a linked
   one, and saying so early is cheaper than a player finding it.
-- **Dead Zone is the test case**, and carries a stopgap in the meantime: its three `Afterburner`
+- **Disasteroids is the test case**, and carries a stopgap in the meantime: its three `Afterburner`
   bindings are `private`, which produces the same screen this chunk will and none of the linkage.
   Replacing those three calls with `follows::<Thrust>()` is this chunk's acceptance test.
 - **Not doing:** inferring the link from two bindings happening to read one control. That is true of
   coincidences as well as intentions, and the two want opposite handling.
-- **Review surface:** whether `follows` is the right shape for the *other* case it resembles —
-  chunk 33's conditions that read another action. Afterburner is genuinely "Thrust, still held", and
-  a game that could say that would need no link at all. If 33 subsumes enough of this, the two
-  should be looked at together before both are built.
+- **Review surface:** whether `follows` is the right shape for the *other* case it resembles — chunk
+  33's conditions that read another action. Afterburner is genuinely "Thrust, still held", and a
+  game that could say that would need no link at all. If 33 subsumes enough of this, the two should
+  be looked at together before both are built.
 
 ### 38. Applying a rebind
 
@@ -363,10 +363,10 @@ designs the structure it writes into.
   holds W is reported as nothing at all. That is deliberate — it is a policy question, and the
   policies are here — but it means one of these policies has to have an answer for it, and "the
   screen will notice" is not one.
-- **Also inherited from 39: the pending set is a list per row.** The working-copy semantics Dead
-  Zone's screen needs (see Phase VII's spec) mean `conflicts()` consults pending overrides, and a
-  pending row now holds several controls. A pending set keyed by mapping and valued by one control
-  would work until the day someone edits a secondary.
+- **Also inherited from 39: the pending set is a list per row.** The working-copy semantics
+  Disasteroids' screen needs (see Phase VII's spec) mean `conflicts()` consults pending overrides,
+  and a pending row now holds several controls. A pending set keyed by mapping and valued by one
+  control would work until the day someone edits a secondary.
 - **Inherited from chunk 47: applying a rebind raises `PromptGeneration`.** Chunk 47 raises it for
   everything that existed to raise it for — a context switching over, an instance arriving or
   leaving — and a binding *changing* is the clause of R18.5 nothing could reach yet. One call at the
@@ -392,11 +392,11 @@ story*. A stick has no row to press.
 - **Why after 38.** A preset is a set of assignments, so it applies through the same path a rebind
   does (§10.1) rather than a second writer. Building it before there is an apply path means
   inventing one, and then having two.
-- **Dead Zone is the acceptance test, and the fork is the lesson.** Its gamepad table is read-only
-  either way; what sits under it is the choice. A game on Steam or a console links to the platform's
-  remapper; a game with neither gets Default and Southpaw as buttons, which is the arrangement most
-  shipped games actually have. Dead Zone teaches the second, since the first is chunk 42's territory
-  and a demo cannot show both without becoming a lecture.
+- **Disasteroids is the acceptance test, and the fork is the lesson.** Its gamepad table is
+  read-only either way; what sits under it is the choice. A game on Steam or a console links to the
+  platform's remapper; a game with neither gets Default and Southpaw as buttons, which is the
+  arrangement most shipped games actually have. Disasteroids teaches the second, since the first is
+  chunk 42's territory and a demo cannot show both without becoming a lecture.
 - **Southpaw is the honest test case** — it swaps two *sticks*, so it cannot be expressed as a
   keyboard-style rebind at all, and a preset mechanism that only rearranges buttons would pass a
   weaker one.
@@ -408,8 +408,8 @@ story*. A stick has no row to press.
   that does not exist yet, so the mapping half can land first — but the preset *format* has to leave
   room, since retrofitting a second kind of entry into a saved file is the migration R17 exists to
   avoid.
-- **Review surface:** whether a game with one preset pays anything. R19.13 says presets are additive,
-  and the shape that satisfies it is a default preset that no one has to declare.
+- **Review surface:** whether a game with one preset pays anything. R19.13 says presets are
+  additive, and the shape that satisfies it is a default preset that no one has to declare.
 
 ### 23. Persistence of overrides
 
@@ -500,9 +500,9 @@ than smuggling a crate-wide rename into a feature chunk.
 
 ## Phase IX — the second example
 
-Dead Zone is one player reading one set of bindings. Everything in §15 is invisible to it, because
-with a single player there is no question of *which* device drove an action — and a model that never
-has to answer that question has not been tested on the thing it was designed for.
+Disasteroids is one player reading one set of bindings. Everything in §15 is invisible to it,
+because with a single player there is no question of *which* device drove an action — and a model
+that never has to answer that question has not been tested on the thing it was designed for.
 
 ### 26. Device routing and the join flow
 
@@ -546,7 +546,7 @@ that capture uses in chunk 20.
 `examples/split_friction/` — a split-screen game in the shape of Gauntlet: two players, top-down,
 shared world, one viewport each.
 
-- **Not doing:** rebinding. Dead Zone covers that, and a second UI would make this example about
+- **Not doing:** rebinding. Disasteroids covers that, and a second UI would make this example about
   something other than the thing it is here to show.
 - **What it is here to show:** the **device selection screen**. Two mappings, each waiting for a
   device to claim it; press anything on a pad or a key on the keyboard and that mapping is yours.
@@ -579,7 +579,8 @@ cheat codes.
   forgiveness windows as a frequent reason teams abandon a general input crate and hand-roll one.
   That makes it load-bearing rather than optional — but it is also exactly the kind of thing that
   goes wrong when guessed at, because the right window lengths and the right *which input* are
-  questions only a real game answers. Dead Zone does not need it. A platformer would, immediately.
+  questions only a real game answers. Disasteroids does not need it. A platformer would,
+  immediately.
 - **Both fit the scratch record** as Design §6 predicted, so this is a condition each, not a
   redesign.
 - **Carried from chunk 11.**
@@ -612,20 +613,20 @@ Input actually is and settles the three places its model disagrees with ours.
   API and carry a maintenance promise; the fake is a test fixture and gets deleted when a real
   backend exists. Ground rule 3 already makes the examples the acceptance test.
 - **It must fake the API, not the concept.** Level-only reads with no timestamps, an "is this bound"
-  flag distinct from a zero value, origins as a type that is deliberately not `Control`, a glyph as a
-  path, and a binding panel that is ugly on purpose. A mock nicer than Steam proves nothing, and
+  flag distinct from a zero value, origins as a type that is deliberately not `Control`, a glyph as
+  a path, and a binding panel that is ugly on purpose. A mock nicer than Steam proves nothing, and
   every one of those is a place §10.5 guessed.
-- **The acceptance criterion is a non-diff, and it is no longer Dead Zone's pad.** The original had
-  Dead Zone's pad become backend-owned with every other file in the example untouched. The preset
-  fork rules that out: Dead Zone's pad is where presets get taught (chunk 45), and a pad the backend
-  owns has no presets of ours to show. The proof still has to be a non-diff — screen code running
-  unchanged against a backend-owned context — but it needs a vehicle that is not already spoken for.
-  Choosing one is part of this chunk, and the awkward part is that sharing the settings screen
-  between two examples is a `#[path]` trick rather than a module.
+- **The acceptance criterion is a non-diff, and it is no longer Disasteroids' pad.** The original
+  had Disasteroids' pad become backend-owned with every other file in the example untouched. The
+  preset fork rules that out: Disasteroids' pad is where presets get taught (chunk 45), and a pad
+  the backend owns has no presets of ours to show. The proof still has to be a non-diff — screen
+  code running unchanged against a backend-owned context — but it needs a vehicle that is not
+  already spoken for. Choosing one is part of this chunk, and the awkward part is that sharing the
+  settings screen between two examples is a `#[path]` trick rather than a module.
 - **R0.6, the half that is not about Steam.** A backend suppresses its devices at L0 so their raw
-  events never reach the frame. This is what makes the demo usable at all — without it Dead Zone
-  reads the pad twice — and it is why this chunk sits after 26 rather than after 38: the filter's key
-  is the device identity chunk 26 puts on the frame, and the runtime entity is a stopgap that is
+  events never reach the frame. This is what makes the demo usable at all — without it Disasteroids
+  reads the pad twice — and it is why this chunk sits after 26 rather than after 38: the filter's
+  key is the device identity chunk 26 puts on the frame, and the runtime entity is a stopgap that is
   wrong across a reconnect.
 - **Blocked on 40 and 38** for the other two halves. Reverse lookup has to be a trait before a
   backend can answer it (R18.8) and rebinding has to be able to say "not ours" (R19.8); both are
@@ -713,7 +714,7 @@ of things that would quietly never happen.
 ## Deliberately deferred
 
 Still out of scope for the sequence above. Rebinding, persistence and presentation have left this
-table because Dead Zone needs them; device routing and local multiplayer have left it because
+table because Disasteroids needs them; device routing and local multiplayer have left it because
 Split Friction does, and because the gate turned out to be met already. Reverse lookup (R18.1) left
 it in chunk 39's grooming, which is also when the §18 row was found to be claiming an asset gate for
 two requirements that have nothing to do with assets.
@@ -757,7 +758,7 @@ to be cheap at.
 
 Guardian is worth restating: it is on **bevy 0.16.1** with `bevy_enhanced_input 0.12`, and we target
 main. The migration is a genuine goal, but it is a port plus a rewrite, and doing both at once would
-confuse "action_map is wrong" with "0.20 moved this". Dead Zone first; guardian when there is
+confuse "action_map is wrong" with "0.20 moved this". Disasteroids first; guardian when there is
 something worth migrating _to_.
 
 ---

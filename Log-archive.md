@@ -222,9 +222,9 @@ compiler to first run.
 
 ## Phase IV — the first game
 
-### Chunk 16: Dead Zone
+### Chunk 16: Disasteroids
 
-`examples/dead_zone/` — an asteroids-like game, played on both keyboard and an Xbox pad. 455 lines,
+`examples/disasteroids/` — an asteroids-like game, played on both keyboard and an Xbox pad. 455 lines,
 of which the input layer is 68 and the control scheme itself is 24.
 
 **It found two gaps before it was playable**, both fixed rather than recorded, because neither had a
@@ -294,12 +294,12 @@ what was in flight rather than leaving a hold stuck (R7.4), and activating ignor
 player is already holding, with an opt-out (R7.5). An inactive context keeps tracking its devices, so
 coming back is free (R7.6).
 
-**The first API was wrong and the example is what showed it.** Dead Zone's pause menu originally held
-two facts — a state, and two contexts driven by hand to match — and kept them in step in an observer.
-That works and reads like something waiting to drift the moment a third way to reach the menu
-appears. `add_context_in_state` inverts it: the contexts follow the state, so there is one fact and
-nothing to disagree with it. "Declared inactive" then falls out for free, which had been recorded as
-an outstanding gap an hour earlier.
+**The first API was wrong and the example is what showed it.** Disasteroids' pause menu originally
+held two facts — a state, and two contexts driven by hand to match — and kept them in step in an
+observer. That works and reads like something waiting to drift the moment a third way to reach the
+menu appears. `add_context_in_state` inverts it: the contexts follow the state, so there is one fact
+and nothing to disagree with it. "Declared inactive" then falls out for free, which had been
+recorded as an outstanding gap an hour earlier.
 
 Two smaller things came with it. `add_context` takes its closure as `impl FnOnce`, so
 `add_context::<Flying, _>` lost its placeholder — the same trick `bind::<Jump>` got in chunk 15. And
@@ -505,14 +505,14 @@ instance is still `activate` on the entity, and mixing the two would mean the co
 frame — said in the doc comment rather than prevented, since preventing it would mean tracking which
 door an activation came through.
 
-**Dead Zone's contexts were arranged the way the crate's history made them, not the way a developer
-would.** Reviewing the chunk turned it up: pause was an action bound in *two* state-driven contexts,
-`Flying` and `PauseMenu`, each hearing the button while the other was down. That arrangement exists
-because chunk 13 built `add_context_in_state` and the example was written to show it off. The
-arrangement a developer reaches for is one context with no condition at all — pause, and later the
-settings screen — beside one conditional context holding everything else. Rewritten that way: the
-`Shell` context is live from the moment its entity exists, and `Flying` is the only thing following
-the state.
+**Disasteroids' contexts were arranged the way the crate's history made them, not the way a
+developer would.** Reviewing the chunk turned it up: pause was an action bound in *two* state-driven
+contexts, `Flying` and `PauseMenu`, each hearing the button while the other was down. That
+arrangement exists because chunk 13 built `add_context_in_state` and the example was written to show
+it off. The arrangement a developer reaches for is one context with no condition at all — pause, and
+later the settings screen — beside one conditional context holding everything else. Rewritten that
+way: the `Shell` context is live from the moment its entity exists, and `Flying` is the only thing
+following the state.
 
 It is a smaller example for it — one binding of `Pause` instead of two, and one less context — and
 the reason it works is easier to state: the control that unpauses has to be heard by something
@@ -554,8 +554,9 @@ which the `SystemParam` derive propagates for free — it forwards each field's 
 intact — and the many-instance case moved to a new `ActionsQuery<C>` with `get`/`iter`. Bevy's own
 `Query`/`Single` pairing, with the short name on the common case.
 
-**Every existing test and example compiled unchanged**, which is the ground-rule-3 signal: Dead
-Zone's `fly` still reads `input.value::<Turn>()` and now simply stops running when there is no ship.
+**Every existing test and example compiled unchanged**, which is the ground-rule-3 signal:
+Disasteroids' `fly` still reads `input.value::<Turn>()` and now simply stops running when there is
+no ship.
 
 The first panic did want a value, and the value is rest — `false`, `0.0`, `Vec2::ZERO` by shape,
 with a warning logged once per context-and-action pair rather than per tick, naming both and listing
@@ -566,16 +567,16 @@ and `is_bound` are there for code that wants the distinction, and `why_not` alre
 
 **Two small dependencies, both already in the graph.** `log` for the warning, which is what
 `bevy_input` uses — `bevy_log` is `std`-only and installs a `tracing-subscriber`, so its
-`warn_once!` was not worth the weight. And `bevy_utils` for `once!`, the `no_std` half of that macro.
-The flag it expands to is a static in the function body, so a generic function warns once per
+`warn_once!` was not worth the weight. And `bevy_utils` for `once!`, the `no_std` half of that
+macro. The flag it expands to is a static in the function body, so a generic function warns once per
 instantiation, which is what makes "once per context-and-action" fall out rather than needing a
 registry.
 
 **The fix made a different failure quieter, and that debt is written onto 17b.** Zero instances used
 to panic: the wrong failure, but a loud one. It is now silent, and silence is indistinguishable at
-the call site from chunk 13's never-spawned bug — the one that cost a debugging session in Dead
-Zone's own pause menu. BSN gives the same silence a second door, since an `on(...)` handler on an
-entity that does not carry the context also never fires and never complains. Both are now recorded
+the call site from chunk 13's never-spawned bug — the one that cost a debugging session in
+Disasteroids' own pause menu. BSN gives the same silence a second door, since an `on(...)` handler on
+an entity that does not carry the context also never fires and never complains. Both are now recorded
 against 17b, which is the chunk that has to tell a dead ship apart from a context nobody spawned.
 
 **R3.7 had no destination after all.** The second grooming recorded it as homed in chunk 17, but
@@ -637,10 +638,10 @@ no chunk. That is the third destination-less item in two sittings, after R3.7 an
 check. Ground rule 5 keeps earning its place.
 
 **The overlay could not be written against the crate as it stood, and that was the real finding.**
-Every public read is generic over `A: InputAction`, and each context's state is a *distinct component
-type*. An overlay built on that would have to name Dead Zone's six actions and two contexts, which is
-the opposite of what R22.2 asks for. So the chunk is not a UI: it is the crate's first view of itself
-that names nothing.
+Every public read is generic over `A: InputAction`, and each context's state is a *distinct
+component type*. An overlay built on that would have to name Disasteroids' six actions and two
+contexts, which is the opposite of what R22.2 asks for. So the chunk is not a UI: it is the crate's
+first view of itself that names nothing.
 
 Three pieces, in order of how much thought they took:
 
