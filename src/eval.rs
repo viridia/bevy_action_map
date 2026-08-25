@@ -481,9 +481,13 @@ impl<C: InputContext> InputContextState<C> {
                 if verdict > best {
                     best = verdict;
                 }
-                // Claimed only on the ticks it actually fires, so a binding that is merely bound to
-                // a control does not hold it against everyone else all the time.
-                if binding.consume && verdict == Verdict::Fired {
+                // Claimed while the binding has something to say, so a binding that is merely bound
+                // to a control does not hold it against everyone else all the time — but one whose
+                // condition is part way through does. Firing alone is too narrow: a menu binding
+                // that fires once per direction entered would hand the stick back to the game
+                // between two crossings, and a charging hold would leak its key to whatever is
+                // underneath until it completed.
+                if binding.consume && verdict >= Verdict::Ongoing {
                     claims.extend(binding.source.controls());
                 }
                 let value = if verdict == Verdict::Fired {

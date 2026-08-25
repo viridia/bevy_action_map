@@ -745,3 +745,81 @@ condition half "stays unbuilt", and nothing carried it. It is now a deferred row
 which is the chunk that takes `private` off `Afterburner` and so the moment a held binding and a
 tapped one appear on one screen. 44 carries a bullet saying so, because a gate nobody is watching
 is not a destination.
+
+### Chunks 29 and 30: a screen you can move around
+
+Landed as one chunk, because the two halves only test each other. The crate gained two combinators
+and a screen to prove them on: a stick or a D-pad now moves the selection on Disasteroids' controls
+screen, the game underneath keeps flying and never hears the keys the screen has taken, and the
+whole thing can be operated from an Xbox pad without touching the keyboard.
+
+**The two names were the review surface, and the argument for both is that neither is about
+navigation.** `.compass(CompassPoints::Four)` rounds a 2D value to a compass point and throws the
+magnitude away; `.on_change()` fires on the ticks a value differs from the tick before. Eight-way
+movement wants the first for its own reasons and it is the cheapest condition in the set, needing
+only the previous value `Scratch` already carries. What makes them a menu is that they compose:
+rounding alone still fires every tick, change detection alone fires on every wobble across a
+boundary, and together they fire once per point *entered*. `.pulse(0.25)` beside them is auto-repeat
+out of a third combinator that was already there.
+
+**`Scratch::prev` was lying, and had been since chunk 11.** Its doc says "the previous input value";
+`evaluate` wrote `ActionValue::Bool(actuated)` over it in the shared preamble before any condition
+saw it, which was all the built-in set ever needed. A condition comparing two directions cannot work
+from that, and neither can anyone's custom one. Storing the whole value costs nothing — every other
+arm reads `prev.to_bool()`, which is the same answer either way — and the fix is one line. Worth
+recording because the field's documentation was correct and the code was not, which is the direction
+that stays invisible: nobody re-reads a doc comment that already says the right thing.
+
+**Consumption stopped following the fire and started following the verdict.** `.consume()` claimed
+its controls only on ticks where the binding reported `Fired`, with a comment explaining that a
+binding merely *bound* to a control should not hold it against everyone else. That reasoning is
+right and the rule drawn from it was too narrow: a menu binding that fires once per direction
+entered says nothing between crossings, so holding the arrow key moved the selection once and then
+turned the ship on every tick after. The claim now lasts while the verdict is `Ongoing` too, which
+is one rule — a binding claims its controls while it has something to say — and it fixes two cases
+nobody had complained about yet: a charging `.hold()` and a part-way `.multi_tap()` were both
+leaking their keys to whatever was underneath. R8.2 carries the amendment.
+
+**The screen is its own context, and that was not the plan.** Chunk 30 was written expecting
+`active_in_state(Settings::Showing)` beside `Flying`'s. What it got is better: the screen's root node
+carries the `Menu` component, so the context exists for exactly as long as the screen does and there
+is no activation condition anywhere. That is R22.14 — spawning must be sufficient — turning out to
+be the *simpler* option rather than the permissive one, and it means despawning the screen releases
+every control it took with nothing saying so.
+
+**The prediction chunk 13 made held.** A settings screen over a running game is a higher-priority
+context binding a subset of the same controls and consuming them, and it needed nothing declared
+beyond that. Cross-domain consumption carried it without being asked: `Menu` is render-tick and
+`Flying` is fixed-tick, and §5.2's rule that a `PreUpdate` claim stands for every fixed tick in the
+frame is what makes an arrow key reach the screen and not the ship.
+
+**What the spatial heuristic cost was one component per widget**, and the roadmap was out of date
+about it. Chunk 29 said `bevy_input_focus` had the directional half only as a `SystemParam`;
+`bevy_ui` has since grown `AutoDirectionalNavigation` and an `AutoDirectionalNavigator` that scores
+candidates by edge distance and perpendicular overlap. So there are no navigation links in the
+example at all — the table's layout is the graph — and the only placement decision is `AutoFocus` on
+Cancel, which is independent of tab order and saves the screen from naming a first cell and then
+keeping that name true as the table changes.
+
+**The finding worth the chunk: consumption cannot reach a widget that reads input itself.**
+`bevy_ui_widgets::Button` activates on `Enter` and `Space`, and `Space` is the ship's trigger. The
+mapper claiming `Space` does nothing about it, because the keyboard event reaches the button through
+`InputDispatchPlugin`, which is the only thing turning a global key event into a focused one and
+asks the mapper nothing. So R8.2 was met between contexts and unmet against the widget beside them
+— written up as R8.2a, since a requirement that is true of the mechanism and false in the game needs
+to say so in the requirements rather than in a log entry.
+
+The first reading of this was that the fix belonged in Bevy. It does not: `DefaultPlugins` is a
+plugin *group*, so an app can disable one member and add a mapper-aware replacement, which makes it
+chunk 49 behind the `focus` feature and no upstream conversation at all. The workaround until then
+is an action bound to `Enter` and `Space` that consumes them and has no observer anywhere —
+Disasteroids' `Swallowed` — which is ugly in exactly the way that keeps it from being mistaken for
+the design.
+
+**Two things declined, both with gates rather than intentions.** R22.7's bubbling dispatch was chunk
+29's stated deliverable and is not built: bubbling exists so that something can intercept, and this
+screen has nothing that wants to swallow a direction, so a `FocusedInput` would have been ceremony
+around a four-line call to the navigator. The gate is a widget that intercepts — a slider, a scroll
+area, a text field. And R22.5's "initial delay + repeat rate" is one number rather than two, because
+the pulse's clock starts on the tick the change fires; the gate is a screen long enough for equal to
+be wrong.

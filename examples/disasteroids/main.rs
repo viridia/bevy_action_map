@@ -9,12 +9,16 @@
 //! as hard as you pull it.
 //!
 //! `F2`, or Y on a pad, opens [`settings`] — the controls screen, which lists every one of those
-//! bindings without being told about any of them.
+//! bindings without being told about any of them, and which can be moved around with the arrow keys
+//! or the stick and operated end to end from the pad.
 //!
-//! The two contexts are the arrangement worth copying. Flying is live only while the game is
+//! The three contexts are the arrangement worth copying. Flying is live only while the game is
 //! playing, so pausing stands it down and whatever the player was holding is canceled rather than
 //! left running. Pause itself is in a context with no condition at all, because the control that
-//! unpauses has to be heard by something that pausing did not switch off.
+//! unpauses has to be heard by something that pausing did not switch off. And the settings screen
+//! is a third, at a higher priority: while it is up the arrow keys move the selection instead of
+//! turning the ship, and nothing is switched off to make that happen — the screen simply consumes
+//! what it binds, and the game goes on flying behind it on everything else.
 
 #![allow(missing_docs)]
 
@@ -50,6 +54,11 @@ fn main() {
                 ..default()
             }),
             bevy_action_map::ActionMapPlugin,
+            // Not in `DefaultPlugins`, unlike the focus and widget plugins beside it. It holds the
+            // navigation graph, which this game never writes an edge to — but the automatic
+            // navigator consults that graph before falling back to where things are on screen, so
+            // it has to exist.
+            bevy::input_focus::directional_navigation::DirectionalNavigationPlugin,
         ))
         .add_plugins((
             actions::plugin,

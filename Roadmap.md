@@ -121,15 +121,15 @@ step and a real game is a better acceptance test than a synthetic one.
 
 | | |
 | --- | --- |
-| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves. |
-| **Known wrong today** | The controls screen does not take the controls: the game hears them through it, because nothing yet declares a context for the screen (chunk 30). A prompt cannot tell a held binding from a tapped one, which is the condition half of R18.3's structured descriptor, deferred with chunk 44 as its gate. The prelude exports sixteen bare English nouns that a glob import drops into a template beside Bevy's own (chunk 48). Otherwise nothing is wrong so much as absent — the player-facing half of the crate is one read-only list and no way to change anything on it. |
+| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves; and a screen that can be *operated* — a stick or a D-pad rounded to a compass point and narrowed to the ticks it moved on, which is a selection moving one step per direction entered, over a game that keeps running and never hears the controls the screen has taken. |
+| **Known wrong today** | A widget that handles its own keyboard bypasses consumption entirely: `bevy_ui_widgets::Button` activates on `Space` whether or not a context claimed `Space`, because `InputDispatchPlugin` asks the mapper nothing (R8.2a, chunk 49). Disasteroids works around it with an action that consumes and does nothing. A prompt cannot tell a held binding from a tapped one, which is the condition half of R18.3's structured descriptor, deferred with chunk 44 as its gate. The prelude exports sixteen bare English nouns that a glob import drops into a template beside Bevy's own (chunk 48). Otherwise nothing is wrong so much as absent — the player-facing half of the crate is a list you can move around and still no way to change anything on it. |
 | **Never built** | Rebinding itself: nothing can yet change what a control is bound to, or save the change. Also tunables, presets, glyphs, and every screen that does more than list what is already there. |
 
 ---
 
 ## What has landed
 
-Thirty chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+Thirty-two chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
 where it fell short of its own description — Phase VII onward there, and everything before it in the
 [archive](./Log-archive.md). This table is only an index, and the sequence below is what remains.
 
@@ -165,6 +165,8 @@ where it fell short of its own description — Phase VII onward there, and every
 | 21 | The settings screen, read-only | done; the caption's reverse lookup → 40, taking the controls → 30 |
 | 40 | Reverse lookup | done; invalidation and device ranking → 47, glyphs still deferred |
 | 47 | A binding as a text span | done; the presentation layer lives in `examples/common/` until the deferred table's promotion gate trips, and the prelude's other bare nouns → 48 |
+| 29 | Directional navigation | done, folded into 30; bubbling dispatch (R22.7) declined and deferred with a gate, an independent repeat delay → deferred table |
+| 30 | The settings screen, interactive | done; the widget layer's own keyboard path → 49 |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -227,7 +229,7 @@ must stay additive: a game that declares none of it keeps working exactly as bef
 mixing them would make it unclear which half was at fault: first a read-only list, then something
 navigable, then something that rebinds. Navigation sits between the first two, since a screen you
 cannot move around is a help screen rather than a settings screen — which is exactly why the first
-pass was worth having on its own. That pass has landed; the two that follow have not.
+pass was worth having on its own. Two have landed; the third, chunk 31, has not.
 
 **The screen Disasteroids is building, stated once.** These are the acceptance criteria for 21, 29,
 30 and 31 together, written down here so that each pass can be judged against the finished thing
@@ -257,51 +259,15 @@ rather than against its own description:
   consult the pending set rather than only what is committed. Chunk 38 owns making it able to.
 
 Chunk 39 built the model half of the three-column table — a mapping holds an ordered list with a
-capacity, and a capture names the slot it fills — 43 put the fixed rows on it, and 21 drew both
-tables from that model alone. What is left is everything that happens when the player presses one.
+capacity, and a capture names the slot it fills — 43 put the fixed rows on it, 21 drew both tables
+from that model alone, and 30 made the cells reachable. What is left is everything that happens when
+the player presses one.
 
-### 29. Directional navigation
-
-The half of D4 that is dispatch rather than activation (R22.7): an action whose firing moves the
-focus. `bevy_input_focus` has the sequential half wired to events already, and the directional half
-only as a `SystemParam` — deliberately, because it was waiting on an input mapper to settle before
-going further. So what is chosen here is a candidate for what lands upstream.
-
-- **Delivers, in the crate:** a modifier that quantises a 2D direction to the compass points, and a
-  condition that fires when a value changes. Both are general — eight-way movement and radial menus
-  want the first; the second is the cheapest condition in the set, needing only the previous value
-  that `Scratch` already carries.
-- **Why two pieces and not one.** Snapping alone fires every tick, because the stick stays off
-  centre. Change-detection alone fires on every wobble. Together they fire once per compass point
-  crossed, which is the behaviour a menu wants — and `.on_change().pulse(0.15)` is then auto-repeat,
-  out of two conditions that exist for other reasons.
-- **Not doing:** bubbling the instruction as a `FocusedInput`. Bubbling exists so that something can
-  *intercept*, and until a widget wants to swallow a direction there is nothing to intercept; the
-  observer calls `DirectionalNavigation::navigate` directly. The event-driven entry point belongs
-  upstream beside `handle_tab_navigation`, where the interception cases live.
-- **Not doing:** `InputFocusVisible`. It exists to hide focus rings from desktop mouse users, and a
-  pad-driven game has no such ambiguity.
-- **In Disasteroids:** a focus ring on the settings screen, drawn with `Outline`.
-- **Review surface:** the two names, more carefully than usual. If bevy_input_focus ends up
-  depending on these concepts, renaming them afterwards is somebody else's breaking change.
-
-### 30. The settings screen, interactive
-
-Chunk 21's list grows a button per mapping, focus moves between them on stick and D-pad, and the
-screen can be dismissed. Still nothing rebinds — pressing a row does nothing yet.
-
-- **Why separate from capture:** navigating a menu with a pad is where the awkwardness usually is,
-  and mixing it with capture would make it unclear which half was at fault.
-- **Inherited from chunk 21: the screen does not take the controls.** It is a state of its own
-  rather than a third `Game` variant, so the ship still answers the throttle while the player reads
-  the table. That was left visible deliberately — standing the flying context down would have hidden
-  the very thing this chunk exists to demonstrate — and it is the acceptance test: with the screen
-  up, the controls it binds must reach it and nothing else.
-- **Demonstrates R7.3's additive layers,** which chunk 13 predicted would fall out of arbitration
-  rather than need a mechanism of their own, and which nothing in tree has shown. A settings screen
-  sitting over a running game is a higher-priority context binding a subset of the same controls and
-  consuming them. If it needs anything declared beyond that, the prediction was wrong.
-- **Verified by:** operating the whole screen from the Xbox pad without touching the keyboard.
+**Two of those criteria are now visibly unmet rather than merely absent**, which is what a screen
+you can operate buys: Confirm and Cancel exist and are indistinguishable, because nothing on the
+screen can be changed yet and so there is nothing for one to commit that the other would discard
+(chunk 38 and chunk 31); and neither caption carries its shortcut, because B is bound to `Back` for
+the whole screen rather than to Cancel in particular and X is bound to nothing at all (chunk 31).
 
 ### 44. Bindings that travel together
 
@@ -385,7 +351,22 @@ designs the structure it writes into.
 ### 31. The settings screen, rebinding
 
 Pressing a row enters capture, the next control pressed takes the mapping, and conflicts are
-reported per chunk 38's policy.
+reported per chunk 38's policy. Chunk 30 left the cells pressable and pressing one deliberately
+inert, so the whole of this chunk is what happens after the `Activate`.
+
+**Inherited from chunk 30**, since a screen that can be operated makes these visible rather than
+merely absent:
+
+- **The two bottom buttons have to differ.** Both currently close the screen, because nothing on it
+  can be changed and so there is nothing for Confirm to commit that Cancel would discard. Chunk 38
+  supplies the pending set; this chunk is where Confirm and Cancel start meaning what they say.
+- **The captions have to carry their shortcuts** — a `PromptSpan` with a `PromptScheme(Gamepad)`
+  beside it, per the acceptance criteria above. That needs the shortcuts to exist first: B is bound
+  to `Back` for the screen as a whole rather than to Cancel in particular, and X is bound to nothing.
+- **Two-stage cancel**, which is the same B doing two things depending on whether a capture is live.
+  `Back` is one action with one observer today; this is where it grows the state to branch on.
+- **The screen stops being built once.** `OnEnter` spawns it from the mapping list and nothing
+  rebuilds it, which was true while nothing could change a row and stops being true here.
 
 ### 45. Presets
 
@@ -454,6 +435,26 @@ what remains here is what building it has to get right and what to look at in re
 - **Review surface:** open the file in a text editor and see whether you can tell what it says. It
   is a format players will edit by hand whatever we intend.
 
+### 49. Dispatch the mapper can filter
+
+`InputDispatchPlugin` turns a global keyboard event into a `FocusedInput` at the focus entity, and
+asks nothing about what a context has claimed. So `bevy_ui_widgets::Button` activates itself on
+`Space` while a screen is consuming `Space`, and R8.2 is met between contexts and unmet against the
+widget beside them (R8.2a). Chunk 30 found it and worked around it; this closes it.
+
+- **Delivers:** a dispatch plugin in `src/focus.rs`, behind the `focus` feature, that consults
+  `ConsumedControls` before dispatching and drops what a context has taken. `DefaultPlugins` is a
+  plugin group, so an app disables the default member and adds this one — no change to Bevy, and
+  nothing in `bevy_ui_widgets` learns that we exist, which is R22.9 intact.
+- **The ordering is the design question.** Consumption is decided during evaluation, and dispatch
+  currently runs wherever `InputDispatchPlugin` put it. A claim has to be visible before the event
+  it suppresses is dispatched, which is R22.11's constraint arriving from the other direction.
+- **In Disasteroids:** `Swallowed` is deleted, and `Accept` binds `Enter` and `Space` alongside the
+  pad's A like an ordinary action — which is also the test, since the button must then be pressed
+  once rather than twice.
+- **Also worth checking here:** whether the same filter wants to cover `bevy_picking`, since R22.4
+  names pointer coexistence and a consumed mouse button is the same question one device over.
+
 ---
 
 ## Phase VIII — settling
@@ -496,6 +497,10 @@ feature chunk.
   other two are here to be judged rather than assumed — `Actions` probably does earn its bareness in
   a crate called `bevy_action_map`.
 
+- **Chunk 30 added a seventeenth export and it is not on the list**, deliberately: `CompassPoints`
+  is named after `bevy_math`'s own `CompassOctant` and `CompassQuadrant`, so a reader who knows Bevy
+  guesses right, which is exactly the criterion below. Recorded because a prelude that grows between
+  now and this chunk needs checking as it grows rather than re-enumerating at the end.
 - **Why it is not cosmetic.** BSN templates are where it bites: a scene lists components from
   several preludes with nothing saying which crate each came from, so a name that does not carry its
   domain reads as whatever the reader assumes. `Scope` was the worst of them and is done.
@@ -756,6 +761,16 @@ now written onto both, the seam is designed in Design §10.5, and the implemente
 that is not one of our `Control`s, which is R18.9's demand met at the only price it was ever going
 to be cheap at.
 
+Chunk 30 added two rows, and one of them is a **MUST arriving here rather than being met**, which
+this table has not held before. R22.7's bubbling dispatch was chunk 29's stated deliverable and was
+declined on the grounds that bubbling exists so something can intercept and nothing yet wants to.
+That is a real gate and it is written below — but a MUST sitting in a deferred table is worth
+noticing rather than filing, and the entry says enough for the next reader to overrule it. The other
+is R22.5's separate repeat delay, which is a SHOULD and ordinary. Note what did *not* come here:
+the widget-side gap chunk 30 found looked like an upstream row and is not one, because
+`DefaultPlugins` is a group whose members can be swapped — so it is chunk 49 with a number, not a
+gate.
+
 | Area                                              | Gated on                                                                   |
 | ------------------------------------------------- | -------------------------------------------------------------------------- |
 | Persistent device identity and calibration (§11)  | two units of the *same kind*, which pad-plus-keyboard does not give         |
@@ -766,7 +781,9 @@ to be cheap at.
 | Glyphs from a backend (R18.9) | the same asset-pipeline questions as the R18.4 row, arriving from the other side. The *origin* half of this row is closed: chunk 40's `ControlOrigin` has a variant for a control that is not one of ours, carrying the same stored name and fallback label everything else renders from, so what is deferred is the image rather than room for it. Chunk 47 widened that variant with the class its reporter claims, so a foreign control can be narrowed to like one of ours |
 | **A presentation crate** (`bevy_action_map_ui`, or wherever it lands) | **Bevy deciding to take this crate upstream.** That is the point at which the workspace has to be arranged properly regardless, and it is also when the layering matters to someone other than us: an input crate that pulls `bevy_ui` cannot go upstream, and `bevy_ui` could not then use action maps. Until then the layer is `examples/common/prompt_ui.rs`, which every example shares and an integration test covers, and the cost of waiting is a `#[path]` import |
 | Netcode injection and rollback (§10)              | a testbed that actually rolls back; also wants held device state made snapshot-able (R10.3), which chunk 9 left as `BTreeSet`/`HashMap` |
-| Focus-driven context activation (R22.8) and text input | chunks 14 and 25 — priority, arbitration, and class bindings are what *claiming* a control means. D4's other half, dispatch (R22.7), needs none of that and is chunk 29. |
+| Focus-driven context activation (R22.8) and text input | chunks 14 and 25 — priority, arbitration, and class bindings are what *claiming* a control means |
+| **Dispatch as an action's effect (R22.7)** | **a widget that intercepts.** Chunk 29 was to build this and declined after asking what bubbling is *for*: it exists so that something can swallow an event before it reaches the default handler, and chunk 30's screen has nothing that wants to swallow a direction. Its observer calls the navigator directly, in four lines, and a `FocusedInput` carrying a navigation instruction would have been ceremony around the same call. The gate is a slider, a scroll area or a text field — a widget where a direction means something to the widget *first*. That is also the point at which the entry point belongs upstream beside `handle_tab_navigation`, because the interception cases are what it is for. A MUST deferred rather than met, and the reason is on record so that the next reader can disagree with it |
+| An initial delay distinct from the repeat rate (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both: the change fires on the crossing and the pulse's clock starts on that tick, so the first repeat is one interval later and every one after is evenly spaced. Two numbers means a `delay` field on `Pulse`, which is small — what is missing is a case where equal is wrong, and a two-table settings screen is not it |
 | **Guardian migration**                            | porting guardian from bevy 0.16.1 to 0.20-dev — four versions, its own job |
 
 Guardian is worth restating: it is on **bevy 0.16.1** with `bevy_enhanced_input 0.12`, and we target

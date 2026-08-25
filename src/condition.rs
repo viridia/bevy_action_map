@@ -118,6 +118,8 @@ pub enum BindingCondition {
         /// Fire immediately on the first tick as well as every interval after.
         immediate: bool,
     },
+    /// Fires on the tick the value differs from what it was on the tick before.
+    Change,
     /// Calls an application-defined condition.
     Custom(Box<dyn Condition>),
 }
@@ -130,8 +132,12 @@ impl BindingCondition {
     /// Decides what this condition makes of the binding's value this tick.
     pub fn evaluate(&self, value: ActionValue, scratch: &mut Scratch, delta: f32) -> Verdict {
         let actuated = value.to_bool();
-        let was = scratch.prev.to_bool();
-        scratch.prev = ActionValue::Bool(actuated);
+        // The whole value rather than whether it was off rest, so that a condition comparing one
+        // tick against the last has something to compare. Everything below reads `was`, which is
+        // the same answer either way, so this costs nothing to the conditions that do not care.
+        let previous = scratch.prev;
+        let was = previous.to_bool();
+        scratch.prev = value;
 
         match self {
             Self::Press => verdict(actuated && !was),
@@ -229,6 +235,23 @@ impl BindingCondition {
                     return Verdict::Fired;
                 }
                 Verdict::Ongoing
+            }
+
+            Self::Change => {
+                // Two values that are both at rest are the same input however they are spelled —
+                // a fresh scratch holds `Bool(false)` and the first tick of a stick reports
+                // `Axis2(ZERO)`, and that is not the player doing anything.
+                if value != previous && (actuated || was) {
+                    Verdict::Fired
+                } else if actuated {
+                    // Unchanged, but the control is still off rest. `Ongoing` rather than `Idle`
+                    // because a consuming binding claims its controls for as long as it has
+                    // something to say, and letting go of the claim between two crossings would
+                    // hand the control back to whatever is underneath in the meantime.
+                    Verdict::Ongoing
+                } else {
+                    Verdict::Idle
+                }
             }
 
             Self::Custom(condition) => condition.evaluate(value, scratch, delta),
@@ -496,5 +519,88 @@ mod tests {
             verdict_of(alloc::vec![explicit(Verdict::Ongoing)]),
             Verdict::Ongoing
         );
+    }
+
+    /// Drives one condition through a script of values, which is what `run` cannot do: a condition
+    /// that compares one tick against the last needs the value and not only whether it was down.
+    fn run_values(condition: &BindingCondition, script: &[ActionValue]) -> Vec<Verdict> {
+        let mut scratch = Scratch::default();
+        script
+            .iter()
+            .map(|value| condition.evaluate(*value, &mut scratch, TICK))
+            .collect()
+    }
+
+    #[test]
+    fn a_change_is_a_new_value_rather_than_a_new_press() {
+        use Verdict::{Fired, Idle, Ongoing};
+        use bevy_math::Vec2;
+
+        let north = ActionValue::Axis2(Vec2::Y);
+        let east = ActionValue::Axis2(Vec2::X);
+        let rest = ActionValue::Axis2(Vec2::ZERO);
+
+        assert_eq!(
+            run_values(&BindingCondition::Change, &[rest, north, north, east, rest]),
+            [Idle, Fired, Ongoing, Fired, Fired],
+            "one fire per direction entered, and one more on the way back to rest"
+        );
+    }
+
+    /// The trap a `Bool(false)` default sets: a fresh scratch and a stick sitting at centre are the
+    /// same input spelled two ways, and reading them as a change would fire on the first tick of
+    /// every context with nobody touching anything.
+    #[test]
+    fn rest_spelled_differently_is_not_a_change() {
+        use bevy_math::Vec2;
+
+        assert_eq!(
+            run_values(
+                &BindingCondition::Change,
+                &[ActionValue::Axis2(Vec2::ZERO), ActionValue::Axis1(0.0)]
+            ),
+            [Verdict::Idle, Verdict::Idle]
+        );
+    }
+
+    /// A held direction has to keep saying something, because consumption (§8) follows the verdict:
+    /// a menu that dropped to `Idle` between two crossings would hand the stick back to the game
+    /// underneath it for those ticks.
+    #[test]
+    fn a_held_direction_stays_ongoing_between_changes() {
+        let held = run_values(&BindingCondition::Change, &[ActionValue::Axis1(1.0); 4]);
+        assert_eq!(
+            held,
+            [
+                Verdict::Fired,
+                Verdict::Ongoing,
+                Verdict::Ongoing,
+                Verdict::Ongoing
+            ]
+        );
+    }
+
+    /// What the roadmap called auto-repeat out of two conditions that exist for other reasons: the
+    /// change fires on the crossing, and the pulse keeps firing while the direction is held.
+    #[test]
+    fn a_change_and_a_pulse_together_are_auto_repeat() {
+        use Verdict::{Fired, Ongoing};
+
+        let conditions = alloc::vec![
+            BindingCondition::Change,
+            BindingCondition::Pulse {
+                interval: TICK * 3.0,
+                immediate: false,
+            },
+        ];
+        let mut scratch = alloc::vec![Scratch::default(); conditions.len()];
+        let held = ActionValue::Axis1(1.0);
+
+        let verdicts: Vec<_> = (0..6)
+            .map(|_| combine(&conditions, held, &mut scratch, TICK))
+            .collect();
+        // The change fires on the crossing; the pulse's clock starts on that same tick, so the
+        // first repeat lands one interval after it and every one thereafter is evenly spaced.
+        assert_eq!(verdicts, [Fired, Ongoing, Fired, Ongoing, Ongoing, Fired]);
     }
 }

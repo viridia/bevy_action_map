@@ -2337,6 +2337,76 @@ mod tests {
         );
     }
 
+    /// The tick after the one it fired on, which is where consumption used to let go.
+    ///
+    /// A menu navigating by direction fires once per direction entered and says nothing on the
+    /// ticks between, so a claim that lasted only as long as the fire would hand the key back to
+    /// the game underneath for every tick the player kept holding it. What the claim follows is the
+    /// binding having something to say, which includes a condition part way through.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_claim_outlasts_the_fire_that_made_it() {
+        #[derive(InputAction)]
+        #[action(path = "tests.navigate", output = bool, intent = Button)]
+        struct Navigate;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.walk", output = bool, intent = Button)]
+        struct Walk;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.screen", tick = Render, priority = 10)]
+        struct Screen;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.world", tick = Render, priority = 0)]
+        struct World;
+
+        #[derive(Resource, Default)]
+        struct Seen {
+            navigated: bool,
+            walked: bool,
+        }
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Screen>(|context| {
+            // One fire when the key goes down, and nothing but `Ongoing` for as long as it is held.
+            context
+                .bind::<Navigate>(KeyCode::ArrowUp)
+                .on_change()
+                .consume();
+        });
+        app.add_context::<World>(|context| {
+            context.bind::<Walk>(KeyCode::ArrowUp);
+        });
+        app.world_mut().spawn(Screen);
+        app.world_mut().spawn(World);
+        app.init_resource::<Seen>();
+        app.add_systems(
+            Update,
+            |screen: Actions<Screen>,
+             world: Actions<World>,
+             mut seen: bevy_ecs::system::ResMut<'_, Seen>| {
+                seen.navigated = screen.value::<Navigate>();
+                seen.walked = world.value::<Walk>();
+            },
+        );
+
+        app.world_mut()
+            .write_message(press(KeyCode::ArrowUp, Key::ArrowUp, ButtonState::Pressed));
+        app.update();
+        assert!(app.world().resource::<Seen>().navigated, "the change fired");
+        assert!(!app.world().resource::<Seen>().walked, "and took the key");
+
+        // The key is still down and nothing has changed, so the screen has nothing to report — but
+        // it has not let go either.
+        app.update();
+        let seen = app.world().resource::<Seen>();
+        assert!(!seen.navigated, "no second fire from one press");
+        assert!(!seen.walked, "and the game behind still does not see it");
+    }
+
     /// Each obstacle the query can currently reach, provoked one at a time. The point of the type
     /// is that these are five different situations that look identical from the call site, so the
     /// test is worth as much as the feature.

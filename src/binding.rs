@@ -757,6 +757,19 @@ impl DeadZone {
     }
 }
 
+/// How many directions a compass modifier rounds to.
+///
+/// Four is what a table or a list wants: up, down, left and right, and nothing in between. Eight
+/// suits a radial menu or eight-way movement, where a diagonal is a direction in its own right
+/// rather than a way of asking for one of its neighbours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompassPoints {
+    /// The four cardinal directions.
+    Four,
+    /// The four cardinal directions and the four diagonals.
+    Eight,
+}
+
 /// A modifier that transforms one source value before it is written to an action.
 ///
 /// Implement this for anything the built-in set does not cover. A modifier is a pure function of
@@ -802,6 +815,8 @@ pub enum BindingModifier {
     Curve(f32),
     /// Reads the value as a rate and turns it into the displacement it produced this tick.
     PerSecond(f32),
+    /// Rounds a 2D direction to the nearest of four or eight compass points.
+    Compass(CompassPoints),
     /// Calls an application-defined modifier.
     Custom(Box<dyn Modifier>),
 }
@@ -817,6 +832,7 @@ impl BindingModifier {
             Self::Clamp { min, max } => apply_clamp(value, *min, *max),
             Self::Curve(power) => apply_curve(value, *power),
             Self::PerSecond(scale) => apply_scale(value, scale * delta),
+            Self::Compass(points) => apply_compass(value, *points),
             Self::Custom(modifier) => modifier.apply(value, scratch, delta),
         }
     }
@@ -837,6 +853,11 @@ impl BindingModifier {
         match self {
             Self::DeadZone(dead_zone) => dead_zone.rescale,
             Self::Custom(modifier) => modifier.rescales(),
+            // Not `Compass`, which discards magnitude rather than stretching it. The check exists
+            // so that a later threshold still corresponds to a physical position, and after a
+            // compass there is no magnitude left for one to read whatever came before it — so the
+            // pairing this is built for, a deadzone deciding when the stick counts as deflected
+            // and a compass reading which way, is not the stacking the check is looking for.
             _ => false,
         }
     }
@@ -920,6 +941,36 @@ impl<'a, C> BindingHandle<'a, C> {
             interval,
             immediate: true,
         });
+        self
+    }
+
+    /// Fires whenever the value differs from what it was on the tick before.
+    ///
+    /// The cheapest way to turn a control that reports a position into one that reports events. A
+    /// stick held off centre is off centre every tick, so a binding on it fires every tick; this
+    /// narrows that to the ticks on which something actually moved.
+    ///
+    /// Returning to rest is a change like any other, so a reader that only cares about the
+    /// direction the player chose should ignore a value at rest.
+    ///
+    /// ```ignore
+    /// // Fires once each time the stick is pushed into a new direction.
+    /// context
+    ///     .bind::<Navigate>(Stick::Left)
+    ///     .dead_zone(DeadZone::radial(0.5))
+    ///     .compass(CompassPoints::Four)
+    ///     .on_change();
+    ///
+    /// // The same, with auto-repeat: the pulse keeps firing while the direction is held.
+    /// context
+    ///     .bind::<Navigate>(Stick::Left)
+    ///     .dead_zone(DeadZone::radial(0.5))
+    ///     .compass(CompassPoints::Four)
+    ///     .on_change()
+    ///     .pulse(0.15);
+    /// ```
+    pub fn on_change(mut self) -> Self {
+        self.push_condition(BindingCondition::Change);
         self
     }
 
@@ -1199,6 +1250,34 @@ impl<'a, C> BindingHandle<'a, C> {
         self
     }
 
+    /// Rounds a direction to the nearest compass point, discarding how far it was pushed.
+    ///
+    /// A stick reports a position; a menu wants a direction. This is the conversion between them:
+    /// what comes out is a unit vector along one of four or eight compass points, or rest, and
+    /// nothing in between. Pair it with a deadzone, which is what decides how far the stick has to
+    /// travel before it counts as pointing anywhere at all.
+    ///
+    /// ```ignore
+    /// // Move the selection one item per direction the stick is pushed in.
+    /// context
+    ///     .bind::<Navigate>(Stick::Left)
+    ///     .dead_zone(DeadZone::radial(0.5))
+    ///     .compass(CompassPoints::Four)
+    ///     .on_change();
+    /// ```
+    ///
+    /// Rounding on its own does not stop the action from firing every tick — the stick stays off
+    /// centre for as long as the player holds it. [`on_change`](Self::on_change) is what makes it
+    /// fire once per direction entered.
+    ///
+    /// A one-dimensional value has two compass points rather than four, and which one it is on is
+    /// its sign, so this rounds one to -1, 0 or 1. A boolean has no direction to round, and neither
+    /// does a 3D value; both pass through untouched.
+    pub fn compass(mut self, points: CompassPoints) -> Self {
+        self.push_modifier(BindingModifier::Compass(points));
+        self
+    }
+
     /// Adds a custom modifier.
     pub fn custom<M: Modifier>(mut self, modifier: M) -> Self {
         self.push_modifier(BindingModifier::Custom(Box::new(modifier)));
@@ -1440,6 +1519,36 @@ where
         // magnitude that survived the test above cannot be zero.
         value * (dead_zone_remainder(magnitude, dead_zone) / magnitude)
     }
+}
+
+fn apply_compass(value: ActionValue, points: CompassPoints) -> ActionValue {
+    match value {
+        ActionValue::Axis2(value) => ActionValue::Axis2(compass_direction(value, points)),
+        // One dimension has two compass points, and which one a value is on is its sign.
+        ActionValue::Axis1(value) => {
+            ActionValue::Axis1(if value == 0.0 { 0.0 } else { value.signum() })
+        }
+        // Neither a boolean nor a 3D value is a direction this knows how to round.
+        other => other,
+    }
+}
+
+/// Rounds a vector to the nearest compass point, as a unit vector.
+///
+/// Bevy's own compass types do the rounding, so that a menu navigated through this and one
+/// navigated by `bevy_input_focus` directly agree about where the boundary between two directions
+/// falls, down to the degree.
+fn compass_direction(value: Vec2, points: CompassPoints) -> Vec2 {
+    // At rest there is no direction to round to, which is also what a reader wants to see: no
+    // input, rather than an arbitrary one of the points.
+    let Ok(direction) = bevy_math::Dir2::new(value) else {
+        return Vec2::ZERO;
+    };
+    match points {
+        CompassPoints::Four => bevy_math::Dir2::from(bevy_math::CompassQuadrant::from(direction)),
+        CompassPoints::Eight => bevy_math::Dir2::from(bevy_math::CompassOctant::from(direction)),
+    }
+    .as_vec2()
 }
 
 fn apply_scale(value: ActionValue, factor: f32) -> ActionValue {
@@ -1832,6 +1941,73 @@ mod tests {
         let out = dead_zoned(dead_zone, Vec2::new(0.75, 0.25));
         assert!((out.x - 0.5).abs() < 1e-6, "{out:?}");
         assert_eq!(out.y, 0.0);
+    }
+
+    fn compassed(points: CompassPoints, value: Vec2) -> Vec2 {
+        match BindingModifier::Compass(points).apply(
+            ActionValue::Axis2(value),
+            &mut Scratch::default(),
+            0.0,
+        ) {
+            ActionValue::Axis2(value) => value,
+            other => panic!("expected Axis2, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn four_points_round_a_diagonal_to_a_cardinal_direction() {
+        // Slightly north of north-east, so there is a right answer rather than a tie.
+        let out = compassed(CompassPoints::Four, Vec2::new(0.4, 0.5));
+        assert_eq!(out, Vec2::Y);
+        assert_eq!(
+            compassed(CompassPoints::Four, Vec2::new(-0.9, -0.1)),
+            -Vec2::X
+        );
+    }
+
+    #[test]
+    fn eight_points_keep_a_diagonal_as_a_direction_of_its_own() {
+        let out = compassed(CompassPoints::Eight, Vec2::new(0.4, 0.5));
+        let expected = Vec2::splat(core::f32::consts::FRAC_1_SQRT_2);
+        assert!(out.abs_diff_eq(expected, 1e-6), "{out:?}");
+    }
+
+    /// Magnitude is what the modifier throws away: how far the stick was pushed says nothing about
+    /// which way it was pushed, and a menu only asked the second question.
+    #[test]
+    fn a_compass_reports_a_direction_at_full_length_however_far_the_control_travelled() {
+        assert_eq!(
+            compassed(CompassPoints::Eight, Vec2::new(0.0, 0.05)),
+            Vec2::Y
+        );
+        assert_eq!(
+            compassed(CompassPoints::Eight, Vec2::new(0.0, 1.0)),
+            Vec2::Y
+        );
+        // Rest has no direction, and rounding it to an arbitrary one would be a phantom input.
+        assert_eq!(compassed(CompassPoints::Eight, Vec2::ZERO), Vec2::ZERO);
+    }
+
+    #[test]
+    fn one_dimension_has_two_compass_points() {
+        let signed = |value: f32| match BindingModifier::Compass(CompassPoints::Four).apply(
+            ActionValue::Axis1(value),
+            &mut Scratch::default(),
+            0.0,
+        ) {
+            ActionValue::Axis1(value) => value,
+            other => panic!("expected Axis1, got {other:?}"),
+        };
+        assert_eq!(signed(0.3), 1.0);
+        assert_eq!(signed(-0.9), -1.0);
+        assert_eq!(signed(0.0), 0.0);
+    }
+
+    /// A deadzone rescales and a compass does not, so the two stack — which is the pairing the
+    /// modifier is built for, and would be refused if it declared otherwise.
+    #[test]
+    fn a_dead_zone_and_a_compass_are_not_two_rescalings() {
+        assert!(!BindingModifier::Compass(CompassPoints::Eight).rescales());
     }
 
     #[test]

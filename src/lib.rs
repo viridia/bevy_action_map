@@ -167,7 +167,7 @@ pub mod prelude {
     #[cfg(any(feature = "keyboard", feature = "gamepad"))]
     pub use crate::binding::{AxisButtons, DirectionalButtons};
     // `MouseMove` is ungated because `BindingSource::MouseMotion` is.
-    pub use crate::binding::{ButtonThreshold, Control, DeadZone, MouseMove, Part};
+    pub use crate::binding::{ButtonThreshold, CompassPoints, Control, DeadZone, MouseMove, Part};
     pub use crate::capture::{
         CaptureSession, Captured, Conflict, ControlClass, Overlap, Refused, RefusedReason,
         ReservedControls, conflicts,

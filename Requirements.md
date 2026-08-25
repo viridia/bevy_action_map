@@ -597,7 +597,19 @@ PassThrough actions, first-match for others.
   longest/most-specific chord wins is the recommended default (`Ctrl+S` suppresses `S`).
 - **R8.2 (MUST)** Higher-priority contexts must be able to _consume_ a control so lower-priority
   contexts do not see it, and this must be opt-in per binding (a menu consumes `Escape`, but the
-  "screenshot" global hotkey should still see `F12`).
+  "screenshot" global hotkey should still see `F12`). _A claim lasts for as long as the binding has
+  something to say — while its conditions are `Ongoing` as well as on the tick it fires. Chunk 30
+  narrowed this from "on the fire" after a menu binding that fires once per direction entered was
+  found handing the stick back to the game between two crossings. The consequence worth stating is
+  that a charging `.hold()` and a part-way `.multi_tap()` now claim their controls too, which is the
+  same rule and not a special case._
+- **R8.2a (MUST)** Consumption governs what reaches other _contexts_, and cannot govern what reaches
+  a consumer outside this crate that reads device events directly. _Found by chunk 30, and named as
+  a requirement because a menu that swallows `Space` while `bevy_ui_widgets` still activates a button
+  with it is R8.2 met on paper and unmet in the game. The path in question is `InputDispatchPlugin`,
+  the only thing that turns a global keyboard event into a focused one. The fix is a mapper-aware
+  plugin in its place — `DefaultPlugins` is a group, so an app can disable one member and add
+  another — and it is chunk 49, behind the `focus` feature with the rest of D4._
 - **R8.3 (MUST)** Consumption must be resolvable in one deterministic pass with no ordering ambiguity
   between systems.
 - **R8.4 (MUST)** Interop with focus/UI: per D4 (§22), a focused widget claims controls by activating
@@ -1288,7 +1300,13 @@ surface.
   actions coexist with picking.
 - **R22.5 (SHOULD)** Interop with `bevy_input_focus::{tab_navigation, directional_navigation}`: UI
   navigation (including analog-stick navigation with initial delay + repeat rate) should be expressible
-  as actions in this system rather than as a parallel input path.
+  as actions in this system rather than as a parallel input path. _Met by chunk 29 for the directional
+  half, out of two general pieces rather than a navigation feature: `.compass()` rounds a stick to a
+  compass point, `.on_change()` narrows a held control to the ticks it moved on, and `.pulse()` beside
+  them is the repeat. Two clauses are short of the letter. **Delay and rate are one number**, because
+  the pulse's clock starts on the same tick the change fires — an independent initial delay is
+  deferred with a stated gate. And **"rather than as a parallel input path" is not yet true of the
+  widget side**, which is R8.2a and chunk 49._
 - **R22.6 (SHOULD)** A documented migration path from LWIM and bevy_enhanced_input, since the ecosystem
   will ask.
 
@@ -1313,7 +1331,12 @@ character keys.
 - **R22.7 (MUST)** An action's effect must be expressible as "dispatch as a bubbling event at the
   current focus entity", not only as "produce a value". This is a distinct axis from the value model
   in §2 and the state machine in §3, both of which describe only what an action *reports*, not what
-  firing it *does*.
+  firing it *does*. _Unbuilt, and deliberately so after chunk 29 declined it. Bubbling exists so that
+  something can **intercept**, and chunk 30's screen has nothing that wants to swallow a direction —
+  its observer calls the navigator directly, in four lines, and a bubbling event would have been
+  ceremony around the same call. The gate is a widget that intercepts: a slider, a scroll area or a
+  text field, where a direction means something to the widget before it means "move the selection".
+  Deferred with that gate rather than carried by a chunk._
 - **R22.8 (MUST)** Context activation must be bindable to the _kind_ of the focused entity, re-evaluated
   when focus changes. Must handle: nothing focused, a focus entity matching several such contexts, and
   a focus entity despawned while focused.

@@ -927,6 +927,62 @@ Three properties worth noting:
 how "Southpaw" is actually shipped, and the only remapping story for device classes where
 per-mapping rebinding is not offered.
 
+### 9.8 Navigating a screen (R22.5)
+
+Moving a selection with a stick is the one input problem where the naive binding is visibly wrong.
+A stick held off centre is off centre every tick, so a binding on it fires every tick, and a menu
+driven that way runs off the end of the list before the player has let go. The two usual fixes — a
+virtual cursor, or a bespoke navigation input path beside the mapper — are both worse than the
+problem: the first is slow to use, and the second puts a game's most-pressed controls somewhere the
+rebinding screen cannot see them.
+
+**What the crate adds is two combinators, neither of which is about navigation.**
+
+| | |
+| --- | --- |
+| `.compass(CompassPoints)` | Rounds a 2D value to the nearest of four or eight compass points and discards the magnitude. Eight-way movement and radial menus want this for their own reasons. |
+| `.on_change()` | Fires on the ticks the value differs from the tick before. The cheapest condition in the set — it needs only the previous value, which `Scratch` already carries. |
+
+Separately each is nearly useless here. Rounding alone still fires every tick; change detection alone
+fires on every wobble across a boundary. Together they fire once per compass point *entered*, which
+is what a menu wants — and `.on_change().pulse(0.25)` is then auto-repeat, out of three combinators
+that all exist for other reasons. R22.5 asks for an initial delay and a repeat rate; what this gives
+is one number serving as both, because the pulse's clock starts on the tick the change fires.
+
+**Two consequences are worth writing down, because neither was obvious.**
+
+- **The previous value has to be the value.** `Scratch::prev` was written as a boolean by every
+  condition's shared preamble, which is all the built-in set needed and is not enough to compare two
+  directions. Storing the whole value instead costs nothing — the boolean the other conditions read
+  is `prev.to_bool()`, the same answer either way — and makes the field mean what its own
+  documentation already claimed.
+- **Consumption follows the verdict, and the verdict is `Ongoing` between crossings.** A binding
+  that fires once per direction entered says nothing on the ticks in between, so a claim that lasted
+  only as long as the fire would hand the stick back to the game underneath for exactly the ticks
+  the player was still holding it. §8's claim is therefore taken while the binding is `Ongoing` as
+  well as while it is `Fired`.
+
+**Where the crate stops is the value.** It rounds the direction and says when it changed; it does not
+call `bevy_input_focus`, and it does not know the focus exists. The observer that turns a direction
+into a focus move is four lines and lives in the app, because R22.9 says the association between a
+widget library and an input mapper may only be expressed by whoever depends on both. The same four
+lines are what let a pad press a button that `bevy_ui_widgets` only knows how to activate from a
+keyboard.
+
+**And there is one thing consumption cannot reach**, which R8.2a now records: a keyboard event
+becomes a focused one through `InputDispatchPlugin`, which asks the mapper nothing — so
+`bevy_ui_widgets::Button` activates itself on `Space` whether or not a context has claimed `Space`,
+and a screen that swallows a control still lets that control press a button.
+
+The fix is a mapper-aware plugin in that one's place, and it is **ours to write rather than Bevy's**:
+`DefaultPlugins` is a plugin group, so an app can `.disable::<InputDispatchPlugin>()` and add a
+replacement that consults `ConsumedControls` before dispatching. It belongs behind the `focus`
+feature with the rest of D4 (R22.10), which is where `src/focus.rs` is already reserved for it, and
+it is chunk 49. The dependency direction survives: the replacement depends on `bevy_input_focus`,
+which the feature already admits, and nothing in `bevy_ui_widgets` learns that we exist. Until it
+lands the workaround is an action that consumes and does nothing, which is what Disasteroids'
+`Swallowed` is.
+
 ---
 
 ## 10. Sketched, not designed
