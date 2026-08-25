@@ -633,3 +633,78 @@ control index. Writing the scan first was the honest order and the answer is tha
 handful of captions rebuilt when a screen opens. Chunk 47 is what would change it, and its own
 answer there is change detection rather than an index — so the index is the move after that one
 fails, not before.
+
+### Chunk 47: a binding as a text span
+
+The presentation half of R18, made authorable. A component beside `TextSpan` names an action and
+fills in its own string, so a template says "Press ⟨whatever fires this⟩" with nothing in it naming
+a control. Dead Zone's two hand-formatted captions are now spans, and the `format!` and the `join`
+are gone from both.
+
+**The dependency graph decided where this lives, and that was not the plan.** The chunk was written
+as two components — one requiring `TextSpan`, one requiring `Text` — until the question "what does
+that cost" got asked. `TextSpan` is `bevy_text`, which drags `bevy_asset`, `bevy_image` and
+`bevy_log`, the crate this project's own manifest says it avoided for being std-only. `Text` is
+`bevy_ui`, which drags the render stack — and `bevy_ui` already depends on `bevy_input` and
+`bevy_input_focus`. An input crate depending on it inverts the layering and forecloses `bevy_ui`
+ever using action maps itself, which is a worse outcome than any amount of convenience is worth. So
+the split is by dependency weight rather than by subject: the crate keeps the lookup and the
+staleness signal, both free, and everything that draws is `examples/common/prompt_ui.rs` — shared
+by `#[path]`, covered by `tests/prompt_ui.rs` so it is tested rather than merely compiled, and
+waiting on a deferred row whose gate is Bevy taking the crate upstream. The two-component design
+went with it: a whole `Text` that is nothing but a prompt is a `Text` with one span under it, which
+is how Bevy already models it.
+
+**A resource that is touched, not an event, and the reasoning is worth keeping.** R18.5 wants
+invalidation that is not a per-frame poll. A broadcast event was the first proposal and the counter
+won on two grounds: three changes in one frame — a rebind, a context switching off, the entity
+carrying it despawning — coalesce into one pass rather than three sweeps over every prompt on
+screen, and the pass happens at a point in the schedule the reader picks, which matters because a
+caption wants rewriting before layout measures it. The half that made it uncontroversial is that
+resources are now entities: the touch is written as an *insert* rather than a mutable deref, so
+hooks fire, so a consumer can observe the resource instead of owning a system. There is a test
+pinning that, because it is a claim about Bevy rather than about us.
+
+**Component change detection is not an alternative, and it is worth writing down why.** The obvious
+implementation watches `Changed<InputContextState<C>>`. Evaluation writes that component every
+frame, so the filter is true constantly and detects nothing. What works is a signal raised
+deliberately, which happens to travel on the change-tick mechanism.
+
+**The third firing point is the one nobody would have written.** Two were obvious: a context
+activating, and a binding changing — that one is chunk 38's to raise, since nothing can rebind yet.
+The third is an instance of a context arriving or leaving, because the answer is folded over every
+entity carrying the context, so it moves from empty to non-empty with nothing calling `activate`.
+That is a hook on `InputContextState<C>` rather than on `C`, registered where `read_bindings`
+already is. It is also chunk 40's `PostStartup` ordering, arriving as a fix rather than a
+constraint: the corner hint went back to `Startup`, because a span asks after the fact and asks
+again when the answer moves, so which system ran first stopped mattering.
+
+**Absence as a third state, for the device a bare prompt speaks for.** The chunk had to decide what
+a span with no companions renders, and chunk 40 had already refused to rank devices. The framing
+that settled it is that nearly every game has one answer for its whole runtime — a console title
+names pad buttons even with a keyboard plugged in — so this is configuration rather than state, set
+once and usually never touched. `PromptDevice` therefore has no default: **absent** means the game
+has not said and is diagnosed where prompts are drawn, and **present holding `None`** means the game
+deliberately has no primary device. A default would have been a guess that fails silently, with
+every prompt in the game naming the wrong control and nothing reporting it.
+
+**A rename, and the sweep it exposed.** `Scope` and `Origin` became `PromptScope` and
+`ControlOrigin` — a prelude glob-imported into a BSN template puts a bare noun beside components
+from three other crates, and `Scope` in particular means something different in half of Bevy. The
+sweep found a dozen more (`Scheme`, `Mapping`, `Part`, `Phase`, `Intent`, the four transition
+events), which became chunk 48 rather than riding along in a feature chunk. That chunk has a shelf
+life: it costs a rename today and a deprecation story the moment anything outside this repository
+depends on the crate.
+
+**What the class narrowing cost, and what it bought.** `PromptScope` grew `of(ControlClass)`, which
+meant `ControlOrigin::Foreign` growing a `class` beside the `scheme` it already carried — symmetric,
+and the alternative was a narrowing no backend-supplied control could ever satisfy. An origin whose
+reporter said nothing about its class is excluded from a narrowed answer deliberately: handing a
+caller who asked for a button something nobody has claimed is one is worse than handing them
+nothing.
+
+**Fell short of its own description in one place.** R18.5 lists a keyboard *layout* change among the
+things that must invalidate a prompt, and nothing in Bevy reports either the current layout or a
+change to it — the same gap §10.3 records for `fallback_label`. The requirement is annotated rather
+than quietly satisfied: it is unobservable rather than unbuilt, and it becomes schedulable if winit
+surfaces the layout.

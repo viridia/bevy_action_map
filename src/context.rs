@@ -644,6 +644,17 @@ fn attach_context_state<C: InputContext + Component>(
     world.commands().entity(context.entity).insert(state);
 }
 
+/// Says that a prompt naming this context's controls may now say something else.
+///
+/// Registered on the *state* rather than on `C`, because it is the state that says whether the
+/// context is being carried at all: a prompt is the fold of that over every instance, so it
+/// changes when the first one appears and when the last one goes away, with nothing calling
+/// `activate` in either case. Deliberately not generic — the hook is the same code for every
+/// context, and one copy of it is enough.
+fn invalidate_prompts(mut world: DeferredWorld<'_>, _context: HookContext) {
+    crate::present::PromptGeneration::invalidate(&mut world.commands());
+}
+
 /// Installs whatever decides when a context is live, once the context itself is declared.
 ///
 /// Boxed because the condition's type is only known inside the closure `add_context` hands to the
@@ -659,6 +670,7 @@ pub(crate) type Activation = alloc::boxed::Box<dyn FnOnce(&mut App)>;
 fn apply_active<C: InputContext + Component>(
     bevy_ecs::system::In(live): bevy_ecs::system::In<bool>,
     contexts: Query<'_, '_, &mut InputContextState<C>>,
+    mut commands: bevy_ecs::system::Commands<'_, '_>,
     mut was_empty: bevy_ecs::system::Local<'_, bool>,
 ) {
     // Something said this context should be live and there is nothing to make live, which is the
@@ -676,6 +688,7 @@ fn apply_active<C: InputContext + Component>(
     }
     *was_empty = empty;
 
+    let mut changed = false;
     for mut context in contexts {
         // `activate` and `deactivate` both return immediately when there is nothing to do; the
         // check here is what keeps the mutable deref, and with it the change tick, off the frames
@@ -688,6 +701,13 @@ fn apply_active<C: InputContext + Component>(
         } else {
             context.deactivate();
         }
+        changed = true;
+    }
+
+    // Once for the edge, not once per instance: a prompt is the same answer however many entities
+    // carry the context.
+    if changed {
+        crate::present::PromptGeneration::invalidate(&mut commands);
     }
 }
 
@@ -1174,6 +1194,18 @@ fn declare_context<C: InputContext + Component>(
             .try_on_add(attach_context_state::<C>)
             .is_some(),
         "context {} is already declared, or its component already has an on_add hook",
+        C::PATH
+    );
+
+    // `InputContextState<C>` is ours alone, so these can only fail the way the assertion above
+    // fails: the same context declared twice.
+    assert!(
+        world
+            .register_component_hooks::<InputContextState<C>>()
+            .try_on_add(invalidate_prompts)
+            .and_then(|hooks| hooks.try_on_remove(invalidate_prompts))
+            .is_some(),
+        "context {} is already declared",
         C::PATH
     );
 

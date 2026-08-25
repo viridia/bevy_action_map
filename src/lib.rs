@@ -104,6 +104,10 @@ impl bevy_app::Plugin for ActionMapPlugin {
         app.init_resource::<binding::ButtonThreshold>();
         app.init_resource::<eval::ConsumedControls>();
         app.init_resource::<capture::ReservedControls>();
+        // Always present, so that whatever draws prompts can watch it from the first frame. Its
+        // absence would mean nothing — unlike `PromptDevice`, where absence is the game not having
+        // said which device it speaks for, and where a default would be a guess.
+        app.init_resource::<present::PromptGeneration>();
 
         // After the release below, or a capture's claim would be cleared the moment it was made.
         app.add_systems(
@@ -172,7 +176,9 @@ pub mod prelude {
     pub use crate::context::{ActionMapAppExt, Actions, ActionsQuery, InputContextState, Obstacle};
     pub use crate::event::{Canceled, Completed, Fired, Started};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
-    pub use crate::present::{BindingTable, Origin, Prompt, Prompts, Scope};
+    pub use crate::present::{
+        BindingTable, ControlOrigin, Prompt, PromptDevice, PromptGeneration, PromptScope, Prompts,
+    };
     pub use crate::rebind::{Capacity, Mapping, MappingKey, Rebinding, Scheme, mappings};
     // The derives share their names with the traits above, which is fine — a derive macro and a
     // trait live in different namespaces. Without these, a glob import of this prelude gives you

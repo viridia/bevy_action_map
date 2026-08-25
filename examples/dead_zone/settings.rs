@@ -12,6 +12,7 @@ use bevy_action_map::prelude::*;
 use bevy_action_map::rebind::fallback_label;
 
 use crate::actions::ToggleSettings;
+use crate::common::prompt_ui::PromptSpan;
 
 /// A row the player may change, and the box drawn around such a cell.
 const CHANGEABLE: Color = Color::srgb(0.75, 0.95, 0.8);
@@ -84,27 +85,12 @@ fn screen(world: &World) -> impl Scene {
             .collect()
     };
 
-    // What closes the screen, which is the one thing here that has to know an action. A reverse
-    // lookup rather than a filter over the list above: the question is what would fire the action
-    // *now*, so the answer skips a context that is switched off and a control something else has
-    // taken — neither of which the mapping list knows about, because neither is a fact about what
-    // the game declared.
-    let close = BindingTable::new(world)
-        .prompts(ToggleSettings::id(), Scope::ANY)
-        .iter()
-        .map(|prompt| prompt.origin.fallback_label().into_owned())
-        .collect::<Vec<_>>()
-        .join(" or ");
     // One list of two, rather than two children: the tables are the same kind of thing, and a
     // `Vec` of scenes is the scene list a `Children` block wants.
     let tables = vec![
         table("Keyboard & Mouse", rows(Scheme::KeyboardMouse)),
         table("Gamepad", rows(Scheme::Gamepad)),
     ];
-    let footer = format!(
-        "Boxed cells are the ones this game offers for rebinding; everything else is listed so \
-         you can see what it does.\nPress {close} to close."
-    );
 
     bsn! {
         // Closing the screen is nothing but despawning it, which the state can do on its own.
@@ -131,10 +117,29 @@ fn screen(world: &World) -> impl Scene {
                 Node { column_gap: Val::Px(64.0), align_items: AlignItems::Start }
                 Children [{tables}]
             ),
+            // The one thing on this screen that has to know an action. A span rather than a
+            // lookup formatted into the sentence: the question is what would fire it *now*, so
+            // the answer skips a context that is switched off and a control something else has
+            // taken — and it changes while the screen is up, once this screen can rebind.
             (
-                Text({footer})
+                Text::new(
+                    "Boxed cells are the ones this game offers for rebinding; everything else \
+                     is listed so you can see what it does.\nPress "
+                )
                 TextFont { font_size: 14.0_f32 }
                 TextColor(FIXED)
+                Children [
+                    (
+                        PromptSpan({ToggleSettings::id()})
+                        TextFont { font_size: 14.0_f32 }
+                        TextColor(TITLE)
+                    ),
+                    (
+                        TextSpan::new(" to close.")
+                        TextFont { font_size: 14.0_f32 }
+                        TextColor(FIXED)
+                    ),
+                ]
             ),
         ]
     }

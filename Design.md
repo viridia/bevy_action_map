@@ -1251,8 +1251,8 @@ answer is decided by three things that are easier to get right before there are 
 **It is a trait, and the answer is not a `Control`.** R18.8 makes the lookup a trait because our
 binding tables are not always the authority; R18.9 goes further and observes that a backend's
 origins are *its own enumeration* of physical controls, covering device families we have no variant
-for. So the return type is an `Origin`, which is either one of ours or a name-plus-label pair from
-somewhere else, and both answer `name()` and `fallback_label()` — the same two strings §10.3
+for. So the return type is a `ControlOrigin`, which is either one of ours or a name-plus-label pair
+from somewhere else, and both answer `name()` and `fallback_label()` — the same two strings §10.3
 established, so a caption renders one without first asking where it came from. A `Vec<Control>`
 would have made the trait ours-only while looking substitutable, which is the expensive kind of
 wrong.
@@ -1288,12 +1288,12 @@ deactivates.
 
 **A scan, and what would make an index worth it.** Each call walks every declared context and
 flattens its bindings. §10's sketch assumed an index — the inverse of the plan's control index — and
-the scan was written first to find out whether one is needed. On the evidence it is not yet: the
-callers are a handful of captions rebuilt when a screen opens, and the cost is proportional to the
-bindings in the game rather than to anything per-frame. The thing that would change that is chunk
-47, where a HUD full of spans could ask the same question every frame; R18.5's answer there is
-change detection over the lookup's inputs, and if that is not enough then an index is the next move
-rather than the first one.
+the scan was written first to find out whether one is needed. On the evidence it is not: the callers
+are a handful of captions rebuilt when something changes, and the cost is proportional to the
+bindings in the game rather than to anything per-frame. A HUD full of spans was the case that would
+have changed it, and §10.7's answer is that the spans do not ask on a quiet frame at all — so what
+an index would speed up is the frame where the answer moved, which is the frame nobody is counting.
+It stays the next move rather than the first one.
 
 **Not built here.** R18.3's structured descriptor for composite structure — "hold", "chord of A and
 B" — is still absent, and §10.3 records why. What *is* carried is the chord itself: a binding that
@@ -1301,6 +1301,65 @@ requires a modifier alongside its own control reports both, because dropping the
 `Ctrl+S` render as "S", which is a wrong prompt rather than an unpolished one. Condition structure
 is the part that stays missing: a held binding and a tapped one on the same key produce the same
 prompt, and Dead Zone's `Afterburner` is the case in tree.
+
+### 10.7 Prompts on screen, and keeping them true
+
+A lookup nobody displays cannot go stale, so R18.5 only becomes observable once something renders an
+answer. What renders it is a **text span that names an action and fills in its own string** — Bevy's
+text spans are entities, so a component beside `TextSpan` is everything a template needs to say
+"Press ⟨whatever fires Thrust⟩ to thrust" with nothing in the template naming a control.
+
+**That component is not in this crate, and the dependency graph is why.** `TextSpan` is `bevy_text`;
+`Text` is `bevy_ui`, which already depends on `bevy_input` and `bevy_input_focus`. A mapping crate
+that depended on `bevy_ui` would invert that layering and would foreclose `bevy_ui` ever using
+action maps itself — which is the opposite of what §11 is arranged for. So the split is by
+dependency weight rather than by subject: the crate keeps the lookup and the staleness signal, both
+of which cost nothing, and everything that draws lives in `examples/common/prompt_ui.rs` until it
+becomes a crate of its own. §11's "when to split" rule is what governs the promotion, and the gate
+is Bevy taking this crate upstream, since that is when the workspace has to be arranged properly
+anyway.
+
+**The signal is a counter, and it is deliberately neutral about how it is read.**
+`PromptGeneration` is bumped by everything the crate can see change the answer: a context
+activating or deactivating, and an instance of a context arriving or going away — which is a
+separate case, because the answer is folded over every entity carrying a context and so moves when
+the first one appears with nothing calling `activate`. The two ways to read it are both real. A run
+condition (`resource_changed`) coalesces a frame's worth of bumps into one pass at a point in the
+schedule the reader chooses, which is what a text layer wants, since a caption should be rewritten
+before layout measures it. An observer works too, because a resource is a component on an entity of
+its own — which is why the bump is written as an *insert* rather than a mutable deref, so that it
+fires hooks. That costs one `u64` write per change and keeps the future presentation crate free to
+stay declarative.
+
+**What the crate cannot see is stated rather than papered over.** `activate` and `deactivate` are
+public, so a game flipping activation by hand raises the signal itself; so does a game that changes
+which device its prompts speak for; so does a backend whose bindings are edited elsewhere, which is
+R18.10. Component change detection is not an alternative for any of these: evaluation writes to
+`InputContextState` every frame, so `Changed` on it is true constantly and detects nothing.
+
+**Which device a bare prompt speaks for is configuration, not state.** Nearly every game has one
+answer for its whole runtime — a console title's prompts name pad controls even with a keyboard
+plugged in, and a desktop title's name keys even with a pad — so `PromptDevice` is set once and
+usually never touched. Nothing defaults it: the crate does not insert it, because a guess here is
+wrong *silently*, with every prompt in the game naming the wrong control and nothing reporting it.
+Its **absence** means the game has not said, and is diagnosed where prompts are drawn; holding
+`None` means the game deliberately has no primary device and takes the unranked answer. A game that
+does vary it at runtime — prompts that follow the device just used — writes it and raises the
+signal, which is the rare case paying for itself.
+
+**Narrowing is by component, one per question.** Which device, which kind of control, and which of
+several are three separate components beside the span rather than fields on it, so that a template
+says which question it is asking and so that a fourth is additive. Two of them are `PromptScope`
+narrowings and the third is not: picking the *n*th answer indexes what would fire the action now,
+after consumption has removed what a stronger context took and after a composite has expanded to one
+entry per direction. That is emphatically not the settings screen's primary and secondary column,
+which are declared and belong to `mappings` — the same two-lists distinction as §10.6, arriving
+where it is easiest to get wrong.
+
+**A span shows one control.** Whether two of them read as "W / Up", "W or Up" or as two table cells
+is a question about the screen they sit on, and a game that wants all of them has the lookup and a
+`join`. The load-bearing half is that a prompt is a hint rather than a manual: "Press W to thrust"
+is the sentence, and "Press W or Up Arrow to thrust" is a worse one even where both are true.
 
 ---
 

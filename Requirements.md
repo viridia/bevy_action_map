@@ -1028,7 +1028,13 @@ game. Unity `ToDisplayString` + `InputBinding.MaskByGroup`. Unreal's `PlayerMapp
   asset handle; the app supplies the atlas. A fallback chain (brand → generic → text) is required.
 - **R18.5 (MUST)** Live invalidation: prompts must update when bindings change, the active context
   changes, the player's active device changes, or the keyboard layout changes. Change detection or
-  events must make this cheap — polling every prompt every frame is not acceptable.
+  events must make this cheap — polling every prompt every frame is not acceptable. _Met by chunk
+  47 for every clause but the last: a counter the crate raises, read either by a run condition or
+  by an observer, with nothing consulted on a frame where it did not move (§10.7). The **keyboard
+  layout** clause is unmet and not schedulable — nothing in Bevy reports a layout change, or the
+  current layout at all, which is the same gap §10.3 records for `fallback_label`. It is a
+  limitation of what can be observed rather than work left undone, and it becomes schedulable if
+  winit surfaces the layout._
 - **R18.6 (WITHDRAWN)** ~~Track a per-player "most recently used device/scheme" for prompt
   selection, subject to §15.R15.8 hysteresis.~~ _Superseded: which device a prompt speaks for is the
   app's call, supplied to the lookup rather than inferred by it. R18.1 already takes a device class,

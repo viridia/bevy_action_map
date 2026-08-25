@@ -29,6 +29,11 @@ mod pause;
 mod settings;
 mod ship;
 
+#[path = "../common/mod.rs"]
+mod common;
+
+use common::prompt_ui::{self, PromptSpan};
+
 fn main() {
     App::new()
         .add_plugins((
@@ -54,10 +59,14 @@ fn main() {
             pause::plugin,
             overlay::plugin,
             settings::plugin,
+            prompt_ui::plugin,
         ))
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))
-        .add_systems(Startup, camera.spawn())
-        .add_systems(PostStartup, hint)
+        // Dead Zone is a desktop game: its prompts name keys even when a pad is plugged in, and
+        // the pad's own controls are listed on the settings screen rather than advertised in the
+        // corner. Nothing infers this — a crate guessing it would be wrong silently.
+        .insert_resource(PromptDevice(Some(Scheme::KeyboardMouse)))
+        .add_systems(Startup, (camera.spawn(), hint.spawn()))
         .run();
 }
 
@@ -72,37 +81,49 @@ fn camera() -> impl Scene {
 
 /// A line in the corner naming the two screens, since a game with no menu advertises nothing.
 ///
-/// The keys in it are looked up rather than written down here, which is the same reason the
-/// controls screen captions its own close button that way: text naming a control goes stale the
-/// moment somebody changes what the control is.
+/// The keys in it are spans rather than text, which is the same reason the controls screen captions
+/// its own close button that way: text naming a control goes stale the moment somebody changes what
+/// the control is, and a span is told when that happens.
 ///
-/// `PostStartup` rather than `Startup`, and that is the lookup's doing. It answers about what would
-/// fire *now*, so it says nothing about a context no entity is carrying yet — and the entity
-/// carrying this one is spawned by another `Startup` system, which nothing orders against this.
-fn hint(world: &World, mut commands: Commands) {
-    let table = BindingTable::new(world);
-    let key_for = |action| {
-        table
-            .prompts(action, Scope::ANY.on(Scheme::KeyboardMouse))
-            .first()
-            .map_or_else(String::new, |prompt| {
-                prompt.origin.fallback_label().into_owned()
-            })
-    };
+/// Back in `Startup`, and that is the span's doing. Formatting the caption here meant asking what
+/// fires an action before the entity carrying that context existed, which is a question with a
+/// different answer depending on which `Startup` system ran first; a span asks after the fact and
+/// asks again whenever the answer moves, so the ordering stops mattering.
+fn hint() -> impl Scene {
+    const LABEL: Color = Color::srgb(0.35, 0.4, 0.42);
+    const KEY: Color = Color::srgb(0.62, 0.7, 0.72);
 
-    let text = format!(
-        "{} debug overlay   {} controls",
-        key_for(actions::ToggleOverlay::id()),
-        key_for(actions::ToggleSettings::id()),
-    );
-    commands.spawn_scene(bsn! {
-        Text({text})
-        TextFont { font_size: 13.0_f32 }
-        TextColor({Color::srgb(0.35, 0.4, 0.42)})
+    bsn! {
+        Text
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(8.0),
             left: Val::Px(8.0),
         }
-    });
+        // Every span carries its own font and colour: a `TextSpan` requires both, so they are not
+        // inherited from the `Text` above and a span that omits them is drawn at Bevy's default
+        // size in white.
+        Children [
+            (
+                PromptSpan({actions::ToggleOverlay::id()})
+                TextFont { font_size: 13.0_f32 }
+                TextColor(KEY)
+            ),
+            (
+                TextSpan::new(" debug overlay   ")
+                TextFont { font_size: 13.0_f32 }
+                TextColor(LABEL)
+            ),
+            (
+                PromptSpan({actions::ToggleSettings::id()})
+                TextFont { font_size: 13.0_f32 }
+                TextColor(KEY)
+            ),
+            (
+                TextSpan::new(" controls")
+                TextFont { font_size: 13.0_f32 }
+                TextColor(LABEL)
+            ),
+        ]
+    }
 }
