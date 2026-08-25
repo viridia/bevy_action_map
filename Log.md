@@ -708,3 +708,40 @@ things that must invalidate a prompt, and nothing in Bevy reports either the cur
 change to it — the same gap §10.3 records for `fallback_label`. The requirement is annotated rather
 than quietly satisfied: it is unobservable rather than unbuilt, and it becomes schedulable if winit
 surfaces the layout.
+
+### Housekeeping, between 47 and the next chunk
+
+Three commits with no chunk between them: the example renamed, `rebind` renamed to `mapping`, and
+the document corrections both renames turned up.
+
+**Disasteroids, and the reason the pun had to go.** The example was Dead Zone, which was funny and
+pedagogically backwards — a reader meeting it while learning what a deadzone *is* meets a game that
+has nothing to do with one. The mechanical half was worse than the joke: its action paths were
+`dead_zone.thrust` and `dead_zone.flight`, so the game's namespace sat one token from the crate's
+own `DeadZone` in `rebind.rs` and `binding.rs`, the two files that teach both. Two `///` comments
+were using the example's namespace to explain `fallback_label` on docs.rs, where no reader has an
+example to refer to; those moved to `gameplay.*`, which the rest of the file already used.
+
+**`rebind` became `mapping`, and the argument was not that it holds mappings.** `binding.rs` holds
+bindings, composites, modifiers and conditions and is named for the primary one; a module holding
+mappings, tunables and presets and named for an *operation* performed on them was the odd one out.
+The rename restores the pairing the module doc already claimed — `binding` is the developer's model,
+`mapping` is the player's. `Rebinding`, `mappable` and every prose "rebind" as a verb stay; the type
+is chunk 48's call and is a good name for what it says.
+
+**The same rename lesson, for the third time.** Chunk 39 left two stale spellings that chunk 43
+found; this pass left one that the *first* sweep of this session missed. It survived because the
+deferred table's Tunables row does not spell the name: it said tunables were wanted "by a game named
+after a deadzone". No grep for the old title finds a paraphrase of the old title. Chunk 43's entry
+already says a rename this size has to be a reading rather than a grep — three instances is a
+pattern, and the reading has to cover the places that describe the thing instead of naming it.
+
+**Two ground-rule-5 findings, from re-reading the prelude instead of the list.** Chunk 48 enumerated
+a dozen bare nouns; the prelude exports sixteen. `Obstacle`, `Timestamp`, `Rebinding` and `Actions`
+were missing, and a name that chunk does not list is a name it walks past — `Timestamp` being the
+one another crate is most likely to export too. Separately, R18.3's condition half had no
+destination in either document: chunk 47 landed the chord half of the descriptor and said the
+condition half "stays unbuilt", and nothing carried it. It is now a deferred row gated on chunk 44,
+which is the chunk that takes `private` off `Afterburner` and so the moment a held binding and a
+tapped one appear on one screen. 44 carries a bullet saying so, because a gate nobody is watching
+is not a destination.
