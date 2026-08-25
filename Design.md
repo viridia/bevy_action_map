@@ -938,10 +938,9 @@ Enough to show the architecture accommodates them; each deserves its own documen
   consulted by the router between L1 and L2, so an unowned device's input never reaches a player's
   evaluator. Join-by-button-press works by evaluating a designated context against *unassigned*
   devices.
-- **Presentation** (Requirements §18)**.** The plan's reverse index answers "what is bound to `Jump`" without scanning;
-  filtering by the player's active device class and by consumption gives the prompt. Glyph resolution
-  returns an identifier, or an opaque handle when an authority backend supplies it. The naming half
-  is built — see §10.3.
+- **Presentation** (Requirements §18)**.** Glyph resolution returns an identifier, or an opaque
+  handle when an authority backend supplies it. Everything else here is built: the naming half in
+  §10.3 and the reverse lookup in §10.6.
 - **Persistence** (Requirements §17)**.** Designed in §10.1 rather than sketched.
 - **Rebinding** (Requirements §19)**.** Designed in §9.7 rather than sketched, because D7 changed what it operates on.
 
@@ -1242,6 +1241,66 @@ lives at `<install>/controller_config/game_actions_<appid>.vdf`, which means a r
 Spacewar's 480 with a `steam_appid.txt` beside the binary, for experiments. And origins are Steam's
 own enumeration of physical controls, not ours: `EInputActionOrigin` covers device families we have
 no `Control` for and never will, which is R18.9's point and chunk 40's review surface.
+
+### 10.6 The reverse lookup
+
+R18.1 asks the question every other path through the crate throws away the answer to: given an
+action, which control fires it. `Prompts::prompts(action, scope)` answers it, and the shape of the
+answer is decided by three things that are easier to get right before there are callers than after.
+
+**It is a trait, and the answer is not a `Control`.** R18.8 makes the lookup a trait because our
+binding tables are not always the authority; R18.9 goes further and observes that a backend's
+origins are *its own enumeration* of physical controls, covering device families we have no variant
+for. So the return type is an `Origin`, which is either one of ours or a name-plus-label pair from
+somewhere else, and both answer `name()` and `fallback_label()` — the same two strings §10.3
+established, so a caption renders one without first asking where it came from. A `Vec<Control>`
+would have made the trait ours-only while looking substitutable, which is the expensive kind of
+wrong.
+
+**A prompt is not a row of the controls screen.** The two lists look alike and answer different
+questions. `rebind::mappings` is what the game *declared*, and it is a static list: a screen must
+draw a row for a binding whether or not anything is carrying its context. A prompt is what would
+fire *now*, so it is empty for a context nobody is carrying and for one that is switched off, and it
+includes a `private` binding — `private` is a statement about the list, not about whether the
+control works. That divergence is why the lookup reads the compiled plan rather than filtering the
+mapping list, and why the two go through separate type-erased doors.
+
+**Ranking, and the half of it that is honest to refuse.** R18.1 asks for a stable ranked order.
+Contexts come back in the order they get to claim a control — render tick before fixed tick, then by
+priority, then declaration order, which is §5.2's rule reused rather than a second one invented —
+and within a context the bindings come back in the order they were written, which is what makes the
+first one the primary. What is deliberately *not* ranked is the device, and that is now a decision
+rather than a gap. Ordering keyboard before gamepad would be a guess wearing a ranking's clothes,
+and the alternative — tracking which device the player used last and ranking by it — was R18.6 and
+is withdrawn: an app knows why it is showing a prompt, which screen and opened with what, where the
+crate would only be inferring from the last thing pressed. So the device is a *scope*, supplied by
+the caller. A caller that knows passes one; a caller that does not gets every device's answer in a
+stable order and picks.
+
+**Consumption is read from the declarations, not from the frame.** R18.2 requires the answer to
+reflect consumption, and there are two things that could mean. The transient set — which controls
+have actually been claimed this tick — is the literal reading and the wrong one: a claim lands only
+while the claiming action fires, so a caption built from it would flicker as the player pressed
+things. What a prompt needs is the standing fact, which is that a control bound with `consume` in a
+stronger active context does not reach the weaker one, whatever the weaker one's binding says.
+That is computed from the plans and the activity, and it moves only when a context activates or
+deactivates.
+
+**A scan, and what would make an index worth it.** Each call walks every declared context and
+flattens its bindings. §10's sketch assumed an index — the inverse of the plan's control index — and
+the scan was written first to find out whether one is needed. On the evidence it is not yet: the
+callers are a handful of captions rebuilt when a screen opens, and the cost is proportional to the
+bindings in the game rather than to anything per-frame. The thing that would change that is chunk
+47, where a HUD full of spans could ask the same question every frame; R18.5's answer there is
+change detection over the lookup's inputs, and if that is not enough then an index is the next move
+rather than the first one.
+
+**Not built here.** R18.3's structured descriptor for composite structure — "hold", "chord of A and
+B" — is still absent, and §10.3 records why. What *is* carried is the chord itself: a binding that
+requires a modifier alongside its own control reports both, because dropping the modifier makes
+`Ctrl+S` render as "S", which is a wrong prompt rather than an unpolished one. Condition structure
+is the part that stays missing: a held binding and a tapped one on the same key produce the same
+prompt, and Dead Zone's `Afterburner` is the case in tree.
 
 ---
 

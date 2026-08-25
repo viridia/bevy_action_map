@@ -56,7 +56,8 @@ fn main() {
             settings::plugin,
         ))
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))
-        .add_systems(Startup, (camera.spawn(), hint))
+        .add_systems(Startup, camera.spawn())
+        .add_systems(PostStartup, hint)
         .run();
 }
 
@@ -71,16 +72,22 @@ fn camera() -> impl Scene {
 
 /// A line in the corner naming the two screens, since a game with no menu advertises nothing.
 ///
-/// The keys in it are read out of the mapping list rather than written down here, which is the same
-/// reason the controls screen captions its own close button that way: text naming a control goes
-/// stale the moment somebody changes what the control is.
+/// The keys in it are looked up rather than written down here, which is the same reason the
+/// controls screen captions its own close button that way: text naming a control goes stale the
+/// moment somebody changes what the control is.
+///
+/// `PostStartup` rather than `Startup`, and that is the lookup's doing. It answers about what would
+/// fire *now*, so it says nothing about a context no entity is carrying yet — and the entity
+/// carrying this one is spawned by another `Startup` system, which nothing orders against this.
 fn hint(world: &World, mut commands: Commands) {
-    let all = mappings(world);
+    let table = BindingTable::new(world);
     let key_for = |action| {
-        all.iter()
-            .find(|mapping| mapping.action == action && mapping.scheme == Scheme::KeyboardMouse)
-            .and_then(|mapping| mapping.slots.first())
-            .map_or_else(String::new, |control| control.fallback_label().into_owned())
+        table
+            .prompts(action, Scope::ANY.on(Scheme::KeyboardMouse))
+            .first()
+            .map_or_else(String::new, |prompt| {
+                prompt.origin.fallback_label().into_owned()
+            })
     };
 
     let text = format!(

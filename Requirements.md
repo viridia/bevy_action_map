@@ -1029,8 +1029,16 @@ game. Unity `ToDisplayString` + `InputBinding.MaskByGroup`. Unreal's `PlayerMapp
 - **R18.5 (MUST)** Live invalidation: prompts must update when bindings change, the active context
   changes, the player's active device changes, or the keyboard layout changes. Change detection or
   events must make this cheap — polling every prompt every frame is not acceptable.
-- **R18.6 (MUST)** Track a per-player "most recently used device/scheme" for prompt selection, subject
-  to §15.R15.8 hysteresis.
+- **R18.6 (WITHDRAWN)** ~~Track a per-player "most recently used device/scheme" for prompt
+  selection, subject to §15.R15.8 hysteresis.~~ _Superseded: which device a prompt speaks for is the
+  app's call, supplied to the lookup rather than inferred by it. R18.1 already takes a device class,
+  and an app knows why it is showing the prompt — which screen, opened how — where the crate would
+  only be guessing from what was pressed last. Split-screen is where the difference stops being
+  academic: a menu one player opened speaks for that player's device, which the app knows from who
+  opened it, and "most recently used" would be answering a question nobody asked while both players
+  are pressing things. What would revive this is R15.8's auto-switching,
+  which is a §15 question about the player model rather than a presentation one: if that lands, a
+  prompt reads the active scheme rather than tracking one of its own._
 - **R18.7 (SHOULD)** Support a confirm/cancel button-convention policy as one setting rather than
   scattered `if cfg!` checks. The case that forces this: on PlayStation in Japan, ○ (East) has
   historically meant confirm and ✕ (South) cancel, while the rest of the world uses the opposite —

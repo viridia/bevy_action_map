@@ -121,15 +121,15 @@ step and a real game is a better acceptance test than a synthetic one.
 
 | | |
 | --- | --- |
-| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; and the first screen a player sees — Dead Zone's controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout. |
-| **Known wrong today** | The controls screen does not take the controls: the game hears them through it, because nothing yet declares a context for the screen (chunk 30). Otherwise nothing is wrong so much as absent — the player-facing half of the crate is one read-only list and no way to change anything on it. |
-| **Never built** | Rebinding itself: nothing can yet change what a control is bound to, or save the change. Also tunables, presets, prompts, and every screen that does more than list what is already there. |
+| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Dead Zone's controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for. |
+| **Known wrong today** | The controls screen does not take the controls: the game hears them through it, because nothing yet declares a context for the screen (chunk 30). A prompt is stated in text and never refreshed, and it cannot tell a held binding from a tapped one (chunk 47). Otherwise nothing is wrong so much as absent — the player-facing half of the crate is one read-only list and no way to change anything on it. |
+| **Never built** | Rebinding itself: nothing can yet change what a control is bound to, or save the change. Also tunables, presets, glyphs, and every screen that does more than list what is already there. |
 
 ---
 
 ## What has landed
 
-Twenty-eight chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+Twenty-nine chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
 where it fell short of its own description — Phase VII onward there, and everything before it in the
 [archive](./Log-archive.md). This table is only an index, and the sequence below is what remains.
 
@@ -163,6 +163,7 @@ where it fell short of its own description — Phase VII onward there, and every
 | 41 | Mouse buttons | done; scroll wheel still unclaimed |
 | 43 | Listed by default | done; the gap it found → 44 |
 | 21 | The settings screen, read-only | done; the caption's reverse lookup → 40, taking the controls → 30 |
+| 40 | Reverse lookup | done; invalidation and device ranking → 47, glyphs still deferred |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -199,62 +200,6 @@ index does not claim an event.
 
 What R24.8 turned from polish into obligation: the long tail cannot verify what it does not own, so
 mistakes have to be caught rather than discovered in QA that nobody is running.
-
-### 17b. Plan-build diagnostics
-
-§9.5's middle tier, which does not exist: plan-build failures collected and reported rather than
-asserted one at a time. Unknown controls, shape mismatches a conversion cannot fix, duplicate
-bindings, contradictory consume flags (R4.8). Plus the derive's duplicate-key error — declaring
-`path` twice currently picks one silently, which for a serialized identity is the worst available
-outcome.
-
-- **Inherited from chunk 15:** the intent-versus-channel mismatch is an `assert!` at plan build
-  rather than a collected diagnostic, alongside the rescaling check it sits next to.
-- **Inherited from chunk 13: a context declared and never spawned says nothing.** Declaring one
-  registers a plan and some systems; if no entity ever carries it, every action in it is silently
-  dead and the failure looks like "that key does nothing". This cost a bug in Dead Zone's own pause
-  menu, in the file that had just been rewritten. A blanket check at startup would be wrong — a
-  per-player context legitimately arrives later — but a **state-driven** context whose state is
-  current and whose instance count is zero is a much narrower signal, and one worth saying out
-  loud.
-- **Inherited from chunk 17a, and it made this one more urgent.** Reading a context with no
-  instance used to panic, which was the wrong failure but a loud one. It now skips the system
-  silently, per Bevy's own rule for `Single`. That is right for the case it was built for — the
-  ship is dead, so the system that flies it has nothing to do — and it is indistinguishable at the
-  call site from the never-spawned bug above. The signal is what tells the two apart.
-- **Inherited from chunk 17a: BSN gives the same silence a second door.** An `on(...)` handler
-  attached to an entity that does not carry the context compiles, spawns, and never fires. The
-  crate now advertises that pattern, so it owns the diagnostic for getting it wrong.
-- **How it is demonstrated, since a correct game shows nothing.** A diagnostic fires when something
-  is wrong, so Dead Zone cannot exercise one without being broken on purpose. Three homes instead:
-  the message text pinned by tests, since 17b's deliverable *is* the text; `tests/ui/`, which
-  already holds the compile-time tier and gains the derive's duplicate-`path` case; and
-  `examples/diagnostics.rs`, a runnable catalogue that authors half a dozen wrong binding sets and
-  prints what the crate says about each.
-- **The catalogue forces validation to be callable without an `App`,** which is worth having on its
-  own: it is half of the offline check R8.6 and R19.3 need to test a binding a player has not
-  committed to yet. Only half — the clash rule itself stays inside the evaluator until chunk 19,
-  and this chunk should not go after it.
-- **Review surface:** error text, judged as the deliverable it is. R24.4 distinguishes runtime
-  failures (must return errors) from app-build ones (may panic, must be actionable).
-
-### 36. The debug overlay
-
-R22.2, which until now no chunk claimed — an inspector-friendly dump of active contexts, bindings
-and action states, and a live overlay in Dead Zone driven by it. `why_not` appears in no example
-today, so the runtime diagnostic tier is tested and never seen.
-
-- **Why it is a chunk rather than a nicety.** R22.2 is a `SHOULD` whose only destination was an
-  assumption, which ground rule 5 says is an item that will be dropped. It is also the second such
-  item found in one sitting; see chunk 35.
-- **What it shows:** which contexts are active and at what priority, each action's phase and value,
-  and `why_not` for the action under the cursor — the five obstacles that look identical from a
-  call site.
-- **Why before rebinding rather than after.** When a rebind does not take, the question is whether
-  it was capture, conflict, or arbitration, and the overlay is what answers it. Building it after
-  chunk 31 means debugging chunk 31 without it.
-- **Not doing:** an editor integration. The requirement asks that the same data drive an overlay,
-  not that we ship an inspector.
 
 ### 17c. Reflect, and the two normalizes
 
@@ -301,7 +246,7 @@ than against its own description:
 - **Confirm and Cancel at the bottom**, activatable three ways: mouse click; directional navigation
   then A; and a shortcut, B for cancel and X for confirm. **The button caption includes the
   shortcut**, which is R18.1's reverse lookup showing up as a UI requirement rather than a nicety —
-  chunk 40 answers it and chunk 47 is how the caption says so without formatting a string by hand.
+  chunk 40 answered it and chunk 47 is how the caption says so without formatting a string by hand.
 - **Two-stage cancel.** B *during a capture* cancels only the capture. B again, with no capture
   live, leaves the screen **without committing**.
 - **Working-copy semantics**, which follow from having a Confirm at all: the screen renders
@@ -312,45 +257,6 @@ Chunk 39 built the model half of the three-column table — a mapping holds an o
 capacity, and a capture names the slot it fills — 43 put the fixed rows on it, and 21 drew both
 tables from that model alone. What is left is everything that happens when the player presses one.
 
-### 40. Reverse lookup
-
-R18.1, which no chunk claimed: given an action — optionally narrowed by context and device class —
-return the controls currently bound to it, in a stable ranked order. This is what "Cancel (B)"
-needs, and Dead Zone's settings screen needs it for the button captions its own spec asks for.
-
-- **Why it is not in §18 and not gated with it.** §18's deferral is about the asset pipeline, which
-  is true of glyphs (R18.4) and false of this: a reverse lookup returns controls, and chunk 37
-  already turned a control into a stored name and a fallback label. Nothing about it waits on an
-  atlas.
-- **It is the inverse of the plan's control index**, which already maps control → bindings, so the
-  work is a second index rather than a scan — and building it as a scan first, to see whether the
-  index is worth it, is the honest order.
-- **Inherited from chunk 21: the caller already exists, doing it the slow way.** Dead Zone's
-  controls screen captions itself with "Press F2 or North Button to close", which it gets by
-  filtering the mapping list by `ActionId` and reading the controls back out. That is this chunk's
-  scan, written before its index, and it is what the trait has to be able to replace.
-- **Must reflect active contexts and consumption** (R18.2). A prompt for an action a higher-priority
-  context is currently consuming is wrong, and this is the part that cannot be answered from the
-  plan alone.
-- **It lands as a trait, with our binding table as one implementation** (R18.8), not as a free
-  function over `DeclaredContexts`. This is the chunk that either makes that decision or forecloses
-  it, and Design §10.5 is what it should be designed against. The trait is about *who is asked*, not
-  how it answers — the scan-first instinct above is unaffected, and the concrete implementation is
-  the one this chunk writes.
-- **Not doing:** R18.3's structured descriptor for composite structure — "hold", "chord of A and B".
-  Chunk 37 left that half unbuilt and Design §10.3 records why; it wants a descriptor type wrapping
-  the names, and nothing in tree renders one yet. It stays without a chunk, which ground rule 5 says
-  is a thing that will be dropped — so it is named here as this chunk's review surface: if the
-  captions need it, it belongs to this chunk after all.
-- **Review surface:** the ranking. "Stable, ranked order" is doing real work — a player on a pad
-  should see the pad control first — and R18.6's most-recently-used-device tracking is what would
-  decide it. That is not built either, so this chunk should say plainly what its ranking is based on
-  rather than implying it knows which device the player is holding.
-- **Second review surface:** whether the trait can answer for an action whose origins it does not
-  own. A backend's controls are its own enumeration and cover device families we have no `Control`
-  for (R18.9), so a return type of `Vec<Control>` quietly makes the trait ours-only. Getting this
-  wrong is cheap to fix here and expensive once callers exist.
-
 ### 47. A binding as a text span
 
 The presentation half of R18, made authorable. Bevy's text spans are *entities* — a `Text` is a
@@ -360,27 +266,38 @@ a template needs to say "Press ⟨whatever fires Jump⟩ to jump", with the crat
 of the sentence and nothing in the template naming a control.
 
 - **What it replaces, and the acceptance test.** Two callers already format that string by hand:
-  Dead Zone's corner hint and the controls screen's close caption, both of which scan the mapping
-  list and `format!`. Both should become `bsn!` with a span apiece. The button captions chunk 31
-  needs — "Cancel (B)" — are the third caller and the reason the shape has to be authorable rather
-  than a helper function.
+  Dead Zone's corner hint and the controls screen's close caption. Chunk 40 moved both onto the
+  lookup, so what is left in each is a `format!` and a `join` over the answer — which is exactly
+  the part a span removes. Both should become `bsn!` with a span apiece. The button captions chunk
+  31 needs — "Cancel (B)" — are the third caller and the reason the shape has to be authorable
+  rather than a helper function.
 - **Reads through chunk 40's trait**, not through `mappings`. A span asking "what fires this action
   right now" is exactly R18.1's question, including R18.2's answer about consumption, and going
   around the trait would give the two callers different answers for the same action.
-- **Disambiguation and formatting are components too**, which is the part worth designing rather
-  than guessing: which scheme, which slot, whether to show one control or all of them joined, and
-  what to do when the action is bound to nothing. Each of those is a reason to add a component
-  beside the first rather than a field nobody sets — but a span with no companions must render
-  something sensible, or the common case pays for the rare one.
+- **A span shows one control, and joining several is the app's problem.** Decided rather than left
+  open, because the alternative is the crate holding an opinion it has no basis for: whether two
+  controls read as "W / Up", "W or Up", or two table cells is a question about the screen they sit
+  on, and a game that wants all of them has the lookup and a `join`. The load-bearing half is that a
+  prompt is a hint and not a manual — "Press W to thrust" is the sentence, and "Press W or Up Arrow
+  to thrust" is a worse one even where both are true.
+- **Disambiguation is components too**, which is the part left worth designing rather than guessing:
+  which scheme, which slot, and what to do when the action is bound to nothing. Each of those is a
+  reason to add a component beside the first rather than a field nobody sets — but a span with no
+  companions must render something sensible, or the common case pays for the rare one.
 - **This is what makes R18.5 observable, and therefore what owes it.** Live invalidation has sat in
   the deferred table because nothing displayed a prompt whose staleness could be seen; a span is
   that thing, and the moment one exists a rebind, a context change or a device change has to reach
   it. Change detection over the lookup's inputs rather than a per-frame poll, which R18.5 names
   outright.
-- **And it is where R18.6 stops being theoretical.** A player holding a pad should be shown the pad
-  control, which is the ranking chunk 40 is told to state plainly rather than fake. If that ranking
-  is still "declaration order" when this lands, every prompt in the game is wrong for one of the two
-  devices, so this chunk either wants most-recently-used-device tracking or has to say why not.
+- **Which device it speaks for is the app's, not ours.** Chunk 40 left devices unranked and this
+  chunk does not fix that by tracking one: the scheme is a parameter the caller supplies, and a
+  `bsn!` scene function takes one as easily as anything else. An app knows why it is showing a
+  prompt — which screen, opened with what — where the crate would be inferring it from what was
+  pressed last. That withdraws R18.6, and the withdrawal is what keeps this chunk small: the
+  mechanism is a convenience for games that want a legible hint, not the prompt layer of a title
+  that will have bespoke platform code regardless.
+- **So the open question is the default**, since a span with no scheme beside it still has to render
+  something. That is this chunk's decision to make and the one place it must not shrug.
 - **A variant per text component, rather than one that guesses.** A span inside a sentence and a
   whole `Text` that is nothing but the prompt are both ordinary, and they require different things —
   `TextSpan` for the first, `Text` for the second. Two components requiring one apiece, over shared
@@ -632,9 +549,22 @@ that capture uses in chunk 20.
   the two devices share no code path and a routing bug cannot hide behind symmetry. Two pads of the
   same model exercise identity, where kind tells you nothing and only the device handle
   distinguishes them — which is the case that decides whether the handle is carried far enough.
+- **Consumption is device-blind, and R15.3 says it must not be.** `ConsumedControls` is keyed on
+  `Control`, which names South without naming *whose* pad, so one player's modal context consuming a
+  button takes it from the other player's gameplay context. Instances of one context are already
+  safe — claims are batched per context rather than applied one instance at a time, deliberately —
+  and it is the cross-context case that collides. This is not visible in a one-player game and is
+  the first thing two pads will do.
+- **Split Fiction is the precedent, and it cuts both ways.** When one player opens the options menu
+  there, the other is locked out, symmetrically — so a modal screen owned by one player standing the
+  other down is a *shipped* answer and not a bug to design away. What the crate must not do is
+  deliver it by accident: a game whose inventory screen should leave the other player flying has no
+  way to say so if consumption cannot tell two pads apart. So the lockout has to be the app's
+  choice, which means routing has to reach consumption rather than stopping at the frame.
 - **Review surface:** whether pairing is a property of the context entity or a filter on the plan.
   The entity already carries the state, so it is the obvious home, but that puts a device handle in
-  a component that has so far been pure.
+  a component that has so far been pure — and the bullet above is the case that decides it, since a
+  filter on the plan leaves the consumed set global whichever way the rest goes.
 
 ### 27. Split Friction
 
@@ -813,17 +743,22 @@ Split Friction does, and because the gate turned out to be met already. Reverse 
 it in chunk 39's grooming, which is also when the §18 row was found to be claiming an asset gate for
 two requirements that have nothing to do with assets.
 
-Those two — live prompt invalidation (R18.5) and most-recently-used device (R18.6) — have now left
-it as well, and their gate is a good example of one that a chunk meets by existing. They waited on
-something that displays a prompt whose staleness could be observed; chunk 47 is that thing, so both
-are written onto it. Glyphs (R18.4) stay, because theirs is an asset-pipeline gate and 47 renders
-text.
+Those two — live prompt invalidation (R18.5) and most-recently-used device (R18.6) — left it as
+well, and only one of them survived the trip. R18.5's gate is a good example of one a chunk meets by
+existing: it waited on something displaying a prompt whose staleness could be observed, and chunk 47
+is that thing, so it is written onto 47. R18.6 is **withdrawn** instead of scheduled — which device
+a prompt speaks for is a parameter the app supplies, not a thing the crate infers from what was
+pressed last, and inferring it is scope this crate does not need to carry. Glyphs (R18.4) stay,
+because theirs is an asset-pipeline gate and 47 renders text.
 
 Backends (D3) left it in the Steam grooming, and the gate is worth restating because the row used to
 read as though any second implementer would do. It named "one working in-tree path to generalize
 _from_", which is true and was doing no work: what the seam actually waits on is chunks 40 and 38,
 because R18.8 and R19.8 are surfaces those two either build as substitutable or foreclose. That is
-now written onto both, the seam is designed in Design §10.5, and the implementer is chunk 42.
+now written onto both, the seam is designed in Design §10.5, and the implementer is chunk 42. Chunk
+40 has since discharged its half: reverse lookup is a trait, and its return type admits an origin
+that is not one of our `Control`s, which is R18.9's demand met at the only price it was ever going
+to be cheap at.
 
 | Area                                              | Gated on                                                                   |
 | ------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -831,7 +766,7 @@ now written onto both, the seam is designed in Design §10.5, and the implemente
 | Mouse wheel as a binding source (R13.3)           | nothing in tree wants it. Chunk 41 landed mouse *buttons* and stopped there deliberately: the wheel is a delta on its own channel, needs the `Line`/`Pixel` normalization R13.3 describes, and shares nothing with a button but the device |
 | Glyph ids (R18.4)                                 | asset-pipeline questions this document does not touch — but *the art is no longer one of them*: **Kenney's input prompt set** covers keyboard, mouse and the three pad brands and is CC0, so an example can ship one without a licensing conversation. Confirm the licence and the coverage before relying on either. What stays open is the identifier scheme, and Kenney is the way to falsify it: R18.4 wants a key of (brand, control) with a brand → generic → text fallback, and chunk 37's stored names are already the control half — `pad/South` plus a brand is nearly the whole id. If that mapping does not survive contact with a real atlas's file names, R18.4 is wrong rather than merely unbuilt |
 | Tunables (R19.11)                                 | nothing in tree adjusts one. Chunk 19 landed mappings and left tunables reading "23 and later", which is the destination ground rule 5 refuses; chunk 45 needs the preset *format* to leave room for them and does not need them to exist. Wanted by R20.5 and by a game named after a deadzone, so this row is a question to reopen rather than a settled no |
-| Glyphs from a backend (R18.9), and origins that are not our `Control` | the same asset-pipeline questions as the R18.4 row, arriving from the other side. The seam that has to accommodate them is settled — Design §10.5, and chunk 40's second review surface — so what is deferred is rendering one, not making room for it |
+| Glyphs from a backend (R18.9) | the same asset-pipeline questions as the R18.4 row, arriving from the other side. The *origin* half of this row is closed: chunk 40's `Origin` has a variant for a control that is not one of ours, carrying the same stored name and fallback label everything else renders from, so what is deferred is the image rather than room for it |
 | Netcode injection and rollback (§10)              | a testbed that actually rolls back; also wants held device state made snapshot-able (R10.3), which chunk 9 left as `BTreeSet`/`HashMap` |
 | Focus-driven context activation (R22.8) and text input | chunks 14 and 25 — priority, arbitration, and class bindings are what *claiming* a control means. D4's other half, dispatch (R22.7), needs none of that and is chunk 29. |
 | **Guardian migration**                            | porting guardian from bevy 0.16.1 to 0.20-dev — four versions, its own job |

@@ -1,4 +1,11 @@
-//! Naming a control: what to store it as, and what to show for it.
+//! Prompts: which control fires an action, and what to call it.
+//!
+//! "Press ⟨something⟩ to jump" is two questions. Which control — the reverse of everything else in
+//! this crate, which turns controls into values and forgets the control on the way — and what to
+//! call it on screen. [`Prompts`] answers the first and [`Control::name`] and
+//! [`Control::fallback_label`] answer the second.
+//!
+//! # Naming a control
 //!
 //! A control needs two strings and they are not the same string. One goes in a settings file and
 //! has to mean the same thing next year; the other goes on screen and has to be readable in the
@@ -31,8 +38,35 @@
 //! What an app can do today is supply the control half of its catalogue per layout. What the crate
 //! will be able to do once capture lands is remember the logical key seen at the moment a player
 //! bound something, which is right for every binding they chose themselves.
+//!
+//! # Which control
+//!
+//! ```ignore
+//! for prompt in BindingTable::new(world).prompts(Jump::id(), Scope::ANY) {
+//!     println!("{}", prompt.origin.fallback_label());
+//! }
+//! ```
+//!
+//! This is a **runtime** question rather than a question about what the game declared. A control
+//! only answers for an action if something is carrying the context the binding lives in, if that
+//! context is active, and if nothing evaluated earlier in the frame takes the control away — so the
+//! answer changes as the game runs, and a caller that asks before its contexts exist is told
+//! nothing rather than told what they will say. [`rebind::mappings`](crate::rebind::mappings) is
+//! the other list, and the one a controls screen wants: everything the game declared, whether or
+//! not it is live.
+//!
+//! [`Prompts`] is a trait because this crate is not always the authority. Where an external backend
+//! owns the bindings, it owns the answer too, and its controls are its own enumeration of things we
+//! have no name for — which is why an [`Origin`] is not a [`Control`].
 
-use crate::binding::Control;
+use alloc::string::String;
+use alloc::vec::Vec;
+
+use bevy_ecs::world::World;
+
+use crate::action::ActionId;
+use crate::binding::{Control, Part};
+use crate::rebind::Scheme;
 
 #[cfg(feature = "gamepad")]
 use bevy_input::gamepad::{GamepadAxis, GamepadButton};
@@ -452,6 +486,252 @@ impl Control {
     }
 }
 
+/// One physical control a prompt can name.
+///
+/// Usually one of ours. It is an enum rather than a [`Control`] because the crate is not always the
+/// authority on what is bound: where an external backend owns the bindings, its controls are its
+/// own enumeration and cover device families this crate has no variant for and never will. Both
+/// variants answer [`name`](Origin::name) and [`fallback_label`](Origin::fallback_label), so a
+/// screen renders one without first asking which it was handed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Origin {
+    /// A control this crate knows.
+    Ours(Control),
+    /// A control only whatever reported it knows.
+    Foreign {
+        /// What it is stored and looked up under, on the same terms as [`Control::name`]: an
+        /// identity that must mean the same thing next year, and the key a catalogue answers to.
+        name: String,
+        /// Readable text for a game whose catalogue has no entry for `name`.
+        label: String,
+        /// Which set of devices it belongs to, where the reporter said. `None` where it belongs to
+        /// neither — a control on a device family this crate does not model.
+        scheme: Option<Scheme>,
+    },
+}
+
+impl Origin {
+    /// What this control is stored and looked up under.
+    pub fn name(&self) -> alloc::borrow::Cow<'_, str> {
+        match self {
+            Self::Ours(control) => control.name(),
+            Self::Foreign { name, .. } => alloc::borrow::Cow::Borrowed(name),
+        }
+    }
+
+    /// Readable text for a game with no translation catalogue.
+    pub fn fallback_label(&self) -> alloc::borrow::Cow<'_, str> {
+        match self {
+            Self::Ours(control) => control.fallback_label(),
+            Self::Foreign { label, .. } => alloc::borrow::Cow::Borrowed(label),
+        }
+    }
+
+    /// Which set of devices this control belongs to, where that is known.
+    pub const fn scheme(&self) -> Option<Scheme> {
+        match self {
+            Self::Ours(control) => Some(control.scheme()),
+            Self::Foreign { scheme, .. } => *scheme,
+        }
+    }
+
+    /// The control itself, for a caller that needs more than a name for it.
+    ///
+    /// `None` for one that came from somewhere else, which is the case a caller reaching for this
+    /// has to have an answer for.
+    pub const fn control(&self) -> Option<Control> {
+        match self {
+            Self::Ours(control) => Some(*control),
+            Self::Foreign { .. } => None,
+        }
+    }
+}
+
+/// One way to fire an action, as a prompt would show it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Prompt {
+    /// The control that fires it.
+    pub origin: Origin,
+    /// What has to be held for that control to count, in the order it was declared.
+    ///
+    /// Empty for almost everything. A binding that requires a modifier alongside its own control is
+    /// the exception, and dropping this would caption `Ctrl+S` as "S".
+    pub with: Vec<Origin>,
+    /// Which part of a composite this control drives.
+    ///
+    /// [`Part::Whole`] unless the action is bound to an arrangement of several controls, in which
+    /// case there is one prompt per part and this is what tells them apart.
+    pub part: Part,
+    /// The path of the context the binding lives in, where it came from a context at all.
+    pub context: Option<&'static str>,
+}
+
+/// How much of the binding set a lookup is asking about.
+///
+/// [`ANY`](Scope::ANY) is everything. The two narrowings are the ones a screen actually wants: one
+/// device's worth, because a prompt shows the control the player is holding rather than all of
+/// them, and one context's, because the same action may be bound differently in two of them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Scope {
+    /// Only bindings declared in the context with this path.
+    pub context: Option<&'static str>,
+    /// Only controls belonging to this set of devices.
+    pub scheme: Option<Scheme>,
+}
+
+impl Scope {
+    /// Everything currently bound, on any device, in any context.
+    pub const ANY: Self = Self {
+        context: None,
+        scheme: None,
+    };
+
+    /// Narrows to one context, named by the path it declared.
+    pub const fn in_context(mut self, path: &'static str) -> Self {
+        self.context = Some(path);
+        self
+    }
+
+    /// Narrows to one set of devices.
+    pub const fn on(mut self, scheme: Scheme) -> Self {
+        self.scheme = Some(scheme);
+        self
+    }
+}
+
+/// Who to ask what a control prompt should say.
+///
+/// A trait rather than a function over this crate's own tables, because those tables are not always
+/// the authority: a game whose bindings live in an external backend asks the backend, gets that
+/// backend's own controls back, and renders them through the same [`Origin`]. The trait is about
+/// *who is asked*; [`BindingTable`] is the answer when the asking stops here.
+pub trait Prompts {
+    /// The controls that would currently fire `action`, strongest first.
+    ///
+    /// Empty is a real answer, and the common way to get one is an action whose context nothing is
+    /// carrying or nothing has activated.
+    fn prompts(&self, action: ActionId, scope: Scope) -> Vec<Prompt>;
+}
+
+/// This crate's own binding tables, as a source of prompts.
+///
+/// # What "strongest first" means, and what it does not
+///
+/// Contexts come back in the order they get to claim a control: render-tick contexts before
+/// fixed-tick ones, then by priority, then in the order they were declared. Within one context the
+/// order is the order the bindings were written, which is what makes the first one the primary.
+///
+/// **Nothing here ranks one device above another.** A player on a pad should be shown the pad
+/// control first, and this cannot know which device they are holding — that wants a per-player
+/// record of the most recently used one, which does not exist yet. So a caller that knows passes a
+/// [`Scope`], and a caller that does not is given every device's answer in a stable order rather
+/// than a guess presented as a ranking.
+pub struct BindingTable<'w>(&'w World);
+
+impl<'w> BindingTable<'w> {
+    /// Reads prompts from the contexts declared in this world.
+    pub const fn new(world: &'w World) -> Self {
+        Self(world)
+    }
+}
+
+impl Prompts for BindingTable<'_> {
+    fn prompts(&self, action: ActionId, scope: Scope) -> Vec<Prompt> {
+        let Some(declared) = self.0.get_resource::<crate::inspect::DeclaredContexts>() else {
+            return Vec::new();
+        };
+
+        // Every live context, not only the ones in scope: what removes a control from the answer is
+        // some *other* context claiming it, and narrowing the scope must not hide that.
+        let mut live: Vec<_> = declared
+            .0
+            .iter()
+            .map(|context| (context, (context.bindings)(self.0)))
+            .filter(|(_, bound)| bound.active)
+            .collect();
+        // Consumption flows forward in schedule order and priority orders within a schedule, so
+        // this is exactly the order in which contexts get to take a control from one another. The
+        // sort is stable, which leaves declaration order as the last tiebreak.
+        live.sort_by_key(|(context, _)| {
+            (
+                match context.tick {
+                    crate::action::TickDomain::Render => 0,
+                    crate::action::TickDomain::Fixed => 1,
+                },
+                core::cmp::Reverse(context.priority),
+            )
+        });
+
+        let mut prompts: Vec<Prompt> = Vec::new();
+        for (index, (context, bound)) in live.iter().enumerate() {
+            if scope.context.is_some_and(|path| path != context.path) {
+                continue;
+            }
+            for entry in &bound.prompts {
+                if entry.action != action {
+                    continue;
+                }
+                if scope
+                    .scheme
+                    .is_some_and(|scheme| scheme != entry.control.scheme())
+                {
+                    continue;
+                }
+                // Taken by something stronger, for something else: pressing it does that instead,
+                // and a prompt saying otherwise is telling the player a lie they can check.
+                if live[..index].iter().any(|(_, earlier)| {
+                    earlier
+                        .claims
+                        .iter()
+                        .any(|&(control, by)| control == entry.control && by != action)
+                }) {
+                    continue;
+                }
+                let prompt = Prompt {
+                    origin: Origin::Ours(entry.control),
+                    with: entry.chord.iter().copied().map(Origin::Ours).collect(),
+                    part: entry.part,
+                    context: Some(context.path),
+                };
+                // The same control reached twice — one action bound in two contexts, most often —
+                // is one prompt. A caption naming a key twice is noise rather than information,
+                // and which context it came from is not what the player is being told.
+                if prompts.iter().any(|seen| {
+                    seen.origin == prompt.origin
+                        && seen.part == prompt.part
+                        && seen.with == prompt.with
+                }) {
+                    continue;
+                }
+                prompts.push(prompt);
+            }
+        }
+        prompts
+    }
+}
+
+/// One context's bindings, flattened once its type is no longer known.
+///
+/// Read whole rather than filtered by action, because deciding whether a control still answers for
+/// one action means knowing what every *other* action in the frame does with it.
+#[derive(Default)]
+pub(crate) struct ContextBindings {
+    /// Whether anything is carrying this context and has it switched on.
+    pub(crate) active: bool,
+    /// One entry per control per binding, in declaration order.
+    pub(crate) prompts: Vec<BoundControl>,
+    /// The controls this context takes for itself when they fire, and what it takes them for.
+    pub(crate) claims: Vec<(Control, ActionId)>,
+}
+
+/// One control of one binding, with what the binding requires alongside it.
+pub(crate) struct BoundControl {
+    pub(crate) action: ActionId,
+    pub(crate) part: Part,
+    pub(crate) control: Control,
+    pub(crate) chord: Vec<Control>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -636,5 +916,302 @@ mod tests {
         // it fill a mapping a key could fill.
         assert_eq!(left.scheme(), crate::rebind::Scheme::KeyboardMouse);
         assert_eq!(left.shape(), crate::action::ChannelShape::Button);
+    }
+}
+
+#[cfg(all(test, feature = "keyboard", feature = "gamepad"))]
+mod prompt_tests {
+    use super::*;
+
+    use alloc::string::ToString;
+    use alloc::vec;
+    use bevy_app::App;
+    use bevy_input::gamepad::GamepadButton;
+    use bevy_input::keyboard::KeyCode;
+
+    use crate::action::InputAction as _;
+    use crate::binding::AxisButtons;
+    use crate::context::{ActionMapAppExt, InputContextState};
+    use crate::{ActionMapPlugin, InputAction, InputContext};
+
+    #[derive(InputAction)]
+    #[action(path = "prompt_tests.jump", output = bool, intent = Button)]
+    struct Jump;
+
+    #[derive(InputAction)]
+    #[action(path = "prompt_tests.turn", output = f32, intent = Analog1)]
+    struct Turn;
+
+    #[derive(InputAction)]
+    #[action(path = "prompt_tests.save", output = bool, intent = Button)]
+    struct Save;
+
+    #[derive(InputContext)]
+    #[context(path = "prompt_tests.shell", tick = Render)]
+    struct Shell;
+
+    #[derive(InputContext)]
+    #[context(path = "prompt_tests.flying", tick = Fixed)]
+    struct Flying;
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app
+    }
+
+    /// What the labels come out as, which is what a caption is made of.
+    fn labels(prompts: &[Prompt]) -> alloc::vec::Vec<alloc::string::String> {
+        prompts
+            .iter()
+            .map(|prompt| prompt.origin.fallback_label().to_string())
+            .collect()
+    }
+
+    /// The lookup itself: name an action, get back the controls that fire it. Nothing in the caller
+    /// says what those controls are, which is the whole point — a caption written this way stays
+    /// true when somebody changes the binding.
+    #[test]
+    fn a_lookup_names_the_controls_that_fire_an_action() {
+        let mut app = app();
+        app.add_context::<Shell>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space);
+            controls.bind::<Jump>(GamepadButton::South);
+        });
+        app.world_mut().spawn(Shell);
+
+        let prompts = BindingTable::new(app.world()).prompts(Jump::id(), Scope::ANY);
+        assert_eq!(labels(&prompts), ["Space", "South Button"]);
+        assert_eq!(prompts[0].part, crate::binding::Part::Whole);
+        assert_eq!(prompts[0].context, Some("prompt_tests.shell"));
+        assert!(prompts[0].with.is_empty());
+        // An origin carries the stored name as well as the readable one, so a game with a
+        // catalogue looks up the first and falls back to the second.
+        assert_eq!(prompts[0].origin.name(), "key/Space");
+        assert_eq!(
+            prompts[0].origin.control(),
+            Some(Control::Key(KeyCode::Space))
+        );
+    }
+
+    /// A prompt is a runtime question. A context nobody is carrying fires nothing, so naming its
+    /// controls would tell the player to press a key that does nothing — which is the failure this
+    /// answers, not a hole in it.
+    #[test]
+    fn a_context_nobody_carries_answers_nothing() {
+        let mut app = app();
+        app.add_context::<Shell>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space);
+        });
+
+        assert!(
+            BindingTable::new(app.world())
+                .prompts(Jump::id(), Scope::ANY)
+                .is_empty()
+        );
+    }
+
+    /// And the same for one that is carried and switched off, which is the ordinary state of a
+    /// context gated on a game state the player is not in.
+    #[test]
+    fn a_context_that_is_switched_off_answers_nothing() {
+        let mut app = app();
+        app.add_context::<Shell>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space);
+        });
+        let entity = app.world_mut().spawn(Shell).id();
+
+        assert_eq!(
+            BindingTable::new(app.world())
+                .prompts(Jump::id(), Scope::ANY)
+                .len(),
+            1
+        );
+
+        app.world_mut()
+            .get_mut::<InputContextState<Shell>>(entity)
+            .unwrap()
+            .deactivate();
+        assert!(
+            BindingTable::new(app.world())
+                .prompts(Jump::id(), Scope::ANY)
+                .is_empty()
+        );
+    }
+
+    /// The two narrowings a screen wants: one device's worth, and one context's.
+    #[test]
+    fn a_scope_narrows_to_one_device_and_one_context() {
+        let mut app = app();
+        app.add_context::<Shell>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space);
+            controls.bind::<Jump>(GamepadButton::South);
+        });
+        app.add_context::<Flying>(|controls| {
+            controls.bind::<Jump>(KeyCode::KeyJ);
+        });
+        app.world_mut().spawn((Shell, Flying));
+
+        let table = BindingTable::new(app.world());
+        assert_eq!(
+            labels(&table.prompts(Jump::id(), Scope::ANY.on(crate::rebind::Scheme::Gamepad))),
+            ["South Button"]
+        );
+        assert_eq!(
+            labels(&table.prompts(Jump::id(), Scope::ANY.in_context("prompt_tests.flying"))),
+            ["J"]
+        );
+    }
+
+    /// Ranking, such as it is: a render-tick context answers before a fixed-tick one because that
+    /// is the order they get to claim a control in, and declaration order decides the rest.
+    #[test]
+    fn a_render_tick_context_answers_before_a_fixed_tick_one() {
+        let mut app = app();
+        // Declared the other way round, so the order below is the schedule's rather than this
+        // file's.
+        app.add_context::<Flying>(|controls| {
+            controls.bind::<Jump>(KeyCode::KeyJ);
+        });
+        app.add_context::<Shell>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space);
+        });
+        app.world_mut().spawn((Shell, Flying));
+
+        let prompts = BindingTable::new(app.world()).prompts(Jump::id(), Scope::ANY);
+        assert_eq!(labels(&prompts), ["Space", "J"]);
+    }
+
+    /// A composite has no single control to name, so it answers once per direction — the same view
+    /// the player-facing model takes, and what lets a caption say which key turns which way.
+    #[test]
+    fn a_composite_answers_once_per_direction() {
+        use crate::binding::Part;
+
+        let mut app = app();
+        app.add_context::<Flying>(|controls| {
+            controls.bind::<Turn>(AxisButtons::ad());
+        });
+        app.world_mut().spawn(Flying);
+
+        let prompts = BindingTable::new(app.world()).prompts(Turn::id(), Scope::ANY);
+        assert_eq!(labels(&prompts), ["A", "D"]);
+        assert_eq!(prompts[0].part, Part::Negative);
+        assert_eq!(prompts[1].part, Part::Positive);
+    }
+
+    /// What has to be held alongside travels with the control, because a prompt that dropped it
+    /// would caption `Ctrl+S` as "S" — which is not an unpolished answer but a wrong one.
+    #[test]
+    fn a_chord_carries_what_must_be_held() {
+        let mut app = app();
+        app.add_context::<Shell>(|controls| {
+            controls
+                .bind::<Save>(KeyCode::KeyS)
+                .with(KeyCode::ControlLeft);
+        });
+        app.world_mut().spawn(Shell);
+
+        let prompts = BindingTable::new(app.world()).prompts(Save::id(), Scope::ANY);
+        assert_eq!(labels(&prompts), ["S"]);
+        assert_eq!(
+            prompts[0].with,
+            vec![Origin::Ours(Control::Key(KeyCode::ControlLeft))]
+        );
+    }
+
+    /// R18.2's other half. A control a stronger context takes for something else does not fire this
+    /// action, whatever the binding says, so a prompt naming it is a lie the player can check.
+    #[test]
+    fn a_stronger_context_taking_a_control_takes_it_out_of_the_prompt() {
+        let mut app = app();
+        // Render tick, so it claims first whatever the priorities say.
+        app.add_context::<Shell>(|controls| {
+            controls.bind::<Save>(KeyCode::Space).consume();
+        });
+        app.add_context::<Flying>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space);
+            controls.bind::<Jump>(KeyCode::KeyJ);
+        });
+        let entity = app.world_mut().spawn((Shell, Flying)).id();
+
+        let prompts = BindingTable::new(app.world()).prompts(Jump::id(), Scope::ANY);
+        assert_eq!(labels(&prompts), ["J"], "space belongs to the shell");
+
+        // Stand the claimant down and the control comes back, which is what makes this a live
+        // answer rather than a fact about the binding tables.
+        app.world_mut()
+            .get_mut::<InputContextState<Shell>>(entity)
+            .unwrap()
+            .deactivate();
+        let prompts = BindingTable::new(app.world()).prompts(Jump::id(), Scope::ANY);
+        assert_eq!(labels(&prompts), ["Space", "J"]);
+    }
+
+    /// A prompt is not a row of the controls screen. `private` keeps a binding off that screen,
+    /// because it reads a control already listed under another name — and it says nothing about
+    /// whether the control fires the action, which is all a prompt is asking.
+    #[test]
+    fn a_private_binding_still_answers_a_prompt() {
+        let mut app = app();
+        app.add_context::<Shell>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).private();
+        });
+        app.world_mut().spawn(Shell);
+
+        assert!(crate::rebind::mappings(app.world()).is_empty());
+        assert_eq!(
+            labels(&BindingTable::new(app.world()).prompts(Jump::id(), Scope::ANY)),
+            ["Space"]
+        );
+    }
+
+    /// One control reached twice is one prompt: what the player is told is which key to press, not
+    /// how many places in the game are listening for it.
+    #[test]
+    fn one_control_bound_in_two_contexts_is_one_prompt() {
+        let mut app = app();
+        app.add_context::<Shell>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space);
+        });
+        app.add_context::<Flying>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space);
+        });
+        app.world_mut().spawn((Shell, Flying));
+
+        assert_eq!(
+            labels(&BindingTable::new(app.world()).prompts(Jump::id(), Scope::ANY)),
+            ["Space"]
+        );
+    }
+
+    /// The point of an origin being an enum. A backend authoritative for the bindings answers with
+    /// its own enumeration of controls, covering devices this crate has no variant for, and a
+    /// caption renders one without knowing where it came from.
+    #[test]
+    fn an_origin_from_somewhere_else_renders_like_one_of_ours() {
+        let foreign = Origin::Foreign {
+            name: "steam/dualsense_touchpad".into(),
+            label: "Touchpad".into(),
+            scheme: Some(crate::rebind::Scheme::Gamepad),
+        };
+
+        assert_eq!(foreign.name(), "steam/dualsense_touchpad");
+        assert_eq!(foreign.fallback_label(), "Touchpad");
+        assert_eq!(foreign.scheme(), Some(crate::rebind::Scheme::Gamepad));
+        // And the one thing it cannot answer, so that a caller reaching past the name has to say
+        // what it does when the control is not ours.
+        assert_eq!(foreign.control(), None);
+    }
+
+    /// Nothing declared at all is not an error, and asking is not a panic.
+    #[test]
+    fn a_world_with_no_contexts_answers_nothing() {
+        let app = app();
+        assert!(
+            BindingTable::new(app.world())
+                .prompts(Jump::id(), Scope::ANY)
+                .is_empty()
+        );
     }
 }

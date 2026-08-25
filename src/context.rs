@@ -908,10 +908,9 @@ fn order_by_priority(
     );
 }
 
-/// Reads the instances of one context back out once its type is no longer known.
+/// Reads the mappings of one context back out once its type is no longer known.
 ///
 /// Registered per context by `add_context`, which is the last place `C` is available.
-/// Reads the mappings of one context back out once its type is no longer known.
 fn read_mappings<C: InputContext + Component>(
     world: &World,
 ) -> alloc::vec::Vec<crate::rebind::Mapping> {
@@ -919,6 +918,64 @@ fn read_mappings<C: InputContext + Component>(
         .get_resource::<InputContextPlan<C>>()
         .map(|declared| declared.mappings.clone())
         .unwrap_or_default()
+}
+
+/// Reads one context's bindings back out for a reverse lookup, once its type is no longer known.
+///
+/// Registered beside `read_mappings`, and answering a different question: this one is about what
+/// would fire now, so it reads the compiled plan rather than the player-facing rows, and it asks
+/// whether anything is carrying the context at all.
+fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::ContextBindings {
+    use crate::present::{BoundControl, ContextBindings};
+
+    let Some(declared) = world.get_resource::<InputContextPlan<C>>() else {
+        return ContextBindings::default();
+    };
+
+    // A context nobody carries, or one that is switched off, fires nothing — and a prompt naming
+    // its controls would be telling the player to press a key that does nothing. Read-only, which
+    // is what keeps a lookup callable from an ordinary system rather than an exclusive one.
+    let active = world
+        .try_query::<&InputContextState<C>>()
+        .is_some_and(|mut instances| instances.iter(world).any(InputContextState::is_active));
+
+    let mut prompts = alloc::vec::Vec::new();
+    let mut claims = alloc::vec::Vec::new();
+    for binding in declared.plan.bindings() {
+        let action = declared.plan.slot_actions()[binding.slot];
+        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+        let chord: alloc::vec::Vec<crate::binding::Control> = binding
+            .chord
+            .iter()
+            .copied()
+            .map(crate::binding::Control::from)
+            .collect();
+        #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
+        let chord: alloc::vec::Vec<crate::binding::Control> = alloc::vec::Vec::new();
+
+        // By part rather than by control, so that a composite answers once per direction and a
+        // stick answers once rather than twice — the same view the player-facing model takes.
+        binding.source.for_each_part(|part, control| {
+            prompts.push(BoundControl {
+                action,
+                part,
+                control,
+                chord: chord.clone(),
+            });
+        });
+        // Claims are by control, because taking a composite takes every control in it.
+        if binding.consume {
+            binding
+                .source
+                .for_each_control(|control| claims.push((control, action)));
+        }
+    }
+
+    ContextBindings {
+        active,
+        prompts,
+        claims,
+    }
 }
 
 fn read_instances<C: InputContext + Component>(
@@ -1085,6 +1142,7 @@ fn declare_context<C: InputContext + Component>(
             priority: C::PRIORITY,
             read: read_instances::<C>,
             mappings: read_mappings::<C>,
+            bindings: read_bindings::<C>,
         });
 
     // A context whose activation follows something else starts inactive and waits to be asked.

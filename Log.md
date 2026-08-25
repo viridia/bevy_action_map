@@ -572,3 +572,64 @@ reason: a string naming a control is wrong the moment somebody changes the contr
 Negative" and a player should read "Turn Left", which is what a catalogue is for: the screen answers
 for the two keys whose derived text is wrong and leaves the rest to the fallback. That the fallback
 is legible for every other row is the point of it existing.
+### Chunk 40: reverse lookup
+
+The question every other path through the crate throws away the answer to. `Prompts` is a trait with
+one method — given an action and a scope, the controls that would fire it now — and `BindingTable`
+is this crate's answer to it. Dead Zone's two hand-rolled captions read through it instead of
+scanning the mapping list.
+
+**The two lists diverged, and that is the finding.** `mappings()` and a reverse lookup look like the
+same query filtered differently, and they are not. A mapping list is what the game *declared*: a
+controls screen has to draw a row whether or not anything is carrying the context, because the row
+is a fact about the game. A prompt is what would fire *now*, so it is empty for a context nobody
+carries and for one that is switched off, and it includes a `private` binding — `private` says the
+row would duplicate another row, which is a statement about the list and not about whether the key
+works. Once that was clear the implementation followed: the lookup reads the compiled plan through
+its own type-erased door rather than filtering `mappings()`, and the two doors sit beside each other
+on `DeclaredContext`.
+
+**The first thing it broke was the caller it was built for.** Dead Zone's corner hint ran in
+`Startup`, alongside — and unordered against — the `Startup` system that spawns the context whose
+controls it names. The mapping list did not care, so nothing had ever needed that ordering; a lookup
+that asks what is live does, and an unordered pair is a coin toss the build makes rather than a bug
+that reproduces. It moved to `PostStartup`. That is the whole cost of the runtime/declared
+distinction showing up in one line of a game, and it is worth knowing that it shows up at all: a
+caller that used to be order-independent is not any more.
+
+**Consumption has two readings and the literal one is wrong.** R18.2 says the answer must reflect
+consumption, and the obvious implementation consults `ConsumedControls` — which holds what has
+actually been claimed *this tick*. A claim lands only while the claiming action fires, so a caption
+built on it would flicker as the player pressed things. What a prompt wants is the standing fact: a
+control bound with `consume` in a stronger active context never reaches the weaker one. That is
+computed from the plans and from which contexts are live, and it moves only when a context
+activates. The ordering it needs — render tick before fixed tick, then priority, then declaration —
+is §5.2's rule, reused rather than reinvented, which is also what makes it the ranking of the
+result.
+
+**The ranking says what it does not know.** Contexts rank, bindings rank within a context, and
+devices do not rank at all, because nothing tracks which one the player is holding (R18.6). Ordering
+keyboard before gamepad would have been a guess wearing a ranking's clothes. A caller that knows
+passes a `Scope`; Dead Zone's corner hint passes `Scheme::KeyboardMouse` and takes the first, which
+is the shape a caller that *does* know has. *Groomed straight afterwards:* the hole is not a hole.
+R18.6 is withdrawn and the device is the caller's parameter for good, so this is the answer rather
+than a placeholder for one.
+
+**The return type is not a `Control`, and this was the cheap moment.** R18.9's point is that a
+backend's origins are its own enumeration, covering device families we have no variant for, so
+`Origin` is either one of ours or a name-plus-label pair from somewhere else. Both answer `name()`
+and `fallback_label()` — the two strings chunk 37 established — so a caption renders one without
+asking where it came from. Nothing in tree constructs the foreign variant yet; the deferred table's
+R18.9 row loses its origin half and keeps its glyph half.
+
+**The chord came along, the conditions did not.** A binding requiring a modifier alongside its own
+control reports both, because a prompt that dropped it renders `Ctrl+S` as "S" — wrong rather than
+unpolished, which is the line this chunk's review surface asked to be drawn. R18.3's structured
+descriptor stays unbuilt on the other side of it: a held binding and a tapped one on the same key
+still produce the same prompt, and `Afterburner` is the case in tree.
+
+**A scan, and the index is still not warranted.** §10's sketch assumed the inverse of the plan's
+control index. Writing the scan first was the honest order and the answer is that the callers are a
+handful of captions rebuilt when a screen opens. Chunk 47 is what would change it, and its own
+answer there is change detection rather than an index — so the index is the move after that one
+fails, not before.

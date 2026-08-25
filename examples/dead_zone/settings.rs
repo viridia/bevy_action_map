@@ -84,14 +84,15 @@ fn screen(world: &World) -> impl Scene {
             .collect()
     };
 
-    // What closes the screen, which is the one thing here that has to know an action. Reading it
-    // back off the mapping list keeps the caption true on both devices without the text being
-    // written down a second time.
-    let close = all
+    // What closes the screen, which is the one thing here that has to know an action. A reverse
+    // lookup rather than a filter over the list above: the question is what would fire the action
+    // *now*, so the answer skips a context that is switched off and a control something else has
+    // taken — neither of which the mapping list knows about, because neither is a fact about what
+    // the game declared.
+    let close = BindingTable::new(world)
+        .prompts(ToggleSettings::id(), Scope::ANY)
         .iter()
-        .filter(|mapping| mapping.action == ToggleSettings::id())
-        .flat_map(|mapping| mapping.slots.iter())
-        .map(|control| control.fallback_label().into_owned())
+        .map(|prompt| prompt.origin.fallback_label().into_owned())
         .collect::<Vec<_>>()
         .join(" or ");
     // One list of two, rather than two children: the tables are the same kind of thing, and a
