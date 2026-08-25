@@ -102,12 +102,12 @@ pub enum DiagnosticKind {
     /// Two mappings would answer to the same name.
     DuplicateMappingKey {
         /// The name they share.
-        key: crate::rebind::MappingKey,
+        key: crate::mapping::MappingKey,
     },
     /// Two bindings feeding one mapping disagree about whether the player may change it.
     RebindingDisagreement {
         /// The name they share.
-        key: crate::rebind::MappingKey,
+        key: crate::mapping::MappingKey,
     },
     /// A mappable binding reads controls from more than one kind of device.
     MixedSchemeMapping,
@@ -259,7 +259,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
             let mut scheme = None;
             let mut mixed = false;
             binding.source.for_each_part(|part, control| {
-                let key = crate::rebind::MappingKey::new(prefix, part);
+                let key = crate::mapping::MappingKey::new(prefix, part);
                 let (claimant, claimed_as) = keys
                     .entry((control.scheme(), key))
                     .or_insert((binding.action, declaration.rebinding));

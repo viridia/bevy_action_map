@@ -54,7 +54,7 @@ use bevy_platform::collections::HashSet;
 pub(crate) struct InputContextPlan<C> {
     plan: Arc<Plan<C>>,
     // The player-facing view of the same bindings, empty unless some were declared mappable.
-    mappings: alloc::vec::Vec<crate::rebind::Mapping>,
+    mappings: alloc::vec::Vec<crate::mapping::Mapping>,
     // Whether an instance is live the moment it is spawned. False for a context whose activation
     // follows something else, so that it does not fire for one frame before the something else
     // has had a chance to say otherwise.
@@ -239,7 +239,7 @@ impl<C: InputContext> InputContextState<C> {
     /// ```ignore
     /// // Why is the ship not thrusting?
     /// info!("{:?}", input.why_not::<Thrust>());
-    /// // Consumed { control: Key(KeyW), by: "disasteroids.shell" }
+    /// // Consumed { control: Key(KeyW), by: "gameplay.shell" }
     /// ```
     ///
     /// Checked in the order the obstacles apply, so what comes back is the first thing in the way
@@ -933,7 +933,7 @@ fn order_by_priority(
 /// Registered per context by `add_context`, which is the last place `C` is available.
 fn read_mappings<C: InputContext + Component>(
     world: &World,
-) -> alloc::vec::Vec<crate::rebind::Mapping> {
+) -> alloc::vec::Vec<crate::mapping::Mapping> {
     world
         .get_resource::<InputContextPlan<C>>()
         .map(|declared| declared.mappings.clone())
@@ -1065,7 +1065,7 @@ fn report_diagnostics<C: InputContext + Component>(builder: &InputContextBuilder
 /// the same key twice. What makes it findable is the registry of what has already been declared.
 fn report_mapping_collisions<C: InputContext + Component>(
     app: &App,
-    mappings: &[crate::rebind::Mapping],
+    mappings: &[crate::mapping::Mapping],
 ) {
     let Some(declared) = app
         .world()
@@ -2187,16 +2187,10 @@ mod tests {
         use alloc::format;
 
         assert_eq!(
-            format!(
-                "{}",
-                BoundPaths(&["disasteroids.turn", "disasteroids.fire"])
-            ),
-            "disasteroids.turn, disasteroids.fire"
+            format!("{}", BoundPaths(&["tests.turn", "tests.fire"])),
+            "tests.turn, tests.fire"
         );
-        assert_eq!(
-            format!("{}", BoundPaths(&["disasteroids.turn"])),
-            "disasteroids.turn"
-        );
+        assert_eq!(format!("{}", BoundPaths(&["tests.turn"])), "tests.turn");
         assert_eq!(
             format!("{}", BoundPaths(&[])),
             "nothing — this context binds no actions at all"

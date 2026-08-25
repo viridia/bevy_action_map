@@ -10,8 +10,8 @@
 
 use bevy::prelude::*;
 use bevy_action_map::inspect::dump;
+use bevy_action_map::mapping::mappings;
 use bevy_action_map::prelude::*;
-use bevy_action_map::rebind::mappings;
 use core::fmt::Write;
 
 use crate::actions::ToggleOverlay;

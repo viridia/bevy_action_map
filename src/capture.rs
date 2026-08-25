@@ -53,7 +53,7 @@ use bevy_ecs::world::World;
 use crate::action::ChannelShape;
 use crate::binding::{ButtonThreshold, Control};
 use crate::frame::{InputFrame, RawEvent, Timestamp};
-use crate::rebind::{Mapping, MappingKey, Scheme};
+use crate::mapping::{Mapping, MappingKey, Scheme};
 
 /// How far a stick or trigger must be pushed before capture treats it as a choice.
 ///
@@ -195,11 +195,11 @@ impl CaptureSession {
     /// answer has nowhere to go but the front of the row.
     ///
     /// Returns `None` for a slot the mapping does not have: past its
-    /// [`capacity`](crate::rebind::Mapping::capacity), or more than one past the controls it holds
+    /// [`capacity`](crate::mapping::Mapping::capacity), or more than one past the controls it holds
     /// now. The second is what stops a capture leaving a hole in a list whose *order* is what
     /// primary and secondary mean. It also returns `None` for a mapping no single control can fill,
     /// exactly as [`for_mapping`](Self::for_mapping) does, and for one the player may not change at
-    /// all — see [`Rebinding`](crate::rebind::Rebinding).
+    /// all — see [`Rebinding`](crate::mapping::Rebinding).
     pub fn for_slot(mapping: &Mapping, slot: usize) -> Option<Self> {
         // A mapping the player cannot change has nothing to capture *for*. It is on the screen so
         // they can read it, and a screen that asked anyway would be offering a rebind it could not
@@ -399,7 +399,7 @@ pub enum Overlap {
 /// chords are reported as an overlap even though arbitration would separate them. That errs toward
 /// telling a player about something harmless rather than staying quiet about something real.
 pub fn conflicts(world: &World, control: Control, target: Option<MappingKey>) -> Vec<Conflict> {
-    let mappings = crate::rebind::mappings(world);
+    let mappings = crate::mapping::mappings(world);
     let target_context = target.and_then(|key| {
         mappings
             .iter()
@@ -614,7 +614,7 @@ mod tests {
     }
 
     fn mapping(app: &App, key: &str) -> Mapping {
-        crate::rebind::mappings(app.world())
+        crate::mapping::mappings(app.world())
             .into_iter()
             .find(|mapping| alloc::string::ToString::to_string(&mapping.key) == key)
             .expect("no such mapping")
@@ -653,7 +653,7 @@ mod tests {
     #[test]
     fn capture_works_with_no_context_spawned() {
         let mut app = app();
-        assert!(crate::rebind::mappings(app.world()).len() > 1);
+        assert!(crate::mapping::mappings(app.world()).len() > 1);
 
         app.world_mut()
             .spawn(CaptureSession::accepting(ControlClass::AnyButton));
@@ -804,7 +804,7 @@ mod tests {
             controls.bind::<OpenSettings>(KeyCode::F1).mappable();
         });
 
-        let settings = crate::rebind::mappings(app.world())[1].key;
+        let settings = crate::mapping::mappings(app.world())[1].key;
         // The secondary, which a `==` against a single control would have missed.
         let found = conflicts(app.world(), Control::Key(KeyCode::Enter), Some(settings));
         assert_eq!(found.len(), 1);
@@ -820,7 +820,7 @@ mod tests {
         assert_eq!(target.slots.len(), 1, "one default…");
         assert_eq!(
             target.capacity,
-            crate::rebind::Capacity::UpTo(2),
+            crate::mapping::Capacity::UpTo(2),
             "…two slots"
         );
 
@@ -860,7 +860,7 @@ mod tests {
         // And one slot, so only the one is addressable — a plain `mappable` said nothing about
         // wanting a second.
         let up = mapping(&app, "capture_tests.move.up");
-        assert_eq!(up.capacity, crate::rebind::Capacity::UpTo(1));
+        assert_eq!(up.capacity, crate::mapping::Capacity::UpTo(1));
         assert!(CaptureSession::for_slot(&up, 0).is_some());
         assert!(CaptureSession::for_slot(&up, 1).is_none());
     }
@@ -879,7 +879,7 @@ mod tests {
             controls.bind::<Jump>(KeyCode::Space).mappable_upto(3);
         });
 
-        let target = &crate::rebind::mappings(app.world())[0];
+        let target = &crate::mapping::mappings(app.world())[0];
         assert!(
             CaptureSession::for_slot(target, 1).is_some(),
             "the next one"
@@ -973,7 +973,7 @@ mod tests {
                 .mappable();
         });
 
-        let target = &crate::rebind::mappings(app.world())[0];
+        let target = &crate::mapping::mappings(app.world())[0];
         assert_eq!(target.accepts, ChannelShape::Axis2);
         assert!(CaptureSession::for_mapping(target).is_none());
     }

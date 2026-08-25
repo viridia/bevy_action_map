@@ -272,19 +272,19 @@ mod tests {
     use crate::{ActionMapPlugin, InputAction, InputContext};
 
     #[derive(InputAction)]
-    #[action(path = "rebind_tests.move", output = bevy_math::Vec2, intent = Directional2, category = "rebind_tests.movement")]
+    #[action(path = "mapping_tests.move", output = bevy_math::Vec2, intent = Directional2, category = "mapping_tests.movement")]
     struct Move;
 
     #[derive(InputAction)]
-    #[action(path = "rebind_tests.jump", output = bool, intent = Button)]
+    #[action(path = "mapping_tests.jump", output = bool, intent = Button)]
     struct Jump;
 
     #[derive(InputAction)]
-    #[action(path = "rebind_tests.toggle_overlay", output = bool, intent = Button)]
+    #[action(path = "mapping_tests.toggle_overlay", output = bool, intent = Button)]
     struct ToggleOverlay;
 
     #[derive(InputContext)]
-    #[context(path = "rebind_tests.on_foot", tick = Fixed)]
+    #[context(path = "mapping_tests.on_foot", tick = Fixed)]
     struct OnFoot;
 
     /// The heart of it: a composite is four rows rather than one, because a player rebinds "move
@@ -309,11 +309,11 @@ mod tests {
         assert_eq!(
             names,
             [
-                "rebind_tests.move.up",
-                "rebind_tests.move.down",
-                "rebind_tests.move.left",
-                "rebind_tests.move.right",
-                "rebind_tests.jump",
+                "mapping_tests.move.up",
+                "mapping_tests.move.down",
+                "mapping_tests.move.left",
+                "mapping_tests.move.right",
+                "mapping_tests.jump",
             ]
         );
 
@@ -328,7 +328,7 @@ mod tests {
         );
 
         // The category comes from the action, so the four movement rows file together.
-        assert_eq!(mappings[0].category, Some("rebind_tests.movement"));
+        assert_eq!(mappings[0].category, Some("mapping_tests.movement"));
         assert_eq!(mappings[4].category, None);
 
         // A part of a composite holds a button whatever the composite reports as a whole.
@@ -342,7 +342,7 @@ mod tests {
     #[test]
     fn a_binding_is_listed_but_not_rebindable_by_default() {
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.silent", tick = Fixed)]
+        #[context(path = "mapping_tests.silent", tick = Fixed)]
         struct Silent;
 
         let mut app = App::new();
@@ -363,7 +363,7 @@ mod tests {
     #[test]
     fn a_private_binding_is_not_listed_at_all() {
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.hidden", tick = Fixed)]
+        #[context(path = "mapping_tests.hidden", tick = Fixed)]
         struct Hidden;
 
         let mut app = App::new();
@@ -381,7 +381,7 @@ mod tests {
     #[should_panic(expected = "both `mappable` and `private`")]
     fn a_binding_cannot_be_private_and_mappable() {
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.contradictory", tick = Fixed)]
+        #[context(path = "mapping_tests.contradictory", tick = Fixed)]
         struct Contradictory;
 
         let mut app = App::new();
@@ -397,7 +397,7 @@ mod tests {
     #[should_panic(expected = "disagree about whether the")]
     fn two_bindings_feeding_one_mapping_cannot_disagree() {
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.disagreeing", tick = Fixed)]
+        #[context(path = "mapping_tests.disagreeing", tick = Fixed)]
         struct Disagreeing;
 
         let mut app = App::new();
@@ -430,8 +430,8 @@ mod tests {
     /// names get.
     #[test]
     fn a_category_reads_sensibly_without_a_catalogue() {
-        assert_eq!(fallback_label("disasteroids.flight"), "Flight");
-        assert_eq!(fallback_label("disasteroids.fine_control"), "Fine Control");
+        assert_eq!(fallback_label("gameplay.flight"), "Flight");
+        assert_eq!(fallback_label("gameplay.fine_control"), "Fine Control");
         assert_eq!(fallback_label("weapons"), "Weapons");
         assert_eq!(fallback_label(""), "");
     }
@@ -442,7 +442,7 @@ mod tests {
     #[test]
     fn two_bindings_of_one_action_share_one_slot() {
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.two_defaults", tick = Fixed)]
+        #[context(path = "mapping_tests.two_defaults", tick = Fixed)]
         struct TwoDefaults;
 
         let mut app = App::new();
@@ -470,7 +470,7 @@ mod tests {
     #[should_panic(expected = "declares a mapping named")]
     fn two_actions_cannot_share_a_slot_name() {
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.colliding", tick = Fixed)]
+        #[context(path = "mapping_tests.colliding", tick = Fixed)]
         struct Colliding;
 
         let mut app = App::new();
@@ -478,10 +478,10 @@ mod tests {
         app.add_context::<Colliding>(|controls| {
             controls
                 .bind::<Jump>(KeyCode::Space)
-                .mappable_as("rebind_tests.go");
+                .mappable_as("mapping_tests.go");
             controls
                 .bind::<ToggleOverlay>(KeyCode::Enter)
-                .mappable_as("rebind_tests.go");
+                .mappable_as("mapping_tests.go");
         });
     }
 
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn a_slot_can_be_given_more_room_than_its_defaults_need() {
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.roomy", tick = Fixed)]
+        #[context(path = "mapping_tests.roomy", tick = Fixed)]
         struct Roomy;
 
         let mut app = App::new();
@@ -522,7 +522,7 @@ mod tests {
     #[test]
     fn capacity_is_the_widest_anything_asked_for() {
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.widening", tick = Fixed)]
+        #[context(path = "mapping_tests.widening", tick = Fixed)]
         struct Widening;
 
         let mut app = App::new();
@@ -544,7 +544,7 @@ mod tests {
     #[should_panic(expected = "room for at least one control")]
     fn a_slot_cannot_be_declared_empty() {
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.empty", tick = Fixed)]
+        #[context(path = "mapping_tests.empty", tick = Fixed)]
         struct Empty;
 
         let mut app = App::new();
@@ -563,7 +563,7 @@ mod tests {
         use bevy_input::gamepad::GamepadButton;
 
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.both_devices", tick = Fixed)]
+        #[context(path = "mapping_tests.both_devices", tick = Fixed)]
         struct BothDevices;
 
         let mut app = App::new();
@@ -585,7 +585,7 @@ mod tests {
     #[test]
     fn naming_a_slot_and_widening_it_are_independent() {
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.named_and_wide", tick = Fixed)]
+        #[context(path = "mapping_tests.named_and_wide", tick = Fixed)]
         struct NamedAndWide;
 
         let mut app = App::new();
@@ -593,18 +593,18 @@ mod tests {
         app.add_context::<NamedAndWide>(|controls| {
             controls
                 .bind::<Jump>(KeyCode::Space)
-                .mappable_as("rebind_tests.leap")
+                .mappable_as("mapping_tests.leap")
                 .mappable_upto(2);
             controls
                 .bind::<ToggleOverlay>(KeyCode::F1)
                 .mappable_upto(3)
-                .mappable_as("rebind_tests.peek");
+                .mappable_as("mapping_tests.peek");
         });
 
         let mappings = mappings(app.world());
-        assert_eq!(mappings[0].key.to_string(), "rebind_tests.leap");
+        assert_eq!(mappings[0].key.to_string(), "mapping_tests.leap");
         assert_eq!(mappings[0].capacity, Capacity::UpTo(2));
-        assert_eq!(mappings[1].key.to_string(), "rebind_tests.peek");
+        assert_eq!(mappings[1].key.to_string(), "mapping_tests.peek");
         assert_eq!(mappings[1].capacity, Capacity::UpTo(3));
     }
 
@@ -613,11 +613,11 @@ mod tests {
     #[should_panic(expected = "already uses")]
     fn one_action_mappable_in_two_contexts_collides() {
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.first", tick = Fixed)]
+        #[context(path = "mapping_tests.first", tick = Fixed)]
         struct First;
 
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.second", tick = Fixed)]
+        #[context(path = "mapping_tests.second", tick = Fixed)]
         struct Second;
 
         let mut app = App::new();
@@ -634,11 +634,11 @@ mod tests {
     #[test]
     fn a_name_of_your_own_settles_a_collision() {
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.renamed_a", tick = Fixed)]
+        #[context(path = "mapping_tests.renamed_a", tick = Fixed)]
         struct RenamedA;
 
         #[derive(InputContext)]
-        #[context(path = "rebind_tests.renamed_b", tick = Fixed)]
+        #[context(path = "mapping_tests.renamed_b", tick = Fixed)]
         struct RenamedB;
 
         let mut app = App::new();
@@ -649,14 +649,14 @@ mod tests {
         app.add_context::<RenamedB>(|controls| {
             controls
                 .bind::<Move>(DirectionalButtons::arrow_keys())
-                .mappable_as("rebind_tests.move_alt");
+                .mappable_as("mapping_tests.move_alt");
         });
 
         let names: Vec<String> = mappings(app.world())
             .iter()
             .map(|mapping| mapping.key.to_string())
             .collect();
-        assert!(names.contains(&String::from("rebind_tests.move.up")));
-        assert!(names.contains(&String::from("rebind_tests.move_alt.up")));
+        assert!(names.contains(&String::from("mapping_tests.move.up")));
+        assert!(names.contains(&String::from("mapping_tests.move_alt.up")));
     }
 }

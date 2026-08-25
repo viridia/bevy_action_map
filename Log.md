@@ -137,7 +137,7 @@ not: a plan is compiled without seeing the others. What made it findable was chu
 declared contexts — built for a debug overlay, and now the only thing in the crate that can see two
 contexts at once. Both tests pass, and the second would have been unwriteable a chunk ago.
 
-**Mappings ride the type-erased door too.** `rebind::mappings(world)` walks the same registry,
+**Mappings ride the type-erased door too.** `mapping::mappings(world)` walks the same registry,
 needing only `&World` because mappings come from the plan resource rather than from anything an
 entity carries. Disasteroids' overlay grew four lines that list what a player would be shown — the
 smallest possible consumer of D7's model, and enough to see that the keys read correctly without a
@@ -541,7 +541,7 @@ case that proves the other half — an empty cell the player will fill, drawn ra
 
 **A category had no way to be rendered.** A mapping's name is a `MappingKey` with a fallback label
 and its category is a bare `&'static str`, so the first screen to draw headings had to write its own
-title-casing next to the crate's. `rebind::fallback_label(key)` is now the same courtesy for any
+title-casing next to the crate's. `mapping::fallback_label(key)` is now the same courtesy for any
 key, and `MappingKey::fallback_label` is written in terms of it. That was the only thing the screen
 needed that D7 did not already offer, which is the answer to this chunk's review surface.
 

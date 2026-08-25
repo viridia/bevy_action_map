@@ -8,8 +8,8 @@
 //! context or a key, so this file would work unchanged in a different game.
 
 use bevy::prelude::*;
+use bevy_action_map::mapping::fallback_label;
 use bevy_action_map::prelude::*;
-use bevy_action_map::rebind::fallback_label;
 
 use crate::actions::ToggleSettings;
 use crate::common::prompt_ui::PromptSpan;

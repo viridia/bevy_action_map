@@ -51,7 +51,7 @@
 //! only answers for an action if something is carrying the context the binding lives in, if that
 //! context is active, and if nothing evaluated earlier in the frame takes the control away — so the
 //! answer changes as the game runs, and a caller that asks before its contexts exist is told
-//! nothing rather than told what they will say. [`rebind::mappings`](crate::rebind::mappings) is
+//! nothing rather than told what they will say. [`mapping::mappings`](crate::mapping::mappings) is
 //! the other list, and the one a controls screen wants: everything the game declared, whether or
 //! not it is live.
 //!
@@ -67,7 +67,7 @@ use bevy_ecs::world::World;
 use crate::action::ActionId;
 use crate::binding::{Control, Part};
 use crate::capture::ControlClass;
-use crate::rebind::Scheme;
+use crate::mapping::Scheme;
 
 #[cfg(feature = "gamepad")]
 use bevy_input::gamepad::{GamepadAxis, GamepadButton};
@@ -1016,7 +1016,7 @@ mod tests {
 
         // A mouse button is keyboard-and-mouse and reports on a button channel, which is what lets
         // it fill a mapping a key could fill.
-        assert_eq!(left.scheme(), crate::rebind::Scheme::KeyboardMouse);
+        assert_eq!(left.scheme(), crate::mapping::Scheme::KeyboardMouse);
         assert_eq!(left.shape(), crate::action::ChannelShape::Button);
     }
 }
@@ -1158,7 +1158,7 @@ mod prompt_tests {
         assert_eq!(
             labels(&table.prompts(
                 Jump::id(),
-                PromptScope::ANY.on(crate::rebind::Scheme::Gamepad)
+                PromptScope::ANY.on(crate::mapping::Scheme::Gamepad)
             )),
             ["South Button"]
         );
@@ -1267,7 +1267,7 @@ mod prompt_tests {
         });
         app.world_mut().spawn(Shell);
 
-        assert!(crate::rebind::mappings(app.world()).is_empty());
+        assert!(crate::mapping::mappings(app.world()).is_empty());
         assert_eq!(
             labels(&BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY)),
             ["Space"]
@@ -1301,13 +1301,13 @@ mod prompt_tests {
         let foreign = ControlOrigin::Foreign {
             name: "steam/dualsense_touchpad".into(),
             label: "Touchpad".into(),
-            scheme: Some(crate::rebind::Scheme::Gamepad),
+            scheme: Some(crate::mapping::Scheme::Gamepad),
             class: Some(ControlClass::AnyDelta),
         };
 
         assert_eq!(foreign.name(), "steam/dualsense_touchpad");
         assert_eq!(foreign.fallback_label(), "Touchpad");
-        assert_eq!(foreign.scheme(), Some(crate::rebind::Scheme::Gamepad));
+        assert_eq!(foreign.scheme(), Some(crate::mapping::Scheme::Gamepad));
         assert_eq!(foreign.class(), Some(ControlClass::AnyDelta));
         // And the one thing it cannot answer, so that a caller reaching past the name has to say
         // what it does when the control is not ours.

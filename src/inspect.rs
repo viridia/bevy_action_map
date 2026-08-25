@@ -89,7 +89,7 @@ pub(crate) struct DeclaredContext {
     pub(crate) read: fn(&mut World) -> Vec<InstanceDump>,
     // Mappings come from the context's compiled bindings rather than from anything an entity
     // so unlike `read` this one needs no query and no exclusive access.
-    pub(crate) mappings: fn(&World) -> Vec<crate::rebind::Mapping>,
+    pub(crate) mappings: fn(&World) -> Vec<crate::mapping::Mapping>,
     // The same bindings the other way round, for a prompt asking what fires an action. Separate
     // from `mappings` because it answers about bindings rather than about rows a player edits:
     // a `private` binding is missing from one and present in the other.

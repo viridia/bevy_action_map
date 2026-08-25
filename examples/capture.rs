@@ -30,8 +30,8 @@
 
 use bevy::input::gamepad::GamepadButton;
 use bevy::prelude::*;
+use bevy_action_map::mapping;
 use bevy_action_map::prelude::*;
-use bevy_action_map::rebind;
 
 #[derive(InputAction)]
 #[action(path = "capture_demo.move", output = Vec2, intent = Directional2, category = "capture_demo.movement")]
@@ -110,13 +110,13 @@ fn main() {
 /// so the walk stops at its empty second slot like any other.
 #[derive(Resource)]
 struct Walk {
-    remaining: Vec<(rebind::Mapping, usize)>,
+    remaining: Vec<(mapping::Mapping, usize)>,
     listening: Option<Entity>,
 }
 
 fn begin(world: &mut World) {
     println!("Walking every mappable slot this game declares.");
-    let mut remaining: Vec<(rebind::Mapping, usize)> = rebind::mappings(world)
+    let mut remaining: Vec<(mapping::Mapping, usize)> = mapping::mappings(world)
         .into_iter()
         .flat_map(|mapping| slots(&mapping).map(move |slot| (mapping.clone(), slot)))
         .collect();
@@ -134,7 +134,7 @@ fn begin(world: &mut World) {
 ///
 /// The same rule `CaptureSession::for_slot` enforces — it refuses anything else — so a screen that
 /// asks this first never offers a slot that would be turned down.
-fn slots(mapping: &rebind::Mapping) -> std::ops::Range<usize> {
+fn slots(mapping: &mapping::Mapping) -> std::ops::Range<usize> {
     let filled = mapping.slots.len();
     0..if mapping.capacity.has_room_for(filled) {
         filled + 1
@@ -185,7 +185,7 @@ fn next(world: &mut World) {
 ///
 /// Joining is the app's business rather than the crate's: `fallback_label` answers for one control,
 /// and how a screen lays several of them out is a layout decision no crate should be making.
-fn bound(mapping: &rebind::Mapping) -> String {
+fn bound(mapping: &mapping::Mapping) -> String {
     if mapping.slots.is_empty() {
         return "nothing".into();
     }
@@ -198,7 +198,7 @@ fn bound(mapping: &rebind::Mapping) -> String {
 }
 
 /// Which column of the row this slot is, in the words a table would put at the top of it.
-fn column(slot: usize, mapping: &rebind::Mapping) -> String {
+fn column(slot: usize, mapping: &mapping::Mapping) -> String {
     match (slot, mapping.capacity.slots()) {
         (_, Some(1)) => "the only slot".into(),
         (0, _) => "primary".into(),

@@ -224,8 +224,11 @@ pub(crate) struct BindingSpec {
 /// Several bindings can feed one mapping, and each carries whatever its own combinator asked for.
 /// The mapping takes the widest, because a narrower declaration elsewhere is not a statement that
 /// this mapping must be narrow — it is a statement about a binding that happens to share the row.
-const fn widest(a: crate::rebind::Capacity, b: crate::rebind::Capacity) -> crate::rebind::Capacity {
-    use crate::rebind::Capacity;
+const fn widest(
+    a: crate::mapping::Capacity,
+    b: crate::mapping::Capacity,
+) -> crate::mapping::Capacity {
+    use crate::mapping::Capacity;
     match (a, b) {
         (Capacity::Any, _) | (_, Capacity::Any) => Capacity::Any,
         (Capacity::UpTo(a), Capacity::UpTo(b)) if a >= b => Capacity::UpTo(a),
@@ -247,9 +250,9 @@ pub(crate) struct MappingDecl {
     /// what the mapping ends up with is the widest thing any of them asked for, never narrower than
     /// the defaults it already holds. Meaningless unless `rebinding` is `Here`, since nothing can
     /// add a control to a mapping the player cannot change.
-    pub(crate) capacity: crate::rebind::Capacity,
+    pub(crate) capacity: crate::mapping::Capacity,
     /// Whether the player may change it, or is only being shown what it does.
-    pub(crate) rebinding: crate::rebind::Rebinding,
+    pub(crate) rebinding: crate::mapping::Rebinding,
 }
 
 impl MappingDecl {
@@ -258,8 +261,8 @@ impl MappingDecl {
     const fn listed() -> Self {
         Self {
             prefix: None,
-            capacity: crate::rebind::Capacity::UpTo(1),
-            rebinding: crate::rebind::Rebinding::Fixed,
+            capacity: crate::mapping::Capacity::UpTo(1),
+            rebinding: crate::mapping::Rebinding::Fixed,
         }
     }
 }
@@ -349,15 +352,15 @@ impl Control {
     ///
     /// Keyboard and mouse are one scheme because a player uses them together; a gamepad is another.
     /// Which one a control belongs to is what decides the scheme a mapping is rebound in.
-    pub const fn scheme(self) -> crate::rebind::Scheme {
+    pub const fn scheme(self) -> crate::mapping::Scheme {
         match self {
             #[cfg(feature = "keyboard")]
-            Self::Key(_) => crate::rebind::Scheme::KeyboardMouse,
+            Self::Key(_) => crate::mapping::Scheme::KeyboardMouse,
             #[cfg(feature = "mouse")]
-            Self::MouseButton(_) => crate::rebind::Scheme::KeyboardMouse,
-            Self::MouseMotion => crate::rebind::Scheme::KeyboardMouse,
+            Self::MouseButton(_) => crate::mapping::Scheme::KeyboardMouse,
+            Self::MouseMotion => crate::mapping::Scheme::KeyboardMouse,
             #[cfg(feature = "gamepad")]
-            Self::GamepadButton(_) | Self::GamepadAxis(_) => crate::rebind::Scheme::Gamepad,
+            Self::GamepadButton(_) | Self::GamepadAxis(_) => crate::mapping::Scheme::Gamepad,
         }
     }
 
@@ -996,7 +999,7 @@ impl<'a, C> BindingHandle<'a, C> {
     /// controls.bind::<Jump>(KeyCode::KeyJ).mappable();   // the same row, second slot
     /// ```
     pub fn mappable(self) -> Self {
-        self.declare_mapping(None, crate::rebind::Capacity::UpTo(1))
+        self.declare_mapping(None, crate::mapping::Capacity::UpTo(1))
     }
 
     /// Keeps this binding out of the player-facing list entirely.
@@ -1037,7 +1040,7 @@ impl<'a, C> BindingHandle<'a, C> {
     /// its three neighbours. Reach for it when two would otherwise derive the same key, which
     /// happens when one action is bound in two contexts.
     pub fn mappable_as(self, key: &'static str) -> Self {
-        self.declare_mapping(Some(key), crate::rebind::Capacity::UpTo(1))
+        self.declare_mapping(Some(key), crate::mapping::Capacity::UpTo(1))
     }
 
     /// Lets the player rebind this, and put up to `count` controls in the mapping.
@@ -1059,7 +1062,7 @@ impl<'a, C> BindingHandle<'a, C> {
             count > 0,
             "a mapping needs room for at least one control; leave `mappable` off instead"
         );
-        self.declare_mapping(None, crate::rebind::Capacity::UpTo(count))
+        self.declare_mapping(None, crate::mapping::Capacity::UpTo(count))
     }
 
     /// Lets the player rebind this, with no limit on how many controls the mapping holds.
@@ -1068,13 +1071,13 @@ impl<'a, C> BindingHandle<'a, C> {
     /// out in a table written in advance — an editor or a tool, where the screen grows an "add
     /// shortcut" button. A game almost always wants a fixed number of slots instead.
     pub fn mappable_any(self) -> Self {
-        self.declare_mapping(None, crate::rebind::Capacity::Any)
+        self.declare_mapping(None, crate::mapping::Capacity::Any)
     }
 
     fn declare_mapping(
         self,
         prefix: Option<&'static str>,
-        capacity: crate::rebind::Capacity,
+        capacity: crate::mapping::Capacity,
     ) -> Self {
         let existing = self.builder.bindings[self.index].mapping;
         assert!(
@@ -1092,7 +1095,7 @@ impl<'a, C> BindingHandle<'a, C> {
             },
             // Every one of this method's callers is a `mappable*`, so reaching here is the author
             // asking for the upgrade from the listed-but-fixed default.
-            rebinding: crate::rebind::Rebinding::Here,
+            rebinding: crate::mapping::Rebinding::Here,
         });
         self
     }
@@ -1296,15 +1299,15 @@ impl<C> InputContextBuilder<C> {
     /// a primary and a secondary, not two rows both called Jump. Merging is keyed by scheme as well
     /// as by name, so the keyboard and gamepad rows stay separate (R19.7); and by action, so two
     /// *different* actions reaching for one name is still the collision R19.15 wants reported.
-    pub(crate) fn mappings(&self, context: &'static str) -> Vec<crate::rebind::Mapping> {
-        let mut mappings: Vec<crate::rebind::Mapping> = Vec::new();
+    pub(crate) fn mappings(&self, context: &'static str) -> Vec<crate::mapping::Mapping> {
+        let mut mappings: Vec<crate::mapping::Mapping> = Vec::new();
         for binding in &self.bindings {
             let Some(declaration) = binding.mapping else {
                 continue;
             };
             let prefix = declaration.prefix.unwrap_or(binding.path);
             binding.source.for_each_part(|part, control| {
-                let key = crate::rebind::MappingKey::new(prefix, part);
+                let key = crate::mapping::MappingKey::new(prefix, part);
                 let scheme = control.scheme();
 
                 if let Some(mapping) = mappings.iter_mut().find(|mapping| {
@@ -1320,7 +1323,7 @@ impl<C> InputContextBuilder<C> {
                     return;
                 }
 
-                mappings.push(crate::rebind::Mapping {
+                mappings.push(crate::mapping::Mapping {
                     key,
                     action: binding.action,
                     action_path: binding.path,
@@ -1345,7 +1348,7 @@ impl<C> InputContextBuilder<C> {
         for mapping in &mut mappings {
             mapping.capacity = widest(
                 mapping.capacity,
-                crate::rebind::Capacity::UpTo(mapping.slots.len()),
+                crate::mapping::Capacity::UpTo(mapping.slots.len()),
             );
         }
         mappings

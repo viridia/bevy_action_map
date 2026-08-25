@@ -478,11 +478,18 @@ Replace the plan's `BTreeMap` with the `Vec<u16>` action→slot map, the dirty b
 
 ### 48. Names that survive a glob import
 
-The prelude exports a dozen bare English nouns — `Scheme`, `Mapping`, `Capacity`, `Conflict`,
-`Overlap`, `Captured`, `Refused`, `Condition`, `Verdict`, `Part`, `Intent`, `Phase`, and the four
-transition events — and a game glob-imports it beside Bevy's own. Found in chunk 47, which renamed
-the two it touched (`Scope` → `PromptScope`, `Origin` → `ControlOrigin`) and left the rest rather
-than smuggling a crate-wide rename into a feature chunk.
+The prelude exports sixteen bare English nouns — `Scheme`, `Mapping`, `Capacity`, `Conflict`,
+`Overlap`, `Captured`, `Refused`, `Condition`, `Verdict`, `Part`, `Intent`, `Phase`, `Obstacle`,
+`Timestamp`, `Rebinding`, `Actions` — plus the four transition events, and a game glob-imports it
+beside Bevy's own. Found in chunk 47, which renamed the two it touched (`Scope` → `PromptScope`,
+`Origin` → `ControlOrigin`) and left the rest rather than smuggling a crate-wide rename into a
+feature chunk.
+
+- **Four of those were missed when this chunk was written**, and turned up by re-reading the prelude
+  rather than the list: `Obstacle`, `Timestamp`, `Rebinding` and `Actions`. `Timestamp` is the one
+  another crate is most likely to export as well; `Obstacle` is the one no reader would guess. The
+  other two are here to be judged rather than assumed — `Actions` probably does earn its bareness in
+  a crate called `bevy_action_map`.
 
 - **Why it is not cosmetic.** BSN templates are where it bites: a scene lists components from
   several preludes with nothing saying which crate each came from, so a name that does not carry its
@@ -749,7 +756,7 @@ to be cheap at.
 | Persistent device identity and calibration (§11)  | two units of the *same kind*, which pad-plus-keyboard does not give         |
 | Mouse wheel as a binding source (R13.3)           | nothing in tree wants it. Chunk 41 landed mouse *buttons* and stopped there deliberately: the wheel is a delta on its own channel, needs the `Line`/`Pixel` normalization R13.3 describes, and shares nothing with a button but the device |
 | Glyph ids (R18.4)                                 | asset-pipeline questions this document does not touch — but *the art is no longer one of them*: **Kenney's input prompt set** covers keyboard, mouse and the three pad brands and is CC0, so an example can ship one without a licensing conversation. Confirm the licence and the coverage before relying on either. What stays open is the identifier scheme, and Kenney is the way to falsify it: R18.4 wants a key of (brand, control) with a brand → generic → text fallback, and chunk 37's stored names are already the control half — `pad/South` plus a brand is nearly the whole id. If that mapping does not survive contact with a real atlas's file names, R18.4 is wrong rather than merely unbuilt |
-| Tunables (R19.11)                                 | nothing in tree adjusts one. Chunk 19 landed mappings and left tunables reading "23 and later", which is the destination ground rule 5 refuses; chunk 45 needs the preset *format* to leave room for them and does not need them to exist. Wanted by R20.5 and by a game named after a deadzone, so this row is a question to reopen rather than a settled no |
+| Tunables (R19.11)                                 | nothing in tree adjusts one. Chunk 19 landed mappings and left tunables reading "23 and later", which is the destination ground rule 5 refuses; chunk 45 needs the preset *format* to leave room for them and does not need them to exist. Wanted by R20.5 and by Disasteroids, whose stick deadzone is the tunable a player would reach for first, so this row is a question to reopen rather than a settled no |
 | Glyphs from a backend (R18.9) | the same asset-pipeline questions as the R18.4 row, arriving from the other side. The *origin* half of this row is closed: chunk 40's `ControlOrigin` has a variant for a control that is not one of ours, carrying the same stored name and fallback label everything else renders from, so what is deferred is the image rather than room for it. Chunk 47 widened that variant with the class its reporter claims, so a foreign control can be narrowed to like one of ours |
 | **A presentation crate** (`bevy_action_map_ui`, or wherever it lands) | **Bevy deciding to take this crate upstream.** That is the point at which the workspace has to be arranged properly regardless, and it is also when the layering matters to someone other than us: an input crate that pulls `bevy_ui` cannot go upstream, and `bevy_ui` could not then use action maps. Until then the layer is `examples/common/prompt_ui.rs`, which every example shares and an integration test covers, and the cost of waiting is a `#[path]` import |
 | Netcode injection and rollback (§10)              | a testbed that actually rolls back; also wants held device state made snapshot-able (R10.3), which chunk 9 left as `BTreeSet`/`HashMap` |

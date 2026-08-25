@@ -879,7 +879,7 @@ that is a question for the conflict *policy* that applies a rebind rather than f
 A rebinding UI then needs no knowledge of this crate's internals:
 
 ```rust
-for mapping in rebind::mappings(world) {
+for mapping in mapping::mappings(world) {
     // mapping.key      -> "gameplay.move.up"        — a key, not text (R19.14)
     // mapping.category -> Some("gameplay.movement") — from the action (R1.6)
     // mapping.slots    -> [Control::Key(KeyCode::KeyW)]  — ordered; slot 0 is the primary
@@ -891,9 +891,9 @@ for mapping in rebind::mappings(world) {
     let label = i18n.get(mapping.key)                 // the app's localization layer...
         .unwrap_or_else(|| mapping.key.fallback_label()); // ...or readable text without one (R19.13)
     // A category is a key on the same terms, and a screen drawing headings needs the same fallback.
-    let heading = mapping.category.map(|c| rebind::fallback_label(c));
+    let heading = mapping.category.map(|c| mapping::fallback_label(c));
 }
-for t in rebind::tunables(world) {
+for t in mapping::tunables(world) {
     // t.key, and a typed range the UI renders as a slider or checkbox
 }
 ```
@@ -902,7 +902,7 @@ The list is a flat one across every context, and nothing in it names an action o
 it goes through the same type-erased door §10's inspection does, so a screen written against it
 works for a game it was not compiled with. Grouping is the caller's: by `category` for headings,
 by `scheme` for which device's worth to show — and because a category is a localization key like
-any other, `rebind::fallback_label` renders one for the game that ships no catalogue, which is the
+any other, `mapping::fallback_label` renders one for the game that ships no catalogue, which is the
 same courtesy `MappingKey` gets and is written in terms of.
 
 The keys are the whole player-facing vocabulary, and none of them is a string this crate renders.
@@ -1259,7 +1259,7 @@ would have made the trait ours-only while looking substitutable, which is the ex
 wrong.
 
 **A prompt is not a row of the controls screen.** The two lists look alike and answer different
-questions. `rebind::mappings` is what the game *declared*, and it is a static list: a screen must
+questions. `mapping::mappings` is what the game *declared*, and it is a static list: a screen must
 draw a row for a binding whether or not anything is carrying its context. A prompt is what would
 fire *now*, so it is empty for a context nobody is carrying and for one that is switched off, and it
 includes a `private` binding — `private` is a statement about the list, not about whether the
@@ -1396,7 +1396,7 @@ bevy_action_map/
     inspect/        type-erased read of contexts and actions    (R22.2)
     player/         device pairing, control schemes             (§15)
     present/    L3  prompts, display descriptors, glyph ids     (§18)
-    rebind/         mappings, tunables, presets           (D7)
+    mapping/        mappings, tunables, presets           (D7)
     backend/        source + authority backend traits           (D3)
     focus/          bevy_input_focus integration  [feature]     (D4)
 bevy_action_map_macros/   #[derive(InputAction)], #[derive(InputContext)]

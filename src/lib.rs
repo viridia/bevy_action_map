@@ -9,7 +9,7 @@
 //! player-facing presentation layer.
 //!
 //! Start with [`action`] to define your actions and contexts, declare what drives them with
-//! [`binding`], and put a context on an entity with [`context`]. Use [`present`] and [`rebind`]
+//! [`binding`], and put a context on an entity with [`context`]. Use [`present`] and [`mapping`]
 //! when you want to show players what is bound.
 //!
 //! ```rust
@@ -50,8 +50,8 @@ pub mod player;
 // L3
 pub mod capture;
 pub mod inspect;
+pub mod mapping;
 pub mod present;
-pub mod rebind;
 
 pub mod backend;
 
@@ -176,10 +176,10 @@ pub mod prelude {
     pub use crate::context::{ActionMapAppExt, Actions, ActionsQuery, InputContextState, Obstacle};
     pub use crate::event::{Canceled, Completed, Fired, Started};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
+    pub use crate::mapping::{Capacity, Mapping, MappingKey, Rebinding, Scheme, mappings};
     pub use crate::present::{
         BindingTable, ControlOrigin, Prompt, PromptDevice, PromptGeneration, PromptScope, Prompts,
     };
-    pub use crate::rebind::{Capacity, Mapping, MappingKey, Rebinding, Scheme, mappings};
     // The derives share their names with the traits above, which is fine — a derive macro and a
     // trait live in different namespaces. Without these, a glob import of this prelude gives you
     // the trait and leaves `#[derive(InputAction)]` unresolved.
