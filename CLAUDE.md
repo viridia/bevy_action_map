@@ -24,8 +24,8 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 | `Requirements.md` | ~204 numbered requirements, `R<section>.<n>`, decisions `D1`–`D8`, open questions `OQ-n` | you need to know what must be true, or a chunk cites an R-number |
 | `Design.md` | how they are satisfied; sections `§1`–`§12` | you need the shape of a thing before changing it |
 | `Roadmap.md` | ground rules, house style, commit format, what has landed, what is left | **start here for any chunk** |
-| `Log.md` | Phase VII onward: what each chunk delivered and what it taught | a decision looks arbitrary |
-| `Log-archive.md` | phases I–VI, closed | rarely; it is history |
+| `Log.md` | what each chunk delivered and what it taught, for the entries the work in flight is still built on | a decision looks arbitrary |
+| `Log-archive.md` | the closed entries — obligations discharged, nothing ahead reasons from them | rarely; it is history |
 
 ## Workflow
 
