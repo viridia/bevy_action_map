@@ -412,11 +412,39 @@ impl<C> Plan<C> {
     // work. Keeping the two apart is what lets a rebinding UI ask about bindings it has no
     // intention of installing.
     pub(crate) fn from_bindings(bindings: Vec<BindingSpec>) -> Self {
+        Self::compile(bindings, None)
+    }
+
+    /// Compiles a variant of `template` — the same actions, driven by different controls.
+    ///
+    /// What an override applies as. The slot allocation is `template`'s rather than derived afresh,
+    /// and both consequences are wanted:
+    ///
+    /// - an action whose every binding the player unbound **keeps its slot**, so reading it gives a
+    ///   rest value rather than the "not bound in this context" warning, which is a typo diagnostic
+    ///   and not what happened here;
+    /// - slot indices stay put across the swap, so an instance's action states and require-reset
+    ///   flags stay aligned with no rebuilding.
+    ///
+    /// A binding for an action the template does not have would still get a slot of its own, which
+    /// cannot happen: a variant only rewrites the sources of bindings the template already holds.
+    pub(crate) fn variant_of(template: &Self, bindings: Vec<BindingSpec>) -> Self {
+        Self::compile(bindings, Some(template))
+    }
+
+    fn compile(bindings: Vec<BindingSpec>, template: Option<&Self>) -> Self {
         let mut slot_intents: Vec<Intent> = Vec::new();
         let mut slot_dispatch: Vec<Dispatch> = Vec::new();
         let mut slot_paths: Vec<&'static str> = Vec::new();
         let mut slot_actions: Vec<ActionId> = Vec::new();
         let mut slot_by_action = BTreeMap::new();
+        if let Some(template) = template {
+            slot_intents.clone_from(&template.slot_intents);
+            slot_dispatch.clone_from(&template.slot_dispatch);
+            slot_paths.clone_from(&template.slot_paths);
+            slot_actions.clone_from(&template.slot_actions);
+            slot_by_action.clone_from(&template.slot_by_action);
+        }
         let mut compiled = Vec::with_capacity(bindings.len());
         let mut scratch_count = 0;
 

@@ -51,6 +51,7 @@ pub mod player;
 pub mod capture;
 pub mod inspect;
 pub mod mapping;
+pub mod overrides;
 pub mod present;
 
 pub mod backend;

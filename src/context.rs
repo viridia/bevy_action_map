@@ -50,15 +50,33 @@ use bevy_platform::collections::HashSet;
 // Instances hold an `Arc` to this rather than a copy: ten local players sharing one binding set
 // hold one plan and ten small state tables. The hook needs somewhere to read it from on insertion,
 // which is why it is also a resource.
+//
+// **This resource is the defaults, permanently.** Applying an override never writes to it — that is
+// what keeps R17.1's diff-against-defaults possible after the first apply, since a diff needs
+// something to diff against. The result of applying goes in `AppliedPlan<C>` instead.
 #[derive(Resource)]
 pub(crate) struct InputContextPlan<C> {
     plan: Arc<Plan<C>>,
+    // The bindings as authored, kept so that an override can be applied as a diff against them.
+    // Cloned and rewritten per apply rather than mutated, for the reason above.
+    bindings: alloc::vec::Vec<crate::binding::BindingSpec>,
     // The player-facing view of the same bindings, empty unless some were declared mappable.
     mappings: alloc::vec::Vec<crate::mapping::Mapping>,
     // Whether an instance is live the moment it is spawned. False for a context whose activation
     // follows something else, so that it does not fire for one frame before the something else
     // has had a chance to say otherwise.
     starts_active: bool,
+}
+
+/// What one context's bindings currently are, once an override has been applied to them.
+///
+/// Absent until something applies one, which is what makes its presence the answer to "has anything
+/// been overridden here". Everything that asks what is bound *now* — a spawning instance, the
+/// player-facing mapping list — reads this and falls back to `InputContextPlan<C>`.
+#[derive(Resource)]
+pub(crate) struct AppliedPlan<C> {
+    pub(crate) plan: Arc<Plan<C>>,
+    pub(crate) mappings: alloc::vec::Vec<crate::mapping::Mapping>,
 }
 
 /// Both views of one button-shaped control.
@@ -368,6 +386,33 @@ impl<C: InputContext> InputContextState<C> {
         self.require_reset.fill(require_reset);
     }
 
+    /// Takes a new set of compiled bindings, which is what applying an override does.
+    ///
+    /// Whatever was in flight is canceled and every action waits to be seen at rest once — the same
+    /// work `deactivate` and `activate` do, and for the same reasons. A hold on a control that is no
+    /// longer bound has to resolve rather than stay held for good, and a player still holding the
+    /// key they just rebound must not get a fresh press out of the swap.
+    ///
+    /// The variant keeps the declared plan's slot allocation, so the action table and the
+    /// require-reset flags stay aligned and only the scratch has to be rebuilt.
+    pub(crate) fn adopt(&mut self, plan: Arc<Plan<C>>) {
+        let was_active = self.active;
+        self.deactivate();
+
+        self.scratch.clear();
+        self.scratch
+            .resize(plan.scratch_count(), Scratch::default());
+        self.chord_claims.clear();
+        self.plan = plan;
+
+        // Set directly rather than through `activate`, which returns early on a context that is
+        // already live — and this one was just switched off to cancel what it held.
+        if was_active {
+            self.active = true;
+            self.require_reset.fill(true);
+        }
+    }
+
     /// Stops driving actions, canceling anything in flight.
     ///
     /// Every action currently held is reported as [`Canceled`](Phase::Canceled) rather than left
@@ -628,12 +673,17 @@ fn attach_context_state<C: InputContext + Component>(
 ) {
     // `add_context` inserts the plan before registering this hook, so the resource is present
     // whenever the hook can run.
-    let Some(plan) = world.get_resource::<InputContextPlan<C>>() else {
+    let Some(declared) = world.get_resource::<InputContextPlan<C>>() else {
         return;
     };
 
-    let starts_active = plan.starts_active;
-    let plan = plan.plan.clone();
+    let starts_active = declared.starts_active;
+    // The current bindings rather than the declared ones, so that an instance arriving after a
+    // rebind — a player joining, a context respawned with a game state — is bound the way the
+    // player left it rather than silently reverting to what the game shipped.
+    let plan = world
+        .get_resource::<AppliedPlan<C>>()
+        .map_or_else(|| declared.plan.clone(), |applied| applied.plan.clone());
     // Whatever is already queued happened before this context existed, so it is not this
     // context's input to react to (R7.5).
     let read_through = world
@@ -934,10 +984,65 @@ fn order_by_priority(
 fn read_mappings<C: InputContext + Component>(
     world: &World,
 ) -> alloc::vec::Vec<crate::mapping::Mapping> {
+    // What is bound now, so a settings screen and a conflict check both read the controls the
+    // player is actually using. `read_declared_mappings` is the one that answers about defaults.
+    if let Some(applied) = world.get_resource::<AppliedPlan<C>>() {
+        return applied.mappings.clone();
+    }
     world
         .get_resource::<InputContextPlan<C>>()
         .map(|declared| declared.mappings.clone())
         .unwrap_or_default()
+}
+
+/// Reads the mappings this context *declared*, whatever has since been applied over them.
+///
+/// The other half of `read_mappings`, which answers about current values. Registered separately
+/// rather than taking a flag, because the two are asked by different callers for different reasons.
+fn read_declared_mappings<C: InputContext + Component>(
+    world: &World,
+) -> alloc::vec::Vec<crate::mapping::Mapping> {
+    world
+        .get_resource::<InputContextPlan<C>>()
+        .map(|declared| declared.mappings.clone())
+        .unwrap_or_default()
+}
+
+/// Rewrites one context's bindings for an override set, and swaps the result into every instance.
+///
+/// Registered per context by `add_context`, like the readers above, and for the same reason: this is
+/// the last place `C` is available.
+fn apply_to_context<C: InputContext + Component>(
+    world: &mut World,
+    overrides: &crate::overrides::Overrides,
+) -> alloc::vec::Vec<crate::overrides::OverrideProblem> {
+    let Some(declared) = world.get_resource::<InputContextPlan<C>>() else {
+        return alloc::vec::Vec::new();
+    };
+    // Read out before anything is written, so the compile below borrows nothing from the world.
+    let bindings = declared.bindings.clone();
+    let rows = declared.mappings.clone();
+    let template = declared.plan.clone();
+    let reserved: alloc::vec::Vec<crate::binding::Control> = world
+        .get_resource::<crate::capture::ReservedControls>()
+        .map(|reserved| reserved.iter().map(|entry| entry.control).collect())
+        .unwrap_or_default();
+
+    let (variant, mappings, problems) =
+        crate::overrides::rewrite(&bindings, &rows, overrides, &reserved, C::PATH);
+    let plan = Arc::new(Plan::variant_of(&template, variant));
+
+    world.insert_resource(AppliedPlan::<C> {
+        plan: plan.clone(),
+        mappings,
+    });
+
+    let mut instances = world.query::<&mut InputContextState<C>>();
+    for mut state in instances.iter_mut(world) {
+        state.adopt(plan.clone());
+    }
+
+    problems
 }
 
 /// Reads one context's bindings back out for a reverse lookup, once its type is no longer known.
@@ -948,8 +1053,14 @@ fn read_mappings<C: InputContext + Component>(
 fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::ContextBindings {
     use crate::present::{BoundControl, ContextBindings};
 
-    let Some(declared) = world.get_resource::<InputContextPlan<C>>() else {
-        return ContextBindings::default();
+    // What is bound now rather than what was declared: a prompt names the control that would fire
+    // the action, and after a rebind that is the control the player chose.
+    let plan = match world.get_resource::<AppliedPlan<C>>() {
+        Some(applied) => &applied.plan,
+        None => match world.get_resource::<InputContextPlan<C>>() {
+            Some(declared) => &declared.plan,
+            None => return ContextBindings::default(),
+        },
     };
 
     // A context nobody carries, or one that is switched off, fires nothing — and a prompt naming
@@ -961,8 +1072,8 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
 
     let mut prompts = alloc::vec::Vec::new();
     let mut claims = alloc::vec::Vec::new();
-    for binding in declared.plan.bindings() {
-        let action = declared.plan.slot_actions()[binding.slot];
+    for binding in plan.bindings() {
+        let action = plan.slot_actions()[binding.slot];
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         let chord: alloc::vec::Vec<crate::binding::Control> = binding
             .chord
@@ -1165,6 +1276,8 @@ fn declare_context<C: InputContext + Component>(
             read: read_instances::<C>,
             mappings: read_mappings::<C>,
             bindings: read_bindings::<C>,
+            declared_mappings: read_declared_mappings::<C>,
+            apply: apply_to_context::<C>,
         });
 
     // A context whose activation follows something else starts inactive and waits to be asked.
@@ -1172,9 +1285,11 @@ fn declare_context<C: InputContext + Component>(
     let activation = builder.activation.take();
     let starts_active = activation.is_none();
 
-    let plan = Arc::new(Plan::from_bindings(builder.finish()));
+    let bindings = builder.finish();
+    let plan = Arc::new(Plan::from_bindings(bindings.clone()));
     app.insert_resource(InputContextPlan::<C> {
         plan,
+        bindings,
         mappings,
         starts_active,
     });

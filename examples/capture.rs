@@ -2,9 +2,9 @@
 //!
 //! Run it and read the console: `cargo run --example capture`.
 //!
-//! It takes each mappable slot in turn, listens for a control, and reports what it heard —
-//! including what that control already does elsewhere. Nothing is rebound: capture reports a
-//! choice, and acting on one is a separate matter.
+//! It takes each mappable slot in turn, listens for a control, reports what it heard — including
+//! what that control already does elsewhere — and then **binds it**, so each answer is visible in
+//! the row the next question prints.
 //!
 //! A *slot* rather than a mapping, because a mapping holds an ordered list of them: `Jump` ships
 //! two keyboard defaults and `Fire` ships one with room for a second, so the walk visits Jump twice
@@ -20,6 +20,12 @@
 //! - press a **gamepad** button on a keyboard row, or a key on a gamepad row — refused, because a
 //!   mapping is rebound within its own control scheme.
 //!
+//! Two lines print after every rebind, and both are the point. `capture_demo.wall_jump` rides
+//! Jump's row rather than having one of its own, so rebinding Jump moves it too — two actions
+//! declared as sharing a control go on sharing one. And the line under it says what the *game*
+//! still ships, unchanged, because an override is a diff: a patch that revises a default reaches
+//! every player who never touched that row.
+//!
 //! No context is ever spawned here, and nothing evaluates: this is a settings screen with no game
 //! behind it, which is the case R19.5 is about.
 //!
@@ -31,6 +37,7 @@
 use bevy::input::gamepad::GamepadButton;
 use bevy::prelude::*;
 use bevy_action_map::mapping;
+use bevy_action_map::overrides::{Overrides, apply_overrides};
 use bevy_action_map::prelude::*;
 
 #[derive(InputAction)]
@@ -48,6 +55,10 @@ struct Fire;
 #[derive(InputAction)]
 #[action(path = "capture_demo.open_settings", output = bool, intent = Button)]
 struct OpenSettings;
+
+#[derive(InputAction)]
+#[action(path = "capture_demo.wall_jump", output = bool, intent = Button, category = "capture_demo.actions")]
+struct WallJump;
 
 #[derive(InputContext)]
 #[context(path = "capture_demo.playing", tick = Render)]
@@ -79,6 +90,23 @@ fn main() {
         // The other half of the same idea: room for two, only one shipped. The walk below stops at
         // the empty second slot, which is the cell a settings screen would draw blank.
         controls.bind::<Fire>(KeyCode::ControlLeft).mappable_upto(2);
+
+        // Jump held rather than tapped, which is a second action on a control the player is already
+        // being shown. It rides Jump's row instead of getting one of its own — and when Jump is
+        // rebound below, watch it move too. That is the whole reason `follows` exists: two actions
+        // declared as sharing a control have to go on sharing one.
+        //
+        // Once per binding of the row, because a follower matches a *binding* rather than a row —
+        // and because a row's sub-row is drawn against every slot the row holds, so a rider on only
+        // some of them would be shown as riding all of them.
+        controls
+            .bind::<WallJump>(KeyCode::Space)
+            .hold(0.4)
+            .follows::<Jump>();
+        controls
+            .bind::<WallJump>(KeyCode::KeyJ)
+            .hold(0.4)
+            .follows::<Jump>();
 
         // The same two actions on the pad, mappable again. Both derive the same mapping name a
         // second time on purpose: `capture_demo.jump` means one thing on the keyboard and another
@@ -112,7 +140,18 @@ fn main() {
 struct Walk {
     remaining: Vec<(mapping::Mapping, usize)>,
     listening: Option<Entity>,
+    /// The row the live session is asking about. A settings screen answers this from wherever it
+    /// put the session — usually the cell the player activated — rather than keeping it here.
+    asking: Option<(mapping::Mapping, usize)>,
 }
+
+/// Everything the player has changed so far.
+///
+/// A plain value the crate hands back rather than something it owns, so a game keeps it wherever it
+/// keeps the rest of its settings. This example keeps it in a resource of its own and never writes
+/// it anywhere; a shipped game would serialize exactly this.
+#[derive(Resource, Default)]
+struct Chosen(Overrides);
 
 fn begin(world: &mut World) {
     println!("Walking every mappable slot this game declares.");
@@ -125,7 +164,9 @@ fn begin(world: &mut World) {
     world.insert_resource(Walk {
         remaining,
         listening: None,
+        asking: None,
     });
+    world.init_resource::<Chosen>();
     next(world);
 }
 
@@ -149,10 +190,13 @@ fn next(world: &mut World) {
         world.despawn(listening);
     }
 
-    let Some((mapping, slot)) = world.resource_mut::<Walk>().remaining.pop() else {
+    let Some((stale, slot)) = world.resource_mut::<Walk>().remaining.pop() else {
         println!("\nThat is every slot. Close the window.");
         return;
     };
+    // Re-read the row rather than trusting the copy taken when the walk was planned: `mappings`
+    // answers with what is bound *now*, and by this point the player may have changed it.
+    let mapping = current(world, &stale);
 
     let Some(session) = CaptureSession::for_slot(&mapping, slot) else {
         // A stick or a mouse bound whole: no single control can fill it, so there is nothing to
@@ -178,7 +222,20 @@ fn next(world: &mut World) {
     let listening = world
         .spawn(session.excluding([Control::Key(KeyCode::Escape)]))
         .id();
-    world.resource_mut::<Walk>().listening = Some(listening);
+    let mut walk = world.resource_mut::<Walk>();
+    walk.listening = Some(listening);
+    walk.asking = Some((mapping, slot));
+}
+
+/// The row `stale` has become, or `stale` itself if this build no longer declares it.
+///
+/// Matched on scheme as well as name, because one name means one thing on the keyboard and another
+/// on the pad — `capture_demo.jump` is two rows, rebound independently.
+fn current(world: &World, stale: &mapping::Mapping) -> mapping::Mapping {
+    mapping::mappings(world)
+        .into_iter()
+        .find(|row| row.key == stale.key && row.scheme == stale.scheme)
+        .unwrap_or_else(|| stale.clone())
 }
 
 /// What the whole row holds, which is more than one thing once a mapping has a secondary.
@@ -232,8 +289,66 @@ fn took(captured: On<Captured>, mut commands: Commands) {
             };
             println!("  ! `{}` already holds it — {certainty}", clash.mapping);
         }
+        rebind(world, control);
         next(world);
     });
+}
+
+/// Writes the captured control into the player's set and makes the game agree with it.
+///
+/// The two halves of a rebind, and they are separate on purpose: the set is the app's to keep and
+/// [`apply_overrides`] is what a running game hears about it. A settings screen with a Confirm
+/// button edits the first for as long as it likes and calls the second once.
+fn rebind(world: &mut World, control: Control) {
+    let Some((row, slot)) = world.resource_mut::<Walk>().asking.take() else {
+        return;
+    };
+
+    // A row is written whole, so the slot-level edit — "put this in the secondary" — happens here,
+    // against the list the row currently holds. The crate's unit is the row; the cell is the
+    // screen's.
+    let mut controls = row.slots.clone();
+    if slot < controls.len() {
+        controls[slot] = control;
+    } else {
+        controls.push(control);
+    }
+
+    let mut chosen = world.remove_resource::<Chosen>().unwrap_or_default();
+    chosen.0.bind(row.scheme, row.key, controls);
+    let problems = apply_overrides(world, &chosen.0);
+    world.insert_resource(chosen);
+
+    for problem in &problems {
+        println!(
+            "  ! `{}` was not applied: {:?}",
+            problem.mapping, problem.kind
+        );
+    }
+
+    let now = current(world, &row);
+    println!("    the row now holds {}", bound(&now));
+    // The rider moved with it, which is the difference between rebinding a control and rebinding
+    // one of the two actions that read it.
+    for follower in &now.followers {
+        println!(
+            "    …and `{}` rides it: {}",
+            follower.action_path,
+            now.slots
+                .iter()
+                .map(|held| follower.condition.fallback_format(&held.fallback_label()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+    }
+    // The declaration is untouched, which is what lets the next patch ship a revised default to
+    // every player who never touched this row.
+    let declared = mapping::declared_mappings(world)
+        .into_iter()
+        .find(|shipped| shipped.key == row.key && shipped.scheme == row.scheme);
+    if let Some(declared) = declared {
+        println!("    the game still ships {}", bound(&declared));
+    }
 }
 
 fn would_not_take(refused: On<Refused>) {

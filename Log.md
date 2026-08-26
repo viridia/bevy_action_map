@@ -349,3 +349,95 @@ that table is the only part of these documents a session is guaranteed to read, 
 description there is a wrong description everywhere.
 
 Nothing was deleted. The archive is one `grep` away, which is the entire reason the split exists.
+
+### Chunk 38: applying a rebind
+
+Twenty chunks of the player-facing model and none of them could change anything. Capture reported a
+choice, `mappings` read the compiled defaults, `conflicts` read the compiled defaults, and chunk
+44's follower link had nothing to follow *through*. What was missing in all four cases was the same
+thing: somewhere to write an answer.
+
+**Split before it was written, into 38 and 54.** The chunk as groomed carried the store, the apply
+path, the follower rewrite, `mappings()`'s meaning, the four conflict policies, R19.8's delegation
+outcome, the repeat-within-a-row question and the pending working copy. That is two chunks, and the
+seam is not arbitrary: a policy needs somewhere to put its answer, so every one of the deferred
+items sits *on top of* the store rather than beside it. Worth noting that ground rule 1's "split it
+before you write it" is easy to apply to a chunk that reads long and hard to apply to one that reads
+coherent — this one read coherent.
+
+**`Overrides` is a plain value, not a resource,** which was the author's call and changed the shape
+of the module. The crate defines the structure and applies it; where it lives is the app's business,
+so it can be a working copy on a settings screen, a field in a settings resource, or a payload sent
+to an account service. That is the same arrangement `bevy_feathers` gives a theme map, and it is
+what makes chunk 54's pending set free rather than a second type.
+
+**Three decisions §10.1 left to whoever built it, now in §10.1.**
+
+*Where the variant lives.* "Swapped into an entity's own state" reads as *only* the entity, and that
+answer has a bug in it: an instance spawned after a rebind — a player joining, a context respawned
+with a game state — silently gets the shipped bindings back. So `AppliedPlan<C>` is a second
+per-context resource holding the variant plan and the variant rows, `InputContextPlan<C>` is now
+literally untouched rather than untouched by convention, and its presence is exactly the answer to
+"has anything been overridden here".
+
+*What `mappings()` means*, which R17.1's note flagged as unanswerable and now is not: it reads the
+variant, and `declared_mappings()` reads the defaults. Every existing caller wanted current values
+and got them without changing. The one that was easy to miss is the *reverse lookup* — a prompt
+names the control that would fire the action, so it reads the variant too, and the test that caught
+it was the one about spawning an instance after a rebind rather than anything about prompts.
+
+*A variant keeps the declared plan's slot allocation*, which turned out not to be an optimization.
+An action whose every binding the player cleared would otherwise lose its slot and read as
+**unbound** — firing the "not bound in this context" warning, which exists to catch a typo and is
+exactly wrong for a control somebody deliberately emptied. Keeping the table also means action
+states and require-reset flags stay aligned across the swap.
+
+**The `Arc` change, and why the alternative lost.** `BindingModifier::Custom` and
+`BindingCondition::Custom` held a `Box`, so neither `BindingSpec` nor `Plan` could be cloned, so a
+variant could not be built by the obvious route. The alternative was sharing compiled per-binding
+data behind an `Arc` and rewriting only the source — cheaper per apply, no public type change — but
+it needs a precomputed key-to-binding index and a second code path deriving the row list. Cloning
+the authored specs and recompiling makes applying *literally* the pure function §10.1 already
+specified, and reuses `diagnose` on the result. Applying is rare by construction; the recompile is
+not the cost worth optimizing.
+
+**One walk, two readers.** The pass that assembles player-facing rows and the pass that rewrites
+them both need "which bindings feed this row, in slot order". They were going to be two walks
+agreeing by inspection, which is the failure mode worth a function to make impossible — a row built
+one way and written another puts the player's control in a slot the screen is not showing it in.
+`mapped_parts` is that function, and `mappings()` was refactored onto it rather than the applier
+duplicating it.
+
+**What the example found, which nothing else would have.** `examples/capture.rs` stopped at "nothing
+is rebound"; it now applies what it captured and prints the row, the rider, and the untouched
+declaration. Two things fell out of running it:
+
+- *Growing a slot on one part of a composite is wrong.* An empty slot is filled by copying the
+  binding beside it, which is right for a whole binding and produces "Move Down: S | S" for a
+  composite — the other three directions land in their own rows a second time. Refused now, with the
+  remedy being the second `mappable` composite a two-column movement table is written with anyway.
+  Found by writing `mappable_upto(2)` on a directional binding to see what happened, not by reading
+  the code.
+- *A follower riding only some of a row's slots is drawn as riding all of them.*
+  `Mapping::followers` is row-level and carries no slot, so the demo's `WallJump` — following one of
+  Jump's two bindings — printed "Hold R, Hold J" when only the first was true. Chunk 44 got this
+  right for Disasteroids, where `Afterburner` rides both of Thrust's bindings, so nothing in tree
+  had ever shown it. The example follows both now; the modelling question is written onto chunk 31,
+  with a plan-build diagnostic as the likely answer since a rider on some slots and not others is
+  far more likely a missing line than an intention.
+
+**Deliberately not here, each with a destination.** The conflict policies and the delegation outcome
+→ 54. Serde, `Reflect` and the file format → 23, which also inherits the question the `MappingKey`
+key raises: a row this build cannot resolve is reported and then dropped, and whether a save should
+preserve it is a format decision, not an apply decision. Per-player override sets → 26, which is the
+first chunk with two players; note that the variant already lives per instance, so a per-entity
+apply is a second entry point rather than a second implementation.
+
+**One new chunk, from noticing that a review note is not a destination.** Chunk 23 carried "open the
+file in a text editor and see whether you can tell what it says" as a review surface, which ground
+rule 5 does not accept — nobody is accountable for a note. It is now chunk 55, and it has something
+to be accountable *with*: a golden TOML document in a test, which fails when the file stops reading
+well. Writing 38's store made the reason concrete rather than aesthetic. `Overrides` keys rows by
+`(Scheme, MappingKey)`, and a derived `Serialize` over that map emits a tuple key — unreadable in
+every format and not a legal TOML table key at all. So the serialized shape has to differ from the
+in-memory one deliberately, and "deliberately" is the word that wants a test under it.

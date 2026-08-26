@@ -1110,11 +1110,41 @@ free** (R17.1). A diff has to be taken against the defaults rather than against 
 means the defaults have to still be there to diff against — and the easy implementation, rewriting
 the declared bindings in place, destroys them on the first apply. It does not have to: the
 declaration lives in `InputContextPlan<C>`, a resource holding the compiled plan and the mapping
-list, while an override applies as a *variant* plan swapped into an entity's own state. So the
-resource is the defaults, permanently, and nothing has to snapshot anything. Two consequences worth
-stating rather than discovering: applying must never write back to that resource, and `mappings()`
-reads it — so once overrides exist, a screen wanting current values reads the entity's variant and
-the two must not be confused.
+list, while an override applies as a *variant* plan. So the resource is the defaults, permanently,
+and nothing has to snapshot anything.
+
+**Where the variant lives, settled by building it.** Not only on the entity, which was the first
+reading of "swapped into an entity's own state": a second per-context resource, `AppliedPlan<C>`,
+holds the variant plan and the variant mapping list, and `InputContextPlan<C>` is then literally
+untouched rather than untouched by convention. The entity still gets the variant — that is what
+makes a rebind take effect — but the resource is what an instance spawned *later* reads, and without
+it a player joining after a rebind, or a context respawned on a state change, silently reverts to
+what the game shipped. Its presence is also exactly the answer to "has anything been overridden
+here".
+
+That settles `mappings()`, which R17.1's note flagged and could not answer: **it reads the
+variant**, so a settings screen and `conflicts()` both see what is bound now without naming an
+entity, and `declared_mappings()` is the defaults, for the reset preview that is the only caller
+wanting them. The reverse lookup reads the variant too, for the same reason and less obviously — a
+prompt names the control that would fire the action, and after a rebind that is the player's.
+
+**A variant keeps the declared plan's slot allocation**, which is not an optimization. An action
+whose every binding the player cleared would otherwise lose its slot and read as *unbound* — firing
+the "not bound in this context" diagnostic, which exists to catch a typo and is precisely wrong
+for a control somebody deliberately emptied. Keeping the table also means an instance's action states and
+require-reset flags stay aligned across the swap, so only the scratch is rebuilt.
+
+**Applying is a whole-row rewrite of the authored bindings, not a patch of the compiled ones.** The
+authored `BindingSpec`s are retained beside the plan and cloned per apply, which is what makes
+loading the pure function this section already asked for — and it is why `BindingModifier::Custom`
+and `BindingCondition::Custom` hold an `Arc` rather than a `Box`. Three cases, and the third is the
+one that bites: a slot the defaults fill has its binding's source rewritten; a slot they left empty
+is filled by *copying* the binding beside it, so a secondary carries the same modifiers and
+conditions as the primary rather than arriving bare; and a slot the override no longer has takes its
+binding away entirely. Copying only works where the binding reads one control — copy a composite and
+its other three directions land in their own rows a second time — so a row that is one part of a
+composite is refused a slot the defaults did not ship, and the remedy is the second `mappable`
+composite that a two-column movement table is written with anyway.
 
 **Applying is the only path in.** An override set is applied to a live context — compiling a variant
 plan and swapping it into that entity's state — and startup is simply the first call. This is not a

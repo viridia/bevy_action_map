@@ -27,7 +27,7 @@
 //! So `.press()` and `.hold(0.5)` together mean "either a press or a long hold", while a blocking
 //! condition vetoes regardless of what the others said.
 
-use alloc::boxed::Box;
+use bevy_platform::sync::Arc;
 
 use crate::action::{ActionValue, Scratch};
 
@@ -77,6 +77,9 @@ pub trait Condition: Send + Sync + 'static {
 }
 
 /// The built-in conditions.
+// `Clone` for the reason `BindingModifier` is: applying an override copies the authored bindings
+// and rewrites their sources, and the defaults have to survive that intact.
+#[derive(Clone)]
 pub enum BindingCondition {
     /// Fires on the tick the control leaves rest.
     Press,
@@ -121,7 +124,11 @@ pub enum BindingCondition {
     /// Fires on the tick the value differs from what it was on the tick before.
     Change,
     /// Calls an application-defined condition.
-    Custom(Box<dyn Condition>),
+    ///
+    /// Shared rather than owned, so that copying a binding set copies the reference and not the
+    /// condition. Use [`when`](crate::binding::BindingHandle::when) rather than building this by
+    /// hand.
+    Custom(Arc<dyn Condition>),
 }
 
 /// The part of a binding's timing that a prompt or a rebinding row has to say something about.
@@ -555,9 +562,9 @@ mod tests {
             combine(&conditions, ActionValue::Bool(true), &mut scratch, TICK)
         }
 
-        let explicit = |v| BindingCondition::Custom(Box::new(Always(v, ConditionKind::Explicit)));
-        let implicit = |v| BindingCondition::Custom(Box::new(Always(v, ConditionKind::Implicit)));
-        let blocking = |v| BindingCondition::Custom(Box::new(Always(v, ConditionKind::Blocking)));
+        let explicit = |v| BindingCondition::Custom(Arc::new(Always(v, ConditionKind::Explicit)));
+        let implicit = |v| BindingCondition::Custom(Arc::new(Always(v, ConditionKind::Implicit)));
+        let blocking = |v| BindingCondition::Custom(Arc::new(Always(v, ConditionKind::Blocking)));
 
         // No conditions at all: the control being off rest is the whole test.
         assert_eq!(verdict_of(Vec::new()), Verdict::Fired);

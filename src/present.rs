@@ -809,15 +809,18 @@ pub struct PromptGeneration(pub u64);
 impl PromptGeneration {
     /// Says that something a prompt reads has changed.
     pub fn invalidate(commands: &mut bevy_ecs::system::Commands<'_, '_>) {
-        commands.queue(|world: &mut World| {
-            // Inserted rather than incremented in place: a hook fires on insert and not on a
-            // mutable deref, and hooks are half of how this is read.
-            let next = world
-                .get_resource::<Self>()
-                .map_or(0, |generation| generation.0)
-                .wrapping_add(1);
-            world.insert_resource(Self(next));
-        });
+        commands.queue(|world: &mut World| Self::bump(world));
+    }
+
+    /// The same, for a caller that already has the world exclusively.
+    pub fn bump(world: &mut World) {
+        // Inserted rather than incremented in place: a hook fires on insert and not on a
+        // mutable deref, and hooks are half of how this is read.
+        let next = world
+            .get_resource::<Self>()
+            .map_or(0, |generation| generation.0)
+            .wrapping_add(1);
+        world.insert_resource(Self(next));
     }
 }
 

@@ -4,7 +4,8 @@
 //! that assembles several controls into a value no single one of them carries. Modifiers reshape
 //! what a binding produces on its way to the action.
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::vec::Vec;
+use bevy_platform::sync::Arc;
 use core::marker::PhantomData;
 
 #[cfg(feature = "gamepad")]
@@ -194,7 +195,11 @@ impl DirectionalButtons {
     }
 }
 
-/// One authored binding in the first end-to-end slice.
+/// One binding as the setup closure declared it: one `.bind` call, plus whatever was chained onto
+/// it. This is what the compiled plan is built from.
+// Cloned when an override is applied: the variant is the authored set with some sources rewritten,
+// and the authored set has to stay intact so a later diff still has defaults to diff against.
+#[derive(Clone)]
 pub(crate) struct BindingSpec {
     pub(crate) action: ActionId,
     // Carried from the action type at bind time: the plan keys state by `ActionId`, which does not
@@ -290,6 +295,166 @@ pub(crate) fn leader_of(bindings: &[BindingSpec], index: usize) -> Option<usize>
                 && spec.mapping.is_some()
         })
         .map(|(other, _)| other)
+}
+
+/// One control an authored [`BindingSpec`] contributes to one
+/// [`Mapping`](crate::mapping::Mapping) row.
+///
+/// This is a fact read off a binding, not a declaration of its own — every `MappedPart` is derived
+/// from [`BindingSpec`]s that already exist, by [`mapped_parts`]. `binding` and `part` say exactly
+/// where it came from: which entry in the binding list, and which of that binding's parts (the
+/// whole thing, for a plain control; one direction, for a composite).
+///
+/// The order these arrive in is the order a mapping's slots fill, which is what makes the first one
+/// the primary.
+#[derive(Clone, Copy)]
+pub(crate) struct MappedPart {
+    pub(crate) key: crate::mapping::MappingKey,
+    pub(crate) scheme: crate::mapping::Scheme,
+    /// Index into the binding list this was read from.
+    pub(crate) binding: usize,
+    pub(crate) part: Part,
+    pub(crate) control: Control,
+}
+
+/// Every mapped part of every listed binding, in slot order.
+///
+/// Two different passes read this instead of walking `bindings` themselves: [`mappings_of`] folds
+/// it into the [`Mapping`](crate::mapping::Mapping) list a settings screen reads, and
+/// [`rewrite`](crate::overrides::rewrite) walks it to find exactly which binding and part to change
+/// when a player's override lands. A row built one way and rewritten another is the failure worth
+/// spending a function to make impossible: it would put the player's new control in a slot the
+/// screen is not showing it in.
+pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
+    let mut parts = Vec::new();
+    for (index, binding) in bindings.iter().enumerate() {
+        let Some(declaration) = binding.mapping else {
+            continue;
+        };
+        let prefix = declaration.prefix.unwrap_or(binding.path);
+        binding.source.for_each_part(|part, control| {
+            parts.push(MappedPart {
+                key: crate::mapping::MappingKey::new(prefix, part),
+                scheme: control.scheme(),
+                binding: index,
+                part,
+                control,
+            });
+        });
+    }
+    parts
+}
+
+/// The [`Mapping`](crate::mapping::Mapping) list for one binding list: one row per mappable part.
+///
+/// Called on the bindings a context declares (from [`mappings`](InputContextBuilder::mappings)) and
+/// again, unchanged, on the rewritten bindings a variant plan holds once an override has been
+/// applied (from [`rewrite`](crate::overrides::rewrite)) — same rule either way, so that a row built
+/// one way and a row rewritten another can never disagree about what is bound.
+///
+/// Empty for a game that declares none, which is the default and costs nothing.
+///
+/// Bindings that derive the same key in the same scheme for the same action are **merged into
+/// one mapping** holding both controls, because that is what a player sees: one row for Jump with
+/// a primary and a secondary, not two rows both called Jump. Merging is keyed by scheme as well
+/// as by name, so the keyboard and gamepad rows stay separate (R19.7); and by action, so two
+/// *different* actions reaching for one name is still the collision R19.15 wants reported.
+pub(crate) fn mappings_of(
+    bindings: &[BindingSpec],
+    context: &'static str,
+) -> Vec<crate::mapping::Mapping> {
+    let mut mappings: Vec<crate::mapping::Mapping> = Vec::new();
+    for entry in mapped_parts(bindings) {
+        let binding = &bindings[entry.binding];
+        // `mapped_parts` yields nothing for a binding without one.
+        let Some(declaration) = binding.mapping else {
+            continue;
+        };
+
+        if let Some(mapping) = mappings.iter_mut().find(|mapping| {
+            mapping.key == entry.key
+                && mapping.scheme == entry.scheme
+                && mapping.action == binding.action
+        }) {
+            mapping.slots.push(entry.control);
+            mapping.capacity = widest(mapping.capacity, declaration.capacity);
+            // Bindings that disagree about this are a plan-build error, so the first one
+            // wins here only so that the value is deterministic while the context is
+            // being refused.
+            continue;
+        }
+
+        mappings.push(crate::mapping::Mapping {
+            key: entry.key,
+            action: binding.action,
+            action_path: binding.path,
+            category: binding.category,
+            // A part of a composite holds a button, whatever the composite as a whole
+            // reports; a whole binding holds whatever its own source does.
+            accepts: match entry.part {
+                Part::Whole => binding.source.channel_shape(),
+                _ => ChannelShape::Button,
+            },
+            scheme: entry.scheme,
+            slots: alloc::vec![entry.control],
+            capacity: declaration.capacity,
+            rebinding: declaration.rebinding,
+            context,
+            followers: Vec::new(),
+        });
+    }
+
+    // A mapping is never narrower than the defaults it already holds, so declaring two
+    // bindings is enough on its own to make a two-slot row — nobody has to also say "2".
+    for mapping in &mut mappings {
+        mapping.capacity = widest(
+            mapping.capacity,
+            crate::mapping::Capacity::UpTo(mapping.slots.len()),
+        );
+    }
+
+    // A second pass rather than folded into the first: a follower's row is found by the
+    // *leader's* declaration, and `leader_of` wants the whole binding list resolved, not just
+    // whatever has been pushed to `mappings` so far.
+    for (index, binding) in bindings.iter().enumerate() {
+        let Some(leader_index) = leader_of(bindings, index) else {
+            // No binding to ride, or `follows` was not declared at all — either way `diagnose`
+            // owns reporting it, and this pass has nothing to attach.
+            continue;
+        };
+        let leader = &bindings[leader_index];
+        // `leader_of` only returns a binding whose `mapping` is `Some`, so this always matches.
+        let Some(declaration) = leader.mapping else {
+            continue;
+        };
+        let prefix = declaration.prefix.unwrap_or(leader.path);
+        let condition = crate::condition::describe(&binding.conditions);
+        leader.source.for_each_part(|part, control| {
+            let key = crate::mapping::MappingKey::new(prefix, part);
+            if let Some(mapping) = mappings.iter_mut().find(|mapping| {
+                mapping.key == key
+                    && mapping.scheme == control.scheme()
+                    && mapping.action == leader.action
+            }) {
+                // A row with two slots is two leader bindings, and Disasteroids' `Afterburner`
+                // follows both of Thrust's — one binding per key, same follower action either
+                // way. Without this it would be pushed once per slot it follows, and a screen
+                // would draw the same sub-row twice.
+                if !mapping
+                    .followers
+                    .iter()
+                    .any(|follower| follower.action == binding.action)
+                {
+                    mapping.followers.push(crate::mapping::Follower {
+                        action: binding.action,
+                        action_path: binding.path,
+                        condition,
+                    });
+                }
+            }
+        });
+    }
+    mappings
 }
 
 impl MappingDecl {
@@ -440,6 +605,62 @@ impl From<ButtonControl> for Control {
     }
 }
 
+/// The other direction: recovers a [`ButtonControl`] from a [`Control`] that turns out to name a
+/// button.
+///
+/// The error carries nothing: the caller already has the [`Control`] that failed, and there is only
+/// one way this can fail — the control names a stick axis or mouse motion, neither of which has a
+/// press to report.
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+impl TryFrom<Control> for ButtonControl {
+    type Error = ();
+
+    fn try_from(control: Control) -> Result<Self, Self::Error> {
+        match control {
+            #[cfg(feature = "keyboard")]
+            Control::Key(key) => Ok(Self::Key(key)),
+            #[cfg(feature = "mouse")]
+            Control::MouseButton(button) => Ok(Self::MouseButton(button)),
+            #[cfg(feature = "gamepad")]
+            Control::GamepadButton(button) => Ok(Self::GamepadButton(button)),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Puts a control in one part of a composite, refusing a control that is not a button — a stick
+/// axis or mouse motion has no press to put there.
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+fn set_button(part: &mut ButtonControl, control: Control) -> bool {
+    match ButtonControl::try_from(control) {
+        Ok(button) => {
+            *part = button;
+            true
+        }
+        Err(()) => false,
+    }
+}
+
+/// The source that reads exactly this one control.
+///
+/// Every control is a source on its own; the composites are the sources that are *not* reachable
+/// this way, since no single control carries a direction or a signed axis.
+impl From<Control> for BindingSource {
+    fn from(control: Control) -> Self {
+        match control {
+            #[cfg(feature = "keyboard")]
+            Control::Key(key) => Self::Button(key),
+            #[cfg(feature = "mouse")]
+            Control::MouseButton(button) => Self::MouseButton(button),
+            #[cfg(feature = "gamepad")]
+            Control::GamepadButton(button) => Self::GamepadButton(button),
+            #[cfg(feature = "gamepad")]
+            Control::GamepadAxis(axis) => Self::GamepadAxis(axis),
+            Control::MouseMotion => Self::MouseMotion,
+        }
+    }
+}
+
 /// The binding source used by the first interactive stage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BindingSource {
@@ -546,6 +767,56 @@ impl BindingSource {
                 visit(Part::Whole, Control::GamepadAxis(x));
             }
         }
+    }
+
+    /// Puts a different control in one part of this source, which is what a rebind does.
+    ///
+    /// The exact inverse of [`for_each_part`](Self::for_each_part): a part this source does not have
+    /// is refused, and so is a control that cannot serve the part it was offered for. Both refusals
+    /// are `false` rather than a panic, because the caller is applying a saved override and a saved
+    /// override can say anything.
+    ///
+    /// **The source's channel shape is invariant.** A whole binding on a key takes another button
+    /// and not a stick axis, so applying an override can never turn a plan that compiled into one
+    /// that would not — the shape mismatch is caught here even if nothing caught it earlier.
+    pub(crate) fn set_part(&mut self, part: Part, control: Control) -> bool {
+        match (&mut *self, part) {
+            // A whole binding is replaced outright, since the new source is entirely the new
+            // control. A stick is deliberately not in here: it reads two axes and reports a
+            // direction, and no single control can stand in for that.
+            (Self::MouseMotion, Part::Whole) => self.replace_whole(control),
+            #[cfg(feature = "keyboard")]
+            (Self::Button(_), Part::Whole) => self.replace_whole(control),
+            #[cfg(feature = "mouse")]
+            (Self::MouseButton(_), Part::Whole) => self.replace_whole(control),
+            #[cfg(feature = "gamepad")]
+            (Self::GamepadButton(_) | Self::GamepadAxis(_), Part::Whole) => {
+                self.replace_whole(control)
+            }
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+            (Self::Axis1(parts), Part::Negative) => set_button(&mut parts.negative, control),
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+            (Self::Axis1(parts), Part::Positive) => set_button(&mut parts.positive, control),
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+            (Self::Directional2(parts), Part::Up) => set_button(&mut parts.up, control),
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+            (Self::Directional2(parts), Part::Down) => set_button(&mut parts.down, control),
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+            (Self::Directional2(parts), Part::Left) => set_button(&mut parts.left, control),
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+            (Self::Directional2(parts), Part::Right) => set_button(&mut parts.right, control),
+            _ => false,
+        }
+    }
+
+    /// Swaps a whole-binding source for the one that reads `control`, if the shape survives it.
+    fn replace_whole(&mut self, control: Control) -> bool {
+        let replacement = Self::from(control);
+        if replacement.channel_shape() != self.channel_shape() {
+            return false;
+        }
+        *self = replacement;
+        true
     }
 
     /// Every physical control this source reads, collected.
@@ -832,6 +1103,9 @@ pub trait Modifier: Send + Sync + 'static {
 }
 
 /// Built-in modifiers that can be chained onto a binding.
+// `Clone` so that a set of authored bindings can be copied and have its sources rewritten, which is
+// how an override is applied without destroying the defaults it overrides.
+#[derive(Clone)]
 pub enum BindingModifier {
     /// Suppresses values near centre, per [`DeadZone`].
     DeadZone(DeadZone),
@@ -855,7 +1129,10 @@ pub enum BindingModifier {
     /// Rounds a 2D direction to the nearest of four or eight compass points.
     Compass(CompassPoints),
     /// Calls an application-defined modifier.
-    Custom(Box<dyn Modifier>),
+    ///
+    /// Shared rather than owned, so that copying a binding set copies the reference and not the
+    /// modifier. Use [`custom`](BindingHandle::custom) rather than building this by hand.
+    Custom(Arc<dyn Modifier>),
 }
 
 impl BindingModifier {
@@ -1278,7 +1555,7 @@ impl<'a, C> BindingHandle<'a, C> {
 
     /// Adds an application-defined condition.
     pub fn when<K: Condition>(mut self, condition: K) -> Self {
-        self.push_condition(BindingCondition::Custom(Box::new(condition)));
+        self.push_condition(BindingCondition::Custom(Arc::new(condition)));
         self
     }
 
@@ -1372,12 +1649,12 @@ impl<'a, C> BindingHandle<'a, C> {
 
     /// Adds a custom modifier.
     pub fn custom<M: Modifier>(mut self, modifier: M) -> Self {
-        self.push_modifier(BindingModifier::Custom(Box::new(modifier)));
+        self.push_modifier(BindingModifier::Custom(Arc::new(modifier)));
         self
     }
 }
 
-/// Builder used by [`crate::player::ActionMapAppExt::add_context`].
+/// Builder used by [`crate::context::ActionMapAppExt::add_context`].
 pub struct InputContextBuilder<C> {
     bindings: Vec<BindingSpec>,
     // Installed against the `App` once the context has been declared. `None` leaves the context
@@ -1463,110 +1740,8 @@ impl<C> InputContextBuilder<C> {
     }
 
     /// The player-facing view of these bindings: one mapping per mappable part.
-    ///
-    /// Empty for a game that declares none, which is the default and costs nothing.
-    ///
-    /// Bindings that derive the same key in the same scheme for the same action are **merged into
-    /// one mapping** holding both controls, because that is what a player sees: one row for Jump
-    /// a primary and a secondary, not two rows both called Jump. Merging is keyed by scheme as well
-    /// as by name, so the keyboard and gamepad rows stay separate (R19.7); and by action, so two
-    /// *different* actions reaching for one name is still the collision R19.15 wants reported.
     pub(crate) fn mappings(&self, context: &'static str) -> Vec<crate::mapping::Mapping> {
-        let mut mappings: Vec<crate::mapping::Mapping> = Vec::new();
-        for binding in &self.bindings {
-            let Some(declaration) = binding.mapping else {
-                continue;
-            };
-            let prefix = declaration.prefix.unwrap_or(binding.path);
-            binding.source.for_each_part(|part, control| {
-                let key = crate::mapping::MappingKey::new(prefix, part);
-                let scheme = control.scheme();
-
-                if let Some(mapping) = mappings.iter_mut().find(|mapping| {
-                    mapping.key == key
-                        && mapping.scheme == scheme
-                        && mapping.action == binding.action
-                }) {
-                    mapping.slots.push(control);
-                    mapping.capacity = widest(mapping.capacity, declaration.capacity);
-                    // Bindings that disagree about this are a plan-build error, so the first one
-                    // wins here only so that the value is deterministic while the context is
-                    // being refused.
-                    return;
-                }
-
-                mappings.push(crate::mapping::Mapping {
-                    key,
-                    action: binding.action,
-                    action_path: binding.path,
-                    category: binding.category,
-                    // A part of a composite holds a button, whatever the composite as a whole
-                    // reports; a whole binding holds whatever its own source does.
-                    accepts: match part {
-                        Part::Whole => binding.source.channel_shape(),
-                        _ => ChannelShape::Button,
-                    },
-                    scheme,
-                    slots: alloc::vec![control],
-                    capacity: declaration.capacity,
-                    rebinding: declaration.rebinding,
-                    context,
-                    followers: Vec::new(),
-                });
-            });
-        }
-
-        // A mapping is never narrower than the defaults it already holds, so declaring two
-        // bindings is enough on its own to make a two-slot row — nobody has to also say "2".
-        for mapping in &mut mappings {
-            mapping.capacity = widest(
-                mapping.capacity,
-                crate::mapping::Capacity::UpTo(mapping.slots.len()),
-            );
-        }
-
-        // A second pass rather than folded into the first: a follower's row is found by the
-        // *leader's* declaration, and `leader_of` wants the whole binding list resolved, not just
-        // whatever has been pushed to `mappings` so far.
-        for (index, binding) in self.bindings.iter().enumerate() {
-            let Some(leader_index) = leader_of(&self.bindings, index) else {
-                // No binding to ride, or `follows` was not declared at all — either way `diagnose`
-                // owns reporting it, and this pass has nothing to attach.
-                continue;
-            };
-            let leader = &self.bindings[leader_index];
-            // `leader_of` only returns a binding whose `mapping` is `Some`, so this always matches.
-            let Some(declaration) = leader.mapping else {
-                continue;
-            };
-            let prefix = declaration.prefix.unwrap_or(leader.path);
-            let condition = crate::condition::describe(&binding.conditions);
-            leader.source.for_each_part(|part, control| {
-                let key = crate::mapping::MappingKey::new(prefix, part);
-                if let Some(mapping) = mappings.iter_mut().find(|mapping| {
-                    mapping.key == key
-                        && mapping.scheme == control.scheme()
-                        && mapping.action == leader.action
-                }) {
-                    // A row with two slots is two leader bindings, and Disasteroids' `Afterburner`
-                    // follows both of Thrust's — one binding per key, same follower action either
-                    // way. Without this it would be pushed once per slot it follows, and a screen
-                    // would draw the same sub-row twice.
-                    if !mapping
-                        .followers
-                        .iter()
-                        .any(|follower| follower.action == binding.action)
-                    {
-                        mapping.followers.push(crate::mapping::Follower {
-                            action: binding.action,
-                            action_path: binding.path,
-                            condition,
-                        });
-                    }
-                }
-            });
-        }
-        mappings
+        mappings_of(&self.bindings, context)
     }
 
     /// The controls this context withholds from capture.
@@ -1848,7 +2023,7 @@ mod tests {
 
     #[test]
     fn custom_modifiers_fit_into_the_chain() {
-        let modifier = BindingModifier::Custom(Box::new(DoubleAxis));
+        let modifier = BindingModifier::Custom(Arc::new(DoubleAxis));
 
         assert_eq!(
             modifier.apply(
@@ -2194,6 +2369,6 @@ mod tests {
         assert!(BindingModifier::DeadZone(DeadZone::radial(0.1)).rescales());
         assert!(!BindingModifier::DeadZone(DeadZone::radial(0.1).without_rescale()).rescales());
         assert!(!BindingModifier::Scale(2.0).rescales());
-        assert!(!BindingModifier::Custom(Box::new(DoubleAxis)).rescales());
+        assert!(!BindingModifier::Custom(Arc::new(DoubleAxis)).rescales());
     }
 }

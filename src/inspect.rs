@@ -94,6 +94,13 @@ pub(crate) struct DeclaredContext {
     // from `mappings` because it answers about bindings rather than about rows a player edits:
     // a `private` binding is missing from one and present in the other.
     pub(crate) bindings: fn(&World) -> crate::present::ContextBindings,
+    // The declared rows, never the current ones — `mappings` above answers that. What a reset
+    // previews, and what an override is a diff against.
+    pub(crate) declared_mappings: fn(&World) -> Vec<crate::mapping::Mapping>,
+    // Rewrites this context's bindings for an override set and swaps the result into every
+    // instance. Exclusive because it writes both a resource and the components.
+    pub(crate) apply:
+        fn(&mut World, &crate::overrides::Overrides) -> Vec<crate::overrides::OverrideProblem>,
 }
 
 /// Every context declared so far, in declaration order.

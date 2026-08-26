@@ -286,10 +286,15 @@ impl Follower {
     }
 }
 
-/// Every mapping a game has declared.
+/// Every mapping in the game, holding the controls that drive it **now**.
 ///
 /// The list a rebinding screen is built from. Nothing here names an action or a context type, so a
 /// screen written against it works for a game it was not compiled with.
+///
+/// Where a player has rebound something, this is what they rebound it to — the controls a row shows
+/// are the controls that fire. Use [`declared_mappings`] for what the game shipped instead, which is
+/// what a "reset to default" offers and what an override set is a diff against. With nothing
+/// overridden the two are the same list, which is why the difference is easy to miss.
 ///
 /// Sorting is the caller's: group by [`category`](Mapping::category) to draw headings, and filter by
 /// [`scheme`](Mapping::scheme) to show one device's worth at a time.
@@ -302,6 +307,23 @@ pub fn mappings(world: &World) -> Vec<Mapping> {
         .0
         .iter()
         .flat_map(|context| (context.mappings)(world))
+        .collect()
+}
+
+/// Every mapping in the game, holding the controls the game itself declared.
+///
+/// [`mappings`] with anything the player changed left out — the same rows, in the same order, with
+/// the shipped controls in their slots. What "reset to default" would produce, and what a screen
+/// compares against to show which rows have been changed.
+pub fn declared_mappings(world: &World) -> Vec<Mapping> {
+    let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
+        return Vec::new();
+    };
+
+    declared
+        .0
+        .iter()
+        .flat_map(|context| (context.declared_mappings)(world))
         .collect()
 }
 
