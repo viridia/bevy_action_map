@@ -136,14 +136,14 @@ step and a real game is a better acceptance test than a synthetic one.
 | | |
 | --- | --- |
 | **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves; and a screen that can be *operated* — a stick or a D-pad rounded to a compass point and narrowed to the ticks it moved on, which is a selection moving one step per direction entered, over a game that keeps running and never hears the controls the screen has taken; and two actions that deliberately share one control declared as sharing it, so that the rebind which cannot happen yet will move both; and a prompt or a mapping row that says when a binding wants more than a bare press — held, or tapped twice — as structure a localization layer can render for itself, with a fallback formula ("Hold W", "W ×2") for a game that ships no catalogue, and a mapping's followers drawn as a subordinate line under the row they ride rather than a row of their own. |
-| **Known wrong today** | A widget that handles its own keyboard bypasses consumption entirely: `bevy_ui_widgets::Button` activates on `Space` whether or not a context claimed `Space`, because `InputDispatchPlugin` asks the mapper nothing (R8.2a, chunk 49). Disasteroids works around it with an action that consumes and does nothing. The settings screen lists its own navigation controls — `Menu` binds `Navigate`, `Accept` and `Back` with nothing marking them as machinery rather than something to rebind — which is what chunk 53 is for, and is why the screen now runs taller than its two device tables alone would explain. The prelude exports sixteen bare English nouns that a glob import drops into a template beside Bevy's own (chunk 48). Otherwise nothing is wrong so much as absent — the player-facing half of the crate is a list you can move around and still no way to change anything on it. |
+| **Known wrong today** | A widget that handles its own keyboard bypasses consumption entirely: `bevy_ui_widgets::Button` activates on `Space` whether or not a context claimed `Space`, because `InputDispatchPlugin` asks the mapper nothing (R8.2a, chunk 49). Disasteroids works around it with an action that consumes and does nothing. The prelude exports sixteen bare English nouns that a glob import drops into a template beside Bevy's own (chunk 48). Otherwise nothing is wrong so much as absent — the player-facing half of the crate is a list you can move around and still no way to change anything on it. |
 | **Never built** | Rebinding itself: nothing can yet change what a control is bound to, or save the change. Also tunables, presets, glyphs, and every screen that does more than list what is already there. |
 
 ---
 
 ## What has landed
 
-Thirty-three chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+Thirty-five chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
 where it fell short of its own description — Phase VII onward there, and everything before it in the
 [archive](./Log-archive.md). This table is only an index, and the sequence below is what remains.
 
@@ -183,6 +183,7 @@ where it fell short of its own description — Phase VII onward there, and every
 | 30 | The settings screen, interactive | done; the widget layer's own keyboard path → 49 |
 | 44 | Bindings that travel together | done; the subordinate row it earns, and the descriptor that row needs → 50 |
 | 50 | What a held control says | done; the context-level filter the settings screen also needs → 53 |
+| 53 | A context the player never sees | closed with no crate change: `Mapping::context` already carried the data |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -286,33 +287,6 @@ you can operate buys: Confirm and Cancel exist and are indistinguishable, becaus
 screen can be changed yet and so there is nothing for one to commit that the other would discard
 (chunk 38 and chunk 31); and neither caption carries its shortcut, because B is bound to `Back` for
 the whole screen rather than to Cancel in particular and X is bound to nothing at all (chunk 31).
-
-### 53. A context the player never sees
-
-`private` is per binding, and "this whole context is not part of the player-facing model" is a fact
-about the context. A main menu is the case: a game would not want to remap its menu navigation and
-would not want to *display* it either, and saying so one binding at a time is N statements of one
-fact — which every future screen then has to know as well, since the alternative is filtering by
-context at each one.
-
-- **Live in the tree, and chunk 43 should have caught it.** Disasteroids' `Menu` context binds
-  `Navigate`, `Accept` and `Back` with no `private`, so listing-by-default puts all of them on the
-  controls screen: one row from the stick, four from the D-pad, and two more. The settings screen
-  is listing its own navigation controls. Nobody noticed through 21, 30 or 43, because each of those
-  was reviewed against what it added rather than against the whole screen.
-- **A declaration on the builder**, not a flag on each binding — the same shape `active_if` has, and
-  the same relationship to R19.10 that `private` has: listed by default, and hiding is declared.
-- **Not the same as `private`.** That marks a binding as an implementation detail of another one.
-  This says a whole context is machinery the player does not think of as controls, and the two
-  should not be spelled the same way even though they land in the same place.
-- **R19.10 gains the context-level exception**, since it currently enumerates three states per
-  binding and this is a fourth thing that produces one of them.
-- **Check `reserved` on the way past.** It is already flat and global across a scheme rather than
-  per context, and a context nobody lists may still want its controls withheld from capture — the
-  two are independent and it would be easy to accidentally couple them here.
-- **Review surface:** whether the screen should be able to *override* it. A debug build that wants
-  to see everything is the case, and the answer is probably no — the filter is the caller's, so a
-  screen that wants everything can already ask for it a different way.
 
 ### 38. Applying a rebind
 

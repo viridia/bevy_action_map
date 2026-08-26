@@ -912,3 +912,31 @@ listing-by-default puts all of them on the screen — exactly what chunk 53 alre
 written to fix. Nothing about this chunk caused it; the extra row height chunk 50 adds is what made
 a pre-existing problem large enough to see. No new destination needed — 53 already is one — so
 "Known wrong today" now names it instead of leaving it for the next reader to rediscover.
+
+### Chunk 53: a context the player never sees, closed without a crate change
+
+**The chunk as written assumed a fact that turned out to be false.** It called for a builder-level
+declaration — `private` or some other spelling, on the whole context rather than on each binding —
+because the alternative was said to be filtering by context at every screen, which every future
+screen would then have to know how to do. But `Mapping` already carries `context: &'static str`,
+set from the declaring context's path since chunk 19 built it for the mapping-collision check
+(`report_mapping_collisions`). The data chunk 53 was written to add already existed; nobody had
+looked before designing around its absence.
+
+**Fixed at the one call site that has it, not in the crate.** `settings.rs`'s `screen` function
+already names `Menu`, `Navigate`, `Accept` and `Back` concretely — it is the function building this
+game's own screen, not the generic table renderer beneath it — so filtering `mapping.context !=
+Menu::PATH` there costs one line and touches nothing `table`, `cells`, or `follower_cells` read. The
+claim in this file's module doc, that nothing below `screen` names a context, stays true; the filter
+sits above it.
+
+**Why not build the crate feature anyway, for the games that will hit this later.** The case for it
+was that a screen written once should work in a different game without knowing its context types —
+but that was never a stated requirement, only a property chunk 19 inherited by reusing chunk 36's
+type-erased registry (built for R22.2's debug overlay) for the mapping list too, and later prose
+treated the inheritance as a design goal. With exactly one consumer of `mappings` in the tree today,
+declaring the exclusion once in the crate and filtering it once at the call site cost the same
+number of lines; the crate version added a builder method, a name to bikeshed, and a panic-ordering
+check against `mappable` for a case that has not happened yet. Revisit if a second screen needs the
+same exclusion and duplicates the filter — that is the point at which the crate is the one paying
+for the repetition rather than one call site.

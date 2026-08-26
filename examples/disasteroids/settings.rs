@@ -163,7 +163,15 @@ fn ring_off(lost: On<FocusLost>, mut outlines: Query<&mut Outline>) {
 /// something the shell does not need: the context is the screen, so there is no activation
 /// condition to write and nothing to switch off on the way out.
 fn screen(world: &World) -> impl Scene {
-    let all = mappings(world);
+    // `Menu`'s own bindings — the stick, the D-pad and the arrow keys that move the selection on
+    // this very screen — are machinery for operating the settings screen, not controls a player
+    // thinks of as part of the game. `mappings` cannot tell the two apart on its own, so this is
+    // the one place the screen names a context: everything from here down still reads `Mapping`
+    // alone.
+    let all: Vec<Mapping> = mappings(world)
+        .into_iter()
+        .filter(|mapping| mapping.context != Menu::PATH)
+        .collect();
     let rows = |scheme| -> Vec<Mapping> {
         all.iter()
             .filter(|mapping| mapping.scheme == scheme)
