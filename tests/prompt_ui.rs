@@ -133,6 +133,22 @@ fn an_action_nothing_fires_renders_a_placeholder() {
     assert_eq!(caption(&mut app, told), "unbound");
 }
 
+/// R18.3's condition half: a binding that only fires held says so in the caption, and the whole
+/// formula rather than a bare qualifier — "Hold Space" tells a player what to do; "Hold" alone tells
+/// them nothing they could act on.
+#[test]
+fn a_held_binding_says_so_in_the_caption() {
+    let mut app = app();
+    app.insert_resource(PromptDevice(Some(Scheme::KeyboardMouse)));
+    app.add_context::<Flying>(|controls| {
+        controls.bind::<Jump>(KeyCode::Space).hold(0.5);
+    });
+    app.world_mut().spawn(Flying);
+
+    let span = app.world_mut().spawn(PromptSpan(Jump::id())).id();
+    assert_eq!(caption(&mut app, span), "Hold Space");
+}
+
 /// R18.5, which is the whole reason the crate raises a signal: a prompt that was right when it was
 /// spawned has to stop being wrong on its own.
 #[test]

@@ -873,3 +873,42 @@ row, one set of keys, and a subordinate line beneath it — dimmer, not activata
 whole formula ("Hold W") rather than a diff against the row above, because a bare "hold" in a cell
 is a qualifier with no control in it. That needs R18.3's condition half, which also has a second
 consumer in `PromptSpan`, which is what makes it a chunk instead of a corner of this one.
+
+### Chunk 50: what a held control says
+
+`ConditionDescriptor` in `condition.rs`: `None`, `Hold { duration }`, `MultiTap { count }`, derived
+from a binding's own `Vec<BindingCondition>` by `describe` — first match wins, and `HoldAndRelease`
+reads as `Hold` because the player still has to hold the control even though release is what fires.
+Its `fallback_format` is the whole formula ("Hold W", "W ×2") rather than a qualifier alone, on the
+same reasoning `fallback_label` already carries: a catalogue gets the pieces separately and composes
+its own word order, and only a game with no catalogue gets English glued together.
+
+Two consumers, as planned. `Prompt` gained a `condition` field, populated in `read_bindings`
+alongside the chord it already carried; `examples/common/prompt_ui.rs`'s `caption` runs the chord
+through first and the condition second, so a held chord renders "Hold Ctrl+S" rather than dropping
+one or the other. `Mapping` gained `followers: Vec<Follower>` — action, path, and the follower's own
+condition — built in a second pass over `InputContextBuilder::mappings` because a follower's row is
+found by its *leader's* declaration, which wants the whole binding list resolved rather than whatever
+`mappings` has accumulated so far. `examples/disasteroids/settings.rs` draws each follower as a
+`line` indented under its principal, sharing `cells`' shape but never `changeable`, so the selection
+cannot land on it.
+
+**The bug worth recording: a follower rides a binding, and a row can be several bindings.**
+Disasteroids' `Thrust` is one row with two keyboard slots — `KeyW` and `ArrowUp`, two separate
+`mappable` bindings merged by key and scheme — and `Afterburner` declares `.follows::<Thrust>()`
+once per key, because `leader_of` matches by exact source and a follower can only ride one binding
+at a time. Both follows-declarations resolve to leader bindings that feed the *same* mapping row, so
+the naive second pass pushed `Afterburner` onto that row's `followers` twice — one identical
+subordinate line drawn under the other. The fix is a dedup by the follower's action within one row's
+`followers` before pushing, which is also the right answer for the case that looks similar and
+isn't: two *different* followers, each riding a different slot of one row, are two real facts about
+it and both belong. `a_follower_riding_every_slot_of_a_row_is_still_one_sub_row` pins the one that
+looked like a corner case and turned out to be the acceptance test's actual shape.
+
+**Running Disasteroids to check the acceptance test found a second, unrelated thing.** The settings
+screen is now visibly taller than its two device tables account for, because `Menu` binds
+`Navigate`, `Accept` and `Back` with nothing marking them as machinery rather than controls, and
+listing-by-default puts all of them on the screen — exactly what chunk 53 already describes and was
+written to fix. Nothing about this chunk caused it; the extra row height chunk 50 adds is what made
+a pre-existing problem large enough to see. No new destination needed — 53 already is one — so
+"Known wrong today" now names it instead of leaving it for the next reader to rediscover.

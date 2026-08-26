@@ -124,6 +124,78 @@ pub enum BindingCondition {
     Custom(Box<dyn Condition>),
 }
 
+/// The part of a binding's timing that a prompt or a rebinding row has to say something about.
+///
+/// Every condition changes *when* a binding fires, but only holding and multi-tapping change what a
+/// player needs to be told beyond the control's own name: `Thrust` and `Afterburner` on one key
+/// produce the same caption unless the caption knows one of them wants the key held. The rest —
+/// press, release, down, a tap's own ceiling, a pulse, a change — read the same as a bare press to a
+/// player, so they carry [`None`](Self::None) here.
+///
+/// R18.3 wants this handed to a localization layer as structure rather than as rendered text, so a
+/// translator chooses its own word order; [`fallback_format`](Self::fallback_format) is the built-in
+/// renderer for a game that ships no catalogue (R19.13).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ConditionDescriptor {
+    /// Nothing to add: the control's own name is the whole answer.
+    None,
+    /// Fires only once the control has been held for `duration` seconds.
+    Hold {
+        /// How long, in the context's seconds.
+        duration: f32,
+    },
+    /// Fires only after `count` taps.
+    MultiTap {
+        /// How many taps. Two is a double-tap.
+        count: u16,
+    },
+}
+
+impl ConditionDescriptor {
+    /// English fallback text combining this with a control's own label — "Hold W", "W ×2" — for a
+    /// game with no catalogue to ask instead.
+    ///
+    /// **The whole formula, not a diff against the control.** A bare "Hold" means nothing to a
+    /// player who has not already read the control it qualifies, so this always returns the two
+    /// together. Word order is English; a catalogue exists so a translator can choose its own.
+    pub fn fallback_format(self, control: &str) -> alloc::string::String {
+        match self {
+            Self::None => alloc::string::String::from(control),
+            Self::Hold { .. } => alloc::format!("Hold {control}"),
+            Self::MultiTap { count } => alloc::format!("{control} \u{d7}{count}"),
+        }
+    }
+}
+
+impl BindingCondition {
+    /// What this one condition contributes to a [`ConditionDescriptor`], where it contributes
+    /// anything. `HoldAndRelease` reads as a hold for the same reason `Hold` does: the player still
+    /// has to hold the control, even though what fires is the release at the end of it.
+    fn descriptor(&self) -> Option<ConditionDescriptor> {
+        match self {
+            Self::Hold { duration, .. } | Self::HoldAndRelease { duration } => {
+                Some(ConditionDescriptor::Hold {
+                    duration: *duration,
+                })
+            }
+            Self::MultiTap { count, .. } => Some(ConditionDescriptor::MultiTap { count: *count }),
+            _ => None,
+        }
+    }
+}
+
+/// What a binding's whole set of conditions contributes to a prompt or a mapping row.
+///
+/// The first condition in declaration order that has anything to say wins. Nothing built in ever
+/// gives one binding both a hold and a multi-tap, so this is a simplification only a `Custom`
+/// combination could ever notice.
+pub(crate) fn describe(conditions: &[BindingCondition]) -> ConditionDescriptor {
+    conditions
+        .iter()
+        .find_map(BindingCondition::descriptor)
+        .unwrap_or(ConditionDescriptor::None)
+}
+
 /// Bit positions within [`Scratch::flags`](crate::action::Scratch::flags).
 const HELD: u8 = 1 << 0;
 const DONE: u8 = 1 << 1;
@@ -602,5 +674,55 @@ mod tests {
         // The change fires on the crossing; the pulse's clock starts on that same tick, so the
         // first repeat lands one interval after it and every one thereafter is evenly spaced.
         assert_eq!(verdicts, [Fired, Ongoing, Fired, Ongoing, Ongoing, Fired]);
+    }
+
+    /// The two conditions R18.3's condition half exists for, and the one that reads the same as a
+    /// bare press and so has nothing to add.
+    #[test]
+    fn describing_finds_the_hold_or_the_multi_tap() {
+        assert_eq!(
+            describe(&[BindingCondition::Hold {
+                duration: 0.75,
+                one_shot: false,
+            }]),
+            ConditionDescriptor::Hold { duration: 0.75 }
+        );
+        assert_eq!(
+            describe(&[BindingCondition::MultiTap {
+                count: 2,
+                max_gap: 0.3,
+            }]),
+            ConditionDescriptor::MultiTap { count: 2 }
+        );
+        assert_eq!(
+            describe(&[BindingCondition::Press]),
+            ConditionDescriptor::None
+        );
+        assert_eq!(describe(&[]), ConditionDescriptor::None);
+    }
+
+    /// `HoldAndRelease` still asks the player to hold the control, even though what fires is the
+    /// release — the caption is the same one `Hold` gets.
+    #[test]
+    fn hold_and_release_reads_as_a_hold() {
+        assert_eq!(
+            describe(&[BindingCondition::HoldAndRelease { duration: 0.5 }]),
+            ConditionDescriptor::Hold { duration: 0.5 }
+        );
+    }
+
+    /// The whole formula rather than a qualifier on its own: a bare "Hold" means nothing to a
+    /// player who has not already read the control it modifies.
+    #[test]
+    fn the_fallback_renderer_names_the_control_every_time() {
+        assert_eq!(ConditionDescriptor::None.fallback_format("W"), "W");
+        assert_eq!(
+            ConditionDescriptor::Hold { duration: 0.75 }.fallback_format("W"),
+            "Hold W"
+        );
+        assert_eq!(
+            ConditionDescriptor::MultiTap { count: 2 }.fallback_format("Space"),
+            "Space \u{d7}2"
+        );
     }
 }

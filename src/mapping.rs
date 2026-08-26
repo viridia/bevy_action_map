@@ -47,6 +47,7 @@ use bevy_ecs::world::World;
 
 use crate::action::{ActionId, ChannelShape};
 use crate::binding::{Control, Part};
+use crate::condition::ConditionDescriptor;
 
 /// The set of devices a player is using, and the scope a rebinding is made in.
 ///
@@ -245,6 +246,44 @@ pub struct Mapping {
     pub rebinding: Rebinding,
     /// The path of the context the binding lives in.
     pub context: &'static str,
+    /// Other actions riding this row's controls, declared with
+    /// [`follows`](crate::binding::BindingHandle::follows).
+    ///
+    /// Empty for almost every mapping. A follower contributes no slot of its own — its controls are
+    /// this row's by construction — so a screen draws it as a subordinate line under the row rather
+    /// than a row of its own, which is the whole reason `.follows` exists: two actions sharing one
+    /// control read as one thing to rebind, not two.
+    pub followers: Vec<Follower>,
+}
+
+/// One other action riding a mapping's row, contributing no controls of its own.
+///
+/// What [`follows`](crate::binding::BindingHandle::follows) declares. The follower reads exactly the
+/// controls its principal's row lists, so nothing here repeats them — a screen names the row above
+/// again, usually with [`condition`](Self::condition) added, rather than drawing a row of its own.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Follower {
+    /// The action riding this row.
+    pub action: ActionId,
+    /// That action's declared path, mirroring the `action`/`action_path` pair
+    /// [`Mapping`] itself carries. A localization key (R19.14), so a catalogue answers it and
+    /// [`fallback_label`](Self::fallback_label) derives "Afterburner" for a game without one.
+    pub action_path: &'static str,
+    /// What distinguishes this action's firing from a bare press of the row's controls — held a
+    /// while longer, most often. [`ConditionDescriptor::None`] means nothing does, which a screen
+    /// showing this follower at all should treat as a game that has declared something with nothing
+    /// to tell the player.
+    pub condition: ConditionDescriptor,
+}
+
+impl Follower {
+    /// Readable text for a game with no translation catalogue.
+    ///
+    /// Use it as the fallback when a catalogue lookup on [`action_path`](Self::action_path) misses,
+    /// not in place of one.
+    pub fn fallback_label(&self) -> String {
+        fallback_label(self.action_path)
+    }
 }
 
 /// Every mapping a game has declared.
@@ -676,6 +715,8 @@ mod tests {
     /// it reads as a bug.
     #[test]
     fn a_follower_is_not_a_row_of_its_own() {
+        use crate::action::InputAction as _;
+
         #[derive(InputContext)]
         #[context(path = "mapping_tests.riding", tick = Fixed)]
         struct Riding;
@@ -698,6 +739,38 @@ mod tests {
             mappings[0].capacity,
             Capacity::UpTo(1),
             "a follower contributes no slots, so it cannot widen the row it rides"
+        );
+
+        // Not a row, but not invisible either: the row it rides knows it is there.
+        assert_eq!(mappings[0].followers.len(), 1);
+        let follower = &mappings[0].followers[0];
+        assert_eq!(follower.action, Lunge::id());
+        assert_eq!(follower.action_path, "mapping_tests.lunge");
+        assert_eq!(follower.fallback_label(), "Lunge");
+    }
+
+    /// The condition half of R18.3: a follower's hold is what a screen draws beside the row it
+    /// rides, and it travels on the follower rather than being derived again from the world.
+    #[test]
+    fn a_follower_carries_its_own_condition() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.riding_held", tick = Fixed)]
+        struct RidingHeld;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<RidingHeld>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls
+                .bind::<Lunge>(KeyCode::Space)
+                .hold(0.4)
+                .follows::<Jump>();
+        });
+
+        let mappings = mappings(app.world());
+        assert_eq!(
+            mappings[0].followers[0].condition,
+            ConditionDescriptor::Hold { duration: 0.4 }
         );
     }
 
@@ -736,6 +809,36 @@ mod tests {
                 .iter()
                 .all(|mapping| mapping.action_path == "mapping_tests.jump")
         );
+    }
+
+    /// Disasteroids' actual shape: one row with a primary and a secondary, and a follower riding
+    /// each slot separately because a follower matches a *binding*, not a row. The row is one thing
+    /// to the player, so it gets one sub-row, not two identical ones.
+    #[test]
+    fn a_follower_riding_every_slot_of_a_row_is_still_one_sub_row() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.riding_every_slot", tick = Fixed)]
+        struct RidingEverySlot;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<RidingEverySlot>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.bind::<Jump>(KeyCode::KeyJ).mappable();
+            controls
+                .bind::<Lunge>(KeyCode::Space)
+                .hold(0.4)
+                .follows::<Jump>();
+            controls
+                .bind::<Lunge>(KeyCode::KeyJ)
+                .hold(0.4)
+                .follows::<Jump>();
+        });
+
+        let mappings = mappings(app.world());
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].slots.len(), 2);
+        assert_eq!(mappings[0].followers.len(), 1);
     }
 
     /// Following a row the player cannot change is allowed, and is the case Disasteroids' pad

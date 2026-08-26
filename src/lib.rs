@@ -172,11 +172,13 @@ pub mod prelude {
         CaptureSession, Captured, Conflict, ControlClass, Overlap, Refused, RefusedReason,
         ReservedControls, conflicts,
     };
-    pub use crate::condition::{Condition, ConditionKind, Verdict};
+    pub use crate::condition::{Condition, ConditionDescriptor, ConditionKind, Verdict};
     pub use crate::context::{ActionMapAppExt, Actions, ActionsQuery, InputContextState, Obstacle};
     pub use crate::event::{Canceled, Completed, Fired, Started};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
-    pub use crate::mapping::{Capacity, Mapping, MappingKey, Rebinding, Scheme, mappings};
+    pub use crate::mapping::{
+        Capacity, Follower, Mapping, MappingKey, Rebinding, Scheme, mappings,
+    };
     pub use crate::present::{
         BindingTable, ControlOrigin, Prompt, PromptDevice, PromptGeneration, PromptScope, Prompts,
     };

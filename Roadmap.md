@@ -135,15 +135,15 @@ step and a real game is a better acceptance test than a synthetic one.
 
 | | |
 | --- | --- |
-| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves; and a screen that can be *operated* — a stick or a D-pad rounded to a compass point and narrowed to the ticks it moved on, which is a selection moving one step per direction entered, over a game that keeps running and never hears the controls the screen has taken; and two actions that deliberately share one control declared as sharing it, so that the rebind which cannot happen yet will move both. |
-| **Known wrong today** | A widget that handles its own keyboard bypasses consumption entirely: `bevy_ui_widgets::Button` activates on `Space` whether or not a context claimed `Space`, because `InputDispatchPlugin` asks the mapper nothing (R8.2a, chunk 49). Disasteroids works around it with an action that consumes and does nothing. A prompt cannot tell a held binding from a tapped one, which is the condition half of R18.3's structured descriptor (chunk 50) — and until it can, a player cannot discover from the controls screen that Disasteroids' throttle does a second thing when it is held, because chunk 44 gave that binding a link to its principal and no way to be drawn beside it. The prelude exports sixteen bare English nouns that a glob import drops into a template beside Bevy's own (chunk 48). Otherwise nothing is wrong so much as absent — the player-facing half of the crate is a list you can move around and still no way to change anything on it. |
+| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves; and a screen that can be *operated* — a stick or a D-pad rounded to a compass point and narrowed to the ticks it moved on, which is a selection moving one step per direction entered, over a game that keeps running and never hears the controls the screen has taken; and two actions that deliberately share one control declared as sharing it, so that the rebind which cannot happen yet will move both; and a prompt or a mapping row that says when a binding wants more than a bare press — held, or tapped twice — as structure a localization layer can render for itself, with a fallback formula ("Hold W", "W ×2") for a game that ships no catalogue, and a mapping's followers drawn as a subordinate line under the row they ride rather than a row of their own. |
+| **Known wrong today** | A widget that handles its own keyboard bypasses consumption entirely: `bevy_ui_widgets::Button` activates on `Space` whether or not a context claimed `Space`, because `InputDispatchPlugin` asks the mapper nothing (R8.2a, chunk 49). Disasteroids works around it with an action that consumes and does nothing. The settings screen lists its own navigation controls — `Menu` binds `Navigate`, `Accept` and `Back` with nothing marking them as machinery rather than something to rebind — which is what chunk 53 is for, and is why the screen now runs taller than its two device tables alone would explain. The prelude exports sixteen bare English nouns that a glob import drops into a template beside Bevy's own (chunk 48). Otherwise nothing is wrong so much as absent — the player-facing half of the crate is a list you can move around and still no way to change anything on it. |
 | **Never built** | Rebinding itself: nothing can yet change what a control is bound to, or save the change. Also tunables, presets, glyphs, and every screen that does more than list what is already there. |
 
 ---
 
 ## What has landed
 
-Thirty-two chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+Thirty-three chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
 where it fell short of its own description — Phase VII onward there, and everything before it in the
 [archive](./Log-archive.md). This table is only an index, and the sequence below is what remains.
 
@@ -182,6 +182,7 @@ where it fell short of its own description — Phase VII onward there, and every
 | 29 | Directional navigation | done, folded into 30; bubbling dispatch (R22.7) declined and deferred with a gate, an independent repeat delay → deferred table |
 | 30 | The settings screen, interactive | done; the widget layer's own keyboard path → 49 |
 | 44 | Bindings that travel together | done; the subordinate row it earns, and the descriptor that row needs → 50 |
+| 50 | What a held control says | done; the context-level filter the settings screen also needs → 53 |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -285,37 +286,6 @@ you can operate buys: Confirm and Cancel exist and are indistinguishable, becaus
 screen can be changed yet and so there is nothing for one to commit that the other would discard
 (chunk 38 and chunk 31); and neither caption carries its shortcut, because B is bound to `Back` for
 the whole screen rather than to Cancel in particular and X is bound to nothing at all (chunk 31).
-
-### 50. What a held control says
-
-R18.3's condition half, which has been a `MUST` in the deferred table since chunk 47 and has now run
-out of gate. Chunk 44 gave a follower a link and deliberately gave it no row; this is the row.
-Nothing renders a `.hold()` differently from a tap, so `Thrust` and `Afterburner` on one key produce
-the same prompt, and the sub-row 44 earns cannot be drawn at all without it.
-
-- **The descriptor grows a condition.** `hold`, `multi_tap`, and the chord structure R18.3 names,
-  plus the fallback renderer it also requires — "Hold W", "W ×2" — so that a game with no catalogue
-  reads sensibly (R19.13). Chunk 47 built the chord half already; this is the other one.
-- **Two consumers, which is what makes it a chunk rather than a corner of 44.** `PromptSpan` renders
-  a held prompt on the HUD, and the settings row renders its followers. Either alone would have been
-  cheaper to bolt on and would have left the other reaching into it.
-- **`Mapping` gains its followers**, since the row is what a screen draws them from: action id and
-  path, mirroring the `action`/`action_path` pair the row already carries. The path is a
-  localization key (R19.14), so a catalogue answers it and `fallback_label` derives "Afterburner"
-  for a game without one. A follower's *controls* are not on it, because they are the principal's
-  slots by construction — the sub-row inherits the row's columns and stays aligned as they fill.
-- **The visual treatment is the author's, and it is the point of the chunk.** A subordinate line
-  immediately under its principal, indented or dimmed, and **not activatable** — a follower is not
-  separately rebindable and a button that does nothing says otherwise.
-- **The whole formula, not the diff.** "Hold W" under "W", not "hold". A bare qualifier in a cell has
-  no control in it and means nothing to a player who has not already parsed the row above; and the
-  whole formula degrades gracefully when a follower's conditions are more than one.
-- **Disasteroids is the acceptance test**, and the thing to check is a player question rather than an
-  API one: can someone who has never read the tutorial find out that the afterburner exists, and
-  which key it is on, from the controls screen alone? That is what chunk 44 left undone.
-- **Review surface:** whether the fallback renderer's word order survives a language that is not
-  English. "Hold" + control is an English construction, and a descriptor that has already composed
-  the string has taken the choice away from the catalogue that should be making it.
 
 ### 53. A context the player never sees
 

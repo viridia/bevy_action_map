@@ -151,16 +151,18 @@ fn refresh_prompts(world: &mut World) {
     }
 }
 
-/// One prompt as a string, whatever must be held alongside it first.
+/// One prompt as a string, whatever must be held alongside it and whatever timing it wants first.
 ///
 /// A binding that needs a modifier says so, because a prompt that dropped it would caption
-/// `Ctrl+S` as "S" — wrong rather than merely terse.
+/// `Ctrl+S` as "S" — wrong rather than merely terse. A binding that only fires held says so too:
+/// `prompt.condition` is `ConditionDescriptor::None` for almost everything, and where it is not,
+/// its fallback renderer is what turns "W" into "Hold W" rather than a bare, uninterpretable "Hold".
 fn caption(prompt: &Prompt) -> String {
-    let mut caption = String::new();
+    let mut control = String::new();
     for held in &prompt.with {
-        caption.push_str(&held.fallback_label());
-        caption.push('+');
+        control.push_str(&held.fallback_label());
+        control.push('+');
     }
-    caption.push_str(&prompt.origin.fallback_label());
-    caption
+    control.push_str(&prompt.origin.fallback_label());
+    prompt.condition.fallback_format(&control)
 }

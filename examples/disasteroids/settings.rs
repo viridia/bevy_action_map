@@ -31,6 +31,9 @@ use crate::common::prompt_ui::PromptSpan;
 const CHANGEABLE: Color = Color::srgb(0.75, 0.95, 0.8);
 /// Everything that is listed to be read rather than changed.
 const FIXED: Color = Color::srgb(0.55, 0.6, 0.62);
+/// A follower's line: dimmer than [`FIXED`], since it is a fact about the row above rather than a
+/// row the player reads on its own.
+const SUBORDINATE: Color = Color::srgb(0.4, 0.44, 0.46);
 const HEADING: Color = Color::srgb(0.45, 0.7, 0.95);
 const TITLE: Color = Color::srgb(0.9, 0.95, 1.0);
 /// The ring drawn around whatever the selection is on.
@@ -39,6 +42,8 @@ const FOCUS: Color = Color::srgb(1.0, 0.85, 0.3);
 /// The width of the column holding what a row is called, and of each control column after it.
 const NAME_WIDTH: f32 = 210.0;
 const CONTROL_WIDTH: f32 = 155.0;
+/// How far a follower's line sits under the row it rides.
+const FOLLOWER_INDENT: f32 = 20.0;
 
 /// Whether the controls screen is up.
 ///
@@ -304,19 +309,31 @@ fn table(title: &'static str, mut rows: Vec<Mapping>) -> impl Scene {
     for mapping in rows {
         if category != Some(mapping.category) {
             category = Some(mapping.category);
-            lines.push(line(vec![Cell {
-                // A category is a localization key on the same terms as a row's name, so a game
-                // with a catalogue looks it up here exactly as `label` does below.
-                text: mapping
-                    .category
-                    .map_or_else(|| String::from("Other"), fallback_label),
-                width: NAME_WIDTH,
-                color: HEADING,
-                border: Color::NONE,
-                changeable: false,
-            }]));
+            lines.push(line(
+                vec![Cell {
+                    // A category is a localization key on the same terms as a row's name, so a game
+                    // with a catalogue looks it up here exactly as `label` does below.
+                    text: mapping
+                        .category
+                        .map_or_else(|| String::from("Other"), fallback_label),
+                    width: NAME_WIDTH,
+                    color: HEADING,
+                    border: Color::NONE,
+                    changeable: false,
+                }],
+                0.0,
+            ));
         }
-        lines.push(line(cells(&mapping, columns)));
+        lines.push(line(cells(&mapping, columns), 0.0));
+        // Chunk 44 gave `Afterburner` a link to `Thrust` and nowhere to be drawn; this is where.
+        // Indented and dimmed rather than a row of its own, and not activatable — a follower is not
+        // separately rebindable, and a button that did nothing would say otherwise.
+        for follower in &mapping.followers {
+            lines.push(line(
+                follower_cells(&mapping, follower, columns),
+                FOLLOWER_INDENT,
+            ));
+        }
     }
 
     bsn! {
@@ -375,6 +392,38 @@ fn cells(mapping: &Mapping, columns: usize) -> Vec<Cell> {
     cells
 }
 
+/// One follower's line: its own name, then the principal's controls with the follower's own
+/// condition formatted in — "Hold W" under "W", not the bare word "hold". A follower has no slots
+/// of its own to draw; a blank column here is the row above not having filled that slot either.
+fn follower_cells(mapping: &Mapping, follower: &Follower, columns: usize) -> Vec<Cell> {
+    let mut cells = vec![Cell {
+        text: follower.fallback_label(),
+        width: NAME_WIDTH,
+        color: SUBORDINATE,
+        border: Color::NONE,
+        changeable: false,
+    }];
+
+    for column in 0..columns {
+        let text = mapping
+            .slots
+            .get(column)
+            .map_or_else(String::new, |control| {
+                follower
+                    .condition
+                    .fallback_format(&control.fallback_label())
+            });
+        cells.push(Cell {
+            text,
+            width: CONTROL_WIDTH,
+            color: SUBORDINATE,
+            border: Color::NONE,
+            changeable: false,
+        });
+    }
+    cells
+}
+
 /// What a mapping is called on screen.
 ///
 /// The crate hands over a localization key rather than words, because that half of a row is as
@@ -401,10 +450,15 @@ struct Cell {
     changeable: bool,
 }
 
-fn line(cells: Vec<Cell>) -> impl Scene {
+/// `indent` is nonzero for exactly a follower's line — the mark of a row that is a fact about the
+/// principal above it rather than a row of its own, since every cell in it is already
+/// [`SUBORDINATE`]. A parameter rather than a second function: two `impl Scene` functions are two
+/// different opaque types, and `table` below builds one `Vec` holding both ordinary and follower
+/// lines.
+fn line(cells: Vec<Cell>, indent: f32) -> impl Scene {
     let cells: Vec<_> = cells.into_iter().map(cell).collect();
     bsn! {
-        Node { column_gap: Val::Px(8.0) }
+        Node { column_gap: Val::Px(8.0), margin: {UiRect::left(Val::Px(indent))} }
         Children [{cells}]
     }
 }

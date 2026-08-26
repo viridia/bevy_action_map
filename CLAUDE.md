@@ -81,11 +81,12 @@ Prose in these markdown documents wraps at 100 columns; tables are exempt.
 ## Commit messages
 
 No `Co-authored-by` for the LLM — Bevy's AI policy wants a disclosure section instead. Standard
-footer, unless the commit genuinely departed from it:
+footer, unless the commit genuinely departed from it. Name the model that actually did the session's
+work, not whichever one wrote the last commit — check rather than copy forward:
 
 ```
 LLM Usage Disclosure: implementation, tests and documentation written by
-Claude Opus 5; design decisions, review and acceptance by the author.
+{model}; design decisions, review and acceptance by the author.
 ```
 
 ## Context, and what not to economize on
@@ -102,7 +103,11 @@ separated things disagree, and that is not free — so cut waste, not reading. D
   was visible from a diff.
 
 What to scope down is **tool output**: `| head`, `| wc -l`, `git diff` rather than a sweep over four
-files dumped into the transcript to find five long lines.
+files dumped into the transcript to find five long lines. The Verification commands are the biggest
+offender — `cargo test --all-features` alone prints one line per test — so filter rather than let it
+scroll: `| grep -E "FAILED|error|test result"` for a run you expect to pass, and only drop the filter
+when something actually fails and you need to see which test. This costs nothing in accuracy; it is
+pure waste to keep paying for it.
 
 **Say when the problem has outgrown the window.** A large change held half in view produces
 confident work with holes in it, which is worse than the same change split in two. If something

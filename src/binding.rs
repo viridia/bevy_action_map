@@ -1511,6 +1511,7 @@ impl<C> InputContextBuilder<C> {
                     capacity: declaration.capacity,
                     rebinding: declaration.rebinding,
                     context,
+                    followers: Vec::new(),
                 });
             });
         }
@@ -1522,6 +1523,48 @@ impl<C> InputContextBuilder<C> {
                 mapping.capacity,
                 crate::mapping::Capacity::UpTo(mapping.slots.len()),
             );
+        }
+
+        // A second pass rather than folded into the first: a follower's row is found by the
+        // *leader's* declaration, and `leader_of` wants the whole binding list resolved, not just
+        // whatever has been pushed to `mappings` so far.
+        for (index, binding) in self.bindings.iter().enumerate() {
+            let Some(leader_index) = leader_of(&self.bindings, index) else {
+                // No binding to ride, or `follows` was not declared at all — either way `diagnose`
+                // owns reporting it, and this pass has nothing to attach.
+                continue;
+            };
+            let leader = &self.bindings[leader_index];
+            // `leader_of` only returns a binding whose `mapping` is `Some`, so this always matches.
+            let Some(declaration) = leader.mapping else {
+                continue;
+            };
+            let prefix = declaration.prefix.unwrap_or(leader.path);
+            let condition = crate::condition::describe(&binding.conditions);
+            leader.source.for_each_part(|part, control| {
+                let key = crate::mapping::MappingKey::new(prefix, part);
+                if let Some(mapping) = mappings.iter_mut().find(|mapping| {
+                    mapping.key == key
+                        && mapping.scheme == control.scheme()
+                        && mapping.action == leader.action
+                }) {
+                    // A row with two slots is two leader bindings, and Disasteroids' `Afterburner`
+                    // follows both of Thrust's — one binding per key, same follower action either
+                    // way. Without this it would be pushed once per slot it follows, and a screen
+                    // would draw the same sub-row twice.
+                    if !mapping
+                        .followers
+                        .iter()
+                        .any(|follower| follower.action == binding.action)
+                    {
+                        mapping.followers.push(crate::mapping::Follower {
+                            action: binding.action,
+                            action_path: binding.path,
+                            condition,
+                        });
+                    }
+                }
+            });
         }
         mappings
     }

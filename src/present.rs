@@ -67,6 +67,7 @@ use bevy_ecs::world::World;
 use crate::action::ActionId;
 use crate::binding::{Control, Part};
 use crate::capture::ControlClass;
+use crate::condition::ConditionDescriptor;
 use crate::mapping::Scheme;
 
 #[cfg(feature = "gamepad")]
@@ -565,7 +566,7 @@ impl ControlOrigin {
 }
 
 /// One way to fire an action, as a prompt would show it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Prompt {
     /// The control that fires it.
     pub origin: ControlOrigin,
@@ -579,6 +580,12 @@ pub struct Prompt {
     /// [`Part::Whole`] unless the action is bound to an arrangement of several controls, in which
     /// case there is one prompt per part and this is what tells them apart.
     pub part: Part,
+    /// What besides pressing the control this binding requires — held a while, tapped twice.
+    ///
+    /// [`ConditionDescriptor::None`] for almost everything, on the same terms as
+    /// [`with`](Self::with) being empty: most bindings fire on a bare press and have nothing here to
+    /// say.
+    pub condition: ConditionDescriptor,
     /// The path of the context the binding lives in, where it came from a context at all.
     pub context: Option<&'static str>,
 }
@@ -733,6 +740,7 @@ impl Prompts for BindingTable<'_> {
                         .map(ControlOrigin::Ours)
                         .collect(),
                     part: entry.part,
+                    condition: entry.condition,
                     context: Some(context.path),
                 };
                 // The same control reached twice — one action bound in two contexts, most often —
@@ -742,6 +750,7 @@ impl Prompts for BindingTable<'_> {
                     seen.origin == prompt.origin
                         && seen.part == prompt.part
                         && seen.with == prompt.with
+                        && seen.condition == prompt.condition
                 }) {
                     continue;
                 }
@@ -832,6 +841,7 @@ pub(crate) struct BoundControl {
     pub(crate) part: Part,
     pub(crate) control: Control,
     pub(crate) chord: Vec<Control>,
+    pub(crate) condition: ConditionDescriptor,
 }
 
 #[cfg(test)]
@@ -1225,6 +1235,36 @@ mod prompt_tests {
         assert_eq!(
             prompts[0].with,
             vec![ControlOrigin::Ours(Control::Key(KeyCode::ControlLeft))]
+        );
+    }
+
+    /// R18.3's condition half: `Thrust` and `Afterburner` share a control and a prompt is the only
+    /// place that would otherwise show them as identical.
+    #[test]
+    fn a_hold_travels_with_the_control_it_qualifies() {
+        use crate::condition::ConditionDescriptor;
+
+        let mut app = app();
+        app.add_context::<Shell>(|controls| {
+            controls.bind::<Turn>(KeyCode::KeyW);
+            controls.bind::<Save>(KeyCode::KeyW).hold(0.75);
+        });
+        app.world_mut().spawn(Shell);
+
+        let table = BindingTable::new(app.world());
+        assert_eq!(
+            table.prompts(Turn::id(), PromptScope::ANY)[0].condition,
+            ConditionDescriptor::None
+        );
+        let held = table.prompts(Save::id(), PromptScope::ANY);
+        assert_eq!(
+            held[0].condition,
+            ConditionDescriptor::Hold { duration: 0.75 }
+        );
+        assert_eq!(
+            ConditionDescriptor::Hold { duration: 0.75 }
+                .fallback_format(&held[0].origin.fallback_label()),
+            "Hold W"
         );
     }
 

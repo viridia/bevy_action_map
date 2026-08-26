@@ -840,8 +840,9 @@ possible. Nothing collides.
 is to appear *with* that control — a subordinate line under the principal, dimmer and not
 activatable, showing its own whole formula ("Hold W") rather than a diff against the row above it: a
 bare "hold" in a cell is a qualifier with no control in it, and means nothing to a player who has
-not already parsed the row it modifies. That needs R18.3's condition half, which is why the model
-here carries the link and the screen does not yet draw it.
+not already parsed the row it modifies. That needed R18.3's condition half, which chunk 50 built:
+`Mapping::followers` carries the condition beside the link, and Disasteroids' settings screen draws
+the sub-row from it.
 
 **`mappable` takes no arguments, and both halves of that are decisions.**
 
@@ -1183,9 +1184,12 @@ catalogue per layout; and once capture lands, the crate can remember the logical
 moment a player bound something, which is right for every binding they chose themselves. Recorded
 here rather than solved, because the solution is a chunk of its own.
 
-**Composite structure is not built.** R18.3 also asks for "hold" and "chord of A and B" as structure
-a renderer can compose. Nothing shows a chord yet; when something does, it is a descriptor wrapping
-these names rather than a change to them.
+**Composite structure, settled.** R18.3 also asks for "hold" and "chord of A and B" as structure a
+renderer can compose, and both landed as fields beside the name rather than a descriptor wrapping
+it: chunk 47 gave `Prompt` a `with: Vec<ControlOrigin>` for the chord, and chunk 50 gave it a
+`condition: ConditionDescriptor` for hold and multi-tap, each with its own fallback renderer on the
+same terms as [`fallback_label`](Control::fallback_label) — a structured value a catalogue can read
+apart, and English text for a game that ships none.
 
 ### 10.4 Capture
 
@@ -1401,12 +1405,13 @@ have changed it, and §10.7's answer is that the spans do not ask on a quiet fra
 an index would speed up is the frame where the answer moved, which is the frame nobody is counting.
 It stays the next move rather than the first one.
 
-**Not built here.** R18.3's structured descriptor for composite structure — "hold", "chord of A and
-B" — is still absent, and §10.3 records why. What *is* carried is the chord itself: a binding that
-requires a modifier alongside its own control reports both, because dropping the modifier makes
-`Ctrl+S` render as "S", which is a wrong prompt rather than an unpolished one. Condition structure
-is the part that stays missing: a held binding and a tapped one on the same key produce the same
-prompt, and Disasteroids' `Afterburner` is the case in tree.
+**Built here, in full.** A binding that requires a modifier alongside its own control reports both,
+because dropping the modifier makes `Ctrl+S` render as "S", which is a wrong prompt rather than an
+unpolished one. Chunk 50 closed the other half `Prompt` was missing: a held binding and a tapped one
+on the same key used to produce the same prompt, and `Prompt::condition` is what tells them apart —
+`ConditionDescriptor::Hold` or `::MultiTap`, `::None` for the ordinary case of a bare press, each
+with a fallback formula for a game with no catalogue. Disasteroids' `Afterburner` is the case that
+forced it: it shares `Thrust`'s control and a prompt was the only place they still read alike.
 
 ### 10.7 Prompts on screen, and keeping them true
 

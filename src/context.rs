@@ -972,6 +972,7 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
             .collect();
         #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
         let chord: alloc::vec::Vec<crate::binding::Control> = alloc::vec::Vec::new();
+        let condition = crate::condition::describe(&binding.conditions);
 
         // By part rather than by control, so that a composite answers once per direction and a
         // stick answers once rather than twice — the same view the player-facing model takes.
@@ -981,6 +982,7 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
                 part,
                 control,
                 chord: chord.clone(),
+                condition,
             });
         });
         // Claims are by control, because taking a composite takes every control in it.
