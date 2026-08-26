@@ -823,3 +823,53 @@ around a four-line call to the navigator. The gate is a widget that intercepts �
 area, a text field. And R22.5's "initial delay + repeat rate" is one number rather than two, because
 the pulse's clock starts on the tick the change fires; the gate is a screen long enough for equal to
 be wrong.
+
+### Chunk 44: bindings that travel together
+
+`.follows::<A>()` on a binding: it rides `A`'s mapping, contributes no row of its own, and moves
+with that row when the row moves. Disasteroids' three `Afterburner` bindings drop `private` for it,
+which was the chunk's stated acceptance test and is the whole of its diff in the example.
+
+**The bug it fixes is a gameplay bug, and it was latent rather than absent.** Rebind Thrust to `J`
+with the old model and the afterburner stays on `W` — and if the player later puts Fire on `W`,
+holding Fire afterburns. Nothing collides, so conflict detection could never have caught it: the
+failure is a *separation* that should not have been possible, and `conflicts()` looks for two rows
+holding one control. Chunk 38 was the deadline rather than the discoverer, which is why this landed
+first.
+
+**Resolution is by the controls, not by the name, and that is one lookup doing three jobs.** A
+follower names an action, and that action usually has several bindings — one per device. Matching
+the *source* picks the right one without either side naming a device, checks "the same controls"
+rather than trusting them, and guarantees that a follower's controls are its principal's slots,
+which is what will let a sub-row inherit the row's columns. It also rules out a chain of followers
+for free: a follower has no mapping, so nothing can ride one.
+
+**The roadmap's own check would have failed the roadmap's own acceptance test.** It said the target
+must "exist, be `mappable`, be in the same scheme, and read the same controls" — but Disasteroids'
+pad `Afterburner` follows the pad `Thrust`, which is deliberately listed-and-fixed, because the pad
+table is read-only and console remapping owns it. Requiring the target to be rebindable rejects it.
+The check is *listed*, not mappable: following a fixed row leaves nothing to rewrite and still keeps
+the duplicate off the screen, which is worth having alone. Worth recording because the plan and the
+example disagreed and only the example was right.
+
+**Two refusals rather than one, because the fix is in different places.** `FollowsNothing` is no
+binding of that action reading this — a typo, or a device bound on one side only. `FollowsUnlisted`
+is a binding that reads it and is `private`, so there is no mapping to lend; the repair is on the
+*other* binding, and one diagnostic covering both would have named the wrong one.
+
+**What the chunk deliberately did not do, and why the deferred table was wrong about it.** A
+follower is not listed separately — so nothing about this puts `Afterburner` back on a screen, which
+is what the deferred row for R18.3's condition half predicted would happen and used as its gate. Two
+things in that row were untrue. `private` was never what concealed the held-versus-tapped prompt
+collision: `a_private_binding_still_answers_a_prompt` has asserted since chunk 40 that a hidden
+binding answers prompts, so the collision has been reachable all along and what conceals it is that
+nothing in tree *prompts* `Afterburner`. And a gate that trips on a chunk which does not trip it is
+not a gate.
+
+So the row is deleted and the work is **chunk 50**, with a number rather than a gate. Asking what
+the player wants to see is what settled it: a player looking up "how do I boost?" cannot find out
+from the controls screen today, and will not be able to after this chunk either. The answer is one
+row, one set of keys, and a subordinate line beneath it — dimmer, not activatable, carrying its own
+whole formula ("Hold W") rather than a diff against the row above, because a bare "hold" in a cell
+is a qualifier with no control in it. That needs R18.3's condition half, which also has a second
+consumer in `PromptSpan`, which is what makes it a chunk instead of a corner of this one.

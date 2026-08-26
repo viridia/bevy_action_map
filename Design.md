@@ -790,6 +790,7 @@ rebindable* if it declares a mapping, and *unlisted* only if it asks:
 | (none) | yes | no |
 | `mappable` | yes | yes |
 | `private` | no | no |
+| `follows::<A>()` | on `A`'s row | with `A`'s row |
 
 The first draft had two states and made listing follow rebindability, so the gamepad `Jump` above
 vanished from the screen entirely. That is backwards for the commonest gamepad screen there is: the
@@ -798,12 +799,49 @@ and under opt-in listing there was no data to draw it from — the crate knew th
 to say so. Rebindability is the developer's call because a fixed binding is a design decision;
 seeing the controls is the player's business, and the default belongs to them (R19.10).
 
-`private` is for where listing is genuinely wrong: a binding that reads a control already shown
-under another name, so a screen listing it again shows one key twice under two headings.
-Disasteroids' `Afterburner` — the throttle, held — is the example, and it is also the example of
-what the model cannot yet say. Those bindings do not merely duplicate `Thrust`'s keys, they *follow*
-them, and nothing here makes a rebind of one move the other; `private` hides the duplicate row
-without linking the two, which is a stopgap rather than the answer.
+`private` is for where listing is genuinely wrong: a binding that is the game's own business and
+would only confuse a controls screen. It hides a binding and links it to nothing, which is the right
+answer for a genuine internal and the wrong one for a control the player is already being shown.
+
+**`follows` is the fourth state, and it exists because the third was being used for the wrong
+thing.** Several actions may deliberately read one control — tap to dodge and hold to sprint,
+Disasteroids' `Afterburner`, which is the throttle held down. The player rebinds *the control*, so
+the two must move together; R19.9's unit is the action's path plus a part, which assumes one action
+per binding and gives them separate rows. Left alone that is a gameplay bug rather than a display
+oddity — rebind the throttle and the afterburner stays on the old key, and whatever the player later
+puts on that key acquires an afterburner — and `private` on the second binding hid the duplicate row
+without linking the two, which was a stopgap that made the bug harder to see rather than smaller.
+
+```rust
+c.bind::<Thrust>(KeyCode::KeyW).mappable();
+c.bind::<Afterburner>(KeyCode::KeyW).hold(0.75).follows::<Thrust>();
+```
+
+**Resolution is by the controls, not by the name.** A follower names an *action*, and the action it
+names usually has several bindings — one per device. Which one it rides is settled by matching the
+source: the target must have a binding in the same context reading exactly what the follower reads.
+That is one lookup doing three jobs. It picks the right binding of several without either side
+naming a device; it makes "the same control" checked rather than merely intended, since a follower
+reading something else is a different binding rather than a linked one; and it means the follower's
+controls are always its principal's, so a screen that renders it inherits the row's slots and stays
+aligned as they are filled.
+
+**Riding a fixed row is allowed**, and is the ordinary case rather than the exception. Disasteroids'
+pad `Thrust` is listed-and-fixed, so the pad `Afterburner` following it has nothing to rewrite — and
+keeping the duplicate row off the screen is worth having on its own. Requiring the target to be
+`mappable` would have failed the build of the game this exists for.
+
+**The link is declared and never inferred.** Two bindings that happen to read one control are as
+often a coincidence as an intention, and conflict detection cannot tell the difference either: it
+looks for two rows holding one control, and this failure is a *separation* that should not have been
+possible. Nothing collides.
+
+**What a follower is not is hidden.** It reads a control the player is being shown, so what it wants
+is to appear *with* that control — a subordinate line under the principal, dimmer and not
+activatable, showing its own whole formula ("Hold W") rather than a diff against the row above it: a
+bare "hold" in a cell is a qualifier with no control in it, and means nothing to a player who has
+not already parsed the row it modifies. That needs R18.3's condition half, which is why the model
+here carries the link and the screen does not yet draw it.
 
 **`mappable` takes no arguments, and both halves of that are decisions.**
 

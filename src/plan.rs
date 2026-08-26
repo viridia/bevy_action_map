@@ -50,7 +50,9 @@ impl BindingDiagnostic {
             DiagnosticKind::MixedSchemeMapping
             | DiagnosticKind::DuplicateMappingKey { .. }
             | DiagnosticKind::RebindingDisagreement { .. }
-            | DiagnosticKind::ReservedAndMappable => Severity::Error,
+            | DiagnosticKind::ReservedAndMappable
+            | DiagnosticKind::FollowsNothing { .. }
+            | DiagnosticKind::FollowsUnlisted { .. } => Severity::Error,
             DiagnosticKind::DuplicateBinding { .. }
             | DiagnosticKind::ConsumeDisagreement { .. } => Severity::Warning,
         }
@@ -113,6 +115,16 @@ pub enum DiagnosticKind {
     MixedSchemeMapping,
     /// A binding is declared both rebindable and reserved, which cannot both be true.
     ReservedAndMappable,
+    /// A binding follows an action that reads nothing like it in this context.
+    FollowsNothing {
+        /// The action it was told to follow.
+        target: &'static str,
+    },
+    /// A binding follows one that is itself off the player-facing list.
+    FollowsUnlisted {
+        /// The action it was told to follow.
+        target: &'static str,
+    },
 }
 
 impl core::fmt::Display for BindingDiagnostic {
@@ -177,6 +189,20 @@ impl core::fmt::Display for BindingDiagnostic {
                 "`{}` is declared both mappable and reserved. Reserving withholds a control from \
                  capture so that it cannot be rebound; a mapping exists so that it can. Keep whichever \
                  one you meant",
+                self.action
+            ),
+            DiagnosticKind::FollowsNothing { target } => write!(
+                f,
+                "`{}` follows `{target}`, but no binding of `{target}` in this context reads the \
+                 same controls. A binding rides the one it reads alongside, so the two must read \
+                 the same thing — check the spelling, and check that both devices are bound",
+                self.action
+            ),
+            DiagnosticKind::FollowsUnlisted { target } => write!(
+                f,
+                "`{}` follows `{target}`, which is itself off the controls screen, so there is no \
+                 mapping to ride. Take `private` off the binding it follows, or make this one \
+                 `private` too and accept that rebinding will not move it",
                 self.action
             ),
         }
@@ -251,6 +277,26 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
                 .is_some_and(|decl| decl.rebinding.is_rebindable())
         {
             found.push(at(DiagnosticKind::ReservedAndMappable));
+        }
+
+        // Resolution is by the controls the two bindings read, so the two ways it fails are "no
+        // binding of that action reads this" and "one does, and has no mapping to lend". The second
+        // is worth its own diagnostic because the fix is on the *other* binding.
+        if let Some(follows) = binding.follows
+            && crate::binding::leader_of(bindings, index).is_none()
+        {
+            let reads_the_same = bindings.iter().enumerate().any(|(other, spec)| {
+                other != index && spec.action == follows.action && spec.source == binding.source
+            });
+            found.push(at(if reads_the_same {
+                DiagnosticKind::FollowsUnlisted {
+                    target: follows.path,
+                }
+            } else {
+                DiagnosticKind::FollowsNothing {
+                    target: follows.path,
+                }
+            }));
         }
 
         if let Some(declaration) = binding.mapping {

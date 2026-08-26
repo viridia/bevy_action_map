@@ -210,9 +210,12 @@ pub(crate) struct BindingSpec {
     pub(crate) modifiers: Vec<BindingModifier>,
     pub(crate) conditions: Vec<BindingCondition>,
     pub(crate) consume: bool,
-    // `None` only for a binding declared `private`. Listing is the default: a player is entitled to
+    // `None` for a binding declared `private`, and for one declared `follows` — the first has no
+    // mapping and the second rides someone else's. Listing is the default: a player is entitled to
     // see what their controls do, and it is *changing* one that has to be asked for.
     pub(crate) mapping: Option<MappingDecl>,
+    // Set by `follows`: the mapping this binding rides instead of declaring one.
+    pub(crate) follows: Option<FollowsDecl>,
     // Whether the controls this binding reads are withheld from capture across their scheme.
     pub(crate) reserved: bool,
     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
@@ -253,6 +256,40 @@ pub(crate) struct MappingDecl {
     pub(crate) capacity: crate::mapping::Capacity,
     /// Whether the player may change it, or is only being shown what it does.
     pub(crate) rebinding: crate::mapping::Rebinding,
+}
+
+/// The action whose mapping a binding rides.
+///
+/// Named rather than resolved at declaration time, because the mapping's name may have been changed
+/// with `mappable_as` and a binding cannot see its neighbours at the point it is written. Resolution
+/// is `leader_of`, over the whole context.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FollowsDecl {
+    pub(crate) action: ActionId,
+    /// The target's declared path, for the diagnostic that names it when resolution fails.
+    pub(crate) path: &'static str,
+}
+
+/// The binding whose mapping `bindings[index]` rides, if there is one.
+///
+/// A follower reads the same controls as the binding it follows, which is what makes matching on the
+/// source the whole of the resolution: it settles the scheme and the controls together, and it picks
+/// the right one of several bindings the target action may have. `None` is a plan-build error rather
+/// than a silent no-op — see `DiagnosticKind::FollowsNothing`.
+pub(crate) fn leader_of(bindings: &[BindingSpec], index: usize) -> Option<usize> {
+    let follows = bindings[index].follows?;
+    bindings
+        .iter()
+        .enumerate()
+        .find(|&(other, spec)| {
+            other != index
+                && spec.action == follows.action
+                && spec.source == bindings[index].source
+                // A binding with no mapping has none to ride, which rules out a chain of followers
+                // without needing to say so separately.
+                && spec.mapping.is_some()
+        })
+        .map(|(other, _)| other)
 }
 
 impl MappingDecl {
@@ -1084,6 +1121,56 @@ impl<'a, C> BindingHandle<'a, C> {
         self
     }
 
+    /// Rides another action's mapping, instead of having one of its own.
+    ///
+    /// Reach for it where an action deliberately shares a control with another — tap to dodge and
+    /// hold to sprint, or a throttle that opens up when it is held down. The player rebinds *the
+    /// control*, once, and both actions move with it.
+    ///
+    /// ```ignore
+    /// controls.bind::<Thrust>(KeyCode::KeyW).mappable();
+    /// // The same key a second time, doing a second thing. Not a row of its own.
+    /// controls.bind::<Afterburner>(KeyCode::KeyW).hold(0.75).follows::<Thrust>();
+    /// ```
+    ///
+    /// The binding it follows is found by the controls the two read: `A` must have a binding **in
+    /// this context** reading exactly what this one reads, and that binding must be listed. So a
+    /// keyboard binding follows the keyboard one and a pad binding follows the pad one, without
+    /// either having to say which. Following a binding the player cannot change is allowed and
+    /// useful — it keeps the duplicate off the screen — and simply leaves nothing to rewrite.
+    ///
+    /// Declaring this and [`mappable`](Self::mappable) contradict each other: a binding either has a
+    /// mapping or rides one. It is not the same as [`private`](Self::private), which hides a binding
+    /// and links it to nothing, so rebinding the control leaves the hidden binding behind on the old
+    /// one.
+    ///
+    /// # Panics
+    ///
+    /// If `A` is this binding's own action, or if the binding was already declared `mappable`.
+    pub fn follows<A: InputAction>(self) -> Self {
+        let binding = &self.builder.bindings[self.index];
+        assert!(
+            A::id() != binding.action,
+            "a binding cannot follow its own action: `{}` would be riding the mapping it is \
+             declaring",
+            A::PATH
+        );
+        assert!(
+            !binding
+                .mapping
+                .is_some_and(|decl| decl.rebinding.is_rebindable()),
+            "a binding cannot be both `mappable` and `follows`: one gives it a mapping of its own, \
+             the other rides someone else's"
+        );
+        let binding = &mut self.builder.bindings[self.index];
+        binding.mapping = None;
+        binding.follows = Some(FollowsDecl {
+            action: A::id(),
+            path: A::PATH,
+        });
+        self
+    }
+
     /// Lets the player rebind this, under a name of your choosing.
     ///
     /// As [`mappable`](Self::mappable), with the given key in place of the action's path — so a
@@ -1131,6 +1218,11 @@ impl<'a, C> BindingHandle<'a, C> {
         capacity: crate::mapping::Capacity,
     ) -> Self {
         let existing = self.builder.bindings[self.index].mapping;
+        assert!(
+            self.builder.bindings[self.index].follows.is_none(),
+            "a binding cannot be both `follows` and `mappable`: one rides another action's mapping, \
+             the other gives it one of its own"
+        );
         assert!(
             existing.is_some(),
             "a binding cannot be both `private` and `mappable`: one says the player may not see it, \
@@ -1319,6 +1411,7 @@ impl<C> InputContextBuilder<C> {
             // The action's default, which a binding can then make an exception of either way.
             consume: A::CONSUMES,
             mapping: Some(MappingDecl::listed()),
+            follows: None,
             reserved: false,
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             chord: Vec::new(),

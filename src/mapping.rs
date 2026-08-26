@@ -20,6 +20,11 @@
 //! row changeable, and [`private`](crate::binding::BindingHandle::private) is what keeps a binding
 //! out of the list altogether, for the ones that are genuinely the game's own business.
 //!
+//! Two actions may deliberately share one control — tap to dodge, hold to sprint — and the player
+//! rebinds *the control* rather than either of them.
+//! [`follows`](crate::binding::BindingHandle::follows) says so: the second binding rides the first
+//! one's mapping, contributing no row of its own and moving with it when the player changes it.
+//!
 //! ```ignore
 //! app.add_context::<OnFoot>(|controls| {
 //!     controls.bind::<Move>(DirectionalButtons::wasd()).mappable();  // four mappings…
@@ -27,7 +32,9 @@
 //!     controls.bind::<Jump>(KeyCode::KeyJ).mappable();               // …with a second slot
 //!     controls.bind::<Fire>(KeyCode::ControlLeft).mappable_upto(2);  // one control, two slots
 //!     controls.bind::<Look>(MouseMove);                              // listed; not changeable
-//!     controls.bind::<Lunge>(KeyCode::Space).hold(0.4).private();    // not listed at all
+//!     controls.bind::<Crouch>(KeyCode::KeyC).private();              // not listed at all
+//!     controls.bind::<Lunge>(KeyCode::Space).hold(0.4)
+//!         .follows::<Jump>();                                        // rides the Jump row
 //! });
 //! ```
 //!
@@ -658,5 +665,195 @@ mod tests {
             .collect();
         assert!(names.contains(&String::from("mapping_tests.move.up")));
         assert!(names.contains(&String::from("mapping_tests.move_alt.up")));
+    }
+
+    #[derive(InputAction)]
+    #[action(path = "mapping_tests.lunge", output = bool, intent = Button)]
+    struct Lunge;
+
+    /// The point of the whole thing: a second action on one control is one row, and the row is the
+    /// principal's. Two rows holding identical keys is what the player would otherwise be shown, and
+    /// it reads as a bug.
+    #[test]
+    fn a_follower_is_not_a_row_of_its_own() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.riding", tick = Fixed)]
+        struct Riding;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<Riding>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls
+                .bind::<Lunge>(KeyCode::Space)
+                .hold(0.4)
+                .follows::<Jump>();
+        });
+
+        let mappings = mappings(app.world());
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].key.to_string(), "mapping_tests.jump");
+        assert_eq!(mappings[0].slots, [Control::Key(KeyCode::Space)]);
+        assert_eq!(
+            mappings[0].capacity,
+            Capacity::UpTo(1),
+            "a follower contributes no slots, so it cannot widen the row it rides"
+        );
+    }
+
+    /// Which binding a follower rides is settled by what it reads, so an action bound on both
+    /// devices gets one follower per device and neither has to say which it meant.
+    #[test]
+    fn a_follower_finds_the_binding_that_reads_what_it_reads() {
+        use bevy_input::gamepad::GamepadButton;
+
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.riding_both", tick = Fixed)]
+        struct RidingBoth;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<RidingBoth>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.bind::<Jump>(GamepadButton::South).mappable();
+            controls
+                .bind::<Lunge>(GamepadButton::South)
+                .hold(0.4)
+                .follows::<Jump>();
+            controls
+                .bind::<Lunge>(KeyCode::Space)
+                .hold(0.4)
+                .follows::<Jump>();
+        });
+
+        // Two rows, one per scheme, and neither of them is Lunge's.
+        let mappings = mappings(app.world());
+        assert_eq!(mappings.len(), 2);
+        assert_eq!(mappings[0].scheme, Scheme::KeyboardMouse);
+        assert_eq!(mappings[1].scheme, Scheme::Gamepad);
+        assert!(
+            mappings
+                .iter()
+                .all(|mapping| mapping.action_path == "mapping_tests.jump")
+        );
+    }
+
+    /// Following a row the player cannot change is allowed, and is the case Disasteroids' pad
+    /// binding is: there is nothing to rewrite, and keeping the duplicate off the screen is the
+    /// whole of what it buys. Refusing it would fail the build of the game this exists for.
+    #[test]
+    fn a_fixed_binding_can_be_followed() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.riding_fixed", tick = Fixed)]
+        struct RidingFixed;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<RidingFixed>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space);
+            controls
+                .bind::<Lunge>(KeyCode::Space)
+                .hold(0.4)
+                .follows::<Jump>();
+        });
+
+        let mappings = mappings(app.world());
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].rebinding, Rebinding::Fixed);
+    }
+
+    /// A follower that reads something else is a different binding rather than a linked one, and
+    /// nothing downstream could tell the difference between that and a typo.
+    #[test]
+    #[should_panic(expected = "reads the same controls")]
+    fn following_an_action_that_reads_something_else_is_refused() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.riding_elsewhere", tick = Fixed)]
+        struct RidingElsewhere;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<RidingElsewhere>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls
+                .bind::<Lunge>(KeyCode::KeyJ)
+                .hold(0.4)
+                .follows::<Jump>();
+        });
+    }
+
+    /// A separate refusal because the fix is on the *other* binding: there is a binding reading the
+    /// same control, and it has no mapping to lend.
+    #[test]
+    #[should_panic(expected = "off the controls screen")]
+    fn following_a_private_binding_is_refused() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.riding_a_ghost", tick = Fixed)]
+        struct RidingAGhost;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<RidingAGhost>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).private();
+            controls
+                .bind::<Lunge>(KeyCode::Space)
+                .hold(0.4)
+                .follows::<Jump>();
+        });
+    }
+
+    /// A binding has a mapping or rides one, and saying both is catchable where it is written.
+    #[test]
+    #[should_panic(expected = "both `mappable` and `follows`")]
+    fn a_binding_cannot_be_mappable_and_follow() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.riding_and_owning", tick = Fixed)]
+        struct RidingAndOwning;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<RidingAndOwning>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls
+                .bind::<Lunge>(KeyCode::Space)
+                .mappable()
+                .follows::<Jump>();
+        });
+    }
+
+    /// And in the other order, since neither call may quietly win.
+    #[test]
+    #[should_panic(expected = "both `follows` and `mappable`")]
+    fn a_binding_cannot_follow_and_be_mappable() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.owning_and_riding", tick = Fixed)]
+        struct OwningAndRiding;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<OwningAndRiding>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls
+                .bind::<Lunge>(KeyCode::Space)
+                .follows::<Jump>()
+                .mappable();
+        });
+    }
+
+    /// Following your own action is riding the mapping you are declaring, which has no coherent
+    /// reading at all.
+    #[test]
+    #[should_panic(expected = "cannot follow its own action")]
+    fn a_binding_cannot_follow_its_own_action() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.riding_itself", tick = Fixed)]
+        struct RidingItself;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<RidingItself>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.bind::<Jump>(KeyCode::Space).follows::<Jump>();
+        });
     }
 }

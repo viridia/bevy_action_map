@@ -223,23 +223,23 @@ pub fn plugin(app: &mut App) {
         // Hold the throttle for three quarters of a second and it opens up. `Started` fires the
         // moment the burn begins, so the exhaust can show it building before it arrives.
         //
-        // `private`, because these are the throttle controls a second time and a controls screen
-        // listing them again would show the same keys under two names. What it *should* say is that
-        // they ride the Thrust row and move with it when the player rebinds that — which the crate
-        // cannot express yet, so this hides the duplicate row without linking the two. Until it
-        // can, rebinding Thrust leaves the afterburner on the old key.
+        // These are the throttle controls a second time, so each one `follows` the Thrust binding
+        // that reads the same control: no second row under a second name, and rebinding Thrust to
+        // some other key takes the afterburner with it. Each finds its own partner by what it reads,
+        // which is why the pad line needs nothing to say it is the pad one — and why it works even
+        // though the pad row is fixed and has nothing to rewrite.
         controls
             .bind::<Afterburner>(GamepadButton::RightTrigger2)
             .hold(0.75)
-            .private();
+            .follows::<Thrust>();
         controls
             .bind::<Afterburner>(KeyCode::KeyW)
             .hold(0.75)
-            .private();
+            .follows::<Thrust>();
         controls
             .bind::<Afterburner>(KeyCode::ArrowUp)
             .hold(0.75)
-            .private();
+            .follows::<Thrust>();
 
         controls
             .bind::<Hyperspace>(GamepadButton::East)

@@ -1239,6 +1239,33 @@ curves ([IGA file][steam-iga]).
     the action is the same, because the two are separate rows in contexts that may be live at
     different times, while the override store is keyed by mapping alone (§17).
 
+- **R19.16 (MUST)** Several actions may deliberately read one control — tap to dodge and hold to
+  sprint, a throttle that opens up when it is held — and the player rebinds **the control**, not one
+  of the actions. A binding must be able to declare that it **rides another action's mapping**:
+  it contributes no slots, is not a row of its own, and an override applied to that mapping rewrites
+  it too.
+
+  R19.9's unit — the action's path plus a part — assumes one action per binding, and without this the
+  two get separate rows and a rebind moves only one of them. The failure is silent and it is a
+  gameplay bug rather than a display oddity: rebind the throttle and the afterburner stays on the
+  old key, and whatever the player later binds to that key acquires an afterburner.
+
+  - **Conflict detection cannot substitute for it** (R8.6, R19.3). Nothing collides. The failure is a
+    *separation* that should not have been possible, and a conflict query looks for two rows holding
+    one control rather than for one control that should have been in one row.
+  - **The link is declared, never inferred.** Two bindings happening to read one control are as often
+    a coincidence as an intention, and the two want opposite handling.
+  - **Checkable when the context is declared.** The binding it rides must exist in that context and
+    read the same controls, which is what makes "the same control" true rather than merely intended,
+    and it must itself be listed, since a binding off the screen has no mapping to lend.
+  - **Riding a row the player cannot change is permitted.** There is nothing to rewrite, and keeping
+    the duplicate off the screen is worth having on its own — which is the ordinary case for a game
+    whose pad rows are listed-and-fixed (R19.10).
+  - **A rider is not hidden the way R19.10's exception is.** It reads a control the player is already
+    being shown, so what it needs is to appear *with* that control rather than in a row of its own —
+    which is a display question that R18.3's structured descriptor answers, since a row naming two
+    actions and not saying which is the held one is worse than a row naming one.
+
 ---
 
 ## 20. Accessibility
