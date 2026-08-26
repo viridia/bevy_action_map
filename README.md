@@ -1,92 +1,309 @@
 # bevy_action_map
 
-Input action mapping for Bevy: bindings, contexts, devices, and binding presentation.
+An comprehensive input action manager for [Bevy](https://bevyengine.org).
 
-Greenfield. Implementation has started: the module tree exists and is documented, the code that
-fills it mostly does not. See the roadmap for what lands in what order.
+Declare what your game reacts to, bind whatever devices should drive it, and let players change their minds later.
 
-## The documents
+You define **actions** (`Jump`, `Move`, `Fire`) and **contexts** (`OnFoot`, `InVehicle`, `MainMenu`)
+as ordinary Rust types. You bind a mix of keyboard, mouse and gamepad controls to them, with
+modifiers and conditions that decide how a hardware signal becomes a game-shaped one. Your gameplay code
+then reads `Move` as a `Vec2` and never again mentions `WASD`, a stick, or a dead zone — and when a
+player wants to rebind `Jump` to a different key, the crate already has everything it needs to show
+them what is bound, let them change it, and keep every prompt on screen in sync.
 
-Read them in this order:
+> **Status: early and public for review, not for production.** The core mapping pipeline —
+> keyboard, mouse, gamepad, modifiers, conditions, arbitration, fixed/render tick handling — is
+> built and exercised by a real game (below). The player-facing rebinding UI works end to end for
+> that game but hasn't shipped a persistence format yet. There's no crate-level API documentation
+> on docs.rs, and this crate isn't published to crates.io. See [Roadmap.md](./Roadmap.md) for what's
+> done and what's left.
 
-| Document                             | What it is                                                                                                                                                                                                      |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Requirements.md](./Requirements.md) | 204 numbered requirements across 24 areas, with prior art from LWIM, bevy_enhanced_input, Unreal, Unity, Steam Input, and Godot. Settled decisions are tagged `(D1)`…`(D7)`; requirements are `R<section>.<n>`. |
-| [Design.md](./Design.md)             | How the requirements are to be satisfied: architecture, data flow, object model, evaluation pipeline, and the developer-experience surface. Commits to positions on the open questions.                         |
-| [Roadmap.md](./Roadmap.md)           | What is left to build, in order. **Start here to write code.**                                                                                                                                                  |
-| [Log.md](./Log.md)                   | What has been built and what building it taught us, from Phase VII on. Optional: the three above are self-contained, and this exists so they do not have to carry their own history. Read it when a decision looks arbitrary. Phases I–VI are in [Log-archive.md](./Log-archive.md). |
+## Why
 
-## Layout
+Input management entails more than just "map a `KeyCode` to an enum", because a
+shipped game needs more than a mapping:
 
-A two-crate workspace. `bevy_action_map` is the root package; `macros/` is
-`bevy_action_map_macros`, which exists only because Rust requires proc macros to live in their own
-crate and is re-exported so users never name it. `tools/padprobe` declares its own `[workspace]` and
-so stays detached from both.
+- **Devices disagree about what a value means.** A mouse delta and a stick deflection are both
+  `Vec2`, but one already happened this frame and the other tells you which way to keep moving. In keeping with the Rust philosophy, these distinctions are represented as _types_: the crate tracks that distinction (an action's _intent_) so it can convert between the two correctly
+  instead of leaving you to remember which is which at every call site.
+- **Real games have more than one thing listening to the keyboard.** A pause menu, a chat box, and
+  a player's ship shouldn't all react to `Escape`. Contexts have priority and consume input, so a
+  higher-priority context can claim a control without the lower one ever knowing it happened.
+- **Fixed-timestep gameplay drops input if you're not careful.** A press-and-release inside one
+  render frame is invisible to `FixedUpdate` unless something remembers it happened. The crate
+  queues timestamped events and drains them by time window, so a fixed tick sees every edge transition exactly
+  once, however many (or few) times it runs between renders.
+- **Players expect to rebind things, and that's usually bolted on later.** The same
+  binding declarations that drive gameplay also generate the list a settings screen shows, which
+  controls are changeable, and visible prompts ("Press W") that stay correct after a rebind.
 
-## Building
+## Features
 
-The Bevy dependencies are git dependencies with no `rev` pin, so a plain `cargo check` will try to
-fetch the whole Bevy repository and can look like it has hung for several minutes.
+- **Actions and contexts as types.** `#[derive(InputAction)]` and `#[derive(InputContext)]` give you
+  compile-time checked reads (`input.value::<Move>()` returns `Vec2`) and
+  a declared, stable name for each — the identity that survives a rename or a save file.
+- **Keyboard, mouse, and gamepad**, each an optional feature, sharing one pipeline. `no_std` at the
+  core (`alloc` only), so the mapping logic itself doesn't require `std`.
+- **Multiple bindings per action**, folded together — chords (`Ctrl+S`), alternatives (`Space` or
+  gamepad South), and composites (WASD as one `Vec2`) all resolve through the same arbitration.
+- **Modifiers**: dead zones, response curves, scale, negate, swizzle, clamping, and rate conversion
+  (turning a stick's _position_ into the same per-frame _delta_ a mouse reports).
+- **Conditions**: press, release, hold, tap, multi-tap, pulse — composed the way Unreal's triggers
+  are, as "any of these" / "all of these" / "none of these must hold."
+- **Context activation and priority.** A context can be tied to a game state, a Bevy run condition, or
+  driven by hand; a higher-priority context consumes a control before a lower one ever sees it.
+- **Fixed and render tick domains**, with a windowed event drain so fixed-timestep gameplay loses no
+  edges and duplicates none, whatever the frame rate is doing.
+- **Read actions by polling or by observer** — `Actions<C>` in a system, or `On<Fired<Jump>>` as an
+  entity event, whichever fits the call site.
+- **A player-facing mapping model**, derived from the same bindings gameplay uses: which controls
+  are shown, which are changeable, primary/secondary slots, two actions sharing one control on
+  purpose (tap to dodge, hold to sprint — rebind the control, not either action).
+- **Interactive rebinding capture** with conflict detection, reserved controls, and live text
+  prompts that update themselves when a binding changes.
+- **Diagnostics that answer "why didn't this fire?"** — inactive context, a higher-priority consumer,
+  a longer chord winning, an unmet condition, or a device that isn't this player's.
 
-`Cargo.lock` pins Bevy at `17e28cd` (0.20-dev). Use it:
+See [Roadmap.md](./Roadmap.md)'s "Where this stands" table for the precise, current line between
+built and not-yet.
 
-```sh
-cargo check --offline     # instant; resolves from the lock
-cargo check --locked      # allows fetching, but will not change the lock
+## Quick start
+
+```rust,ignore
+use bevy::prelude::*;
+use bevy_action_map::prelude::*;
+
+#[derive(InputAction)]
+#[action(path = "gameplay.jump", output = bool, intent = Button)]
+struct Jump;
+
+#[derive(InputContext)]
+#[context(path = "gameplay.on_foot", tick = Render)]
+struct OnFoot;
+
+fn main() {
+    App::new()
+        .add_plugins((DefaultPlugins, ActionMapPlugin))
+        .add_context::<OnFoot>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        })
+        .add_systems(Startup, |mut commands: Commands| {
+            commands.spawn(OnFoot);
+        })
+        .add_systems(Update, print_jump)
+        .run();
+}
+
+fn print_jump(input: Actions<OnFoot>) {
+    if input.fired::<Jump>() {
+        println!("Jump fired");
+    }
+}
 ```
 
-Run `cargo update -p bevy` deliberately when you actually want to move to a newer Bevy, and expect
-to re-verify §14's "Bevy's current behavior" notes in Requirements.md when you do — several of them
-cite specific line numbers at `17e28cd`.
+Run it: `cargo run --example minimal`.
 
-### The `no_std` build needs a math backend
+## Concepts
 
-The core is `no_std`, but `cargo check --no-default-features` on its own **fails** — glam takes its
-math backend from a feature and gets it from `std` by default, so turning `std` off leaves it with
-none and it refuses to compile. Name the replacement:
+### Actions: what, not how
 
-```sh
-cargo check --offline --workspace --all-features
-cargo check --offline --workspace --no-default-features --features libm
+An action is a type, not a value — `Jump`, `Move`, `Look`. `#[derive(InputAction)]` declares its
+**output** (the Rust type your gameplay reads: `bool`, `f32`, `Vec2`, `Vec3`) and its **intent**,
+which says what that value _means_:
+
+| Intent         | Meaning                                         | Typical source          |
+| -------------- | ----------------------------------------------- | ----------------------- |
+| `Button`       | digital, on or off                              | a key, a gamepad button |
+| `Analog1`      | a single continuous value                       | a trigger               |
+| `Directional2` | a position implying a direction to keep moving  | a stick, WASD           |
+| `Delta2`       | a displacement that already happened this frame | mouse motion            |
+
+Intent matters because shape alone can't distinguish a stick from a mouse — both are `Vec2` — but
+mixing them up produces camera code that either drifts on its own or never catches up. Modifiers like
+`.per_second()` convert between the two explicitly, at the binding, instead of leaving it implicit at
+the read site.
+
+Every action also declares a **path** — `"gameplay.jump"` — which is the name that ends up in a
+settings file. It doesn't have to match the Rust type name, and shouldn't be updated when the type is
+renamed; that stability is the point of declaring it separately.
+
+### Contexts: what's listening right now
+
+A context groups the bindings that are active together: `OnFoot`, `InVehicle`, `MainMenu`. You assign
+one to an entity — the player, or a bare entity for input that isn't tied to anything in particular —
+and that entity holds the live state for every action in the context. Local multiplayer falls out
+of this for free: each player's entity has its own context instance, so nobody shares state.
+
+A context can be always-on, tied to a `bevy_state` state, driven by any run condition, or flipped by
+hand. Contexts also have a priority: while a settings screen's context is active and consumes the
+arrow keys for navigation, a lower-priority gameplay context never sees them move the ship — no
+manual "pause gameplay input" bookkeeping required.
+
+### Bindings: modifiers and conditions
+
+A binding pairs a control with the action it drives, and reads left to right as a pipeline:
+
+```rust,ignore
+context.bind::<Move>(Stick::Left).dead_zone(DeadZone::radial(0.15));
+context.bind::<Look>(Stick::Right).curve(1.8).per_second(180.0);
+context.bind::<Charge>(KeyCode::Space).hold(0.4);
 ```
 
-Those two are the configurations to keep green; the `libm` feature exists for the second and has no
-other purpose.
+**Modifiers** reshape the raw value — dead zone, response curve, scale, clamp — before it becomes the
+action's value. **Conditions** decide _when_ a binding counts as firing: without one, a binding fires
+whenever its control is off rest; `.hold(0.4)` instead waits for half a second, reporting progress as
+it builds so a UI can show a charge meter. Several bindings can feed one action, and the plan folds
+them by specificity, so `Ctrl+S` beats a plain `S` bound in the same context without either binding
+knowing about the other.
 
-## Hardware for testing
+### Reading actions: poll or observe
 
-Gamepad support runs through [gilrs](https://docs.rs/gilrs/), which is what `bevy_gilrs` wraps. Not
-every controller works, and the failure modes are not obvious. Verified on this machine (macOS):
+```rust,ignore
+fn movement(input: Actions<OnFoot>) {
+    let dir = input.value::<Move>();     // Vec2, checked at compile time
+    if input.fired::<Jump>() { /* ... */ }
+}
 
-| Controller                 | Result                                                                                                                                                                                                                                  |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Xbox Series, **Bluetooth** | ✅ Works fully. Use this.                                                                                                                                                                                                               |
-| Xbox Series, **USB**       | ❌ Enumerates, but gilrs receives no values — macOS binds its own `com.apple.gamecontroller.driver.XboxGamepad` DriverKit dext and the GameController framework takes the input.                                                        |
-| Switch-protocol clone, USB | ❌ Advertises a HID descriptor that does not match the report it sends. gilrs decodes the report's timer byte as buttons: ~500 phantom presses/sec, no stick data. SDL handles these with a dedicated handshake driver; gilrs has none. |
-
-So: **pair over Bluetooth, don't plug in.** A second device is still needed before the device-pairing
-and local-multiplayer work (Requirements §15) can be tested at all.
-
-## tools/padprobe
-
-A standalone probe that answers "what does this controller actually report?" without building a Bevy
-app. It is its own workspace root, so it stays detached from the main crate.
-
-```sh
-cd tools/padprobe
-cargo run -- 30 --bevy
+fn on_jump(_: On<Fired<Jump>>) {
+    // an entity event, for code that would rather react than poll
+}
 ```
 
-Arguments: `[seconds] [--bevy | --unfiltered]`. The filter mode is the point of the tool:
+Every action has a **phase** each tick — `Idle`, `Started`, `Ongoing`, `Fired`, `Completed`,
+`Canceled` — so a hold that's building, a hold that just fired, and a hold released too early are all
+distinguishable, whether you read it by polling `Actions<C>` or by listening for `Fired<A>` /
+`Started<A>` / `Completed<A>` / `Canceled<A>` as entity events on the context's own entity.
 
-- **default** — gilrs's own default filters: `axis_dpad_to_button`, `Jitter`, and a **radial 0.1
-  deadzone with rescaling**. Stick values are deadzoned, and a resting stick reads exactly `0.0000`.
-  This is _not_ what Bevy sees.
-- **`--bevy`** — replicates `bevy_gilrs` exactly: default filters off, `axis_dpad_to_button`
-  re-applied. Stick values are raw. **This is what `RawGamepadEvent` carries**, so it is the mode to
-  use when measuring anything that feeds the deadzone design (D6, Requirements §14).
-- **`--unfiltered`** — no filters. More raw than Bevy: a hat D-pad stays as `DPadX`/`DPadY` axes
-  instead of becoming four buttons.
+### The player-facing side: mapping and rebinding
 
-Use `--bevy` to measure a pad's **resting drift**, which is the calibration number that this mode
-is meant to reveal and the default mode cannot read.
+The binding API above is a developer's model — dead zones and response curves are implementation
+detail nobody rebinding "move forward" should have to think about. Marking a binding `.mappable()`
+adds it to a smaller, player-facing model instead: a named **mapping** with an ordered list of slots
+("Primary", "Secondary"), which a settings screen walks without needing to know anything else about
+your action or binding declarations. From there the crate can show what's bound, capture a new
+control interactively (with conflict detection against everything else in the context), and keep any
+on-screen prompt ("Press W") correct across a rebind — see the `mapping` and `present` modules, and
+`examples/disasteroids/settings.rs` for a full rebinding screen operable from a gamepad.
+
+## A fuller example
+
+Two device classes, two contexts (one on the fixed tick for gameplay, one on the render tick for
+camera look), dead zones and a stick-to-mouse-equivalent rate conversion:
+
+```rust,ignore
+use bevy::prelude::*;
+use bevy_action_map::prelude::*;
+use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
+
+#[derive(InputAction)]
+#[action(path = "gameplay.move", output = Vec2, intent = Directional2)]
+struct Move;
+
+#[derive(InputAction)]
+#[action(path = "gameplay.look", output = Vec2, intent = Delta2)]
+struct Look;
+
+#[derive(InputAction)]
+#[action(path = "gameplay.jump", output = bool, intent = Button)]
+struct Jump;
+
+#[derive(InputContext)]
+#[context(path = "gameplay.on_foot", tick = Fixed)]
+struct OnFoot;
+
+#[derive(InputContext)]
+#[context(path = "gameplay.free_look", tick = Render)]
+struct FreeLook;
+
+fn main() {
+    let mut app = App::new();
+    app.add_plugins((DefaultPlugins, ActionMapPlugin));
+    app.add_context::<OnFoot>(|context| {
+        context.bind::<Move>(DirectionalButtons::wasd());
+        context.bind::<Move>(Stick::Left).dead_zone(DeadZone::radial(0.15));
+        context.bind::<Jump>(KeyCode::Space);
+        context.bind::<Jump>(GamepadButton::South);
+    });
+    app.add_context::<FreeLook>(|context| {
+        context.bind::<Look>(MouseMove);
+        context.bind::<Look>(Stick::Right)
+            .dead_zone(DeadZone::radial(0.12))
+            .curve(1.8)
+            .per_second(180.0);
+    });
+    app.add_systems(Startup, |mut commands: Commands| {
+        commands.spawn(OnFoot);
+        commands.spawn(FreeLook);
+    });
+    app.add_systems(FixedUpdate, move_player);
+    app.add_systems(Update, look_camera);
+    app.run();
+}
+
+fn move_player(input: Actions<OnFoot>) {
+    let dir = input.value::<Move>();
+    if input.fired::<Jump>() { /* ... */ }
+}
+
+fn look_camera(input: Actions<FreeLook>) {
+    let delta = input.value::<Look>();
+}
+```
+
+Run it: `cargo run --example move_and_jump`.
+
+### Disasteroids
+
+`examples/disasteroids` is the crate's proving ground: a small, playable asteroids-like game, driven
+entirely through this crate, keyboard or gamepad. Its input layer — seven actions, two gameplay
+contexts, and every binding — lives in `examples/disasteroids/actions.rs`. Its `F2`/pad-Y settings screen is a real rebinding UI, with its own
+context: it lists every binding without being told about any of them, can be navigated end to end
+from a gamepad, and applies a rebind live.
+
+```sh
+cargo run --example disasteroids
+```
+
+Fly with `W`/↑ and `A`/`D` (or ←/→), fire with `Space`, jump with `Left Shift`, pause with `Escape`.
+
+## Other examples
+
+| Example         | Shows                                                                  |
+| --------------- | ---------------------------------------------------------------------- |
+| `minimal`       | The smallest possible setup                                            |
+| `move_and_jump` | Two device classes, two tick domains, dead zones, a rate conversion    |
+| `disasteroids`  | A full game with a rebinding settings screen                           |
+| `capture`       | Interactive rebind capture in isolation, without a full game around it |
+| `diagnostics`   | What a bad binding declaration reports, and when                       |
+
+## Installing
+
+Not on crates.io yet. Depend on the git repository directly, and pin `Cargo.lock` the way this repo
+does — the Bevy dependencies are git dependencies with no `rev`, so an unpinned `cargo update` can
+pull a Bevy commit this crate hasn't been built against:
+
+```toml
+[dependencies]
+bevy_action_map = { git = "https://github.com/viridia/bevy_action_map" }
+```
+
+Default features are `std`, `bevy_reflect`, `keyboard`, `mouse`, `gamepad`, and `state`. `touch` and
+`focus` are opt-in; `serialize` adds `serde` support for overrides; a `no_std` build needs
+`--no-default-features --features libm` to give `glam` a math backend. See `[features]` in
+[Cargo.toml](./Cargo.toml) for the complete list.
+
+## Project documents
+
+This crate is being built from a written requirements and design process, kept in the repository
+rather than in an issue tracker, in the order a reviewer would actually want to read them:
+
+| Document                                                | What it is                                                                                                                    |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| [Requirements.md](./Requirements.md)                    | ~204 numbered requirements, with prior art surveyed from LWIM, `bevy_enhanced_input`, Unreal, Unity, Steam Input, and Godot   |
+| [Design.md](./Design.md)                                | How the requirements are satisfied — architecture, data flow, object model, evaluation pipeline, developer-experience surface |
+| [Roadmap.md](./Roadmap.md)                              | What's built, in what order, and what's left — **start here to see current status**                                           |
+| [Log.md](./Log.md) / [Log-archive.md](./Log-archive.md) | What each increment of work delivered and learned                                                                             |
+
+## License
+
+Dual-licensed under MIT or Apache-2.0, at your option, as declared in [Cargo.toml](./Cargo.toml).
