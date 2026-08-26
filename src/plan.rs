@@ -6,9 +6,10 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use core::marker::PhantomData;
 
 use crate::action::{ActionId, ChannelShape, Intent};
-use crate::binding::{BindingModifier, BindingSource, BindingSpec, Control};
+use crate::binding::{BindingModifier, BindingSource, BindingSpec, ClassBindingSpec, Control};
+use crate::capture::ControlClass;
 use crate::condition::BindingCondition;
-use crate::event::Dispatch;
+use crate::event::{ClassDispatch, Dispatch};
 
 /// The part of a rejected binding's message that says what to do about it.
 ///
@@ -54,7 +55,8 @@ impl BindingDiagnostic {
             | DiagnosticKind::FollowsNothing { .. }
             | DiagnosticKind::FollowsUnlisted { .. } => Severity::Error,
             DiagnosticKind::DuplicateBinding { .. }
-            | DiagnosticKind::ConsumeDisagreement { .. } => Severity::Warning,
+            | DiagnosticKind::ConsumeDisagreement { .. }
+            | DiagnosticKind::DuplicateClassBinding { .. } => Severity::Warning,
         }
     }
 }
@@ -124,6 +126,11 @@ pub enum DiagnosticKind {
     FollowsUnlisted {
         /// The action it was told to follow.
         target: &'static str,
+    },
+    /// Two class bindings in one context watch the same class.
+    DuplicateClassBinding {
+        /// The class they share.
+        class: ControlClass,
     },
 }
 
@@ -203,6 +210,12 @@ impl core::fmt::Display for BindingDiagnostic {
                 "`{}` follows `{target}`, which is itself off the controls screen, so there is no \
                  mapping to ride. Take `private` off the binding it follows, or make this one \
                  `private` too and accept that rebinding will not move it",
+                self.action
+            ),
+            DiagnosticKind::DuplicateClassBinding { class } => write!(
+                f,
+                "`{}` binds the class {class:?}, and so does something else in this context. The \
+                 first one declared claims every matching control; the second can never fire",
                 self.action
             ),
         }
@@ -359,6 +372,32 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
     found
 }
 
+/// Everything wrong with a set of authored class bindings.
+///
+/// One check, deliberately: two class bindings in one context declaring the same
+/// [`ControlClass`] mean the second can never fire, since arbitration between class bindings is
+/// declaration order with no per-tick contest to decide it otherwise. Two *different* classes that
+/// happen to overlap — `AnyButton` and `CharacterProducing` both match a character key — are not
+/// reported; declaring both, in a chosen order, is how an app says "claim character keys first,
+/// then everything else," the same tiebreak plain bindings already use.
+pub(crate) fn diagnose_classes(bindings: &[ClassBindingSpec]) -> Vec<BindingDiagnostic> {
+    let mut found = Vec::new();
+    for (index, binding) in bindings.iter().enumerate() {
+        if bindings[..index]
+            .iter()
+            .any(|earlier| earlier.class == binding.class)
+        {
+            found.push(BindingDiagnostic {
+                action: binding.action_path,
+                kind: DiagnosticKind::DuplicateClassBinding {
+                    class: binding.class,
+                },
+            });
+        }
+    }
+    found
+}
+
 /// An authored binding with its action resolved to a state slot.
 pub(crate) struct CompiledBinding {
     pub(crate) slot: usize,
@@ -384,6 +423,19 @@ impl CompiledBinding {
     }
 }
 
+/// An authored class binding, resolved to nothing but itself — there is no slot, because there is
+/// no fold to put one in.
+///
+/// No `action_path` here, unlike `BindingSpec`/`CompiledBinding`: the one diagnostic that needs to
+/// name a class binding's action runs on the authored `ClassBindingSpec` list before compilation,
+/// and evaluation never has to name one back to a person.
+#[derive(Clone)]
+pub(crate) struct CompiledClassBinding {
+    pub(crate) class: ControlClass,
+    pub(crate) consume: bool,
+    pub(crate) dispatch: ClassDispatch,
+}
+
 /// The plan is the immutable runtime view of a context's authored bindings.
 // One slot per action, not per binding: an action may be bound several times, and all of those
 // bindings write the same state. Bindings are grouped by slot so the evaluator can fold each
@@ -401,6 +453,12 @@ pub struct Plan<C> {
     slot_by_action: BTreeMap<ActionId, usize>,
     scratch_count: usize,
     has_chords: bool,
+    // Design §4.1's second structure: consulted only when `indexed_controls` doesn't already claim
+    // the control an event arrived on.
+    class_bindings: Vec<CompiledClassBinding>,
+    // Every control any binding above reads, deduped. Not an arbitration index — a class binding
+    // never competes for a control on specificity, it simply yields whenever this set claims one.
+    indexed_controls: Vec<Control>,
     _marker: PhantomData<C>,
 }
 
@@ -411,8 +469,20 @@ impl<C> Plan<C> {
     // `add_context` runs it first and refuses the context rather than compiling a plan that cannot
     // work. Keeping the two apart is what lets a rebinding UI ask about bindings it has no
     // intention of installing.
-    pub(crate) fn from_bindings(bindings: Vec<BindingSpec>) -> Self {
-        Self::compile(bindings, None)
+    pub(crate) fn from_bindings(
+        bindings: Vec<BindingSpec>,
+        class_bindings: Vec<ClassBindingSpec>,
+    ) -> Self {
+        let mut plan = Self::compile(bindings, None);
+        plan.class_bindings = class_bindings
+            .into_iter()
+            .map(|spec| CompiledClassBinding {
+                class: spec.class,
+                consume: spec.consume,
+                dispatch: spec.dispatch,
+            })
+            .collect();
+        plan
     }
 
     /// Compiles a variant of `template` — the same actions, driven by different controls.
@@ -428,8 +498,13 @@ impl<C> Plan<C> {
     ///
     /// A binding for an action the template does not have would still get a slot of its own, which
     /// cannot happen: a variant only rewrites the sources of bindings the template already holds.
+    ///
+    /// Class bindings are not part of the diff — they are never rebindable, so they carry over from
+    /// `template` unchanged rather than being rebuilt from a list that would just be a copy of them.
     pub(crate) fn variant_of(template: &Self, bindings: Vec<BindingSpec>) -> Self {
-        Self::compile(bindings, Some(template))
+        let mut plan = Self::compile(bindings, Some(template));
+        plan.class_bindings.clone_from(&template.class_bindings);
+        plan
     }
 
     fn compile(bindings: Vec<BindingSpec>, template: Option<&Self>) -> Self {
@@ -482,6 +557,18 @@ impl<C> Plan<C> {
 
         let has_chords = compiled.iter().any(|binding| binding.chord_len > 1);
 
+        // Recomputed on every compile, including a variant's: an override rewrites which controls
+        // these bindings read, so a rebind has to move a control between "indexed" and "not" along
+        // with everything else — unlike `class_bindings`, which is never part of that diff.
+        let mut indexed_controls: Vec<Control> = Vec::new();
+        for binding in &compiled {
+            binding.source.for_each_control(|control| {
+                if !indexed_controls.contains(&control) {
+                    indexed_controls.push(control);
+                }
+            });
+        }
+
         Self {
             bindings: compiled,
             slot_intents,
@@ -490,6 +577,8 @@ impl<C> Plan<C> {
             slot_actions,
             slot_by_action,
             scratch_count,
+            class_bindings: Vec::new(),
+            indexed_controls,
             has_chords,
             _marker: PhantomData,
         }
@@ -534,6 +623,18 @@ impl<C> Plan<C> {
     /// The identity of every action this context binds, in slot order.
     pub(crate) fn slot_actions(&self) -> &[ActionId] {
         &self.slot_actions
+    }
+
+    /// This context's class bindings, in declaration order — the order they arbitrate in.
+    pub(crate) fn class_bindings(&self) -> &[CompiledClassBinding] {
+        &self.class_bindings
+    }
+
+    /// Whether some plain binding in this context already reads `control`.
+    ///
+    /// A class binding yields to this unconditionally; see the note on `indexed_controls`.
+    pub(crate) fn is_indexed(&self, control: Control) -> bool {
+        self.indexed_controls.contains(&control)
     }
 }
 
@@ -644,5 +745,65 @@ mod tests {
             1,
             "and the duplicate is only suspicious"
         );
+    }
+
+    struct CharacterInput;
+
+    impl crate::event::ClassBinding for CharacterInput {
+        const PATH: &'static str = "plan_tests.character_input";
+    }
+
+    struct AnyKey;
+
+    impl crate::event::ClassBinding for AnyKey {
+        const PATH: &'static str = "plan_tests.any_key";
+    }
+
+    /// A control a plain binding already names is never handed to the class list — computed once at
+    /// compile time, not re-derived per event.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_plainly_bound_control_is_indexed() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<Jump>(KeyCode::Space);
+        let (bindings, class_bindings) = builder.finish();
+        let plan = Plan::<()>::from_bindings(bindings, class_bindings);
+
+        assert!(plan.is_indexed(Control::Key(KeyCode::Space)));
+        assert!(!plan.is_indexed(Control::Key(KeyCode::KeyA)));
+    }
+
+    /// Two class bindings watching the same class: the second can never fire, and R4.8 wants that
+    /// caught rather than discovered by a player.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn two_class_bindings_on_the_same_class_is_reported() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind_class::<CharacterInput>(crate::capture::ControlClass::CharacterProducing);
+        builder.bind_class::<AnyKey>(crate::capture::ControlClass::CharacterProducing);
+
+        let found = builder.diagnostics();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].severity(), Severity::Warning);
+        assert_eq!(
+            found[0].kind,
+            DiagnosticKind::DuplicateClassBinding {
+                class: crate::capture::ControlClass::CharacterProducing
+            }
+        );
+    }
+
+    /// Different classes overlapping is not a mistake — it's how an app says "claim these
+    /// specifically, then everything else" — so nothing is reported.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn two_different_classes_is_fine_even_though_they_overlap() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind_class::<CharacterInput>(crate::capture::ControlClass::CharacterProducing);
+        builder.bind_class::<AnyKey>(crate::capture::ControlClass::AnyButton);
+
+        assert_eq!(builder.diagnostics(), &[]);
     }
 }

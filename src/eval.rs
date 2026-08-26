@@ -133,6 +133,32 @@ pub fn dispatch_transitions<C: InputContext + Component>(
     }
 }
 
+/// A control matching a bound class arrived and nothing indexed claimed it, logged in the order it
+/// happened.
+pub(crate) struct ClassFire {
+    pub(crate) binding_index: usize,
+    pub(crate) event: RawEvent,
+}
+
+/// [`ClassFire`]'s counterpart to [`dispatch_transitions`], and separate for the same reason.
+pub fn dispatch_class_fires<C: InputContext + Component>(
+    mut commands: Commands<'_, '_>,
+    mut states: Query<'_, '_, (Entity, &mut InputContextState<C>)>,
+) {
+    for (entity, mut state) in &mut states {
+        if state.class_fires.is_empty() {
+            continue;
+        }
+
+        let mut log = core::mem::take(&mut state.class_fires);
+        for fire in log.drain(..) {
+            let dispatch = state.plan.class_bindings()[fire.binding_index].dispatch;
+            dispatch(&mut commands, entity, fire.event);
+        }
+        state.class_fires = log;
+    }
+}
+
 /// Applies the current input frame to every instance of one context.
 pub fn evaluate_context<C: InputContext + Component, S: bevy_ecs::schedule::ScheduleLabel>(
     frame: Res<'_, InputFrame>,
@@ -207,6 +233,10 @@ impl<C: InputContext> InputContextState<C> {
             }
             self.apply_level_event(&event.event, threshold);
             self.fold(threshold, Vec2::ZERO, delta, Fold::Level, consumed, claims);
+            // After the fold, not before: Design §4.1's ordering. A class binding never competes on
+            // specificity, so it only ever gets a look at a control the fold's own bindings did not
+            // already index — checked once here rather than woven into the fold itself.
+            self.class_dispatch(&event.event, consumed, claims);
             level_changes += 1;
         }
 
@@ -264,6 +294,62 @@ impl<C: InputContext> InputContextState<C> {
                 }
                 RawGamepadEvent::Connection(_) => {}
             },
+        }
+    }
+
+    /// Whether the control this event names is actuated right now, using the held state
+    /// `apply_level_event` just updated — so a gamepad button reads through this crate's own
+    /// threshold hysteresis rather than the raw fraction the backend reported.
+    fn actuated(&self, event: &RawEvent) -> bool {
+        match event {
+            #[cfg(feature = "keyboard")]
+            RawEvent::Keyboard(KeyboardInput { state, .. }) => *state == ButtonState::Pressed,
+            #[cfg(feature = "mouse")]
+            RawEvent::MouseButton(MouseButtonInput { state, .. }) => *state == ButtonState::Pressed,
+            RawEvent::MouseMotion(_) => false,
+            #[cfg(feature = "gamepad")]
+            RawEvent::Gamepad(RawGamepadEvent::Button(raw_button)) => self
+                .held_gamepad_buttons
+                .get(&raw_button.button)
+                .is_some_and(|reading| reading.pressed),
+            #[cfg(feature = "gamepad")]
+            RawEvent::Gamepad(RawGamepadEvent::Axis(raw_axis)) => raw_axis.value != 0.0,
+            #[cfg(feature = "gamepad")]
+            RawEvent::Gamepad(RawGamepadEvent::Connection(_)) => false,
+        }
+    }
+
+    /// Tests one raw event against the plan's class list, Design §4.1's second structure.
+    ///
+    /// Called once per level event, after the fold: a class binding never competes on specificity,
+    /// so it only ever sees a control no plain binding in this context already indexes, and only
+    /// while that control reads as actuated and nothing else has already consumed it this schedule.
+    fn class_dispatch(
+        &mut self,
+        event: &RawEvent,
+        consumed: &ConsumedControls,
+        claims: &mut Vec<Control>,
+    ) {
+        let Some(control) = event.control() else {
+            return;
+        };
+        if !self.actuated(event) || consumed.contains(control) || self.plan.is_indexed(control) {
+            return;
+        }
+        let Some(binding_index) = self
+            .plan
+            .class_bindings()
+            .iter()
+            .position(|binding| binding.class.contains_event(event))
+        else {
+            return;
+        };
+        self.class_fires.push(ClassFire {
+            binding_index,
+            event: event.clone(),
+        });
+        if self.plan.class_bindings()[binding_index].consume {
+            claims.push(control);
         }
     }
 
@@ -710,7 +796,13 @@ mod tests {
 
         let mut builder = InputContextBuilder::<Flying>::default();
         builder.bind::<Jump>(KeyCode::Space);
-        InputContextState::<Flying>::new(Arc::new(Plan::from_bindings(builder.finish())), None)
+        InputContextState::<Flying>::new(
+            Arc::new({
+                let (bindings, class_bindings) = builder.finish();
+                Plan::from_bindings(bindings, class_bindings)
+            }),
+            None,
+        )
     }
 
     /// The log holds transitions, not state. A key that is still down is not news, and if held
@@ -816,7 +908,10 @@ mod tests {
 
         let mut builder = InputContextBuilder::<Flying>::default();
         builder.bind::<Look>(crate::binding::MouseMove);
-        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let plan = Arc::new({
+            let (bindings, class_bindings) = builder.finish();
+            Plan::from_bindings(bindings, class_bindings)
+        });
         let mut state = InputContextState::<Flying>::new(plan, None);
         let threshold = ButtonThreshold::default();
 
@@ -989,7 +1084,10 @@ mod tests {
         let mut builder = InputContextBuilder::<Flying>::default();
         builder.bind::<Look>(MouseMove);
         builder.bind::<Look>(Stick::Right).per_second(180.0);
-        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let plan = Arc::new({
+            let (bindings, class_bindings) = builder.finish();
+            Plan::from_bindings(bindings, class_bindings)
+        });
         let mut state = InputContextState::<Flying>::new(plan, None);
         let threshold = ButtonThreshold::default();
 
@@ -1089,7 +1187,10 @@ mod tests {
             .bind::<Counted>(bevy_input::keyboard::KeyCode::Space)
             .custom(Remembering)
             .custom(Remembering);
-        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let plan = Arc::new({
+            let (bindings, class_bindings) = builder.finish();
+            Plan::from_bindings(bindings, class_bindings)
+        });
         let mut state = InputContextState::<Flying>::new(plan, None);
         let threshold = ButtonThreshold::default();
         let frame = InputFrame::default();
@@ -1123,7 +1224,10 @@ mod tests {
 
         let mut builder = InputContextBuilder::<Flying>::default();
         builder.bind::<Jump>(KeyCode::Space).hold(0.25);
-        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let plan = Arc::new({
+            let (bindings, class_bindings) = builder.finish();
+            Plan::from_bindings(bindings, class_bindings)
+        });
         let mut state = InputContextState::<Flying>::new(plan, None);
         let threshold = ButtonThreshold::default();
         let mut frame = InputFrame::default();
@@ -1175,7 +1279,10 @@ mod tests {
         let mut builder = InputContextBuilder::<Flying>::default();
         builder.bind::<Jump>(KeyCode::Space).hold(10.0);
         builder.bind::<Jump>(GamepadButton::South);
-        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let plan = Arc::new({
+            let (bindings, class_bindings) = builder.finish();
+            Plan::from_bindings(bindings, class_bindings)
+        });
         let mut state = InputContextState::<Flying>::new(plan, None);
         let threshold = ButtonThreshold::default();
         let mut frame = InputFrame::default();
@@ -1220,7 +1327,10 @@ mod tests {
     fn a_press_derived_from_an_axis_does_not_chatter() {
         let mut builder = InputContextBuilder::<Flying>::default();
         builder.bind::<Jump>(GamepadAxis::LeftStickY);
-        let plan = Arc::new(Plan::from_bindings(builder.finish()));
+        let plan = Arc::new({
+            let (bindings, class_bindings) = builder.finish();
+            Plan::from_bindings(bindings, class_bindings)
+        });
         let mut state = InputContextState::<Flying>::new(plan, None);
         let threshold = ButtonThreshold::default();
         let midband = (threshold.press + threshold.release) / 2.0;
@@ -1252,5 +1362,133 @@ mod tests {
         assert!(!push_to(&mut state, &mut frame, 0.1));
         // ...and re-entering it keeps it let go.
         assert!(!push_to(&mut state, &mut frame, midband));
+    }
+
+    struct CharacterInput;
+
+    #[cfg(feature = "keyboard")]
+    impl crate::event::ClassBinding for CharacterInput {
+        const PATH: &'static str = "eval_tests.character_input";
+    }
+
+    #[cfg(feature = "keyboard")]
+    fn char_key(state: ButtonState, text: Option<&str>) -> RawEvent {
+        use bevy_input::keyboard::{Key, KeyCode, KeyboardInput};
+
+        RawEvent::Keyboard(KeyboardInput {
+            key_code: KeyCode::KeyA,
+            logical_key: Key::Character(text.unwrap_or_default().into()),
+            state,
+            text: text.map(Into::into),
+            repeat: false,
+            window: bevy_ecs::entity::Entity::PLACEHOLDER,
+        })
+    }
+
+    /// The mechanism's whole point: an unindexed, class-matching key fires the class binding and,
+    /// once `consume` is set, is claimed the same way a plain consuming binding claims its control.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_class_binding_fires_and_consumes_an_unclaimed_key() {
+        use crate::capture::ControlClass;
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder
+            .bind_class::<CharacterInput>(ControlClass::CharacterProducing)
+            .consume();
+        let plan = Arc::new({
+            let (bindings, class_bindings) = builder.finish();
+            Plan::from_bindings(bindings, class_bindings)
+        });
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        let threshold = ButtonThreshold::default();
+
+        let mut frame = InputFrame::default();
+        frame.record(char_key(ButtonState::Pressed, Some("a")));
+        let mut claims = Vec::new();
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut claims,
+        );
+
+        assert_eq!(state.class_fires.len(), 1);
+        assert!(matches!(
+            &state.class_fires[0].event,
+            RawEvent::Keyboard(bevy_input::keyboard::KeyboardInput { text: Some(text), .. })
+                if text.as_str() == "a"
+        ));
+        assert_eq!(
+            claims,
+            alloc::vec![Control::Key(bevy_input::keyboard::KeyCode::KeyA)]
+        );
+    }
+
+    /// A control already read by a plain binding never reaches the class list, even when it would
+    /// also match — the per-control index wins unconditionally, per Design §4.1.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn an_indexed_control_never_reaches_the_class_list() {
+        use crate::capture::ControlClass;
+        use bevy_input::keyboard::KeyCode;
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Jump>(KeyCode::KeyA);
+        builder
+            .bind_class::<CharacterInput>(ControlClass::AnyButton)
+            .consume();
+        let plan = Arc::new({
+            let (bindings, class_bindings) = builder.finish();
+            Plan::from_bindings(bindings, class_bindings)
+        });
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        let threshold = ButtonThreshold::default();
+
+        let mut frame = InputFrame::default();
+        frame.record(char_key(ButtonState::Pressed, Some("a")));
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
+
+        assert!(state.class_fires.is_empty());
+        // The plain binding still saw it.
+        assert_eq!(state.transitions.len(), 1);
+    }
+
+    /// A class binding that does not ask to consume leaves the control for a lower-priority context
+    /// to see, the same as any other binding's default.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_non_consuming_class_binding_claims_nothing() {
+        use crate::capture::ControlClass;
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind_class::<CharacterInput>(ControlClass::CharacterProducing);
+        let plan = Arc::new({
+            let (bindings, class_bindings) = builder.finish();
+            Plan::from_bindings(bindings, class_bindings)
+        });
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        let threshold = ButtonThreshold::default();
+
+        let mut frame = InputFrame::default();
+        frame.record(char_key(ButtonState::Pressed, Some("a")));
+        let mut claims = Vec::new();
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut claims,
+        );
+
+        assert_eq!(state.class_fires.len(), 1, "it still fires");
+        assert!(claims.is_empty(), "but claims nothing");
     }
 }

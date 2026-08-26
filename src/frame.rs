@@ -94,6 +94,33 @@ pub enum RawEvent {
     Gamepad(RawGamepadEvent),
 }
 
+impl RawEvent {
+    /// The physical control this event reports on, if it names one.
+    ///
+    /// `None` only for a gamepad connection event, which is about the device rather than any one
+    /// control on it. Every other variant has exactly one control behind it, which is what lets a
+    /// class binding (R4.9) test a freshly arrived event against the plan's per-control index
+    /// without re-deriving the control from scratch at each call site.
+    pub fn control(&self) -> Option<crate::binding::Control> {
+        use crate::binding::Control;
+        match self {
+            #[cfg(feature = "keyboard")]
+            Self::Keyboard(event) => Some(Control::Key(event.key_code)),
+            #[cfg(feature = "mouse")]
+            Self::MouseButton(event) => Some(Control::MouseButton(event.button)),
+            Self::MouseMotion(_) => Some(Control::MouseMotion),
+            #[cfg(feature = "gamepad")]
+            Self::Gamepad(RawGamepadEvent::Button(button)) => {
+                Some(Control::GamepadButton(button.button))
+            }
+            #[cfg(feature = "gamepad")]
+            Self::Gamepad(RawGamepadEvent::Axis(axis)) => Some(Control::GamepadAxis(axis.axis)),
+            #[cfg(feature = "gamepad")]
+            Self::Gamepad(RawGamepadEvent::Connection(_)) => None,
+        }
+    }
+}
+
 /// A raw input event paired with the timestamp it was sampled under.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]

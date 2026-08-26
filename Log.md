@@ -481,3 +481,62 @@ decision it makes per rebind — turned out to be answered by not building a cra
 all: the app already owns both cases with the primitives it has, a fixed policy applied every time
 or a modal that tries `Reject` first and calls its own resolution afterward. There is no outcome
 type here that would have needed to carry what a policy would have done instead.
+
+### Chunk 25: Control classes and class bindings
+
+The binding half of R4.9. Chunk 20 landed the shape half — `ControlClass` as capture's filter
+language; this adds a *binding* that targets a class, and a fourth class, `CharacterProducing`,
+whose membership depends on the event rather than the control.
+
+**Not `InputAction`.** The first design pass reused `InputAction`/`ActionOutput` so a class binding
+could dispatch through the same `Fired<A>` observers everything else does, and immediately hit a
+type it had no honest answer for: `ActionValue` has four shapes (`Bool`, `Axis1`, `Axis2`, `Axis3`),
+none of which is "which control fired, with its original event." Making `Control` satisfy
+`ActionOutput` would have meant an `into_action_value`/`from_action_value` pair that is never
+actually called, `unreachable!()`'d out — dead code standing in for a conversion nothing needed. A
+class binding never enters the per-tick fold, carries no modifiers or conditions, and has nothing to
+hold between ticks, so it got its own trait (`ClassBinding`, one associated `PATH`) and its own
+event (`ClassFired<A>`, carrying the original `RawEvent` untouched) instead. Smaller than reusing
+`InputAction` would have been, once the reuse stopped being free.
+
+**The payload is the raw event, not a synthesized `Control`.** The motivating consumer is a
+text-edit widget, which wants what `bevy_input_focus`-style widgets already work with — the
+logical key, the text, the repeat flag — not an identity it would have to reconstruct those from.
+`RawEvent` already carries all of it and was already `Clone + Debug + PartialEq`, so it is the
+payload verbatim. Different classes want different fields out of it; that is left to the app,
+matching to `RawEvent::Keyboard` or reading `RawEvent::control()` for the identity-only case,
+rather than this crate inventing one payload shape to fit every consumer.
+
+**The plan's second structure is a membership test, not a re-derivation of arbitration.** Design
+§4.1 describes "the per-control index" as something a class binding is consulted behind; in this
+evaluator (which folds from held state each tick rather than dispatching per binding per event)
+that turned out to mean exactly one thing: `Plan::indexed_controls`, every control any plain binding
+in the context reads, recomputed on every compile — including a variant's, since a rebind changes
+which controls are indexed even though it never touches the class list itself. A class binding
+never wins a control by being more specific; it is excluded outright the moment any plain binding
+names that control, which is what "it only ever wins by sitting in a higher-priority context"
+(§4.1) already said, just enforced up front rather than re-litigated per tick.
+
+**`character_producing` was measured, not reasoned, using a new example**
+(`examples/ime_diagnostic.rs`) **run against real input on the author's machine.** A macOS kana
+input source composed correctly: every keystroke arrived as its own `Pressed` `KeyboardInput` with
+`text: Some(single kana character)`, and the matching `Released` always carried `text: None`. That
+is exactly what the predicate (`text.is_some() && state == Pressed`) assumes, and it held with no
+exceptions across the run. A dead key looked wrong at first — Option+I then A, which should compose
+to `â`, arrived through this crate's bare diagnostic window as two independent plain letters, `i`
+then `a` — but a side-by-side run of Bevy's own text-input example against the same keystroke
+produced one composed character (visible as the font's missing-glyph box, not two letters), which
+means the composition the diagnostic window was missing is a property of *that window* — most
+likely IME not being enabled on it — and not something winit or Bevy fails to deliver in general.
+So the predicate needs nothing extra for dead keys: wherever composition happens upstream, it
+already lands as one `KeyboardInput` with `text: Some(the composed character)`, which is the exact
+shape the predicate already recognizes. Left genuinely unmeasured: committing a multi-candidate
+conversion through an IME's candidate popup. Reasoned rather than measured: it should be fine,
+since that commit happens through ordinary keystrokes (Space or Enter to pick a candidate) that the
+same per-event rule already judges independently — recorded as a comment next to the predicate
+rather than a chunk, since nothing about it currently looks wrong.
+
+**Deliberately not here.** Wiring an actual focused text field to `CharacterProducing` → 49, which
+already owns "the rest of D4" per Requirements.md's own note by R8.4/R12.6. Nothing in-tree
+declares a class binding yet; the mechanism and its tests are the whole of this chunk, same as the
+roadmap section said going in.

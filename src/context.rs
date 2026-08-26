@@ -37,7 +37,7 @@ use crate::action::{
     ActionId, ActionOutput, ActionState, InputAction, InputContext, Phase, Scratch, TickDomain,
 };
 use crate::binding::InputContextBuilder;
-use crate::eval::{Transition, dispatch_transitions, evaluate_context};
+use crate::eval::{Transition, dispatch_class_fires, dispatch_transitions, evaluate_context};
 use crate::frame::{InputFrame, Timestamp};
 use crate::plan::Plan;
 use crate::{ActionMapPlugin, ActionMapSystems};
@@ -117,6 +117,9 @@ pub struct InputContextState<C> {
     // drains, which is what keeps observers — arbitrary code with `&mut World` — outside the
     // evaluator (R10.2).
     pub(crate) transitions: Vec<Transition>,
+    // A class binding's counterpart to `transitions`: logged by evaluation, drained by dispatch, for
+    // the same reason.
+    pub(crate) class_fires: Vec<crate::eval::ClassFire>,
     // The last event this context has read. Seeded at spawn rather than left empty, so a context
     // added mid-session starts from the present instead of replaying whatever is still queued.
     pub(crate) read_through: Option<Timestamp>,
@@ -147,6 +150,7 @@ impl<C: InputContext> InputContextState<C> {
             chord_claims: Vec::new(),
             require_reset: alloc::vec![false; slots],
             transitions: Vec::new(),
+            class_fires: Vec::new(),
             read_through,
             #[cfg(feature = "keyboard")]
             held_buttons: BTreeSet::new(),
@@ -1285,8 +1289,8 @@ fn declare_context<C: InputContext + Component>(
     let activation = builder.activation.take();
     let starts_active = activation.is_none();
 
-    let bindings = builder.finish();
-    let plan = Arc::new(Plan::from_bindings(bindings.clone()));
+    let (bindings, class_bindings) = builder.finish();
+    let plan = Arc::new(Plan::from_bindings(bindings.clone(), class_bindings));
     app.insert_resource(InputContextPlan::<C> {
         plan,
         bindings,
@@ -1327,12 +1331,17 @@ fn declare_context<C: InputContext + Component>(
     );
 
     let dispatch = dispatch_transitions::<C>.in_set(ActionMapSystems::Dispatch);
+    let dispatch_classes = dispatch_class_fires::<C>.in_set(ActionMapSystems::Dispatch);
     let order = EvaluateAt(C::PRIORITY);
     match C::TICK {
         TickDomain::Render => {
             app.add_systems(
                 PreUpdate,
-                (evaluate_context::<C, PreUpdate>.in_set(order), dispatch),
+                (
+                    evaluate_context::<C, PreUpdate>.in_set(order),
+                    dispatch,
+                    dispatch_classes,
+                ),
             );
             order_by_priority(app, PreUpdate, TickDomain::Render, C::PRIORITY);
         }
@@ -1342,6 +1351,7 @@ fn declare_context<C: InputContext + Component>(
                 (
                     evaluate_context::<C, FixedPreUpdate>.in_set(order),
                     dispatch,
+                    dispatch_classes,
                 ),
             );
             order_by_priority(app, FixedPreUpdate, TickDomain::Fixed, C::PRIORITY);

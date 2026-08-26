@@ -135,9 +135,9 @@ step and a real game is a better acceptance test than a synthetic one.
 
 | | |
 | --- | --- |
-| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves; and a screen that can be *operated* — a stick or a D-pad rounded to a compass point and narrowed to the ticks it moved on, which is a selection moving one step per direction entered, over a game that keeps running and never hears the controls the screen has taken; and two actions that deliberately share one control declared as sharing it, so that a rebind moves both; and a prompt or a mapping row that says when a binding wants more than a bare press — held, or tapped twice — as structure a localization layer can render for itself, with a fallback formula ("Hold W", "W ×2") for a game that ships no catalogue, and a mapping's followers drawn as a subordinate line under the row they ride rather than a row of their own; and **a rebind that takes effect** — a diff against the declared bindings, applied to every live context by compiling a variant plan and swapping it in, which cancels what was in flight and re-arms require-reset, moves every follower riding a row that changed, leaves the declaration intact so the next patch's revised defaults still reach anyone who never touched that row, and tells every prompt on screen to catch up; and conflict detection that can be asked against a working copy of overrides rather than only what is applied, which is what lets a screen with unconfirmed choices tell whether two of them clash before either is committed. |
+| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves; and a screen that can be *operated* — a stick or a D-pad rounded to a compass point and narrowed to the ticks it moved on, which is a selection moving one step per direction entered, over a game that keeps running and never hears the controls the screen has taken; and two actions that deliberately share one control declared as sharing it, so that a rebind moves both; and a prompt or a mapping row that says when a binding wants more than a bare press — held, or tapped twice — as structure a localization layer can render for itself, with a fallback formula ("Hold W", "W ×2") for a game that ships no catalogue, and a mapping's followers drawn as a subordinate line under the row they ride rather than a row of their own; and **a rebind that takes effect** — a diff against the declared bindings, applied to every live context by compiling a variant plan and swapping it in, which cancels what was in flight and re-arms require-reset, moves every follower riding a row that changed, leaves the declaration intact so the next patch's revised defaults still reach anyone who never touched that row, and tells every prompt on screen to catch up; and conflict detection that can be asked against a working copy of overrides rather than only what is applied, which is what lets a screen with unconfirmed choices tell whether two of them clash before either is committed; and a **class binding** — a plan's second list, consulted only for a control no plain binding in the context already indexes, dispatching the original raw event (not a folded value, since there is no lifecycle to fold it into) to whatever declared it, which is the mechanism a focused text field will claim character-producing keys through without the app enumerating them. |
 | **Known wrong today** | A widget that handles its own keyboard bypasses consumption entirely: `bevy_ui_widgets::Button` activates on `Space` whether or not a context claimed `Space`, because `InputDispatchPlugin` asks the mapper nothing (R8.2a, chunk 49). Disasteroids works around it with an action that consumes and does nothing. The prelude exports sixteen bare English nouns that a glob import drops into a template beside Bevy's own (chunk 48). A follower that rides only *some* of the bindings feeding a row is drawn as riding all of them, because `Mapping::followers` is row-level and carries no slot (chunk 31). Otherwise nothing is wrong so much as absent — a rebind now applies, and Disasteroids' screen still has no way to ask for one. |
-| **Never built** | Saving a rebind: an override set is a value in memory and nothing writes it to a file (chunk 23), and nothing has yet looked at what that file would read like (chunk 55). Also tunables, presets, glyphs, and every screen that does more than list what is already there. |
+| **Never built** | Saving a rebind: an override set is a value in memory and nothing writes it to a file (chunk 23), and nothing has yet looked at what that file would read like (chunk 55). Also tunables, presets, glyphs, and every screen that does more than list what is already there. And the class binding mechanism has no caller yet: nothing in-tree is a focused text field, so `ControlClass::CharacterProducing` has never been bound outside its own tests (chunk 49). |
 
 ---
 
@@ -186,35 +186,10 @@ where it fell short of its own description — Phase VII onward there, and every
 | 53 | A context the player never sees | closed with no crate change: `Mapping::context` already carried the data |
 | 38 | Applying a rebind | done; the conflict policies it also carried → 54, the file → 23, a follower riding only some of a row's slots → 31 |
 | 54 | Conflict policy | landed as detection only: `conflicts_pending` against a working copy, resolution left to the app on existing `Overrides` primitives |
+| 25 | Control classes and class bindings | done; `character_producing` measured against a real kana IME and a dead key rather than reasoned from docs — both compose correctly upstream and need nothing extra here; a focused text field actually claiming the class → 49 |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
-
----
-
-## Phase V — multiple contexts
-
-Disasteroids' pause menu forced the first three of these, which have landed; what is left is the one
-that only a focused widget wants.
-
-### 25. Control classes and class bindings
-
-The binding half of R4.9. Chunk 20 landed the shape half — `ControlClass`, decided by the channel a
-control reports on — as capture's filter language; what is left is a *binding* that targets a class,
-which means the plan grows the second list Design §4.1 describes, consulted when the per-control
-index does not claim an event.
-
-- **Not doing:** focus integration. Nothing in-tree binds a class until a focused widget does, so
-  this chunk lands the mechanism and its tests, and text input follows when D4 does.
-- **Verify `CharacterInput` empirically, do not reason about it.** `KeyboardInput.text` looks like
-  the answer, but IME composition arrives on a separate `bevy_window::Ime` channel and whether key
-  events still carry text during composition is winit- and platform-specific. This deserves the
-  treatment §14's gamepad findings got: measure it, on a real IME, and write down what was actually
-  observed. It is the one predicate in the crate a developer is being told to trust rather than
-  read (R4.9), so it had better be right.
-- **Review surface:** whether R4.10's non-enumerability criterion held. If the set of classes grew
-  past a handful while being written, the criterion was abandoned and the case for a closed set goes
-  with it.
 
 ---
 
@@ -467,6 +442,10 @@ widget beside them (R8.2a). Chunk 30 found it and worked around it; this closes 
   once rather than twice.
 - **Also worth checking here:** whether the same filter wants to cover `bevy_picking`, since R22.4
   names pointer coexistence and a consumed mouse button is the same question one device over.
+- **Also inherited:** a focused text field claiming `ControlClass::CharacterProducing` (R8.4,
+  R12.6). Chunk 25 landed the class binding mechanism and measured the predicate against a real
+  IME, but nothing in-tree is a focused text field yet — that needs the rest of D4's
+  focus-activated context, which is this chunk's to build.
 
 ---
 

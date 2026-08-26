@@ -49,6 +49,10 @@ use alloc::vec::Vec;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::{Commands, Component, EntityEvent, Query, Res, ResMut, Resource};
 use bevy_ecs::world::World;
+#[cfg(feature = "keyboard")]
+use bevy_input::ButtonState;
+#[cfg(feature = "keyboard")]
+use bevy_input::keyboard::KeyboardInput;
 
 use crate::action::ChannelShape;
 use crate::binding::{ButtonThreshold, Control};
@@ -94,10 +98,22 @@ pub enum ControlClass {
     AnyAxis,
     /// Anything reporting a displacement that has already happened, such as the mouse.
     AnyDelta,
+    /// A keyboard key whose event carries text, once IME composition and dead keys are accounted
+    /// for.
+    ///
+    /// Membership here cannot be read off a [`Control`]: the same key is a dead key on one press
+    /// and a plain letter on the next, so what changes is whether that particular
+    /// [`KeyboardInput`] carries text, not which key it was. See
+    /// [`contains_event`](Self::contains_event), the only place this class can actually be tested.
+    CharacterProducing,
 }
 
 impl ControlClass {
     /// Whether this control is a member.
+    ///
+    /// Always `false` for [`CharacterProducing`](Self::CharacterProducing): that class is a
+    /// property of the *event* a control produced, not of the control's identity, so no control on
+    /// its own is ever a member. Test [`contains_event`](Self::contains_event) instead.
     pub const fn contains(self, control: Control) -> bool {
         matches!(
             (self, control.shape()),
@@ -105,6 +121,19 @@ impl ControlClass {
                 | (Self::AnyAxis, ChannelShape::Axis1)
                 | (Self::AnyDelta, ChannelShape::Delta2)
         )
+    }
+
+    /// Whether the control that produced `event` is a member, given what actually happened.
+    ///
+    /// For the three shape-based classes this is [`contains`](Self::contains) on the event's own
+    /// control. For [`CharacterProducing`](Self::CharacterProducing) it reads the event itself.
+    pub fn contains_event(self, event: &crate::frame::RawEvent) -> bool {
+        match self {
+            Self::CharacterProducing => character_producing(event),
+            _ => event
+                .control()
+                .is_some_and(|control| self.contains(control)),
+        }
     }
 
     /// The class of controls that can fill a mapping expecting this channel.
@@ -120,6 +149,44 @@ impl ControlClass {
             ChannelShape::Axis2 => None,
         }
     }
+}
+
+// Measured against real input with `examples/ime_diagnostic.rs` (macOS), rather than reasoned from
+// documentation. A kana input source composed correctly: every keystroke arrived as its own
+// `Pressed` `KeyboardInput` with `text: Some(single kana character)`, and the matching `Released`
+// always carried `text: None` — no `Pressed` event with `text: None` mid-composition. That is
+// exactly what this predicate assumes.
+//
+// A dead key (Option+I then A, which should compose to `â`) looked like a counterexample at first —
+// through this crate's bare diagnostic window it arrived as two independent plain letters, `i` then
+// `a` — but the same keystroke through Bevy's own text-input example produced one composed
+// character. So the gap was the diagnostic window not having IME composition enabled on it, not a
+// shape this predicate fails to handle: wherever composition happens upstream, it already lands as
+// one `KeyboardInput` with `text: Some(the composed character)`, single- or multi-character alike,
+// which this predicate already recognizes without change.
+//
+// Gated to `Pressed` so a release never re-fires a class binding — the same rule every other
+// binding follows, just stated once here since there is no per-control state to fall back on.
+//
+// Left genuinely unmeasured: committing a multi-candidate conversion (kana to kanji) via an IME's
+// candidate popup. Reasoned rather than measured: it should be fine, since that commit happens
+// through ordinary keystrokes this predicate already judges independently. Revisit if that turns
+// out wrong.
+#[cfg(feature = "keyboard")]
+fn character_producing(event: &crate::frame::RawEvent) -> bool {
+    matches!(
+        event,
+        crate::frame::RawEvent::Keyboard(KeyboardInput {
+            text: Some(_),
+            state: ButtonState::Pressed,
+            ..
+        })
+    )
+}
+
+#[cfg(not(feature = "keyboard"))]
+fn character_producing(_event: &crate::frame::RawEvent) -> bool {
+    false
 }
 
 /// A control withheld from capture, and what withheld it.
@@ -1054,6 +1121,40 @@ mod tests {
         );
         // The one with no answer, and the reason there is no two-dimensional class.
         assert_eq!(ControlClass::of(ChannelShape::Axis2), None);
+    }
+
+    /// `CharacterProducing` cannot be decided from a bare control — R4.9's second property — so
+    /// `contains` always says no, and only `contains_event` can actually answer.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn character_producing_is_a_property_of_the_event_not_the_control() {
+        assert!(!ControlClass::CharacterProducing.contains(Control::Key(KeyCode::KeyA)));
+
+        let key = |text: Option<&str>, state: ButtonState| {
+            crate::frame::RawEvent::Keyboard(KeyboardInput {
+                key_code: KeyCode::KeyA,
+                logical_key: Key::Character(text.unwrap_or_default().into()),
+                state,
+                text: text.map(Into::into),
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            })
+        };
+
+        assert!(
+            ControlClass::CharacterProducing.contains_event(&key(Some("a"), ButtonState::Pressed))
+        );
+        // A dead key on this press: same `KeyCode`, no text yet.
+        assert!(!ControlClass::CharacterProducing.contains_event(&key(None, ButtonState::Pressed)));
+        // Release is not a choice, the same rule every other binding follows.
+        assert!(
+            !ControlClass::CharacterProducing
+                .contains_event(&key(Some("a"), ButtonState::Released))
+        );
+
+        // The other three classes read straight off the event's own control, same as `contains`.
+        assert!(ControlClass::AnyButton.contains_event(&key(Some("a"), ButtonState::Pressed)));
+        assert!(!ControlClass::AnyDelta.contains_event(&key(Some("a"), ButtonState::Pressed)));
     }
 
     /// A stick bound whole is not a rebinding row, so `for_slot` says so rather than making one

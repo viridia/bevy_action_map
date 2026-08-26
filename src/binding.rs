@@ -227,6 +227,18 @@ pub(crate) struct BindingSpec {
     pub(crate) chord: Vec<ButtonControl>,
 }
 
+/// One class binding as [`InputContextBuilder::bind_class`] declared it.
+///
+/// Deliberately not a `BindingSpec`: a class binding has no source to modify, no chord, no mapping,
+/// and nothing to fold — the only things it carries are the class it watches, whether it consumes
+/// what it catches, and where to send it.
+pub(crate) struct ClassBindingSpec {
+    pub(crate) action_path: &'static str,
+    pub(crate) class: crate::capture::ControlClass,
+    pub(crate) consume: bool,
+    pub(crate) dispatch: crate::event::ClassDispatch,
+}
+
 /// The more permissive of two capacities.
 ///
 /// Several bindings can feed one mapping, and each carries whatever its own combinator asked for.
@@ -1183,6 +1195,27 @@ pub struct BindingHandle<'a, C> {
     index: usize,
 }
 
+/// A chainable handle for the class binding that was just declared.
+///
+/// Deliberately not [`BindingHandle`]: a class binding has no source to run a modifier or a
+/// condition against, so this exposes only what actually applies to one.
+pub struct ClassBindingHandle<'a, C> {
+    builder: &'a mut InputContextBuilder<C>,
+    index: usize,
+}
+
+impl<C> ClassBindingHandle<'_, C> {
+    /// Takes this class binding's controls, so that lower-priority contexts do not see them.
+    ///
+    /// The generalization of a plain binding's [`consume`](BindingHandle::consume) from one control
+    /// to every member of the class this binding watches — a focused text field claiming
+    /// character-producing keys away from gameplay is the motivating case.
+    pub fn consume(self) -> Self {
+        self.builder.class_bindings[self.index].consume = true;
+        self
+    }
+}
+
 impl<'a, C> BindingHandle<'a, C> {
     fn push_modifier(&mut self, modifier: BindingModifier) {
         self.builder.bindings[self.index].modifiers.push(modifier);
@@ -1657,6 +1690,7 @@ impl<'a, C> BindingHandle<'a, C> {
 /// Builder used by [`crate::context::ActionMapAppExt::add_context`].
 pub struct InputContextBuilder<C> {
     bindings: Vec<BindingSpec>,
+    class_bindings: Vec<ClassBindingSpec>,
     // Installed against the `App` once the context has been declared. `None` leaves the context
     // live from the moment an entity carries it; see `active_if`, which lives in `context` because
     // everything it touches does.
@@ -1668,6 +1702,7 @@ impl<C> Default for InputContextBuilder<C> {
     fn default() -> Self {
         Self {
             bindings: Vec::new(),
+            class_bindings: Vec::new(),
             activation: None,
             _marker: PhantomData,
         }
@@ -1728,6 +1763,45 @@ impl<C> InputContextBuilder<C> {
         self.push_binding::<A>(source.into_binding_source())
     }
 
+    /// Binds to every control a [`ControlClass`](crate::capture::ControlClass) names, rather than to
+    /// one control.
+    ///
+    /// Where a plain [`bind`](Self::bind) reads one control you name, this reads whichever member of
+    /// the class shows up — the mechanism a focused text field uses to claim character-producing
+    /// keys without the app enumerating them. It fires once per matching, otherwise-unclaimed event,
+    /// carrying that event untouched; there is no value to fold and nothing to hold between ticks, so
+    /// it skips modifiers, conditions and the player-facing mapping list entirely.
+    ///
+    /// ```ignore
+    /// struct CharacterInput;
+    /// impl ClassBinding for CharacterInput {
+    ///     const PATH: &'static str = "ui.character_input";
+    /// }
+    ///
+    /// controls.bind_class::<CharacterInput>(ControlClass::CharacterProducing).consume();
+    /// ```
+    ///
+    /// A control already named by a plain binding in this context never reaches a class binding,
+    /// however it is declared — see [`bind`](Self::bind)'s doc for how several bindings on one
+    /// action combine; a class binding does not compete in that the way a chord does, it simply
+    /// yields.
+    pub fn bind_class<A: crate::event::ClassBinding>(
+        &mut self,
+        class: crate::capture::ControlClass,
+    ) -> ClassBindingHandle<'_, C> {
+        self.class_bindings.push(ClassBindingSpec {
+            action_path: A::PATH,
+            class,
+            consume: false,
+            dispatch: crate::event::class_dispatch_for::<A>,
+        });
+        let index = self.class_bindings.len() - 1;
+        ClassBindingHandle {
+            builder: self,
+            index,
+        }
+    }
+
     /// Reports everything wrong with the bindings declared so far.
     ///
     /// [`add_context`](crate::context::ActionMapAppExt::add_context) runs this for you and refuses
@@ -1736,7 +1810,9 @@ impl<C> InputContextBuilder<C> {
     /// file, or one a player is part way through choosing — since it reads the bindings and nothing
     /// else, and needs no `App`.
     pub fn diagnostics(&self) -> Vec<crate::plan::BindingDiagnostic> {
-        crate::plan::diagnose(&self.bindings)
+        let mut found = crate::plan::diagnose(&self.bindings);
+        found.extend(crate::plan::diagnose_classes(&self.class_bindings));
+        found
     }
 
     /// The player-facing view of these bindings: one mapping per mappable part.
@@ -1765,8 +1841,8 @@ impl<C> InputContextBuilder<C> {
         reserved
     }
 
-    pub(crate) fn finish(self) -> Vec<BindingSpec> {
-        self.bindings
+    pub(crate) fn finish(self) -> (Vec<BindingSpec>, Vec<ClassBindingSpec>) {
+        (self.bindings, self.class_bindings)
     }
 }
 
@@ -2045,7 +2121,7 @@ mod tests {
             .negate()
             .dead_zone(DeadZone::radial(0.1));
 
-        let bindings = builder.finish();
+        let (bindings, _) = builder.finish();
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].modifiers.len(), 3);
         assert!(matches!(
@@ -2156,7 +2232,8 @@ mod tests {
 
         let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<Thrust>(GamepadButton::LeftTrigger2);
-        crate::plan::Plan::<()>::from_bindings(builder.finish());
+        let (bindings, class_bindings) = builder.finish();
+        crate::plan::Plan::<()>::from_bindings(bindings, class_bindings);
     }
 
     #[cfg(feature = "keyboard")]
@@ -2205,7 +2282,7 @@ mod tests {
         builder.bind::<DummyButton>(GamepadButton::South);
         builder.bind::<DummyVec2>(Stick::Left);
 
-        let bindings = builder.finish();
+        let (bindings, _) = builder.finish();
         assert_eq!(bindings.len(), 2);
         assert!(matches!(
             bindings[0].source,

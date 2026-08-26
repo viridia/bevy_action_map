@@ -175,7 +175,7 @@ pub mod prelude {
     };
     pub use crate::condition::{Condition, ConditionDescriptor, ConditionKind, Verdict};
     pub use crate::context::{ActionMapAppExt, Actions, ActionsQuery, InputContextState, Obstacle};
-    pub use crate::event::{Canceled, Completed, Fired, Started};
+    pub use crate::event::{Canceled, ClassBinding, ClassFired, Completed, Fired, Started};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
     pub use crate::mapping::{
         Capacity, Follower, Mapping, MappingKey, Rebinding, Scheme, mappings,
