@@ -441,3 +441,43 @@ well. Writing 38's store made the reason concrete rather than aesthetic. `Overri
 `(Scheme, MappingKey)`, and a derived `Serialize` over that map emits a tuple key — unreadable in
 every format and not a legal TOML table key at all. So the serialized shape has to differ from the
 in-memory one deliberately, and "deliberately" is the word that wants a test under it.
+
+### Chunk 54: Conflict policy
+
+Smaller than the roadmap section that described it. `conflicts_pending(mappings, pending, control,
+target)` in `capture.rs`: the same question `conflicts` answers, against a working copy of
+`Overrides` instead of what is applied, which is what a screen holding unconfirmed rebinds needs
+before either choice is committed. `conflicts` itself is now a thin call onto a shared walk with
+`pending: None`, so it is unchanged in behavior and untouched in its own tests.
+
+**Everything else the roadmap section asked for turned out to already exist, or not belong here.**
+The four named policies — reject, swap, duplicate-allowed, unbind-the-other — do not need a
+crate-owned enum or a `rebind()` that mutates rows on the app's behalf. `Overrides::bind`, `set` and
+`get` already say everything a policy needs to say: reject is not writing, duplicate-allowed is
+writing anyway, and swap and unbind-the-other are the app reading the conflicting row's own current
+list — `pending.get(scheme, key)` falling back to `Mapping::slots`, the same rule
+`conflicts_pending` itself uses — and writing it back with one control removed or traded. A first
+pass built the crate side of that anyway, as a `ConflictPolicy` enum and an `Overrides::rebind`
+resolving conflicts and writing several rows internally. Correctly rejected on review as the crate
+accreting a decision that is the app's to make, not a gap the app cannot fill itself — and not a
+hypothetical concern: this is feedback already heard from collaborators about the crate taking on
+more than it needs to. The doc comment on `conflicts_pending` now carries the four policies as
+worked examples instead, so a reader is not left to invent the pattern.
+
+R19.8's "not ours, delegate" outcome needed nothing at all: `Override::NotOurs`, landed with the
+store in chunk 38, already is that answer, read with `Overrides::get` before a screen ever starts a
+capture. Nothing about it required the delegation to be phrased as an outcome a rebind attempt
+returns.
+
+**The repeat-within-one-row gap chunk 39 left** (`conflicts` excludes the whole target mapping, so
+two slots of one row holding the same control is invisible to it) **resolves the same way, not with
+a crate-side check.** A caller about to write a row already has the candidate list in hand — the
+same list it is about to hand to `Overrides::bind` — and a duplicate in a `Vec<Control>` needs no
+help from this crate to notice. Recorded here rather than turned into an API, on the same reasoning
+as above.
+
+**The roadmap's own "review surface"** — whether a policy is a value the app picks once or a
+decision it makes per rebind — turned out to be answered by not building a crate-side policy API at
+all: the app already owns both cases with the primitives it has, a fixed policy applied every time
+or a modal that tries `Reject` first and calls its own resolution afterward. There is no outcome
+type here that would have needed to carry what a policy would have done instead.

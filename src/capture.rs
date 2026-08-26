@@ -54,6 +54,7 @@ use crate::action::ChannelShape;
 use crate::binding::{ButtonThreshold, Control};
 use crate::frame::{InputFrame, RawEvent, Timestamp};
 use crate::mapping::{Mapping, MappingKey, Scheme};
+use crate::overrides::{Override, Overrides};
 
 /// How far a stick or trigger must be pushed before capture treats it as a choice.
 ///
@@ -399,7 +400,48 @@ pub enum Overlap {
 /// chords are reported as an overlap even though arbitration would separate them. That errs toward
 /// telling a player about something harmless rather than staying quiet about something real.
 pub fn conflicts(world: &World, control: Control, target: Option<MappingKey>) -> Vec<Conflict> {
-    let mappings = crate::mapping::mappings(world);
+    conflicts_in(&crate::mapping::mappings(world), None, control, target)
+}
+
+/// Which mappings already hold a control, as a screen's own unconfirmed choices would leave things.
+///
+/// Same question as [`conflicts`], against a working copy rather than what is currently applied — a
+/// settings screen holds its player's choices in a [`Overrides`] of its own until they confirm, and a
+/// choice that has not been confirmed yet still has to be able to clash with another one that hasn't
+/// either. `mappings` is the applied baseline (as `crate::mapping::mappings` returns), and `pending`
+/// is laid over it: a row `pending` names reads as that row says, and everything else reads as
+/// `mappings` already has it.
+///
+/// A backend-owned row (`Override::NotOurs` in `pending`) reads as `mappings` already has it —
+/// unaffected, not cleared — matching how [`crate::overrides::apply_overrides`] treats it.
+///
+/// Resolving a conflict this finds is the caller's decision, made with [`Overrides::bind`] and
+/// [`Overrides::get`] directly rather than through another crate API: refuse it by not writing the
+/// candidate row at all; allow the duplicate by writing it regardless; or read the conflicting row's
+/// current list the same way this function does — `pending.get(mapping.scheme, mapping.key)` falling
+/// back to `mapping.slots` — and `bind` it back with the shared control removed, or with the
+/// candidate's own previous control put in its place to trade the two. The same look at a row's own
+/// candidate list, before writing it, is how a caller notices it would hold one control twice: that
+/// case never reaches this function, because a mapping never conflicts with itself.
+pub fn conflicts_pending(
+    mappings: &[Mapping],
+    pending: &Overrides,
+    control: Control,
+    target: Option<MappingKey>,
+) -> Vec<Conflict> {
+    conflicts_in(mappings, Some(pending), control, target)
+}
+
+/// The shared walk behind [`conflicts`] and [`conflicts_pending`].
+///
+/// `pending` is `None` for the world-only form; `Some` layers a working copy over `mappings` before
+/// asking the same question, which is why both forms produce identical results for identical inputs.
+fn conflicts_in(
+    mappings: &[Mapping],
+    pending: Option<&Overrides>,
+    control: Control,
+    target: Option<MappingKey>,
+) -> Vec<Conflict> {
     let target_context = target.and_then(|key| {
         mappings
             .iter()
@@ -409,7 +451,9 @@ pub fn conflicts(world: &World, control: Control, target: Option<MappingKey>) ->
 
     mappings
         .iter()
-        .filter(|mapping| mapping.slots.contains(&control) && Some(mapping.key) != target)
+        .filter(|mapping| {
+            Some(mapping.key) != target && effective_slots(mapping, pending).contains(&control)
+        })
         .map(|mapping| Conflict {
             mapping: mapping.key,
             action_path: mapping.action_path,
@@ -421,6 +465,19 @@ pub fn conflicts(world: &World, control: Control, target: Option<MappingKey>) ->
             },
         })
         .collect()
+}
+
+/// What a mapping currently holds: `pending`'s row for it if there is one, else its own slots.
+///
+/// A row absent from `pending` means untouched (the common case, so borrowed rather than cloned); a
+/// `NotOurs` row means the same, since something else owns it and this crate neither fills it in nor
+/// reads it as cleared.
+fn effective_slots<'a>(mapping: &'a Mapping, pending: Option<&'a Overrides>) -> &'a [Control] {
+    match pending.and_then(|pending| pending.get(mapping.scheme, mapping.key)) {
+        Some(Override::Controls(controls)) => controls,
+        Some(Override::Cleared) => &[],
+        Some(Override::NotOurs) | None => &mapping.slots,
+    }
 }
 
 /// One control arriving, and whether the player meant it.
@@ -809,6 +866,49 @@ mod tests {
         let found = conflicts(app.world(), Control::Key(KeyCode::Enter), Some(settings));
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].action_path, "capture_tests.jump");
+    }
+
+    /// The whole point of a pending-aware query: a screen's own unconfirmed choice has to be able to
+    /// clash with another one, and `conflicts` alone cannot see it because nothing has been applied.
+    #[test]
+    fn conflicts_pending_sees_a_row_the_player_has_not_confirmed_yet() {
+        let app = app();
+        let mappings = crate::mapping::mappings(app.world());
+        let up = mapping(&app, "capture_tests.move.up").key;
+        let jump = mapping(&app, "capture_tests.jump").key;
+
+        let mut pending = Overrides::new();
+        pending.bind(Scheme::KeyboardMouse, jump, [Control::Key(KeyCode::KeyW)]);
+
+        // Still on Space in the world, so the world-only query hears nothing.
+        assert!(conflicts(app.world(), Control::Key(KeyCode::KeyW), Some(up)).is_empty());
+
+        let found = conflicts_pending(&mappings, &pending, Control::Key(KeyCode::KeyW), Some(up));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].action_path, "capture_tests.jump");
+    }
+
+    /// R17.7's third state, read the same way applying does: a row someone else owns is neither
+    /// cleared nor untouched, and a pending `NotOurs` must not read as freeing up its control.
+    #[test]
+    fn a_pending_not_ours_row_still_holds_its_control() {
+        let app = app();
+        let mappings = crate::mapping::mappings(app.world());
+        let jump = mapping(&app, "capture_tests.jump").key;
+        let up = mapping(&app, "capture_tests.move.up").key;
+
+        let mut pending = Overrides::new();
+        pending.set(Scheme::KeyboardMouse, jump, Override::NotOurs);
+        let found = conflicts_pending(&mappings, &pending, Control::Key(KeyCode::Space), Some(up));
+        assert_eq!(found.len(), 1, "NotOurs leaves the row reading as it did");
+        assert_eq!(found[0].action_path, "capture_tests.jump");
+
+        // Contrast with `Cleared`, which does free the control.
+        pending.set(Scheme::KeyboardMouse, jump, Override::Cleared);
+        assert!(
+            conflicts_pending(&mappings, &pending, Control::Key(KeyCode::Space), Some(up))
+                .is_empty()
+        );
     }
 
     /// A mapping holds a list, so a capture says which slot it fills — otherwise the answer has

@@ -171,7 +171,7 @@ pub mod prelude {
     pub use crate::binding::{ButtonThreshold, CompassPoints, Control, DeadZone, MouseMove, Part};
     pub use crate::capture::{
         CaptureSession, Captured, Conflict, ControlClass, Overlap, Refused, RefusedReason,
-        ReservedControls, conflicts,
+        ReservedControls, conflicts, conflicts_pending,
     };
     pub use crate::condition::{Condition, ConditionDescriptor, ConditionKind, Verdict};
     pub use crate::context::{ActionMapAppExt, Actions, ActionsQuery, InputContextState, Obstacle};
