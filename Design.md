@@ -1104,6 +1104,17 @@ names belong to Bevy, and a rename upstream would silently orphan every saved bi
 carry the physical/logical distinction (R12.1) and the device class, and it is round-trip tested
 like any other serialized identity.
 
+**The defaults survive being overridden, and the structure already in place is what makes that
+free** (R17.1). A diff has to be taken against the defaults rather than against current state, which
+means the defaults have to still be there to diff against — and the easy implementation, rewriting
+the declared bindings in place, destroys them on the first apply. It does not have to: the
+declaration lives in `InputContextPlan<C>`, a resource holding the compiled plan and the mapping
+list, while an override applies as a *variant* plan swapped into an entity's own state. So the
+resource is the defaults, permanently, and nothing has to snapshot anything. Two consequences worth
+stating rather than discovering: applying must never write back to that resource, and `mappings()`
+reads it — so once overrides exist, a screen wanting current values reads the entity's variant and
+the two must not be confused.
+
 **Applying is the only path in.** An override set is applied to a live context — compiling a variant
 plan and swapping it into that entity's state — and startup is simply the first call. This is not a
 convenience: an authority backend can rewrite its bindings mid-session (R18.10), so mid-session

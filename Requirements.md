@@ -300,11 +300,16 @@ sources of different kinds feed one action (R2.9, §13.R13.2).
 - **R2.4 (WITHDRAWN)** ~~Distinguish _value_ actions (continuous, arbitrated) from _pass-through_
   actions (every contributing source visible, no arbitration).~~
 
-  Unity's distinction, whose motivating cases turn out to be device-shaped rather than value-shaped
-  and are answered elsewhere here: device scoping by §15.R15.3 and R15.4, per-source visibility by
-  R22.2's inspector dump, and a value that remembers its origin by R2.6. What remained was a second
-  storage shape carried by every action so that a few could use it. If a case appears that genuinely
-  needs it, it should arrive as its own requirement with that case attached.
+  Unity's `Value` / `PassThrough` distinction: a `Value` action arbitrates, so one of its bound
+  controls wins each frame and the others are not heard from; a `PassThrough` action does not, and
+  delivers every bound control's changes as they arrive.
+
+  Withdrawn because what sends people to `PassThrough` is wanting to know _which device_ produced
+  the input, not wanting different arbitration — and that is answered here without a second kind of
+  action: device scoping by §15.R15.3 and R15.4, per-source visibility by R22.2's inspector dump, a
+  value that remembers its origin by R2.6. What was left was a second storage shape on every action
+  so that a few could use it. A case that genuinely needs different _arbitration_ should arrive as
+  its own requirement with that case attached.
   ([Log](./Log-archive.md#the-review-and-the-requirements-amendments-it-produced))
 
 - **R2.5 (SHOULD)** Values must not be normalized/clamped implicitly; clamping is an explicit modifier
@@ -351,11 +356,12 @@ LWIM: polled `ActionState` with `current_duration()` and explicit `consume()`.
   condition that has begun and not yet been satisfied; ongoing; fired; completed; and canceled, for
   a started condition abandoned before it ever fired.
 
-  _(Six rather than five, because "started" and "ongoing" are different questions and one name
-  cannot answer both. A hold that has just been pressed and a hold that is now firing are both
-  "not an edge", and a player can tell them apart on screen, so the model must too. Canceled is
-  only meaningful against started: what distinguishes it from completed is whether the action ever
-  actually happened.)_
+  _(**Six states, where the Unreal model above has five.** The one added is **started**, which is an
+  edge where `ongoing` is a level: the tick a condition began, versus every tick after it while the
+  condition is still running. Unreal has only the second, so a hold pressed this instant and a hold
+  charging for half a second are one state, and showing a charge meter the moment it appears means
+  detecting the edge yourself. Canceled is only meaningful against started: what distinguishes it
+  from completed is whether the action ever actually happened.)_
 - **R3.2 (MUST)** Both polling and event/observer access to state. Polling is required for
   `FixedUpdate` simulation code (§9); events are required for UI and for one-shot commands.
   Event delivery must be attachable **declaratively**, not only from imperative setup code — a scene
@@ -386,7 +392,12 @@ LWIM: polled `ActionState` with `current_duration()` and explicit `consume()`.
   half kept: the UI's context claims the control and the gameplay action never fires at all, which
   is both stronger and inspectable. If a case appears that genuinely needs two observers of one
   firing to arbitrate between themselves, it should arrive as its own requirement with that case
-  attached.)_
+  attached.
+
+  Bevy declines to offer it in any case, for the same reason. Stopping propagation on a bubbled
+  event stops it reaching entities **further down the chain**, never the other observers **on the
+  same entity**, which all still run — observers on one entity are unordered, so "suppress my peers"
+  can only mean "suppress whichever have not run yet".)_
 - **R3.7 (MUST)** Actions must be individually disable-able without unbinding, and re-enabling must not
   spuriously fire (require-reset semantics: a key held across the enable boundary does not count as a
   fresh press).
@@ -486,14 +497,17 @@ subtle trap: a "smoothing" modifier is a stateful filter and must therefore be r
 
   _("normalize" is deliberately absent from this list. The word names two incompatible operations,
   so it is split out and disambiguated as R5.9.)_
-- **R5.9 (MUST)** Both meanings of "normalize" must be available and must not share a name:
-  - **clamp to unit length** — scale a vector down if it exceeds magnitude 1, leave it otherwise.
-    This is what keeps a composite of four keys from exceeding a stick's reach on the diagonal.
-  - **remap a range** — map an input range onto 0..1, the sense Unity's `Normalize` processor uses.
+- **R5.9 (MUST)** Both meanings of "normalize" must be available, and neither may be called by that
+  name:
 
-  Naming one of them `Normalize` invites the other. Whichever names are chosen, neither may be the
-  bare word. Note the second rescales and so is bound by D6's one-rescaling-stage rule (R5.3), while
-  the first does not.
+  | Name | Does | Rescales |
+  | --- | --- | --- |
+  | `clamp_magnitude` | scales a vector down if it exceeds magnitude 1, leaves it otherwise | no |
+  | `rescale` | maps an input range onto 0..1, the sense Unity's `Normalize` processor uses | yes |
+
+  The first is what keeps a composite of four keys from exceeding a stick's reach on the diagonal.
+  The second is bound by D6's one-rescaling-stage rule (R5.3), which is a rule that cannot be
+  counted if two operations answer to one word.
 - **R5.3 (MUST)** Deadzone semantics must be explicit about rescaling — whether output is remapped to
   0..1 after the inner radius is removed (almost always desired; frequently gotten wrong). Per D6
   (§14) at most one stage in the deadzone stack may rescale, so a deadzone modifier must be able to
@@ -982,6 +996,13 @@ any of that is stable loses player data silently on the next patch.
 
 - **R17.1 (MUST)** User binding overrides serialize as a _diff against defaults_, not a full snapshot,
   so that shipping new default bindings does not require migrating every save.
+
+  A diff against _current_ state satisfies the letter of this and defeats its purpose: the first
+  save pins every row to whatever the game shipped that day, and a revised default never again
+  reaches a player who has changed anything. So **the defaults must stay readable after overrides
+  have been applied** — applying must not overwrite the declaration it overrides. Keeping them is
+  the crate's obligation rather than the app's: an app cannot reliably snapshot defaults before
+  loading its settings, because settings load early.
 - **R17.2 (MUST)** Loading must tolerate unknown actions, unknown controls, and removed devices
   without failing the whole load; unresolved entries must be reported, not dropped silently.
 - **R17.3 (MUST)** A version field with a documented migration path.
@@ -1245,26 +1266,19 @@ curves ([IGA file][steam-iga]).
   it contributes no slots, is not a row of its own, and an override applied to that mapping rewrites
   it too.
 
-  R19.9's unit — the action's path plus a part — assumes one action per binding, and without this the
-  two get separate rows and a rebind moves only one of them. The failure is silent and it is a
-  gameplay bug rather than a display oddity: rebind the throttle and the afterburner stays on the
-  old key, and whatever the player later binds to that key acquires an afterburner.
+  Without it the two get separate rows and a rebind moves only one, which is a gameplay bug rather
+  than a display oddity: the afterburner stays on the old key, and whatever the player later binds
+  there acquires an afterburner. Conflict detection cannot catch it, because nothing collides.
 
-  - **Conflict detection cannot substitute for it** (R8.6, R19.3). Nothing collides. The failure is a
-    *separation* that should not have been possible, and a conflict query looks for two rows holding
-    one control rather than for one control that should have been in one row.
   - **The link is declared, never inferred.** Two bindings happening to read one control are as often
-    a coincidence as an intention, and the two want opposite handling.
-  - **Checkable when the context is declared.** The binding it rides must exist in that context and
-    read the same controls, which is what makes "the same control" true rather than merely intended,
-    and it must itself be listed, since a binding off the screen has no mapping to lend.
-  - **Riding a row the player cannot change is permitted.** There is nothing to rewrite, and keeping
-    the duplicate off the screen is worth having on its own — which is the ordinary case for a game
-    whose pad rows are listed-and-fixed (R19.10).
-  - **A rider is not hidden the way R19.10's exception is.** It reads a control the player is already
-    being shown, so what it needs is to appear *with* that control rather than in a row of its own —
-    which is a display question that R18.3's structured descriptor answers, since a row naming two
-    actions and not saying which is the held one is worse than a row naming one.
+    a coincidence as an intention.
+  - **Checkable when the context is declared:** the binding it rides must exist in that context,
+    read the same controls, and itself be listed. Riding a row the player cannot change is
+    permitted — there is nothing to rewrite, and keeping the duplicate off the screen stands alone.
+  - **A rider is not hidden** the way R19.10's exception is. It reads a control the player is
+    already being shown, so it must be able to appear *with* that control rather than in a row of
+    its own, which requires R18.3's descriptor: a row naming two actions without saying which is
+    the held one is worse than a row naming one.
 
 ---
 

@@ -63,13 +63,18 @@ dev-dependency — chunk 28 owns the fix); the `--features libm` build emits 4 p
 
 ## House style
 
-Full statement in `Roadmap.md` § House style. The two rules most often broken:
+Full statement in `Roadmap.md` § House style. The three rules most often broken:
 
 - **Doc comments are user-facing.** They render on docs.rs, where our documents do not exist. Never
   cite an R-number, a `§`, an `OQ`, or a chunk from a `///` comment. The reasoning usually survives
   the edit — drop the parenthesis, keep the sentence.
 - **Internal comments are terse**, and `pub(crate)`/`//` comments keep their references. Comment the
   non-obvious decision — the thing that breaks if someone changes it — not the mechanism.
+- **`Requirements.md` is the constitution, not the Federalist Papers.** A requirement states what
+  must be true and stops. Structure it needs to say that precisely — enumerated states, a table of
+  cases, a worked example — is the requirement. The argument for it is not: that belongs in
+  `Design.md`, or `Log.md` where a chunk learned it. One clause of reason where a requirement needs
+  one to be intelligible; not a paragraph defending the choice.
 
 Prose in these markdown documents wraps at 100 columns; tables are exempt.
 

@@ -63,8 +63,22 @@ explanatory in a way internal comments must not be.
 
 **Analysis belongs in the review conversation, not the source file.** The reasoning that produced a
 design — why an alternative was rejected, what the tradeoff was — goes in the chunk's discussion.
-When it genuinely needs to persist, it goes in [Design.md](./Design.md) or the requirements, both of
-which are built for it. What it must not do is accumulate as prose in the code.
+When it genuinely needs to persist, it goes in [Design.md](./Design.md), which is built for it.
+What it must not do is accumulate as prose in the code — or in the requirements, which is the next
+rule.
+
+**`Requirements.md` is the constitution, not the Federalist Papers.** A requirement states what must
+be true, and stops. It may carry whatever *structure* it takes to say that precisely — an enumerated
+set of states, a table of cases, a worked example of what does and does not qualify — because that
+structure is the requirement rather than commentary on it. What it may not carry is the argument:
+which alternative was considered, what the trade-off was, why the obvious reading is wrong. That is
+Design.md's job, or `Log.md`'s where a chunk learned it.
+
+Two habits keep it honest. Where a requirement needs a reason to be intelligible, one clause is
+almost always enough — "…because absence already means the default" earns its place; a paragraph
+defending the choice does not. And a **withdrawn** requirement is the exception that proves the
+rule: it keeps enough to stop the idea being re-proposed, and that is the only argument in the
+document with a job to do.
 
 **Avoid the tells:** restating what the code says, hedging, enumerating the obvious, unusual
 punctuation or phrasing in comments.
@@ -208,8 +222,10 @@ mistakes have to be caught rather than discovered in QA that nobody is running.
 ### 17c. Reflect, and the two normalizes
 
 `Reflect` on modifiers and conditions so third-party ones round-trip (R5.6, R17.5). Plus R5.9's two
-`normalize` operations, which need naming before either can be written — one clamps to unit length,
-the other remaps a range and therefore falls under D6's one-rescaling-stage rule.
+`normalize` operations, now named: `clamp_magnitude` scales a vector down if it exceeds magnitude 1,
+and `rescale` maps a range onto 0..1 and therefore falls under D6's one-rescaling-stage rule.
+`rescale` is the word the crate already uses for that stage — `without_rescale`, `rescales()` — so
+this chunk builds the modifier under a name the plan-build check already counts by.
 
 - **Why separate:** neither is a diagnostic, and both were riding in 17 because it was the open
   chunk when they were found.
@@ -301,6 +317,33 @@ the same prompt, and the sub-row 44 earns cannot be drawn at all without it.
   English. "Hold" + control is an English construction, and a descriptor that has already composed
   the string has taken the choice away from the catalogue that should be making it.
 
+### 53. A context the player never sees
+
+`private` is per binding, and "this whole context is not part of the player-facing model" is a fact
+about the context. A main menu is the case: a game would not want to remap its menu navigation and
+would not want to *display* it either, and saying so one binding at a time is N statements of one
+fact — which every future screen then has to know as well, since the alternative is filtering by
+context at each one.
+
+- **Live in the tree, and chunk 43 should have caught it.** Disasteroids' `Menu` context binds
+  `Navigate`, `Accept` and `Back` with no `private`, so listing-by-default puts all of them on the
+  controls screen: one row from the stick, four from the D-pad, and two more. The settings screen
+  is listing its own navigation controls. Nobody noticed through 21, 30 or 43, because each of those
+  was reviewed against what it added rather than against the whole screen.
+- **A declaration on the builder**, not a flag on each binding — the same shape `active_if` has, and
+  the same relationship to R19.10 that `private` has: listed by default, and hiding is declared.
+- **Not the same as `private`.** That marks a binding as an implementation detail of another one.
+  This says a whole context is machinery the player does not think of as controls, and the two
+  should not be spelled the same way even though they land in the same place.
+- **R19.10 gains the context-level exception**, since it currently enumerates three states per
+  binding and this is a fourth thing that produces one of them.
+- **Check `reserved` on the way past.** It is already flat and global across a scheme rather than
+  per context, and a context nobody lists may still want its controls withheld from capture — the
+  two are independent and it would be easy to accidentally couple them here.
+- **Review surface:** whether the screen should be able to *override* it. A debug build that wants
+  to see everything is the case, and the answer is probably no — the filter is the caller's, so a
+  screen that wants everything can already ask for it a different way.
+
 ### 38. Applying a rebind
 
 The mutation half of what chunk 20 was originally written to cover, split out because it needs
@@ -317,6 +360,12 @@ designs the structure it writes into.
   anything. This is the half that makes it do something: when a variant plan is compiled for a
   mapping, every binding riding that mapping takes the new controls too. Without it 44 is a screen
   fix and the gameplay bug it exists for is still there.
+- **The defaults must survive being overridden** (R17.1), and two things follow that are easy to get
+  wrong in the same commit. Applying must never write back to `InputContextPlan<C>` — that resource
+  *is* the defaults, and a diff has nothing to diff against once it has been rewritten. And
+  `mappings()` reads that resource, so the moment overrides exist it is answering about defaults
+  while a settings screen is asking about current values. Decide here what `mappings()` means, and
+  say so in its doc: today the question cannot be asked.
 - **The four conflict policies** (R19.3): reject, swap, duplicate-allowed, unbind-the-other, chosen
   by the app. Chunk 20 delivered the detection these act on.
 - **A fifth outcome: "not ours, delegate"** (R19.8). When a backend is authoritative for an action,
@@ -482,6 +531,81 @@ Replace the plan's `BTreeMap` with the `Vec<u16>` action→slot map, the dirty b
 - **Success criterion: `examples/` does not change.** A diff there means the abstraction leaked.
 - **Why last:** it is an optimization of a shape we now understand, and it is the only chunk that
   adds nothing a player or a developer can see.
+
+### 51. The constitution, trimmed
+
+`Requirements.md` accreted argument because the house style pointed it there — the rule said
+persisting analysis goes in "Design.md or the requirements", which has since been narrowed to
+Design.md alone. This is the pass that clears what accumulated under the old rule.
+
+- **The target is 23 italic `_(...)_` asides**, not the long requirements. Measurement first,
+  because the instinct is wrong: 220 requirements, 962 lines of body, median 3 lines, only 14 over
+  twelve — and most of those are long because they carry a table of cases or an enumerated set of
+  states, which *is* the requirement. Trimming by length would remove constitutional content.
+- **The test, per requirement:** does this sentence say what must be true, or defend it? Defence
+  moves to `Design.md`, or to `Log.md` where a chunk learned it. It is moved rather than deleted —
+  the reasoning is worth keeping, in the document built for it.
+- **Withdrawn requirements are exempt.** What they keep is the argument that stops the idea being
+  re-proposed, which is the one argument in the document with a job to do.
+- **Why it is a chunk rather than an afternoon.** Twenty-three judgement calls in the document every
+  other document defers to, where dropping a load-bearing clause is invisible in a diff — the
+  clause reads as commentary right up until the moment someone needs it.
+- **Review surface:** whether anything moved to `Design.md` landed somewhere a reader would find it.
+  Text moved out of the constitution and into a section nobody opens has been deleted with extra
+  steps.
+
+### 52. What the crate has accreted
+
+Thirteen thousand lines arrived a chunk at a time, and nothing has yet read them as a whole asking
+what could be fewer things. This is that read: a **survey producing a list of proposed collapses**,
+each with the argument for and against, from which the author picks. It deliberately does not land
+the refactors — a chunk that both decides and executes gives review nothing to disagree with before
+the diff exists.
+
+**Before 48**, which renames prelude types. Renaming a type this chunk proposes to delete is work
+done twice, and two of 48's sixteen nouns — `Verdict`, `Rebinding` — are on the candidate list
+below.
+
+Three candidates found while answering an unrelated question, so the survey starts with something
+rather than from nothing:
+
+- **`ControlClass` is `ChannelShape` minus one variant.** `AnyButton`/`AnyAxis`/`AnyDelta` against
+  `Button`/`Axis1`/`Axis2`/`Delta2` — the same partition of the same space under two names, and the
+  variant that differs is the one §10.4 already explains away. The question to answer is whether "a
+  class a binding may target" and "a channel a control reports on" are two ideas or one idea named
+  twice. Strongest candidate in the crate.
+- **`Verdict` is a strict subset of `Phase`'s variant names** — `Idle`/`Ongoing`/`Fired` against
+  `Idle`/`Started`/`Ongoing`/`Fired`/`Completed`/`Canceled`. Probably right to keep separate, since
+  one is per-condition and the other per-action and the extra states are derived from transitions
+  between the first. But two enums sharing variant names in one pipeline is a standing confusion,
+  and if they stay separate one place should say why.
+- **`context.rs` is 3,325 lines**, a quarter of the crate and two and a half times the next largest.
+  Whatever else this finds, that file is doing more than one job, and splitting it is the one item
+  here that is a certainty rather than a question.
+
+Two things to be careful of, because a survey like this fails in predictable ways:
+
+- **The three-property model must survive it.** `Intent`, `ChannelShape` and the action's output
+  shape look collapsible from a distance and are three properties on purpose (R2.10, and chunk 15
+  separated them against exactly this instinct). A pass optimizing for fewer types would delete the
+  distinction that the crate's hardest bug reports came from. Treat R2.10 as a fixed point.
+- **Similar shape is not shared meaning.** The test for a collapse is whether the two things must
+  change together, not whether they currently look alike.
+
+**Also here, from the settings-screen scope question** (chunk 53 is the other half of it), since it
+is a doc fix on the same surface this chunk is reviewing: `mappings()`'s doc offers filtering by
+scheme and grouping by category and never mentions `Mapping::context`, which is the field that
+answers "show only these contexts on this screen". One sentence.
+
+**The scope question itself, recorded so it is not re-proposed.** Feedback suggested the app should
+decide which controls appear on a settings screen rather than the crate deriving them from the
+registry. The middle form of it — the app names the contexts, the crate builds the rows — needs no
+change at all, because `Mapping::context` is public and filtering is already the caller's. The full
+form costs the persistence story: `MappingKey` is the save-file row key (§10.1, R17.9), so an app
+that owns the rows owns the keys, and R17.1, R17.2, R17.7 and R19.14 stop being things the crate can
+provide; `conflicts()` goes with them, since it is a query over the mapping list. Declined on that
+basis. If this chunk finds the doc sentence insufficient, the next step is a convenience filter, not
+a smaller model.
 
 ### 48. Names that survive a glob import
 
