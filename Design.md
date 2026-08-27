@@ -790,7 +790,7 @@ rebindable* if it declares a mapping, and *unlisted* only if it asks:
 | (none) | yes | no |
 | `mappable` | yes | yes |
 | `private` | no | no |
-| `follows::<A>()` | on `A`'s row | with `A`'s row |
+| `follow::<Follower, Leader>()` | on `Leader`'s row | with `Leader`'s row |
 
 The first draft had two states and made listing follow rebindability, so the gamepad `Jump` above
 vanished from the screen entirely. That is backwards for the commonest gamepad screen there is: the
@@ -803,7 +803,7 @@ seeing the controls is the player's business, and the default belongs to them (R
 would only confuse a controls screen. It hides a binding and links it to nothing, which is the right
 answer for a genuine internal and the wrong one for a control the player is already being shown.
 
-**`follows` is the fourth state, and it exists because the third was being used for the wrong
+**`follow` is the fourth state, and it exists because the third was being used for the wrong
 thing.** Several actions may deliberately read one control — tap to dodge and hold to sprint,
 Disasteroids' `Afterburner`, which is the throttle held down. The player rebinds *the control*, so
 the two must move together; R19.9's unit is the action's path plus a part, which assumes one action
@@ -814,17 +814,32 @@ without linking the two, which was a stopgap that made the bug harder to see rat
 
 ```rust
 c.bind::<Thrust>(KeyCode::KeyW).mappable();
-c.bind::<Afterburner>(KeyCode::KeyW).hold(0.75).follows::<Thrust>();
+c.bind::<Thrust>(KeyCode::ArrowUp).mappable();
+c.follow::<Afterburner, Thrust>(|binding| binding.hold(0.75));
 ```
 
-**Resolution is by the controls, not by the name.** A follower names an *action*, and the action it
-names usually has several bindings — one per device. Which one it rides is settled by matching the
-source: the target must have a binding in the same context reading exactly what the follower reads.
-That is one lookup doing three jobs. It picks the right binding of several without either side
-naming a device; it makes "the same control" checked rather than merely intended, since a follower
-reading something else is a different binding rather than a linked one; and it means the follower's
-controls are always its principal's, so a screen that renders it inherits the row's slots and stays
-aligned as they are filled.
+**One call, not one binding per device.** The first shape of this was declared per binding —
+`.follows::<A>()`, once for each device, exactly like `Thrust` itself: `Afterburner` on `KeyW` had to
+say `.follows::<Thrust>()` again on `ArrowUp`, retyping a control `Thrust` had already named. Two
+things followed from that repetition, and both were worth fixing at once. An author who forgot one
+of the repeats got no error — only a follower that silently rode part of a row while being drawn as
+if it rode all of it, since nothing checked that the count of follows-declarations matched the count
+of bindings they were meant to shadow. And the repetition itself was never buying anything: the two
+bindings always had to name the same control to resolve at all, so retyping it was pure risk with no
+offsetting freedom. `follow` reads `Leader`'s bindings once and generates a matching one for
+`Follower` per device found, so there is nothing left to retype and nothing left to under-declare.
+
+**It runs against whatever `Leader` has declared *so far*, not against its final shape** — an
+ordering rule rather than a snapshot taken at the end of the closure. That is what lets a follower
+ride only some of a leader's devices on purpose: call `follow` before the rest of `Leader`'s bindings
+are declared, and only the ones already there are covered. Disasteroids' `Afterburner` wants every
+device `Thrust` has, so it is declared last, after both of `Thrust`'s keyboard bindings.
+
+**Resolution is still by the controls, not by the name, underneath `follow`.** Every binding it
+generates reads exactly the control it copied from `Leader`, and that identity — not a name, not an
+index — is what [`rewrite`](crate::overrides::rewrite) matches on when a rebind moves the row: a
+follower's source is rewritten because it reads what the leader read. `follow` makes that identity
+true by construction instead of by the author repeating it correctly by hand.
 
 **Riding a fixed row is allowed**, and is the ordinary case rather than the exception. Disasteroids'
 pad `Thrust` is listed-and-fixed, so the pad `Afterburner` following it has nothing to rewrite — and

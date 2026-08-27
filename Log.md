@@ -628,3 +628,50 @@ would want one. T-junctions and non-rectangular obstacle shapes: the directional
 promises a plain outer corner, which is what a rectangle always presents; an obstacle shape this
 rule cannot draw correctly was never generated in the first place, rather than generated and drawn
 wrong.
+
+### Chunk 58: `follow` replaces per-binding `follows`
+
+Found while scoping chunk 31, which inherited chunk 38's leftover: a follower drawn as riding every
+slot of a row when it had only declared `.follows()` on some of them. The roadmap's proposed fix was
+a plan-build diagnostic requiring full coverage. Looking at why partial coverage was writable at all
+found the actual defect one layer down: `.follows::<A>()` was a per-binding declaration, so a
+follower had to retype every control its leader already named — once per device, verbatim — and
+nothing tied the *count* of those repeats to the leader's own. A diagnostic would have caught the
+typo after the fact; it would not have removed the reason to make one.
+
+**`InputContextBuilder::follow::<Follower, Leader>(configure)` replaces `BindingHandle::follows`.**
+It reads every binding `Leader` has declared, generates one matching binding of `Follower` per
+control found, and runs `configure` on each — `controls.follow::<Afterburner, Thrust>(|b|
+b.hold(0.75))` where three hand-written `.bind().follows::<Thrust>()` calls stood before. Partial
+coverage of one row is no longer expressible: there is nothing left to under-declare, since the
+bindings are derived rather than retyped.
+
+**Resolves against the leader's bindings *so far*, not a snapshot taken at the end — a deliberate,
+costed choice.** An order-independent version (a pending list, resolved once every binding is known)
+was designed and rejected: it needs a boxed closure held in builder state to survive past the
+`follow` call, a struct re-deriving what `push_binding` already gets for free from a type parameter,
+and — because diagnostics run before the builder is finished — a second call site in `context.rs`,
+resolving pending follows before `report_diagnostics` runs so a private leader binding is still
+caught. Roughly three to four times the code, in two files, for a pattern nothing else in this
+builder uses. The order-dependent version costs none of that, and the rule it imposes — declare what
+you are naming before you name it — is the same rule every other call in this builder already
+follows. It has one real consequence: `examples/capture.rs`'s `WallJump` follows `Jump`'s keyboard
+bindings and not its pad one, and that is now because `follow` is called before `Jump`'s pad binding
+is declared, not because of a third follows-call nobody wrote.
+
+**The internal representation is untouched, on purpose.** `FollowsDecl`, `leader_of`'s
+match-by-source resolution, `rewrite_followers`, and the second pass in `mappings_of` all still work
+exactly as before — `follow` only changes how the `BindingSpec`s they operate on get authored, not
+what they are once declared. Follows is a build-time and rebind-time bookkeeping question; the
+evaluator never knows a binding is a follower at all, so there was nothing to gain at that layer from
+also making the relationship action-based rather than per-binding, and a real cost (losing the
+"provably reads what it claims to ride" self-check that source-matching gives for free).
+
+**One test deleted outright rather than adapted.**
+`following_an_action_that_reads_something_else_is_refused` exercised a mistake — a follower
+hand-bound to a control its leader never used — that `follow` cannot construct, since its sources
+are always copied from the leader. Likewise `a_binding_cannot_be_mappable_and_follow` (`mappable`
+declared *before* `follows`): `follow` always applies `follows` first, so that order is unreachable
+through the public API; the reverse order (`follows` then `mappable`, attempted inside `configure`)
+still panics, off the same guard in `declare_mapping` that was already independent of how `follows`
+got there.

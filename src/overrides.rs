@@ -560,10 +560,7 @@ mod tests {
         app.add_context::<Playing>(|controls| {
             controls.bind::<Move>(DirectionalButtons::wasd()).mappable();
             controls.bind::<Jump>(KeyCode::Space).mappable_upto(2);
-            controls
-                .bind::<Lunge>(KeyCode::Space)
-                .hold(0.4)
-                .follows::<Jump>();
+            controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));
             controls.bind::<Look>(crate::binding::MouseMove);
             controls.bind::<OpenSettings>(KeyCode::F1).reserved();
         });

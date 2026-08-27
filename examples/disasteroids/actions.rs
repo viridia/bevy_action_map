@@ -223,23 +223,13 @@ pub fn plugin(app: &mut App) {
         // Hold the throttle for three quarters of a second and it opens up. `Started` fires the
         // moment the burn begins, so the exhaust can show it building before it arrives.
         //
-        // These are the throttle controls a second time, so each one `follows` the Thrust binding
-        // that reads the same control: no second row under a second name, and rebinding Thrust to
-        // some other key takes the afterburner with it. Each finds its own partner by what it reads,
-        // which is why the pad line needs nothing to say it is the pad one — and why it works even
-        // though the pad row is fixed and has nothing to rewrite.
-        controls
-            .bind::<Afterburner>(GamepadButton::RightTrigger2)
-            .hold(0.75)
-            .follows::<Thrust>();
-        controls
-            .bind::<Afterburner>(KeyCode::KeyW)
-            .hold(0.75)
-            .follows::<Thrust>();
-        controls
-            .bind::<Afterburner>(KeyCode::ArrowUp)
-            .hold(0.75)
-            .follows::<Thrust>();
+        // One binding of Afterburner per binding Thrust has above — pad, W and the up arrow —
+        // generated from Thrust's own declarations rather than retyped: no second row under a
+        // second name, and rebinding Thrust to some other key takes the afterburner with it. It
+        // works even though the pad row is fixed and has nothing to rewrite. Declared last, after
+        // every one of Thrust's bindings, because `follow` only sees what its leader has declared
+        // so far — this is what makes it cover all three rather than whichever came first.
+        controls.follow::<Afterburner, Thrust>(|binding| binding.hold(0.75));
 
         controls
             .bind::<Hyperspace>(GamepadButton::East)

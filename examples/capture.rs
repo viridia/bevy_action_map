@@ -93,20 +93,13 @@ fn main() {
 
         // Jump held rather than tapped, which is a second action on a control the player is already
         // being shown. It rides Jump's row instead of getting one of its own — and when Jump is
-        // rebound below, watch it move too. That is the whole reason `follows` exists: two actions
+        // rebound below, watch it move too. That is the whole reason `follow` exists: two actions
         // declared as sharing a control have to go on sharing one.
         //
-        // Once per binding of the row, because a follower matches a *binding* rather than a row —
-        // and because a row's sub-row is drawn against every slot the row holds, so a rider on only
-        // some of them would be shown as riding all of them.
-        controls
-            .bind::<WallJump>(KeyCode::Space)
-            .hold(0.4)
-            .follows::<Jump>();
-        controls
-            .bind::<WallJump>(KeyCode::KeyJ)
-            .hold(0.4)
-            .follows::<Jump>();
+        // One call covers both of Jump's keyboard bindings, generated from them rather than
+        // retyped. Called here, before Jump's pad binding below is declared, is what keeps
+        // WallJump off the pad: `follow` only sees what its leader has declared so far.
+        controls.follow::<WallJump, Jump>(|binding| binding.hold(0.4));
 
         // The same two actions on the pad, mappable again. Both derive the same mapping name a
         // second time on purpose: `capture_demo.jump` means one thing on the keyboard and another

@@ -1431,56 +1431,6 @@ impl<'a, C> BindingHandle<'a, C> {
         self
     }
 
-    /// Rides another action's mapping, instead of having one of its own.
-    ///
-    /// Reach for it where an action deliberately shares a control with another — tap to dodge and
-    /// hold to sprint, or a throttle that opens up when it is held down. The player rebinds *the
-    /// control*, once, and both actions move with it.
-    ///
-    /// ```ignore
-    /// controls.bind::<Thrust>(KeyCode::KeyW).mappable();
-    /// // The same key a second time, doing a second thing. Not a row of its own.
-    /// controls.bind::<Afterburner>(KeyCode::KeyW).hold(0.75).follows::<Thrust>();
-    /// ```
-    ///
-    /// The binding it follows is found by the controls the two read: `A` must have a binding **in
-    /// this context** reading exactly what this one reads, and that binding must be listed. So a
-    /// keyboard binding follows the keyboard one and a pad binding follows the pad one, without
-    /// either having to say which. Following a binding the player cannot change is allowed and
-    /// useful — it keeps the duplicate off the screen — and simply leaves nothing to rewrite.
-    ///
-    /// Declaring this and [`mappable`](Self::mappable) contradict each other: a binding either has a
-    /// mapping or rides one. It is not the same as [`private`](Self::private), which hides a binding
-    /// and links it to nothing, so rebinding the control leaves the hidden binding behind on the old
-    /// one.
-    ///
-    /// # Panics
-    ///
-    /// If `A` is this binding's own action, or if the binding was already declared `mappable`.
-    pub fn follows<A: InputAction>(self) -> Self {
-        let binding = &self.builder.bindings[self.index];
-        assert!(
-            A::id() != binding.action,
-            "a binding cannot follow its own action: `{}` would be riding the mapping it is \
-             declaring",
-            A::PATH
-        );
-        assert!(
-            !binding
-                .mapping
-                .is_some_and(|decl| decl.rebinding.is_rebindable()),
-            "a binding cannot be both `mappable` and `follows`: one gives it a mapping of its own, \
-             the other rides someone else's"
-        );
-        let binding = &mut self.builder.bindings[self.index];
-        binding.mapping = None;
-        binding.follows = Some(FollowsDecl {
-            action: A::id(),
-            path: A::PATH,
-        });
-        self
-    }
-
     /// Lets the player rebind this, under a name of your choosing.
     ///
     /// As [`mappable`](Self::mappable), with the given key in place of the action's path — so a
@@ -1761,6 +1711,63 @@ impl<C> InputContextBuilder<C> {
     /// ```
     pub fn bind<A: InputAction>(&mut self, source: impl BindingSourceSpec) -> BindingHandle<'_, C> {
         self.push_binding::<A>(source.into_binding_source())
+    }
+
+    /// Declares `Follower` as riding every one of `Leader`'s bindings, one for one.
+    ///
+    /// Reach for it where an action deliberately shares a control with another — tap to dodge and
+    /// hold to sprint, or a throttle that opens up when it is held down. `Leader` must already have
+    /// its bindings declared: this reads them off, generates one matching binding of `Follower` per
+    /// device `Leader` reads, and runs `configure` on each. The player rebinds *the control*, once,
+    /// and every action riding it moves with it.
+    ///
+    /// ```ignore
+    /// controls.bind::<Thrust>(KeyCode::KeyW).mappable();
+    /// controls.bind::<Thrust>(KeyCode::ArrowUp).mappable();
+    /// // Same two keys, without retyping either of them.
+    /// controls.follow::<Afterburner, Thrust>(|binding| binding.hold(0.75));
+    /// ```
+    ///
+    /// Following a binding the player cannot change is allowed and useful — it keeps the duplicate
+    /// off the screen — and simply leaves nothing to rewrite. Calling this before `Leader` has every
+    /// device bound is not an error and not a mistake to catch: it is what lets a follower ride only
+    /// some of `Leader`'s devices, by naming `Leader`'s bindings so far rather than all of them ever
+    /// declared.
+    ///
+    /// # Panics
+    ///
+    /// If `Leader` has no bindings declared yet, or if `Follower` and `Leader` are the same action.
+    pub fn follow<Follower: InputAction, Leader: InputAction>(
+        &mut self,
+        configure: impl Fn(BindingHandle<'_, C>) -> BindingHandle<'_, C>,
+    ) {
+        assert!(
+            Follower::id() != Leader::id(),
+            "`{}` cannot follow its own action: it would be riding the mapping it is declaring",
+            Follower::PATH
+        );
+        let sources: Vec<BindingSource> = self
+            .bindings
+            .iter()
+            .filter(|binding| binding.action == Leader::id())
+            .map(|binding| binding.source)
+            .collect();
+        assert!(
+            !sources.is_empty(),
+            "`{}` has no bindings yet for `{}` to follow — declare `{}` first",
+            Leader::PATH,
+            Follower::PATH,
+            Leader::PATH
+        );
+        for source in sources {
+            let handle = self.push_binding::<Follower>(source);
+            handle.builder.bindings[handle.index].mapping = None;
+            handle.builder.bindings[handle.index].follows = Some(FollowsDecl {
+                action: Leader::id(),
+                path: Leader::PATH,
+            });
+            configure(handle);
+        }
     }
 
     /// Binds to every control a [`ControlClass`](crate::capture::ControlClass) names, rather than to

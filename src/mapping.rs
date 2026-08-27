@@ -22,8 +22,9 @@
 //!
 //! Two actions may deliberately share one control — tap to dodge, hold to sprint — and the player
 //! rebinds *the control* rather than either of them.
-//! [`follows`](crate::binding::BindingHandle::follows) says so: the second binding rides the first
-//! one's mapping, contributing no row of its own and moving with it when the player changes it.
+//! [`follow`](crate::binding::InputContextBuilder::follow) says so: it declares one action riding
+//! another's bindings, one for one, contributing no row of its own and moving with them when the
+//! player changes them.
 //!
 //! ```ignore
 //! app.add_context::<OnFoot>(|controls| {
@@ -33,8 +34,7 @@
 //!     controls.bind::<Fire>(KeyCode::ControlLeft).mappable_upto(2);  // one control, two slots
 //!     controls.bind::<Look>(MouseMove);                              // listed; not changeable
 //!     controls.bind::<Crouch>(KeyCode::KeyC).private();              // not listed at all
-//!     controls.bind::<Lunge>(KeyCode::Space).hold(0.4)
-//!         .follows::<Jump>();                                        // rides the Jump row
+//!     controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));   // rides the Jump row
 //! });
 //! ```
 //!
@@ -747,10 +747,7 @@ mod tests {
         app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
         app.add_context::<Riding>(|controls| {
             controls.bind::<Jump>(KeyCode::Space).mappable();
-            controls
-                .bind::<Lunge>(KeyCode::Space)
-                .hold(0.4)
-                .follows::<Jump>();
+            controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));
         });
 
         let mappings = mappings(app.world());
@@ -783,10 +780,7 @@ mod tests {
         app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
         app.add_context::<RidingHeld>(|controls| {
             controls.bind::<Jump>(KeyCode::Space).mappable();
-            controls
-                .bind::<Lunge>(KeyCode::Space)
-                .hold(0.4)
-                .follows::<Jump>();
+            controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));
         });
 
         let mappings = mappings(app.world());
@@ -796,10 +790,10 @@ mod tests {
         );
     }
 
-    /// Which binding a follower rides is settled by what it reads, so an action bound on both
-    /// devices gets one follower per device and neither has to say which it meant.
+    /// `follow` reads every binding `Jump` has by the time it runs, so an action bound on both
+    /// devices gets one follower per device from a single call, with neither side naming one.
     #[test]
-    fn a_follower_finds_the_binding_that_reads_what_it_reads() {
+    fn a_follower_covers_every_binding_the_leader_has() {
         use bevy_input::gamepad::GamepadButton;
 
         #[derive(InputContext)]
@@ -811,14 +805,7 @@ mod tests {
         app.add_context::<RidingBoth>(|controls| {
             controls.bind::<Jump>(KeyCode::Space).mappable();
             controls.bind::<Jump>(GamepadButton::South).mappable();
-            controls
-                .bind::<Lunge>(GamepadButton::South)
-                .hold(0.4)
-                .follows::<Jump>();
-            controls
-                .bind::<Lunge>(KeyCode::Space)
-                .hold(0.4)
-                .follows::<Jump>();
+            controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));
         });
 
         // Two rows, one per scheme, and neither of them is Lunge's.
@@ -834,8 +821,9 @@ mod tests {
     }
 
     /// Disasteroids' actual shape: one row with a primary and a secondary, and a follower riding
-    /// each slot separately because a follower matches a *binding*, not a row. The row is one thing
-    /// to the player, so it gets one sub-row, not two identical ones.
+    /// both slots from the one `follow` call that declared it. The row is one thing to the player,
+    /// so it gets one sub-row, not two identical ones — and there is no way through `follow` to
+    /// declare a rider on one slot and not the other.
     #[test]
     fn a_follower_riding_every_slot_of_a_row_is_still_one_sub_row() {
         #[derive(InputContext)]
@@ -847,14 +835,7 @@ mod tests {
         app.add_context::<RidingEverySlot>(|controls| {
             controls.bind::<Jump>(KeyCode::Space).mappable();
             controls.bind::<Jump>(KeyCode::KeyJ).mappable();
-            controls
-                .bind::<Lunge>(KeyCode::Space)
-                .hold(0.4)
-                .follows::<Jump>();
-            controls
-                .bind::<Lunge>(KeyCode::KeyJ)
-                .hold(0.4)
-                .follows::<Jump>();
+            controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));
         });
 
         let mappings = mappings(app.world());
@@ -876,10 +857,7 @@ mod tests {
         app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
         app.add_context::<RidingFixed>(|controls| {
             controls.bind::<Jump>(KeyCode::Space);
-            controls
-                .bind::<Lunge>(KeyCode::Space)
-                .hold(0.4)
-                .follows::<Jump>();
+            controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));
         });
 
         let mappings = mappings(app.world());
@@ -887,23 +865,20 @@ mod tests {
         assert_eq!(mappings[0].rebinding, Rebinding::Fixed);
     }
 
-    /// A follower that reads something else is a different binding rather than a linked one, and
-    /// nothing downstream could tell the difference between that and a typo.
+    /// `follow` runs against whatever the leader has declared *so far*, not its final shape — the
+    /// ordering rule that lets a follower ride only some of a leader's devices on purpose. Called
+    /// before `Jump` has any binding at all, there is nothing yet to ride.
     #[test]
-    #[should_panic(expected = "reads the same controls")]
-    fn following_an_action_that_reads_something_else_is_refused() {
+    #[should_panic(expected = "has no bindings")]
+    fn following_an_action_with_no_bindings_yet_is_refused() {
         #[derive(InputContext)]
-        #[context(path = "mapping_tests.riding_elsewhere", tick = Fixed)]
-        struct RidingElsewhere;
+        #[context(path = "mapping_tests.riding_nothing", tick = Fixed)]
+        struct RidingNothing;
 
         let mut app = App::new();
         app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
-        app.add_context::<RidingElsewhere>(|controls| {
-            controls.bind::<Jump>(KeyCode::Space).mappable();
-            controls
-                .bind::<Lunge>(KeyCode::KeyJ)
-                .hold(0.4)
-                .follows::<Jump>();
+        app.add_context::<RidingNothing>(|controls| {
+            controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));
         });
     }
 
@@ -920,33 +895,13 @@ mod tests {
         app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
         app.add_context::<RidingAGhost>(|controls| {
             controls.bind::<Jump>(KeyCode::Space).private();
-            controls
-                .bind::<Lunge>(KeyCode::Space)
-                .hold(0.4)
-                .follows::<Jump>();
+            controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));
         });
     }
 
     /// A binding has a mapping or rides one, and saying both is catchable where it is written.
-    #[test]
-    #[should_panic(expected = "both `mappable` and `follows`")]
-    fn a_binding_cannot_be_mappable_and_follow() {
-        #[derive(InputContext)]
-        #[context(path = "mapping_tests.riding_and_owning", tick = Fixed)]
-        struct RidingAndOwning;
-
-        let mut app = App::new();
-        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
-        app.add_context::<RidingAndOwning>(|controls| {
-            controls.bind::<Jump>(KeyCode::Space).mappable();
-            controls
-                .bind::<Lunge>(KeyCode::Space)
-                .mappable()
-                .follows::<Jump>();
-        });
-    }
-
-    /// And in the other order, since neither call may quietly win.
+    /// `follow` declares `follows` before `configure` runs, so this is the only order reachable
+    /// through it — asking for `mappable` inside `configure` finds the conflict already there.
     #[test]
     #[should_panic(expected = "both `follows` and `mappable`")]
     fn a_binding_cannot_follow_and_be_mappable() {
@@ -958,10 +913,7 @@ mod tests {
         app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
         app.add_context::<OwningAndRiding>(|controls| {
             controls.bind::<Jump>(KeyCode::Space).mappable();
-            controls
-                .bind::<Lunge>(KeyCode::Space)
-                .follows::<Jump>()
-                .mappable();
+            controls.follow::<Lunge, Jump>(|binding| binding.mappable());
         });
     }
 
@@ -978,7 +930,7 @@ mod tests {
         app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
         app.add_context::<RidingItself>(|controls| {
             controls.bind::<Jump>(KeyCode::Space).mappable();
-            controls.bind::<Jump>(KeyCode::Space).follows::<Jump>();
+            controls.follow::<Jump, Jump>(|binding| binding);
         });
     }
 }
