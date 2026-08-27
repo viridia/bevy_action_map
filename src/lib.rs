@@ -104,6 +104,7 @@ impl bevy_app::Plugin for ActionMapPlugin {
 
         app.init_resource::<binding::ButtonThreshold>();
         app.init_resource::<eval::ConsumedControls>();
+        app.init_resource::<eval::ExclusionCeiling>();
         app.init_resource::<capture::ReservedControls>();
         // Always present, so that whatever draws prompts can watch it from the first frame. Its
         // absence would mean nothing — unlike `PromptDevice`, where absence is the game not having
@@ -118,10 +119,15 @@ impl bevy_app::Plugin for ActionMapPlugin {
 
         // Two clearing points, per Design §5.2. The frame's starts everything from nothing; the
         // fixed one lets a schedule that runs several times decide afresh each run while what
-        // `PreUpdate` claimed still stands.
+        // `PreUpdate` claimed still stands. The exclusion ceiling (Design §5.3) clears at the same
+        // point as the frame's consumption release and nowhere else — see `ExclusionCeiling`.
         app.add_systems(
             bevy_app::PreUpdate,
-            eval::release_consumed_controls.before(ActionMapSystems::Capture),
+            (
+                eval::release_consumed_controls,
+                eval::reset_exclusion_ceiling,
+            )
+                .before(ActionMapSystems::Capture),
         );
         app.add_systems(
             bevy_app::FixedPreUpdate,

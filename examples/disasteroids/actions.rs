@@ -76,28 +76,10 @@ pub struct Navigate;
 /// Bound on the pad only, and the reason is a seam rather than a preference. `bevy_ui_widgets`
 /// already activates a focused button on `Enter` and `Space`: it observes a `FocusedInput` carrying
 /// a keyboard event, which no gamepad will ever produce. So the keyboard half of this action is
-/// already built by somebody else, and what is left for an action to do is the half that is not —
-/// see [`Swallowed`] for the controls that leaves stranded.
+/// already built by somebody else, and what is left for an action to do is the half that is not.
 #[derive(InputAction)]
 #[action(path = "disasteroids.accept", output = bool, intent = Button, category = "disasteroids.menu")]
 pub struct Accept;
-
-/// The controls a screen takes from the game beneath it without acting on them itself.
-///
-/// An action with no observer anywhere, which is worth explaining. `Enter` and `Space` press the
-/// focused button — `bevy_ui_widgets` sees to that on its own — and `Space` is also the ship's
-/// trigger. The screen must therefore claim both, or the same press that answers a dialog also
-/// fires the gun; but it must not *act* on either, or the button is pressed twice.
-///
-/// This is a workaround, and the shape of the real fix is known. Consumption is decided inside the
-/// mapper, while the keyboard event reaches the widget through `InputDispatchPlugin` — which is the
-/// only thing that turns a global keyboard event into a focused one, and which never asks the
-/// mapper anything. The fix is a mapper-aware plugin in its place, dropping the events for controls
-/// a context has already claimed. Until that exists, an action that consumes and does nothing is how
-/// a context says "this one is mine" to the half of the system that is listening.
-#[derive(InputAction)]
-#[action(path = "disasteroids.swallowed", output = bool, intent = Button, category = "disasteroids.menu")]
-pub struct Swallowed;
 
 /// Leaves the screen, discarding anything not yet confirmed.
 ///
@@ -135,11 +117,11 @@ pub struct Shell;
 
 /// The controls a screen with a selection on it answers.
 ///
-/// Declared at a higher priority than either of the others and consuming everything it binds, which
-/// is the whole of how a screen takes the controls away from the game underneath it: the arrow keys
-/// move the selection instead of turning the ship, and escape closes the screen instead of pausing.
-/// Nothing is switched off to make that happen, and the moment the screen is gone the same keys go
-/// back to what they were doing.
+/// Declared at a higher priority than either of the others and `exclusive`, which is the whole of
+/// how a screen takes the controls away from the game underneath it: `Flying` and `Shell` are
+/// treated as inactive for as long as this context is, so the arrow keys move the selection instead
+/// of turning the ship and nothing bound below has to be named here to stop answering. The moment
+/// the screen is gone, both contexts pick up wherever their own conditions already had them.
 ///
 /// It is also the context with no state condition of any kind. It does not need one: the screen's
 /// root node *is* the entity carrying this context, so the context exists for exactly as long as
@@ -148,7 +130,7 @@ pub struct Shell;
 /// Render tick, for [`Shell`]'s reason — a menu answers at the frame rate, and a menu over a paused
 /// game has no simulation rate to answer at.
 #[derive(InputContext)]
-#[context(path = "disasteroids.menu", tick = Render, priority = 10)]
+#[context(path = "disasteroids.menu", tick = Render, priority = 10, exclusive)]
 pub struct Menu;
 
 /// How long a held direction waits before it starts repeating, and how long between repeats after.
@@ -254,9 +236,10 @@ pub fn plugin(app: &mut App) {
         controls.bind::<ToggleSettings>(GamepadButton::North);
     });
 
-    // Every binding here consumes, which is the point of the context. The screen is a layer over a
-    // running game, and a layer that let the controls it binds fall through to the game as well
-    // would move the selection and turn the ship with one press of the same key.
+    // No binding here needs `.consume()`: `Menu` is `exclusive` (see its own doc comment), so
+    // `Flying` and `Shell` cannot answer anything while this context is up regardless of which
+    // controls it names. What is left to bind is only what the screen itself does with a control,
+    // not what it needs to keep from the game underneath.
     app.add_context::<Menu>(|controls| {
         // The pair chunk 29 exists for. A stick reports a position, and a position is off centre
         // every tick it is held — so a binding on it fires every tick. Rounding to four points
@@ -269,8 +252,7 @@ pub fn plugin(app: &mut App) {
             .dead_zone(DeadZone::radial(MENU_DEAD_ZONE))
             .compass(CompassPoints::Four)
             .on_change()
-            .pulse(MENU_REPEAT)
-            .consume();
+            .pulse(MENU_REPEAT);
         // A D-pad is already quantised, so it needs no compass — but it needs the same `on_change`,
         // because a held button is held every tick exactly as a stick is. The two bindings behave
         // identically from the selection's point of view, which is the test of whether the rounding
@@ -278,46 +260,28 @@ pub fn plugin(app: &mut App) {
         controls
             .bind::<Navigate>(DirectionalButtons::dpad())
             .on_change()
-            .pulse(MENU_REPEAT)
-            .consume();
+            .pulse(MENU_REPEAT);
         controls
             .bind::<Navigate>(DirectionalButtons::arrow_keys())
             .on_change()
-            .pulse(MENU_REPEAT)
-            .consume();
+            .pulse(MENU_REPEAT);
 
-        controls
-            .bind::<Accept>(GamepadButton::South)
-            .press()
-            .consume();
-        // Claimed, not answered — see `Swallowed`. `private`, because a row on the controls screen
-        // reading "Swallowed: Enter, Space" describes an implementation detail rather than
-        // something a player can use; what those two keys do is press the selected button, and the
-        // screen has no action modelling that to hang the row on.
-        controls
-            .bind::<Swallowed>(KeyCode::Enter)
-            .press()
-            .private()
-            .consume();
-        controls
-            .bind::<Swallowed>(KeyCode::Space)
-            .press()
-            .private()
-            .consume();
+        controls.bind::<Accept>(GamepadButton::South).press();
+        // No keyboard binding, and no observer answers this on the keyboard's behalf either:
+        // `bevy_ui_widgets` already activates a focused button on `Enter` and `Space` on its own,
+        // and `Flying`'s `Fire` — bound to `Space` too — cannot fire behind it once this context is
+        // exclusive. There is nothing left here for an action to claim.
+        controls.bind::<Back>(GamepadButton::East).press();
+        controls.bind::<Back>(KeyCode::Escape).press();
 
-        // Escape is bound to `Pause` in the shell as well. This context wins it while the screen is
-        // up — which is R8.2's worked example arriving in the game rather than in a test — and the
-        // shell gets it back the moment the screen despawns, with nothing anywhere saying so.
-        controls.bind::<Back>(GamepadButton::East).press().consume();
-        controls.bind::<Back>(KeyCode::Escape).press().consume();
+        controls.bind::<Confirm>(GamepadButton::West).press();
 
-        // No keyboard binding: Enter and Space already confirm through `Swallowed` and the widget
-        // layer's own activation of the focused button, exactly as they do for Accept. This is the
-        // pad's own way to reach Confirm without navigating to it.
-        controls
-            .bind::<Confirm>(GamepadButton::West)
-            .press()
-            .consume();
+        // Duplicated from `Shell` rather than reached through it, because `Shell` is exactly what
+        // this context shadows while it is up — the inconsistency with `Pause`, which stays
+        // unreachable until the screen closes, is deliberate: closing the screen this way is common
+        // enough to want a direct route, and pausing from inside it is not.
+        controls.bind::<ToggleSettings>(KeyCode::F2);
+        controls.bind::<ToggleSettings>(GamepadButton::North);
     });
 
     app.add_systems(Startup, shell.spawn());

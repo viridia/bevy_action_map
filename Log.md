@@ -228,6 +228,70 @@ pad-A already trigger, setting `InputFocus` to the entity itself. Idempotent for
 cases (they already hold focus by the time `Activate` fires) and the fix for the mouse case, which
 never did.
 
+### Chunk 61: Exclusive contexts
+
+`Menu` consumed only the controls it named — `Navigate`, `Accept`, `Back`, `Confirm` — so `Thrust`
+and `Fire` kept answering while the settings screen covered the ship, blind but still flying. R8.2's
+opt-in-per-binding model was doing exactly what it says on the tin; the bug was asking it to do a
+context-level job. New requirement, R7.8: a context can declare itself `exclusive`, and every
+lower-priority context is treated as inactive for as long as it is.
+
+**Steam's own model settled the shape before any code was written.** Its Action Sets are mutually
+exclusive — switching replaces the active set outright — while Action Set Layers are additive,
+stacking a partial override on top without disturbing what is underneath. Requirements.md already
+carried both halves as separate, unbuilt requirements (R7.3 for the layer, R7.7 for the set) without
+either ever having been designed. R7.8 is the set half, and once framed that way the mechanism chose
+itself: reuse `deactivate`'s existing cancel-in-flight behaviour (R7.4) rather than invent a third
+context state, and reuse priority order rather than a named grouping — a context above the exclusive
+one's priority is untouched by construction, which is R8.2's own "the screenshot key should still
+work" worked example, arrived at for free.
+
+**The mechanism is one `Option<i32>`, not a per-schedule map like `ConsumedControls`.** The instinct
+going in was to mirror `ConsumedControls`'s per-schedule bookkeeping, since both describe something
+claimed across a frame that spans multiple fixed ticks. But a control's actuation is genuinely
+per-tick data — the reason a fixed tick's consumption claim has to be released before the next one —
+while a context's *activity* does not reset between fixed ticks at all; it only changes on an
+activate/deactivate edge. So the ceiling only needs a monotonic raise and one reset at the top of the
+frame, and it composes stacked exclusive contexts correctly with no extra code: an exclusive context
+only raises the ceiling if it is itself still active *after* being checked against whatever a
+higher-priority one already set, so a third exclusive context shadowing a second correctly stops the
+second from also shadowing the first.
+
+**Found by the sweep the session was asked to do, not by review of the diff:** two places in
+Roadmap.md were already reasoning from the bug this chunk fixes, and both would have gone stale
+silently. Chunk 33 listed "a modal that blocks an action while it is open" as one of `BlockedBy`'s
+two motivating cases — it is exactly this bug, and the fix landed at the context level rather than
+the condition level, so the motivation is gone from under it. And chunk 49 planned to prove itself in
+Disasteroids by deleting `Swallowed` and watching a focused button stop double-firing `Fire` — but
+`Swallowed`'s only job was stopping `Fire` from firing behind `Space`, and once `Flying` is fully
+shadowed while `Menu` is exclusive, `Fire` cannot fire regardless of what `Swallowed` or R8.2a's
+dispatch gap does. Chunk 61 deletes `Swallowed` for a reason that has nothing to do with chunk 49,
+and leaves chunk 49 with no acceptance vehicle in Disasteroids until it finds a different one.
+
+**`.consume()` throughout `Menu`'s own bindings turned out to be dead weight, for the same reason.**
+Every one of them existed to stop `Flying`/`Shell` from also firing on a shared control; once the
+whole context is shadowed rather than merely outranked per-control, consuming is provably inert.
+Stripped along with the doc comment explaining why they were there.
+
+**Coupling the simulation's pause to `ToggleSettings`'s own observer was rejected after tracing one
+more step.** The first version had the action that opens the screen also drive `Game` to `Paused`.
+Closing happens four ways — `Back`, Cancel, Confirm, and (once duplicated for the reason below)
+`ToggleSettings` again — and only one of them would have handed the pause back, leaving the other
+three exits stuck paused with no visible cause. Worse: since `ToggleSettings` was already reachable
+regardless of `Game`'s state (`Shell` has no activation condition), a player who paused first and
+then opened settings would have had the close path *unpause* a game that was already paused before
+the screen existed. Landed instead as a second, independent `run_if` on `Simulating` — the set
+`pause.rs` already exports for exactly this — gated on `Settings::Hidden` rather than `Game`. Nothing
+needs to remember what the state was before, because nothing is mutated: `Simulating` already ANDs
+whatever conditions are configured on it.
+
+**`Menu` becoming exclusive blocked `Shell` entirely, including the binding that opens `Menu` in the
+first place** — found while updating the example, not designed for up front. `ToggleSettings` is
+duplicated into `Menu` rather than reached through `Shell`, which is deliberately inconsistent with
+`Pause`: `Pause` stays unreachable until the screen closes, and that is accepted rather than fixed,
+because pausing from inside an already-modal screen is not a control this game needs and splitting
+`Shell` into two priority tiers to preserve it would be more machinery than the problem is worth.
+
 **`bsn!`'s tuple-constructor form needs `FromTemplate`, which needs `Default` — plain data tags
 generally don't have one.** `RebindCell(key, slot)` written directly in a `bsn!` block failed to
 compile: bsn!'s `Type(args)` syntax builds through a `Template`, and `FromTemplate` is only blanket-

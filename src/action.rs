@@ -514,6 +514,13 @@ pub trait InputContext: Send + Sync + 'static {
     /// The evaluation priority of this context.
     const PRIORITY: i32;
 
+    /// Whether this context, while active, treats every lower-priority context as inactive.
+    ///
+    /// A settings screen wants this: it should not have to name every action `Flying` and `Shell`
+    /// bind just to keep them from answering while it is up. A context above it in priority is
+    /// untouched either way, which is how a global hotkey survives without an opt-out list.
+    const EXCLUSIVE: bool = false;
+
     /// Stable path used to identify the context across runs.
     const PATH: &'static str;
 }

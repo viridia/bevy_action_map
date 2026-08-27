@@ -30,6 +30,7 @@ use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
 use crate::actions::{Accept, Back, Confirm, Menu, Navigate, ToggleSettings};
 use crate::common::prompt_ui::{PromptScheme, PromptSpan};
+use crate::pause::Simulating;
 
 // Colors
 
@@ -79,6 +80,14 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<PendingOverrides>();
     app.add_systems(OnEnter(Settings::Showing), (reset_pending, show));
     app.add_systems(OnExit(Settings::Showing), release_focus);
+
+    // `Menu` being exclusive already stops the ship answering; this stops the simulation
+    // continuing to run behind a screen nobody can see it through. A second, independent
+    // `run_if` on the set `pause::plugin` already configures, rather than a state this file
+    // would have to remember to hand back — `Simulating` composes the two conditions itself, so
+    // there is nothing to restore if the game was already paused when the screen opened.
+    app.configure_sets(Update, Simulating.run_if(in_state(Settings::Hidden)));
+    app.configure_sets(FixedUpdate, Simulating.run_if(in_state(Settings::Hidden)));
 }
 
 /// Starts this visit with nothing changed.
@@ -88,8 +97,10 @@ fn reset_pending(mut pending: ResMut<PendingOverrides>) {
 
 /// Opens the screen, and closes it again.
 ///
-/// Attached to the shell context's entity by [`actions::shell`](crate::actions::shell), like the
-/// other controls the player can always reach.
+/// Attached twice: to the shell context's entity by [`actions::shell`](crate::actions::shell), like
+/// the other controls the player can always reach, and to the screen's own root by [`screen`] below
+/// — `Menu` binds `ToggleSettings` a second time so the same key that opened the screen also closes
+/// it, without needing `Shell` to answer while `Menu` shadows it.
 pub(crate) fn toggle(
     _: On<Fired<ToggleSettings>>,
     settings: Res<State<Settings>>,
@@ -210,7 +221,7 @@ fn ring_off(lost: On<FocusLost>, mut outlines: Query<&mut Outline>) {
 /// [`mappings`] hands back every row the game has declared, in both schemes. Splitting them into two
 /// tables and sorting each is the screen's business, which is why the crate does not do it.
 ///
-/// The root carries [`Menu`] and the observers for its three actions, which is the arrangement
+/// The root carries [`Menu`] and the observers for its actions, which is the arrangement
 /// [`actions::shell`](crate::actions::shell) already uses for the always-on controls. Here it buys
 /// something the shell does not need: the context is the screen, so there is no activation
 /// condition to write and nothing to switch off on the way out.
@@ -247,6 +258,7 @@ fn screen(world: &World) -> impl Scene {
         on(accept)
         on(back)
         on(confirm)
+        on(toggle)
         // Over the game and the debug overlay both, since it covers them.
         GlobalZIndex(10)
         BackgroundColor({Color::srgba(0.02, 0.02, 0.06, 0.97)})

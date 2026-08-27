@@ -104,6 +104,11 @@ pub struct InputContextState<C> {
     pub(crate) plan: Arc<Plan<C>>,
     pub(crate) actions: Vec<ActionState>,
     pub(crate) active: bool,
+    // Set and cleared only by `shadow`/`unshadow` (R7.8), never by `activate`/`deactivate`: `active`
+    // is what this context's own condition or lifecycle wants, `shadowed` is what a higher-priority
+    // exclusive context is currently forcing regardless of that. Kept apart so the two do not fight
+    // each other — see `is_active`.
+    pub(crate) shadowed: bool,
     // Working memory for every modifier and condition in the plan, indexed as the plan says.
     pub(crate) scratch: Vec<Scratch>,
     // Reused between folds: the longest satisfied chord found on each control. Kept here rather
@@ -146,6 +151,7 @@ impl<C: InputContext> InputContextState<C> {
             plan,
             actions,
             active: true,
+            shadowed: false,
             scratch: alloc::vec![Scratch::default(); scratch_slots],
             chord_claims: Vec::new(),
             require_reset: alloc::vec![false; slots],
@@ -285,7 +291,7 @@ impl<C: InputContext> InputContextState<C> {
         let Some(slot) = self.plan.slot_for_action(action) else {
             return Obstacle::Unbound;
         };
-        if !self.active {
+        if !self.is_active() {
             return Obstacle::ContextInactive;
         }
         if self.actions[slot].phase == Phase::Fired || self.actions[slot].phase == Phase::Ongoing {
@@ -351,9 +357,11 @@ impl<C: InputContext> InputContextState<C> {
     /// Whether this context is currently driving its actions.
     ///
     /// An inactive context keeps up with its devices but stops resolving them into actions, so
-    /// reactivating it is immediate and costs no rebuilding.
+    /// reactivating it is immediate and costs no rebuilding. `false` either because this context's
+    /// own activation says so, or because a higher-priority exclusive context currently shadows it —
+    /// the two look the same from here, and everywhere else that asks.
     pub fn is_active(&self) -> bool {
-        self.active
+        self.active && !self.shadowed
     }
 
     /// Starts driving actions again, ignoring controls the player is already holding.
@@ -427,7 +435,37 @@ impl<C: InputContext> InputContextState<C> {
             return;
         }
         self.active = false;
+        self.cancel_in_flight();
+    }
 
+    /// Suppresses this context for as long as a higher-priority exclusive context is active,
+    /// without touching what its own activation thinks — that stays `active`'s business, so the two
+    /// do not fight each other once the shadow lifts.
+    ///
+    /// R7.8's mechanism: cancels in-flight actions exactly as `deactivate` does, because a control
+    /// held through a modal opening must not stay "held forever" any more than one held through an
+    /// ordinary deactivation would.
+    pub(crate) fn shadow(&mut self) {
+        if self.shadowed {
+            return;
+        }
+        self.shadowed = true;
+        self.cancel_in_flight();
+    }
+
+    /// Lifts a shadow, re-arming require-reset (R7.5) so a control still held when it lifts does
+    /// not read as a fresh press.
+    pub(crate) fn unshadow(&mut self) {
+        if !self.shadowed {
+            return;
+        }
+        self.shadowed = false;
+        self.require_reset.fill(true);
+    }
+
+    /// Reports every `Fired`/`Ongoing` action as `Canceled` rather than left where it was — the one
+    /// piece `deactivate` and `shadow` share.
+    fn cancel_in_flight(&mut self) {
         for (slot, state) in self.actions.iter_mut().enumerate() {
             if !matches!(state.phase, Phase::Fired | Phase::Ongoing) {
                 continue;
@@ -2461,6 +2499,129 @@ mod tests {
         assert!(
             seen.screenshot,
             "but f12 was never claimed, so it still works"
+        );
+    }
+
+    /// R7.8: an exclusive context shadows every lower-priority one exactly as `deactivate` would —
+    /// canceling what was in flight — and releases it exactly as `activate` would, honoring
+    /// require-reset (R7.5) so a control held through the whole transition does not fire again on
+    /// its own. `Menu` is render-tick and `OnFoot` fixed, which is the one direction Design §5.2
+    /// allows and the direction Disasteroids' settings screen actually uses.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn an_exclusive_context_shadows_and_releases_everything_below_it() {
+        #[derive(InputContext)]
+        #[context(path = "tests.exclusive_menu", tick = Render, priority = 10, exclusive)]
+        struct Menu;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        app.add_context::<Menu>(|context| {
+            context.bind::<Jump>(KeyCode::Escape);
+        });
+        app.world_mut().spawn(OnFoot);
+        app.init_resource::<Probe>();
+        app.add_systems(FixedUpdate, probe_jump);
+
+        let tick = |app: &mut App| {
+            app.update();
+            run_fixed_tick(app);
+        };
+        let key = |app: &mut App, state: ButtonState| {
+            app.world_mut()
+                .write_message(press(KeyCode::Space, Key::Space, state));
+        };
+
+        key(&mut app, ButtonState::Pressed);
+        tick(&mut app);
+        assert_eq!(app.world().resource::<Probe>().phase, Phase::Fired);
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<Probe>().phase,
+            Phase::Ongoing,
+            "held, and nothing has shadowed it yet"
+        );
+
+        let menu = app.world_mut().spawn(Menu).id();
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<Probe>().phase,
+            Phase::Canceled,
+            "the exclusive context shadows it exactly as deactivate would"
+        );
+
+        // Still held, and the exclusive context is still up — no fresh fire hides behind the cancel.
+        tick(&mut app);
+        assert_ne!(app.world().resource::<Probe>().phase, Phase::Fired);
+
+        app.world_mut().despawn(menu);
+        tick(&mut app);
+        assert_ne!(
+            app.world().resource::<Probe>().phase,
+            Phase::Fired,
+            "the key never left the control, so require-reset (R7.5) holds it back"
+        );
+
+        key(&mut app, ButtonState::Released);
+        tick(&mut app);
+        key(&mut app, ButtonState::Pressed);
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<Probe>().phase,
+            Phase::Fired,
+            "released and pressed again, now it fires"
+        );
+    }
+
+    /// R7.8's other half of the worked example: a context above the exclusive one's priority is
+    /// never touched, which is how a global hotkey survives a modal without an opt-out list —
+    /// settled by placement rather than a second mechanism.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_context_above_the_exclusive_ones_priority_is_untouched() {
+        #[derive(InputAction)]
+        #[action(path = "tests.screenshot", output = bool, intent = Button)]
+        struct Screenshot;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.exclusive_menu", tick = Render, priority = 10, exclusive)]
+        struct Menu;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.system", tick = Render, priority = 20)]
+        struct System;
+
+        #[derive(Resource, Default)]
+        struct Seen(bool);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Menu>(|context| {
+            context.bind::<Jump>(KeyCode::Escape);
+        });
+        app.add_context::<System>(|context| {
+            context.bind::<Screenshot>(KeyCode::F12);
+        });
+        app.world_mut().spawn(Menu);
+        app.world_mut().spawn(System);
+        app.init_resource::<Seen>();
+        app.add_systems(
+            Update,
+            |system: Actions<System>, mut seen: bevy_ecs::system::ResMut<'_, Seen>| {
+                seen.0 = system.value::<Screenshot>();
+            },
+        );
+
+        app.world_mut()
+            .write_message(press(KeyCode::F12, Key::F12, ButtonState::Pressed));
+        app.update();
+
+        assert!(
+            app.world().resource::<Seen>().0,
+            "priority 20 is above the exclusive context's 10, so it was never shadowed"
         );
     }
 

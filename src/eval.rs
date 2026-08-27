@@ -91,6 +91,45 @@ pub fn release_consumed_controls(mut consumed: bevy_ecs::prelude::ResMut<'_, Con
     consumed.release_all();
 }
 
+/// The priority of the highest-priority active exclusive context seen so far this frame — R7.8's
+/// mechanism, and Design §5.3.
+///
+/// Unlike [`ConsumedControls`], this needs no per-schedule bookkeeping: a context's activity does
+/// not reset between fixed ticks the way a control's actuation does, so an exclusive context simply
+/// re-raises the ceiling to the same value every time it runs. One number, reset once at the top of
+/// the frame, is the whole mechanism — set by whichever exclusive context runs first in priority
+/// order (render-tick contexts run before fixed-tick ones, per §5.2, so the same forward-only
+/// direction applies here too), and read by everything lower that runs after it, in either domain,
+/// for the rest of the frame.
+#[derive(bevy_ecs::resource::Resource, Default)]
+pub(crate) struct ExclusionCeiling(Option<i32>);
+
+impl ExclusionCeiling {
+    fn reset(&mut self) {
+        self.0 = None;
+    }
+
+    /// Records that an exclusive context at this priority is active, raising the ceiling if it is
+    /// not already at least this high. Monotonic within a frame — nothing lowers it before `reset`.
+    fn raise(&mut self, priority: i32) {
+        self.0 = Some(self.0.map_or(priority, |ceiling| ceiling.max(priority)));
+    }
+
+    /// Whether a context at this priority is shadowed by an exclusive one that has already run.
+    fn shadows(&self, priority: i32) -> bool {
+        self.0.is_some_and(|ceiling| priority < ceiling)
+    }
+}
+
+/// Starts a frame with no exclusion in effect — the same clear point as
+/// [`release_consumed_controls`], for the same reason: both describe "nothing has claimed anything
+/// yet".
+pub(crate) fn reset_exclusion_ceiling(
+    mut ceiling: bevy_ecs::prelude::ResMut<'_, ExclusionCeiling>,
+) {
+    ceiling.reset();
+}
+
 /// Starts one run of a schedule with nothing claimed *by that schedule*.
 pub fn release_consumed_in<S: bevy_ecs::schedule::ScheduleLabel>(
     mut consumed: bevy_ecs::prelude::ResMut<'_, ConsumedControls>,
@@ -160,17 +199,35 @@ pub fn dispatch_class_fires<C: InputContext + Component>(
 }
 
 /// Applies the current input frame to every instance of one context.
-pub fn evaluate_context<C: InputContext + Component, S: bevy_ecs::schedule::ScheduleLabel>(
+pub(crate) fn evaluate_context<
+    C: InputContext + Component,
+    S: bevy_ecs::schedule::ScheduleLabel,
+>(
     frame: Res<'_, InputFrame>,
     threshold: Res<'_, ButtonThreshold>,
     mut consumed: bevy_ecs::prelude::ResMut<'_, ConsumedControls>,
+    mut ceiling: bevy_ecs::prelude::ResMut<'_, ExclusionCeiling>,
     // The generic clock, which Bevy points at the fixed timestep inside the fixed schedules — so a
     // context is told how long its own tick was rather than how long the frame was (R9.6).
     time: Res<'_, bevy_time::Time>,
     mut states: Query<'_, '_, &mut InputContextState<C>>,
 ) {
     let delta = time.delta_secs();
+    // Read once, before this context's own instances can raise it further — evaluation order is
+    // priority order (§5, Design §5.3), so whatever a higher-priority exclusive context already did
+    // this frame is visible here, and nothing this context does can affect its own shadowing.
+    let shadowed = ceiling.shadows(C::PRIORITY);
+    let mut any_active = false;
     for mut state in &mut states {
+        if shadowed {
+            state.shadow();
+        } else {
+            state.unshadow();
+        }
+        if state.is_active() {
+            any_active = true;
+        }
+
         // Every instance of one context sees the same claims and adds to them together, so two
         // players sharing a context cannot take controls from each other.
         let mut claims = Vec::new();
@@ -178,6 +235,13 @@ pub fn evaluate_context<C: InputContext + Component, S: bevy_ecs::schedule::Sche
         for control in claims {
             consumed.claim::<S>(control, C::PATH);
         }
+    }
+
+    // Only a context that is itself active-and-unshadowed gets to shadow anything below it — which
+    // is what makes two stacked exclusive contexts compose correctly with nothing extra: a second
+    // exclusive context shadowed by a third does not also shadow whatever the second would have.
+    if C::EXCLUSIVE && any_active {
+        ceiling.raise(C::PRIORITY);
     }
 }
 
@@ -211,9 +275,10 @@ impl<C: InputContext> InputContextState<C> {
             self.read_through = Some(last.timestamp);
         }
 
-        // An inactive context still tracks its devices. Skipping that would leave the held state
-        // stale, so reactivating would need a rebuild — and R7.6 wants activation to be free.
-        if !self.active {
+        // An inactive context still tracks its devices, shadowed or not. Skipping that would leave
+        // the held state stale, so reactivating would need a rebuild — and R7.6 wants activation to
+        // be free.
+        if !self.is_active() {
             for event in unread {
                 self.apply_level_event(&event.event, threshold);
             }

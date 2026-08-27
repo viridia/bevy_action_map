@@ -59,6 +59,7 @@ struct ContextArgs {
     tick: Ident,
     priority: Option<LitInt>,
     path: LitStr,
+    exclusive: bool,
 }
 
 fn expand_input_action(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
@@ -121,16 +122,18 @@ fn expand_input_context(input: DeriveInput) -> Result<proc_macro2::TokenStream> 
     let priority = args
         .priority
         .unwrap_or_else(|| LitInt::new("0", ident.span()));
+    let exclusive = args.exclusive;
 
     // A context is only usable as a component, so deriving one without the other is never what
     // was meant. `Default` and `Clone` come along because a scene format needs to construct and
     // copy the component to spawn it. All three are trivial on a unit struct; a context that needs
     // to configure its component differently should implement `InputContext` by hand, which is
-    // three associated consts.
+    // four associated consts.
     Ok(quote! {
         impl ::bevy_action_map::action::InputContext for #ident {
             const TICK: ::bevy_action_map::action::TickDomain = ::bevy_action_map::action::TickDomain::#tick;
             const PRIORITY: i32 = #priority;
+            const EXCLUSIVE: bool = #exclusive;
             const PATH: &'static str = #path;
         }
 
@@ -260,6 +263,7 @@ fn parse_context_args(
     let mut tick = None;
     let mut priority = None;
     let mut path = None;
+    let mut exclusive = None;
 
     for attribute in attributes
         .iter()
@@ -277,6 +281,11 @@ fn parse_context_args(
                 )
             } else if meta.path.is_ident("path") {
                 set_once(&mut path, meta.value()?.parse::<LitStr>()?, &meta, "path")
+            } else if meta.path.is_ident("exclusive") {
+                // A flag rather than `exclusive = true`, for the same reason `#[action(consume)]`
+                // is one: it reads as the thing it turns on, and there is no `exclusive = false` to
+                // write because absent already means that.
+                set_once(&mut exclusive, (), &meta, "exclusive")
             } else {
                 Err(meta.error("unsupported #[context(...)] argument"))
             }
@@ -292,5 +301,6 @@ fn parse_context_args(
         tick,
         priority,
         path,
+        exclusive: exclusive.is_some(),
     })
 }
