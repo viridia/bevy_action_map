@@ -20,6 +20,8 @@ them what is bound, let them change it, and keep every prompt on screen in sync.
 
 ## Why
 
+![forest](images/disasteroids_settings.png)
+
 Input management entails more than just "map a `KeyCode` to an enum", because a
 shipped game needs more than a mapping:
 

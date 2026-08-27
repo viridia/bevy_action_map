@@ -1,18 +1,7 @@
 //! Every action, context and binding in the game.
 //!
-//! This is deliberately the whole of the input layer. If you want to know what Disasteroids does with
-//! `bevy_action_map`, this file is it; everything else in the directory is ordinary game code that
-//! reads these actions and never mentions a key or a button.
-//!
-//! Every context is a scene carrying both the context component and the observers for its actions —
-//! see [`shell`]. A context is a component and a transition is an entity event aimed at whatever
-//! carries it, so a `bsn!` block can hold the entity, its controls, and its reactions together
-//! instead of scattering them across a spawn, an `add_observer` call, and a comment explaining how
-//! the two relate.
-//!
-//! Which is why not every context is spawned from this file. [`Menu`] rides the settings screen's
-//! own root node, in `settings.rs`, because the screen and the controls it answers are one thing;
-//! the bindings still live here, so this file is still the whole of what is bound to what.
+//! Every context is a scene carrying both the [`InputContext`] component and the observers for
+//! its actions — see [`shell`].
 
 use bevy::prelude::*;
 use bevy_action_map::prelude::*;

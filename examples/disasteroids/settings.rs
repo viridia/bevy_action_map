@@ -1,30 +1,22 @@
-//! The controls screen: every control the game has, and what it does — and, for the boxed cells,
-//! what to change it to.
+//! The controls screen: every control the game has, and what it does, and what control it is
+//! currently mapped to.
 //!
 //! Press `F2` (or Y on a pad) to open it. It can be operated end to end from a gamepad without
 //! touching the keyboard — the stick and the D-pad move the selection, A presses what is selected,
 //! X confirms and B cancels. Pressing a boxed cell listens for the next control and puts it there;
 //! if that control already belongs to another row, this row takes it and the other row loses it.
 //!
-//! Two tables, one per device, because a rebinding is made for the keyboard *or* for the pad and
-//! never for both at once. Each is drawn from [`mappings`] alone, laid over the player's own
-//! unconfirmed choices: nothing below names an action, a context or a key, so this file would work
-//! unchanged in a different game.
+//! There are separate tables for keyboard and gamepad, because the rebinding strategies are
+//! different: keyboard allows rebinding of individual keys, while gamepad allows a choice of
+//! presets. This mirrors common practice.
 //!
-//! # How the selection moves
-//!
-//! There are no navigation links anywhere in this file. Every focusable thing carries
-//! [`AutoDirectionalNavigation`], and Bevy scores the candidates by where they are on screen — so
-//! the table's own layout is the navigation graph, and a row added to it joins that graph without
-//! anything being told. The one placement decision is [`AutoFocus`] on Cancel, which saves the
-//! screen from having to name a first cell and then keep that name true as the table changes.
+//! Selection movement is driven by [`AutoDirectionalNavigation`].
 //!
 //! # Working copy
 //!
 //! Nothing is applied to the running game until Confirm. Every capture instead writes into
 //! [`PendingOverrides`], and patches the cells it touched directly — the row's own slot, and any
-//! follower line riding that column — rather than rebuilding anything: a capture never changes a
-//! row's shape, only what a cell says, so there is nothing here a `Text` write cannot do on its own.
+//! follower line riding that column.
 
 use bevy::input_focus::{AutoFocus, FocusCause, FocusGained, FocusLost, InputFocus};
 use bevy::math::CompassOctant;
@@ -38,6 +30,8 @@ use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
 use crate::actions::{Accept, Back, Confirm, Menu, Navigate, ToggleSettings};
 use crate::common::prompt_ui::{PromptScheme, PromptSpan};
+
+// Colors
 
 /// A row the player may change, and the box drawn around such a cell.
 const CHANGEABLE: Color = Color::srgb(0.75, 0.95, 0.8);
@@ -294,6 +288,9 @@ fn screen(world: &World) -> impl Scene {
                      press what you want bound there; everything else is listed so you can see \
                      what it does.\nPress "
                 )
+                Node {
+                    margin: UiRect::axes(percent(10), px(0))
+                }
                 TextFont { font_size: 14.0_f32 }
                 TextColor(FIXED)
                 Children [
