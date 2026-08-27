@@ -1,61 +1,72 @@
 //! Split Friction — a split-screen game in the shape of Gauntlet.
 //!
-//! This example grows in stages, each landing on its own. This file's only job so far is proving
-//! that [`tileset`]'s indices into Kenney's Tiny Dungeon atlas are the tiles they claim to be, with
-//! one hand-placed room. Nothing here reads an action yet — the device-selection screen this game
-//! exists to demonstrate, plus generation, players, monsters and missiles, all arrive in later
-//! stages, none of which should have to touch the tile names this one got right.
+//! This example grows in stages, each landing on its own. So far it generates a Gauntlet-sized
+//! dungeon from a seed (see [`dungeon`]) and draws it with Kenney's Tiny Dungeon atlas (see
+//! [`tileset`]). Nothing here reads an action yet — the device-selection screen this game exists to
+//! demonstrate, plus players, monsters and missiles, all arrive in later stages, none of which
+//! should have to touch the generator or the tile names this one got right.
+//!
+//! Pass a seed on the command line to see a different layout: `cargo run --example split_friction --
+//! 7`. With none given, the layout is the same every run.
 
 #![allow(missing_docs)]
 
 use bevy::image::TextureAtlasTemplate;
 use bevy::prelude::*;
 
+mod dungeon;
 mod tileset;
 
+use dungeon::TileRole;
+
+const WIDTH: usize = 64;
+const HEIGHT: usize = 64;
+
 fn main() {
+    let seed = std::env::args()
+        .nth(1)
+        .and_then(|arg| arg.parse().ok())
+        .unwrap_or(42);
+
     App::new()
         .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
+        .insert_resource(Seed(seed))
         .add_systems(Startup, setup)
         .run();
 }
 
-fn setup(mut commands: Commands, mut layouts: ResMut<Assets<TextureAtlasLayout>>) {
+#[derive(Resource)]
+struct Seed(u64);
+
+fn setup(mut commands: Commands, mut layouts: ResMut<Assets<TextureAtlasLayout>>, seed: Res<Seed>) {
     let layout = layouts.add(tileset::layout());
     commands.spawn(Camera2d);
-    commands.spawn_scene(room(layout));
+    commands.spawn_scene(map(layout, seed.0));
 }
 
-/// A 7×3 room: a north wall with a door in it, and floor beneath.
+/// The generated arena, one sprite per cell — every cell resolves to something, so there is no
+/// "skip this one" case here the way chunk 56's static room never needed either.
 ///
-/// One room, placed by hand from [`tileset`]'s constants, is the whole of this chunk's acceptance
-/// — if the atlas indices were wrong, this would render as noise instead of a room.
-fn room(layout: Handle<TextureAtlasLayout>) -> impl Scene {
-    #[rustfmt::skip]
-    let plan: [[usize; 7]; 3] = [
-        [tileset::WALL_TOP_LEFT, tileset::WALL_TOP, tileset::WALL_TOP, tileset::DOOR_CLOSED, tileset::WALL_TOP, tileset::WALL_TOP, tileset::WALL_TOP_RIGHT],
-        [tileset::WALL_SIDE_LEFT, tileset::FLOOR_SHADOW, tileset::FLOOR_SHADOW, tileset::FLOOR_SHADOW, tileset::FLOOR_SHADOW, tileset::FLOOR_SHADOW, tileset::WALL_SIDE_RIGHT],
-        [tileset::WALL_SIDE_LEFT, tileset::FLOOR, tileset::FLOOR_VARIANTS[0], tileset::FLOOR, tileset::FLOOR_VARIANTS[2], tileset::FLOOR, tileset::WALL_SIDE_RIGHT],
-    ];
+/// Wrong atlas indices would be one kind of failure here, same as chunk 56's hand-placed room; a
+/// generator bug is a different one, and looks like a different thing on screen — an obstacle with
+/// a hole in it, a gap too narrow to walk through, floor that never connects. Both are visible at a
+/// glance.
+fn map(layout: Handle<TextureAtlasLayout>, seed: u64) -> impl Scene {
+    let dungeon = dungeon::generate(seed, WIDTH, HEIGHT);
+    let roles = dungeon.resolve(seed);
 
-    let scale = 4.0;
-    let tile_px = tileset::TILE_SIZE as f32 * scale;
-    let width = plan[0].len() as f32;
-    let height = plan.len() as f32;
+    let tile_px = tileset::TILE_SIZE as f32;
+    let width = WIDTH as f32;
+    let height = HEIGHT as f32;
 
-    let tiles: Vec<_> = plan
+    let tiles: Vec<_> = roles
         .into_iter()
         .enumerate()
-        .flat_map(|(row, cells)| {
-            cells
-                .into_iter()
-                .enumerate()
-                .map(move |(col, index)| (row, col, index))
-        })
-        .map(|(row, col, index)| {
+        .map(|(i, role)| {
+            let (col, row) = (i % WIDTH, i / WIDTH);
             let x = (col as f32 - (width - 1.0) / 2.0) * tile_px;
             let y = ((height - 1.0) / 2.0 - row as f32) * tile_px;
-            tile(layout.clone(), index, Vec2::new(x, y), tile_px)
+            tile(layout.clone(), tile_index(role), Vec2::new(x, y), tile_px)
         })
         .collect();
 
@@ -65,6 +76,22 @@ fn room(layout: Handle<TextureAtlasLayout>) -> impl Scene {
         Children [
             {tiles},
         ]
+    }
+}
+
+/// This chunk's only tie between the generator's vocabulary and this atlas's — everywhere else,
+/// each stays free to change without the other noticing.
+fn tile_index(role: TileRole) -> usize {
+    match role {
+        TileRole::Floor(0) => tileset::FLOOR,
+        TileRole::Floor(n) => tileset::FLOOR_VARIANTS[n as usize - 1],
+        TileRole::FloorShadow => tileset::FLOOR_SHADOW,
+        TileRole::WallTop => tileset::WALL_TOP,
+        TileRole::WallTopLeft => tileset::WALL_TOP_LEFT,
+        TileRole::WallTopRight => tileset::WALL_TOP_RIGHT,
+        TileRole::WallSideLeft => tileset::WALL_SIDE_LEFT,
+        TileRole::WallSideRight => tileset::WALL_SIDE_RIGHT,
+        TileRole::WallFill => tileset::WALL_FILL,
     }
 }
 

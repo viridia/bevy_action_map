@@ -6,8 +6,8 @@
 //! this same atlas) and checking each index against a render of that map, tile by tile, rather than
 //! read off a preview image by eye. See `assets/split_friction/CREDITS.md` for the license.
 //!
-//! Only floor, wall and door are named here — enough for one hand-placed room. Characters,
-//! monsters and weapons get their own names when the chunks that use them need them.
+//! Only floor and wall are named here — enough for a generated layout. Doors, characters, monsters
+//! and weapons get their own names when the chunks that use them need them.
 
 use bevy::prelude::*;
 
@@ -29,9 +29,9 @@ pub const WALL_TOP_RIGHT: usize = 3;
 /// Wall side, one tile tall, west and east — stacked to make a wall of any height.
 pub const WALL_SIDE_LEFT: usize = 13;
 pub const WALL_SIDE_RIGHT: usize = 15;
-
-/// A closed wood door, the same footprint as [`WALL_TOP`] so it can replace one in a wall run.
-pub const DOOR_CLOSED: usize = 46;
+/// Plain brick, no cap or side implied — an obstacle's own interior, or any solid cell too far
+/// from floor for a directional piece to make sense.
+pub const WALL_FILL: usize = 36;
 
 /// The atlas layout matching `tilemap_packed.png`'s grid, with no padding between tiles.
 pub fn layout() -> TextureAtlasLayout {

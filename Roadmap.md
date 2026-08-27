@@ -188,6 +188,7 @@ where it fell short of its own description — Phase VII onward there, and every
 | 54 | Conflict policy | landed as detection only: `conflicts_pending` against a working copy, resolution left to the app on existing `Overrides` primitives |
 | 25 | Control classes and class bindings | done; `character_producing` measured against a real kana IME and a dead key rather than reasoned from docs — both compose correctly upstream and need nothing extra here; a focused text field actually claiming the class → 49 |
 | 56 | Split Friction's tileset | done; landed ahead of chunk 27 (device selection), which has not — this chunk needed nothing from it |
+| 57 | A generated dungeon | done; landed as an open arena with punched-out obstacles rather than rooms-and-corridors, after review of the first pass found the maze-of-small-rooms shape wrong for what Split Friction wants |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -653,19 +654,6 @@ shared world, one viewport each.
   the device-selection code they build on stays exactly as reviewed here.
 
 ---
-
-### 57. A generated dungeon
-
-Seeded procedural layout, replacing chunk 56's static grid: rooms and corridors from the seed, then
-each floor tile resolved to the correct wall/corner/edge sprite by its neighbors (autotiling).
-
-- Generation and tile-resolution are pure data — no ECS, no Bevy — so they are unit-tested directly
-  against fixed seeds rather than only through a running app.
-- **Not doing:** anything that is not the map. No players, monsters, or missiles yet; the acceptance
-  is that every seed produces a layout that fits together, with no floating walls and no unreachable
-  room.
-- **Verified by:** unit tests fixing a seed and asserting the tile grid it produces, plus running the
-  example against a handful of seeds and looking at the result.
 
 ### 58. Split Friction's players and monsters
 

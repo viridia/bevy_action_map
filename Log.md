@@ -583,3 +583,48 @@ default()` on the root silences it; nothing else in the render output changes.
 2) does, so a door dropped into a wall run pokes up above the row's otherwise level skyline.
 Cosmetic at this scale, and left as a note for chunk 57 rather than chased here — a generator
 choosing where doors go is the more natural place to decide whether that matters.
+
+### Chunk 57: A generated dungeon
+
+Landed twice. The first pass built what the roadmap section described — rooms placed as
+non-overlapping rectangles, joined pairwise by straight 1-wide corridors — and it passed every unit
+test written for it (determinism, connectivity, no directional wall standing with no floor beside
+it). Looking at the render was still worth doing: reviewed against a 64×64 Gauntlet-sized playfield,
+it read as a maze of small disconnected rooms threaded by narrow halls, and a maze was not the
+target. **Gauntlet's actual shape is one open arena with obstacles in it, not a maze** — the fix was
+a different generator, not a bigger one: floor now fills the whole interior by default, and a
+handful of solid rectangles are punched back out of it, kept apart from each other and from the
+outer wall by [`CLEARANCE`](examples/split_friction/dungeon.rs) cells of guaranteed-open floor
+(2, so a walkway never narrows to a single-tile squeeze). No corridor-carving code survived; there
+is nothing left for it to connect.
+
+**Every solid cell needed to draw *something*, not "wall or nothing."** The room-and-corridor
+version only ever placed a wall tile adjacent to floor, by construction, so anything not floor and
+not wall-adjacent was background — invisible, correctly, since it was always outside every room.
+Punching obstacles out of an otherwise-solid-free arena breaks that assumption: an obstacle's own
+interior, and the corners of the outer border no directional rule reaches, are solid cells with no
+floor neighbor in any of the five directional patterns. Left as `Empty`, those cells rendered as
+literal holes — the arena's obstacles looked hollow, and the outer boundary had gaps at its
+corners. The fix is a sixth role, `WallFill`, the fallback for solid ground no directional piece
+claims, drawn from one of the flat brick tiles (`tileset::WALL_FILL`, index 36) that were sitting
+unused in the atlas already. `TileRole::Empty` is gone entirely now: every cell resolves to a real
+tile, so `tile_index` returns `usize` rather than `Option<usize>` and the render loop lost its
+`filter_map`.
+
+**A real bug, found while rewriting the file for the design change rather than while fixing it.**
+The floor branch of `resolve_cell` originally read: plain floor if the cell to the north is *also*
+floor, otherwise shadow-or-decorated depending on a second check
+(`is_wall_neighbor_north`) that, read closely, always agreed with the first — it was called only
+from the branch where north was already known not to be floor, so its own "is north floor"
+disjunct was a tautology, and the other two disjuncts it `||`ed against never mattered. Net effect:
+a floor cell only ever got a decorative variant when its north neighbor was floor, which silently
+excluded every shadowed row from ever showing a variant and was three lines doing the work of one.
+Replaced with the obvious rule — shadow if north is not floor, decorated floor otherwise — and the
+now-redundant helper deleted outright rather than kept dead.
+
+**Deliberately not here.** Doors: the previous chunk's `DOOR_CLOSED` constant has no generator-side
+placement logic yet, and isn't reintroduced by this chunk — nothing currently carves an opening that
+would want one. T-junctions and non-rectangular obstacle shapes: the directional-wall rule only
+promises a plain outer corner, which is what a rectangle always presents; an obstacle shape this
+rule cannot draw correctly was never generated in the first place, rather than generated and drawn
+wrong.
