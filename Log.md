@@ -675,3 +675,85 @@ declared *before* `follows`): `follow` always applies `follows` first, so that o
 through the public API; the reverse order (`follows` then `mappable`, attempted inside `configure`)
 still panics, off the same guard in `declare_mapping` that was already independent of how `follows`
 got there.
+
+### Chunk 31: The settings screen, rebinding
+
+Pressing a boxed cell now captures a control into it. R19.3 leaves the conflict policy to the app;
+Disasteroids steals — the pressed control moves to the row just captured, and whatever else held it
+loses it, with no extra prompt. Confirm calls `apply_overrides` on the working copy and leaves;
+Cancel drops it and leaves; B cancels a capture in progress before it falls through to Cancel's
+meaning, which is the two-stage rule R19.2's exclusion list was already half of — `Back`'s own two
+controls (`Escape`, `GamepadButton::East`) are excluded from every capture, so pressing either
+reaches the action instead of being bound.
+
+**The first design landed on despawn-and-rebuild the whole table on every capture, and it was wrong
+twice before it was right.** The first pass rebuilt the entire settings root each time, tracked by a
+marker component; reviewed before being written, and rejected for churn no capture actually needs.
+The second pass narrowed that to a `bevy_reactor`-style trick — a `bundle_template` that despawns an
+entity's children in the same frame new ones are spawned, reapplied to a container holding just the
+two tables — also reviewed before being written, and rejected once it was clear a capture never
+changes a row's *shape*: column count, which cells are boxed, and the follower lines under them are
+all declaration-level facts capacity and rebindability, never touched by an override. What actually
+changes is what a handful of cells *say*. The landed version tags every boxed cell with
+`RebindCell(Scheme, MappingKey, usize)` and every follower's cell with `FollowerCell(Scheme,
+MappingKey, usize, ConditionDescriptor)` at spawn time, and a capture patches `Text` on exactly the
+cells named by the rows it touched — the row captured into, and every row a steal emptied — found by
+a plain query, no entity despawned or respawned anywhere. Two full-table scans per capture rather
+than tracking which columns actually moved: a steal's `retain` can shift every later slot of the row
+it took from, so "repaint the whole row" is the right answer as often as the precise one would be,
+for far less code.
+
+**`MappingKey` alone does not name a row, and the first version of the two tags above forgot it —
+found by playing it, not by review.** `Hyperspace`'s keyboard cell refused every capture; logging
+`start_capture`'s lookup showed it resolving to `Hyperspace`'s *gamepad* mapping instead —
+`Rebinding::Fixed`, wrong capacity, refused on the first check. `MappingKey` is derived from the
+action's path and part alone (§19.R19.9's own doc says so), so the same key names two different rows
+whenever an action is bound in both schemes, which every action in Disasteroids is. `mappings(world)`
+returns both, in whatever order the context happened to declare them, and `.find(|row| row.key ==
+key)` took whichever came first — the keyboard row for some actions, the gamepad row for others,
+depending on which scheme's binding was written first in `actions.rs`. Every lookup this chunk added
+now carries `Scheme` alongside the key and matches both. `conflicts_pending` itself needed no such
+fix: the `control` a capture is choosing among is itself scheme-specific — a key can never sit in a
+gamepad row's `slots` — so its scheme-blind key comparison was never actually ambiguous, only this
+file's own row lookups were.
+
+**A click did not survive itself: `bevy_input_focus`'s pointer-click handler cleared focus instead of
+granting it — also found by playing it.** This screen drives its selection through
+`AutoDirectionalNavigation`, not `bevy_input_focus`'s tab-index scheme, and the crate's own click
+handler resolves a click through whatever carries `TabIndex` before falling back to "clicked outside
+everything, clear focus" — with no `TabIndex` anywhere on this screen, every click read as outside.
+The visible effect was exactly what it sounds like: click a cell, watch the focus ring vanish, and
+directional navigation has nowhere left to resume from. Considered and declined: adding `TabIndex` to
+`focusable()` to ride the existing bridge — it works, but it borrows tab-navigation's own vocabulary
+for a screen that does not use tab navigation and never will. Landed instead as a fourth thing every
+`focusable()` widget carries: `claim_focus`, an observer on the same `Activate` a click, `Enter` and
+pad-A already trigger, setting `InputFocus` to the entity itself. Idempotent for the keyboard and pad
+cases (they already hold focus by the time `Activate` fires) and the fix for the mouse case, which
+never did.
+
+**`bsn!`'s tuple-constructor form needs `FromTemplate`, which needs `Default` — plain data tags
+generally don't have one.** `RebindCell(key, slot)` written directly in a `bsn!` block failed to
+compile: bsn!'s `Type(args)` syntax builds through a `Template`, and `FromTemplate` is only blanket-
+implemented for `Clone + Default + Unpin` types, which a `MappingKey`-keyed tag has no honest
+default for. `template_value(RebindCell(key, slot))` is the documented way around it — `Template`
+itself is blanket-implemented for `Clone + Unpin` alone, which every `Copy` component gets for free,
+so handing over an already-built value sidesteps the missing `Default` entirely. The same fix
+applied to `PromptScheme(Scheme::Gamepad)`, used here for the first time outside `examples/common/`.
+
+**Two more findings from playing it, both small.** A capture in progress looked identical to one
+that had not started — nothing on screen said "listening" — so `LISTENING`, an amber
+`BackgroundColor`, is set on the cell in `start_capture` and cleared in both ways a capture ends
+(`captured`, and `back`'s mid-capture branch). And the help text never said how to *start* a
+capture at all; it now reads "press one, then press what you want bound there" instead of stopping
+at "the ones this game offers for rebinding". Raised and declined: a gamepad row reading "West
+Button" rather than a controller's own printed label (X, on the pad tested against) — this is
+`fallback_label`'s own generic-by-design behavior (R19.13's ships-with-no-catalogue fallback), which
+a real game replaces with glyphs or a per-platform localization pass; Disasteroids has neither, and
+inventing one for this screen alone would be answering a question the crate already has a chunk for
+(glyphs, deferred table).
+
+**Not done: telling the player why a capture refused something.** `Refused` (wrong shape, wrong
+scheme, reserved) has no observer on this screen; the session simply keeps listening, silently,
+which is `CaptureSession`'s own documented behavior for anything not a deliberate press but is a
+real gap for the three reasons that are. No mechanism in this file renders a transient message of
+any kind, so this is left as a found-not-fixed rather than invented on the spot.

@@ -1,12 +1,15 @@
-//! The controls screen: every control the game has, and what it does.
+//! The controls screen: every control the game has, and what it does — and, for the boxed cells,
+//! what to change it to.
 //!
-//! Press `F2` (or Y on a pad) to open it, escape or B to leave it. It can be operated end to end
-//! from a gamepad without touching the keyboard — the stick and the D-pad move the selection, A
-//! presses what is selected — and nothing rebinds yet: pressing a control cell does nothing at all.
+//! Press `F2` (or Y on a pad) to open it. It can be operated end to end from a gamepad without
+//! touching the keyboard — the stick and the D-pad move the selection, A presses what is selected,
+//! X confirms and B cancels. Pressing a boxed cell listens for the next control and puts it there;
+//! if that control already belongs to another row, this row takes it and the other row loses it.
 //!
 //! Two tables, one per device, because a rebinding is made for the keyboard *or* for the pad and
-//! never for both at once. Each is drawn from [`mappings`] alone: nothing below names an action, a
-//! context or a key, so this file would work unchanged in a different game.
+//! never for both at once. Each is drawn from [`mappings`] alone, laid over the player's own
+//! unconfirmed choices: nothing below names an action, a context or a key, so this file would work
+//! unchanged in a different game.
 //!
 //! # How the selection moves
 //!
@@ -15,17 +18,26 @@
 //! the table's own layout is the navigation graph, and a row added to it joins that graph without
 //! anything being told. The one placement decision is [`AutoFocus`] on Cancel, which saves the
 //! screen from having to name a first cell and then keep that name true as the table changes.
+//!
+//! # Working copy
+//!
+//! Nothing is applied to the running game until Confirm. Every capture instead writes into
+//! [`PendingOverrides`], and patches the cells it touched directly — the row's own slot, and any
+//! follower line riding that column — rather than rebuilding anything: a capture never changes a
+//! row's shape, only what a cell says, so there is nothing here a `Text` write cannot do on its own.
 
-use bevy::input_focus::{AutoFocus, FocusGained, FocusLost, InputFocus};
+use bevy::input_focus::{AutoFocus, FocusCause, FocusGained, FocusLost, InputFocus};
 use bevy::math::CompassOctant;
 use bevy::prelude::*;
 use bevy::ui::auto_directional_navigation::{AutoDirectionalNavigation, AutoDirectionalNavigator};
 use bevy::ui_widgets::{Activate, Button};
 use bevy_action_map::mapping::fallback_label;
+use bevy_action_map::overrides::{Override, Overrides, apply_overrides};
 use bevy_action_map::prelude::*;
+use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
-use crate::actions::{Accept, Back, Menu, Navigate, ToggleSettings};
-use crate::common::prompt_ui::PromptSpan;
+use crate::actions::{Accept, Back, Confirm, Menu, Navigate, ToggleSettings};
+use crate::common::prompt_ui::{PromptScheme, PromptSpan};
 
 /// A row the player may change, and the box drawn around such a cell.
 const CHANGEABLE: Color = Color::srgb(0.75, 0.95, 0.8);
@@ -38,6 +50,9 @@ const HEADING: Color = Color::srgb(0.45, 0.7, 0.95);
 const TITLE: Color = Color::srgb(0.9, 0.95, 1.0);
 /// The ring drawn around whatever the selection is on.
 const FOCUS: Color = Color::srgb(1.0, 0.85, 0.3);
+/// The background a cell shows while it is listening for the next control — without this, a
+/// capture in progress and one that has not started look identical.
+const LISTENING: Color = Color::srgb(0.4, 0.28, 0.05);
 
 /// The width of the column holding what a row is called, and of each control column after it.
 const NAME_WIDTH: f32 = 210.0;
@@ -57,12 +72,24 @@ pub enum Settings {
     Showing,
 }
 
+/// Every change the player has made on this visit to the screen, unconfirmed.
+///
+/// Reset empty whenever the screen opens. Confirm is the only path from here into the running
+/// game, via [`apply_overrides`]; every capture writes here and patches the cells it touched to
+/// match, so what a row shows is always what Confirm would commit.
+#[derive(Resource, Default)]
+struct PendingOverrides(Overrides);
+
 pub fn plugin(app: &mut App) {
     app.init_state::<Settings>();
-    // Nothing the screen shows can change while it is up, so it is built once when it opens. Once a
-    // row can be rebound, that is what stops being true.
-    app.add_systems(OnEnter(Settings::Showing), show);
+    app.init_resource::<PendingOverrides>();
+    app.add_systems(OnEnter(Settings::Showing), (reset_pending, show));
     app.add_systems(OnExit(Settings::Showing), release_focus);
+}
+
+/// Starts this visit with nothing changed.
+fn reset_pending(mut pending: ResMut<PendingOverrides>) {
+    *pending = PendingOverrides::default();
 }
 
 /// Opens the screen, and closes it again.
@@ -130,9 +157,40 @@ pub(crate) fn accept(_: On<Fired<Accept>>, focus: Res<InputFocus>, mut commands:
     }
 }
 
-/// Leaves the screen without changing anything.
-pub(crate) fn back(_: On<Fired<Back>>, mut next: ResMut<NextState<Settings>>) {
+/// Cancels a capture in progress, or — with none in progress — leaves the screen without applying
+/// anything.
+///
+/// Two things one button does depending on state, rather than two buttons: a listening row and a
+/// screen with unconfirmed changes are the same "not sure yet" the player is backing out of, one
+/// level at a time.
+pub(crate) fn back(
+    _: On<Fired<Back>>,
+    listening: Query<Entity, With<CaptureSession>>,
+    mut commands: Commands,
+    mut next: ResMut<NextState<Settings>>,
+) {
+    if let Some(entity) = listening.iter().next() {
+        commands
+            .entity(entity)
+            .remove::<CaptureSession>()
+            .insert(BackgroundColor(Color::NONE));
+        return;
+    }
     next.set(Settings::Hidden);
+}
+
+/// Applies the working copy to the running game, and leaves.
+pub(crate) fn confirm(_: On<Fired<Confirm>>, mut commands: Commands) {
+    commands.queue(apply_and_close);
+}
+
+/// The two ways Confirm is reached — the action above, and the button below — end here.
+fn apply_and_close(world: &mut World) {
+    let pending = world.resource::<PendingOverrides>().0.clone();
+    apply_overrides(world, &pending);
+    world
+        .resource_mut::<NextState<Settings>>()
+        .set(Settings::Hidden);
 }
 
 /// Draws and erases the ring around the selection.
@@ -194,6 +252,7 @@ fn screen(world: &World) -> impl Scene {
         on(navigate)
         on(accept)
         on(back)
+        on(confirm)
         // Over the game and the debug overlay both, since it covers them.
         GlobalZIndex(10)
         BackgroundColor({Color::srgba(0.02, 0.02, 0.06, 0.97)})
@@ -221,8 +280,8 @@ fn screen(world: &World) -> impl Scene {
                 Children [
                     // Cancel first in the tree as well as on screen, so that the one the selection
                     // starts on is also the one the eye starts on.
-                    ({button("Cancel", true)}),
-                    ({button("Confirm", false)}),
+                    ({cancel_button()}),
+                    ({confirm_button()}),
                 ]
             ),
             // The one thing on this screen that has to know an action. A span rather than a
@@ -231,8 +290,9 @@ fn screen(world: &World) -> impl Scene {
             // taken — and it changes while the screen is up, once this screen can rebind.
             (
                 Text::new(
-                    "Boxed cells are the ones this game offers for rebinding; everything else \
-                     is listed so you can see what it does.\nPress "
+                    "Boxed cells are the ones this game offers for rebinding — press one, then \
+                     press what you want bound there; everything else is listed so you can see \
+                     what it does.\nPress "
                 )
                 TextFont { font_size: 14.0_f32 }
                 TextColor(FIXED)
@@ -253,20 +313,18 @@ fn screen(world: &World) -> impl Scene {
     }
 }
 
-/// One of the two buttons at the bottom.
+/// Discards the working copy and leaves. Where the selection starts, since it is the one action a
+/// player who opened this screen by accident is guaranteed to want.
 ///
-/// Neither does anything but leave, because nothing on this screen can be changed yet and so there
-/// is nothing for Confirm to commit that Cancel would have discarded. They differ in what they will
-/// do rather than in what they do, and the screen is worth having as two buttons now because the
-/// selection has to have somewhere to start.
-fn button(caption: &'static str, focused_first: bool) -> impl Scene {
-    let start_here = focused_first.then(|| bsn! { AutoFocus });
+/// The caption carries its own shortcut — `PromptScheme(Gamepad)` because a keyboard player reads
+/// [`Back`]'s own binding (`Escape`) off the row it is bound on, and the pad has no such row here.
+fn cancel_button() -> impl Scene {
     bsn! {
         Button
-        on(dismiss)
-        {start_here}
+        on(cancel_pressed)
+        AutoFocus
         focusable()
-        Text::new(caption)
+        Text::new("Cancel (")
         TextFont { font_size: 16.0_f32 }
         TextColor(TITLE)
         BorderColor::all(FIXED)
@@ -275,19 +333,58 @@ fn button(caption: &'static str, focused_first: bool) -> impl Scene {
             border_radius: {BorderRadius::all(Val::Px(4.0))},
             padding: {UiRect::axes(Val::Px(18.0), Val::Px(5.0))},
         }
+        Children [
+            (
+                PromptSpan({Back::id()})
+                template_value(PromptScheme(Scheme::Gamepad))
+                TextFont { font_size: 16.0_f32 }
+                TextColor(TITLE)
+            ),
+            (TextSpan::new(")") TextFont { font_size: 16.0_f32 } TextColor(TITLE)),
+        ]
     }
 }
 
-/// What both bottom buttons do for now, whichever device pressed them.
-///
-/// One observer for the mouse, the keyboard and the pad alike: a click, `Enter` on the focused
-/// button and A on the pad all arrive here as the same [`Activate`], the first two from the widget
-/// itself and the third from [`accept`] above.
-fn dismiss(_: On<Activate>, mut next: ResMut<NextState<Settings>>) {
+/// Applies the working copy to the running game and leaves.
+fn confirm_button() -> impl Scene {
+    bsn! {
+        Button
+        on(confirm_pressed)
+        focusable()
+        Text::new("Confirm (")
+        TextFont { font_size: 16.0_f32 }
+        TextColor(TITLE)
+        BorderColor::all(FIXED)
+        Node {
+            border: {UiRect::all(Val::Px(1.0))},
+            border_radius: {BorderRadius::all(Val::Px(4.0))},
+            padding: {UiRect::axes(Val::Px(18.0), Val::Px(5.0))},
+        }
+        Children [
+            (
+                PromptSpan({Confirm::id()})
+                template_value(PromptScheme(Scheme::Gamepad))
+                TextFont { font_size: 16.0_f32 }
+                TextColor(TITLE)
+            ),
+            (TextSpan::new(")") TextFont { font_size: 16.0_f32 } TextColor(TITLE)),
+        ]
+    }
+}
+
+/// A mouse click or `Enter` on a focused Cancel — the pad's B reaches the same outcome through
+/// [`back`] instead, since B also has the mid-capture meaning Cancel does not.
+fn cancel_pressed(_: On<Activate>, mut next: ResMut<NextState<Settings>>) {
     next.set(Settings::Hidden);
 }
 
-/// Everything a selection can land on carries these three.
+/// A mouse click or `Enter` on a focused Confirm — the pad's X reaches the same outcome through
+/// [`confirm`] instead.
+fn confirm_pressed(_: On<Activate>, mut commands: Commands) {
+    commands.queue(apply_and_close);
+}
+
+/// Everything a selection can land on carries these three, plus [`claim_focus`] to answer a click.
 ///
 /// [`AutoDirectionalNavigation`] is what makes an entity a candidate; the [`Outline`] is the ring,
 /// kept colourless until the selection arrives so that showing it is a colour change rather than a
@@ -298,7 +395,21 @@ fn focusable() -> impl Scene {
         Outline { width: Val::Px(2.0), offset: Val::Px(2.0), color: Color::NONE }
         on(ring_on)
         on(ring_off)
+        on(claim_focus)
     }
+}
+
+/// A mouse click on any focusable widget takes the focus, the same way keyboard and gamepad
+/// navigation already do.
+///
+/// Without this, a click activates the button — `bevy_ui_widgets` sees to that — but never claims
+/// [`InputFocus`], because this screen's selection is driven by [`AutoDirectionalNavigation`] rather
+/// than the `TabIndex`-based bridge `bevy_input_focus`'s own click handler resolves through. A click
+/// with nothing to claim it then reads as "clicked outside everything" and *clears* focus instead,
+/// which leaves directional navigation with nowhere to resume from the next time a direction is
+/// pressed.
+fn claim_focus(activate: On<Activate>, mut focus: ResMut<InputFocus>) {
+    focus.set(activate.entity, FocusCause::Pressed);
 }
 
 /// One device's worth of rows, under a heading and grouped by category.
@@ -327,7 +438,7 @@ fn table(title: &'static str, mut rows: Vec<Mapping>) -> impl Scene {
                     width: NAME_WIDTH,
                     color: HEADING,
                     border: Color::NONE,
-                    changeable: false,
+                    role: CellRole::Label,
                 }],
                 0.0,
             ));
@@ -372,7 +483,7 @@ fn cells(mapping: &Mapping, columns: usize) -> Vec<Cell> {
         width: NAME_WIDTH,
         color,
         border: Color::NONE,
-        changeable: false,
+        role: CellRole::Label,
     }];
 
     for column in 0..columns {
@@ -394,7 +505,11 @@ fn cells(mapping: &Mapping, columns: usize) -> Vec<Cell> {
             },
             // Exactly the cells the box is drawn around, which is what the box was always
             // promising: the selection can reach what the player may change, and skips the rest.
-            changeable: changeable && exists,
+            role: if changeable && exists {
+                CellRole::Changeable(mapping.scheme, mapping.key, column)
+            } else {
+                CellRole::Label
+            },
         });
     }
     cells
@@ -409,7 +524,7 @@ fn follower_cells(mapping: &Mapping, follower: &Follower, columns: usize) -> Vec
         width: NAME_WIDTH,
         color: SUBORDINATE,
         border: Color::NONE,
-        changeable: false,
+        role: CellRole::Label,
     }];
 
     for column in 0..columns {
@@ -426,7 +541,7 @@ fn follower_cells(mapping: &Mapping, follower: &Follower, columns: usize) -> Vec
             width: CONTROL_WIDTH,
             color: SUBORDINATE,
             border: Color::NONE,
-            changeable: false,
+            role: CellRole::Follower(mapping.scheme, mapping.key, column, follower.condition),
         });
     }
     cells
@@ -454,8 +569,55 @@ struct Cell {
     /// Drawn around the cells the player will be able to press once rebinding lands, and around the
     /// empty ones they will be able to fill. [`Color::NONE`] for the rest.
     border: Color,
-    /// Whether the selection stops here. True for exactly the boxed cells.
-    changeable: bool,
+    role: CellRole,
+}
+
+/// What kind of thing a cell is, which is also what a capture needs to find it again afterwards.
+///
+/// `MappingKey` alone does not name a row — the same key is shared by a keyboard mapping and a
+/// gamepad one for the same action (it is derived from the action's path and part, and says nothing
+/// about the scheme), so every role that names a row carries its `Scheme` too.
+#[derive(Clone, Copy)]
+enum CellRole {
+    /// A heading, a row's name, or a follower's name — read, never pressed.
+    Label,
+    /// A control the player may press to capture a new one into this slot.
+    Changeable(Scheme, MappingKey, usize),
+    /// A follower's line under one column of the row above it, carrying the condition its caption
+    /// is formatted with — a capture on that column has to reformat this cell too, not just the
+    /// principal one.
+    Follower(Scheme, MappingKey, usize, ConditionDescriptor),
+}
+
+/// Finds every cell belonging to one row — its own changeable cells and every follower's line
+/// beneath it — and rewrites each to match `controls`.
+///
+/// The only place a capture's result reaches the screen: nothing is despawned or rebuilt, because a
+/// capture never changes a row's shape, only what a cell says. Two full-table scans regardless of
+/// how many cells actually changed, which is cheap at this size and simpler than threading a "which
+/// columns moved" answer out of the caller — a steal can shift every column behind the one that was
+/// actually taken, so "repaint the whole row" is the correct answer as often as not.
+fn repaint_row(world: &mut World, scheme: Scheme, key: MappingKey, controls: &[Control]) {
+    let mut principals = world.query::<(&RebindCell, &mut Text)>();
+    for (cell, mut text) in principals.iter_mut(world) {
+        if cell.0 == scheme && cell.1 == key {
+            *text = Text::new(
+                controls
+                    .get(cell.2)
+                    .map(|control| control.fallback_label().into_owned())
+                    .unwrap_or_default(),
+            );
+        }
+    }
+
+    let mut followers = world.query::<(&FollowerCell, &mut Text)>();
+    for (cell, mut text) in followers.iter_mut(world) {
+        if cell.0 == scheme && cell.1 == key {
+            *text = Text::new(controls.get(cell.2).map_or_else(String::new, |control| {
+                cell.3.fallback_format(&control.fallback_label())
+            }));
+        }
+    }
 }
 
 /// `indent` is nonzero for exactly a follower's line — the mark of a row that is a fact about the
@@ -473,13 +635,41 @@ fn line(cells: Vec<Cell>, indent: f32) -> impl Scene {
 
 fn cell(cell: Cell) -> impl Scene {
     // A changeable cell is a button and a stop for the selection; a fixed one is neither, and
-    // stays the plain text it was. Pressing one does nothing yet — capture is what comes next —
-    // but the selection reaching it is the half that had to work first.
-    let selectable = cell.changeable.then(|| bsn! { Button focusable() });
+    // stays the plain text it was. Three independent splices rather than branching to one of three
+    // different `bsn!` blocks — each of those would be its own opaque type, and this way there is
+    // exactly one `impl Scene` this function ever returns.
+    // `BackgroundColor` starts at `Color::NONE` here rather than being absent, so `start_capture`
+    // and its two ways out (`captured`, `back`'s mid-capture branch) are all just writing the same
+    // component, never inserting or removing it.
+    let selectable = matches!(cell.role, CellRole::Changeable(..)).then(|| {
+        bsn! {
+            Button
+            on(start_capture)
+            on(captured)
+            BackgroundColor(Color::NONE)
+            focusable()
+        }
+    });
+    // `template_value` rather than the bare tuple-constructor form `bsn!` otherwise expects: these
+    // two are plain data tags with no sensible `Default`, and `bsn!`'s own `Type(args)` syntax needs
+    // one (it patches a template, which `template_value` sidesteps by handing over an already-built
+    // value).
+    let rebind_tag = if let CellRole::Changeable(scheme, key, slot) = cell.role {
+        Some(template_value(RebindCell(scheme, key, slot)))
+    } else {
+        None
+    };
+    let follower_tag = if let CellRole::Follower(scheme, key, slot, condition) = cell.role {
+        Some(template_value(FollowerCell(scheme, key, slot, condition)))
+    } else {
+        None
+    };
     // Every cell carries the same border and padding whether or not the border is visible, so the
     // columns line up down the table rather than shifting where a box begins.
     bsn! {
         {selectable}
+        {rebind_tag}
+        {follower_tag}
         Text({cell.text})
         TextFont { font_size: 15.0_f32 }
         TextColor({cell.color})
@@ -490,5 +680,134 @@ fn cell(cell: Cell) -> impl Scene {
             border_radius: {BorderRadius::all(Val::Px(3.0))},
             padding: {UiRect::axes(Val::Px(6.0), Val::Px(2.0))},
         }
+    }
+}
+
+/// Names the row and slot a boxed cell would capture for, so a press knows what to start and a
+/// result knows which row to write into.
+///
+/// `Scheme` first because `MappingKey` alone does not name a row — see [`CellRole`].
+#[derive(Component, Clone, Copy)]
+struct RebindCell(Scheme, MappingKey, usize);
+
+/// Names the row, column and condition a follower's cell renders, so a capture on that column can
+/// reformat this cell's caption along with the principal's.
+#[derive(Component, Clone, Copy)]
+struct FollowerCell(Scheme, MappingKey, usize, ConditionDescriptor);
+
+/// Starts listening for the control that will fill this cell, and paints it [`LISTENING`] so the
+/// player can tell a capture started at all — the only signal on this screen that one has, since a
+/// press otherwise looks identical to one that did nothing.
+///
+/// The session lives on the cell entity itself, per [`CaptureSession`]'s own recommendation — it is
+/// the thing that will show the answer. `Back`'s two controls are excluded so a two-stage cancel
+/// works from inside a capture: without this, pressing B here would be captured as this row's new
+/// binding instead of reaching [`back`] and cancelling the capture.
+fn start_capture(activate: On<Activate>, cells: Query<&RebindCell>, mut commands: Commands) {
+    let Ok(&RebindCell(scheme, key, slot)) = cells.get(activate.entity) else {
+        return;
+    };
+    let entity = activate.entity;
+    commands.queue(move |world: &mut World| {
+        let Some(mapping) = mappings(world)
+            .into_iter()
+            .find(|row| row.scheme == scheme && row.key == key)
+        else {
+            return;
+        };
+        let Some(session) = CaptureSession::for_slot(&mapping, slot) else {
+            return;
+        };
+        world.entity_mut(entity).insert((
+            session.excluding([
+                Control::Key(KeyCode::Escape),
+                Control::GamepadButton(GamepadButton::East),
+            ]),
+            BackgroundColor(LISTENING),
+        ));
+    });
+}
+
+/// Writes what was captured into the working copy, stealing the control from whatever else already
+/// held it, patches every cell either row's change touched, and clears [`LISTENING`] off the cell
+/// that was — the crate has already removed `CaptureSession` itself by the time this runs.
+fn captured(captured: On<Captured>, cells: Query<&RebindCell>, mut commands: Commands) {
+    let Ok(&RebindCell(scheme, key, slot)) = cells.get(captured.entity) else {
+        return;
+    };
+    let control = captured.control;
+    let entity = captured.entity;
+    commands.queue(move |world: &mut World| {
+        world
+            .entity_mut(entity)
+            .insert(BackgroundColor(Color::NONE));
+        resolve_capture(world, scheme, key, slot, control);
+    });
+}
+
+/// What a mapping currently holds, the working copy laid over its declared slots — [`Overrides`]'s
+/// own three-state rule, read the same way [`apply_overrides`] and `conflicts_pending` both do.
+fn effective(mapping: &Mapping, pending: &Overrides) -> Vec<Control> {
+    match pending.get(mapping.scheme, mapping.key) {
+        Some(Override::Controls(controls)) => controls.clone(),
+        Some(Override::Cleared) => Vec::new(),
+        Some(Override::NotOurs) | None => mapping.slots.clone(),
+    }
+}
+
+/// The policy chunk 31 picked for R19.3: a captured control is stolen from whatever else already
+/// holds it rather than being refused or left to duplicate. Every row the steal or the capture
+/// itself touched is repainted before this returns.
+///
+/// Every row a steal can find is guaranteed to share `scheme` with the row captured into: `control`
+/// is itself scheme-specific (a key can never sit in a gamepad row's slots), so nothing outside this
+/// scheme can ever hold it. That is what makes looking `clash.mapping` back up against `scheme`
+/// rather than a bare key search safe, and it is also why `conflicts_pending` needs no scheme
+/// parameter of its own.
+fn resolve_capture(
+    world: &mut World,
+    scheme: Scheme,
+    key: MappingKey,
+    slot: usize,
+    control: Control,
+) {
+    let all = mappings(world);
+    let Some(target) = all
+        .iter()
+        .find(|row| row.scheme == scheme && row.key == key)
+        .cloned()
+    else {
+        return;
+    };
+    let mut pending = world
+        .remove_resource::<PendingOverrides>()
+        .unwrap_or_default();
+    let mut touched = Vec::new();
+
+    for clash in conflicts_pending(&all, &pending.0, control, Some(key)) {
+        let Some(other) = all
+            .iter()
+            .find(|row| row.scheme == scheme && row.key == clash.mapping)
+        else {
+            continue;
+        };
+        let mut controls = effective(other, &pending.0);
+        controls.retain(|&held| held != control);
+        pending.0.bind(other.scheme, other.key, controls.clone());
+        touched.push((other.key, controls));
+    }
+
+    let mut controls = effective(&target, &pending.0);
+    if slot < controls.len() {
+        controls[slot] = control;
+    } else {
+        controls.push(control);
+    }
+    pending.0.bind(target.scheme, target.key, controls.clone());
+    touched.push((target.key, controls));
+
+    world.insert_resource(pending);
+    for (key, controls) in touched {
+        repaint_row(world, scheme, key, &controls);
     }
 }

@@ -110,10 +110,18 @@ pub struct Accept;
 #[action(path = "disasteroids.swallowed", output = bool, intent = Button, category = "disasteroids.menu")]
 pub struct Swallowed;
 
-/// Leaves the screen.
+/// Leaves the screen, discarding anything not yet confirmed.
+///
+/// While a row is listening for a new control, this cancels only that capture instead — press it
+/// again with nothing listening to leave.
 #[derive(InputAction)]
 #[action(path = "disasteroids.back", output = bool, intent = Button, category = "disasteroids.menu")]
 pub struct Back;
+
+/// Applies every change made on the screen, and leaves it.
+#[derive(InputAction)]
+#[action(path = "disasteroids.confirm", output = bool, intent = Button, category = "disasteroids.menu")]
+pub struct Confirm;
 
 /// The context a living ship flies under.
 ///
@@ -313,6 +321,14 @@ pub fn plugin(app: &mut App) {
         // shell gets it back the moment the screen despawns, with nothing anywhere saying so.
         controls.bind::<Back>(GamepadButton::East).press().consume();
         controls.bind::<Back>(KeyCode::Escape).press().consume();
+
+        // No keyboard binding: Enter and Space already confirm through `Swallowed` and the widget
+        // layer's own activation of the focused button, exactly as they do for Accept. This is the
+        // pad's own way to reach Confirm without navigating to it.
+        controls
+            .bind::<Confirm>(GamepadButton::West)
+            .press()
+            .consume();
     });
 
     app.add_systems(Startup, shell.spawn());

@@ -135,15 +135,15 @@ step and a real game is a better acceptance test than a synthetic one.
 
 | | |
 | --- | --- |
-| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves; and a screen that can be *operated* — a stick or a D-pad rounded to a compass point and narrowed to the ticks it moved on, which is a selection moving one step per direction entered, over a game that keeps running and never hears the controls the screen has taken; and two actions that deliberately share one control declared as sharing it, so that a rebind moves both; and a prompt or a mapping row that says when a binding wants more than a bare press — held, or tapped twice — as structure a localization layer can render for itself, with a fallback formula ("Hold W", "W ×2") for a game that ships no catalogue, and a mapping's followers drawn as a subordinate line under the row they ride rather than a row of their own; and **a rebind that takes effect** — a diff against the declared bindings, applied to every live context by compiling a variant plan and swapping it in, which cancels what was in flight and re-arms require-reset, moves every follower riding a row that changed, leaves the declaration intact so the next patch's revised defaults still reach anyone who never touched that row, and tells every prompt on screen to catch up; and conflict detection that can be asked against a working copy of overrides rather than only what is applied, which is what lets a screen with unconfirmed choices tell whether two of them clash before either is committed; and a **class binding** — a plan's second list, consulted only for a control no plain binding in the context already indexes, dispatching the original raw event (not a folded value, since there is no lifecycle to fold it into) to whatever declared it, which is the mechanism a focused text field will claim character-producing keys through without the app enumerating them. |
-| **Known wrong today** | A widget that handles its own keyboard bypasses consumption entirely: `bevy_ui_widgets::Button` activates on `Space` whether or not a context claimed `Space`, because `InputDispatchPlugin` asks the mapper nothing (R8.2a, chunk 49). Disasteroids works around it with an action that consumes and does nothing. The prelude exports sixteen bare English nouns that a glob import drops into a template beside Bevy's own (chunk 48). Otherwise nothing is wrong so much as absent — a rebind now applies, and Disasteroids' screen still has no way to ask for one. |
-| **Never built** | Saving a rebind: an override set is a value in memory and nothing writes it to a file (chunk 23), and nothing has yet looked at what that file would read like (chunk 55). Also tunables, presets, glyphs, and every screen that does more than list what is already there. And the class binding mechanism has no caller yet: nothing in-tree is a focused text field, so `ControlClass::CharacterProducing` has never been bound outside its own tests (chunk 49). |
+| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves; and a screen that can be *operated* — a stick or a D-pad rounded to a compass point and narrowed to the ticks it moved on, which is a selection moving one step per direction entered, over a game that keeps running and never hears the controls the screen has taken; and two actions that deliberately share one control declared as sharing it, so that a rebind moves both; and a prompt or a mapping row that says when a binding wants more than a bare press — held, or tapped twice — as structure a localization layer can render for itself, with a fallback formula ("Hold W", "W ×2") for a game that ships no catalogue, and a mapping's followers drawn as a subordinate line under the row they ride rather than a row of their own; and **a rebind that takes effect** — a diff against the declared bindings, applied to every live context by compiling a variant plan and swapping it in, which cancels what was in flight and re-arms require-reset, moves every follower riding a row that changed, leaves the declaration intact so the next patch's revised defaults still reach anyone who never touched that row, and tells every prompt on screen to catch up; and conflict detection that can be asked against a working copy of overrides rather than only what is applied, which is what lets a screen with unconfirmed choices tell whether two of them clash before either is committed; and a **class binding** — a plan's second list, consulted only for a control no plain binding in the context already indexes, dispatching the original raw event (not a folded value, since there is no lifecycle to fold it into) to whatever declared it, which is the mechanism a focused text field will claim character-producing keys through without the app enumerating them; and **the settings screen finished** — pressing a boxed cell listens for a control and writes it into a working copy rather than the running game, a clash steals the control from whatever else already held it, Confirm applies the working copy in one call and Cancel discards it, B cancels a capture in progress before it cancels the screen, and every cell a capture or a steal touches is patched in place — `Text` on the exact entities named at spawn, nothing despawned or rebuilt, because a capture never changes a row's shape. |
+| **Known wrong today** | A widget that handles its own keyboard bypasses consumption entirely: `bevy_ui_widgets::Button` activates on `Space` whether or not a context claimed `Space`, because `InputDispatchPlugin` asks the mapper nothing (R8.2a, chunk 49). Disasteroids works around it with an action that consumes and does nothing. The prelude exports sixteen bare English nouns that a glob import drops into a template beside Bevy's own (chunk 48). A control capture refuses (wrong shape, wrong scheme, reserved) is silent on Disasteroids' screen — the session simply keeps listening, with nothing said about why the press did not take. |
+| **Never built** | Saving a rebind: an override set is a value in memory and nothing writes it to a file (chunk 23), and nothing has yet looked at what that file would read like (chunk 55). Also tunables, presets, and glyphs. And the class binding mechanism has no caller yet: nothing in-tree is a focused text field, so `ControlClass::CharacterProducing` has never been bound outside its own tests (chunk 49). |
 
 ---
 
 ## What has landed
 
-Forty-one chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+Forty-two chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
 where it fell short of its own description — Phase VII onward there, and everything before it in the
 [archive](./Log-archive.md). This table is only an index, and the sequence below is what remains.
 
@@ -190,6 +190,7 @@ where it fell short of its own description — Phase VII onward there, and every
 | 56 | Split Friction's tileset | done; landed ahead of chunk 27 (device selection), which has not — this chunk needed nothing from it |
 | 57 | A generated dungeon | done; landed as an open arena with punched-out obstacles rather than rooms-and-corridors, after review of the first pass found the maze-of-small-rooms shape wrong for what Split Friction wants |
 | 58 | `follow` replaces per-binding `follows` | done; found while scoping chunk 31 and landed ahead of it, since 31 inherited the follower-coverage problem this closes |
+| 31 | The settings screen, rebinding | done; steal chosen for R19.3's policy, and every capture patches the exact cells it touched rather than rebuilding — a capture never changes a row's shape |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -228,7 +229,7 @@ must stay additive: a game that declares none of it keeps working exactly as bef
 mixing them would make it unclear which half was at fault: first a read-only list, then something
 navigable, then something that rebinds. Navigation sits between the first two, since a screen you
 cannot move around is a help screen rather than a settings screen — which is exactly why the first
-pass was worth having on its own. Two have landed; the third, chunk 31, has not.
+pass was worth having on its own. All three have landed.
 
 **The screen Disasteroids is building, stated once.** These are the acceptance criteria for 21, 29,
 30 and 31 together, written down here so that each pass can be judged against the finished thing
@@ -259,39 +260,9 @@ rather than against its own description:
 
 Chunk 39 built the model half of the three-column table — a mapping holds an ordered list with a
 capacity, and a capture names the slot it fills — 43 put the fixed rows on it, 21 drew both tables
-from that model alone, and 30 made the cells reachable. What is left is everything that happens when
-the player presses one.
-
-**Two of those criteria are now visibly unmet rather than merely absent**, which is what a screen
-you can operate buys: Confirm and Cancel exist and are indistinguishable, because nothing on the
-screen can be changed yet and so there is nothing for one to commit that the other would discard
-(chunk 31, which now has the store it was waiting on); and neither caption carries its shortcut,
-because B is bound to `Back` for the whole screen rather than to Cancel in particular and X is bound
-to nothing at all (chunk 31).
-
-### 31. The settings screen, rebinding
-
-Pressing a row enters capture, the next control pressed takes the mapping, and this chunk decides
-what to do about a clash — reject it, swap, allow the duplicate, or unbind the other row — using
-`conflicts_pending` (chunk 54) to ask and `Overrides::bind` to write the answer; the crate detects,
-this chunk resolves. Chunk 30 left the cells pressable and pressing one deliberately inert, so the
-whole of this chunk is what happens after the `Activate`.
-
-**Inherited from chunk 30**, since a screen that can be operated makes these visible rather than
-merely absent:
-
-- **The two bottom buttons have to differ.** Both currently close the screen, because nothing on it
-  can be changed and so there is nothing for Confirm to commit that Cancel would discard. Chunk 38
-  supplies the store and its pending copy is just a second `Overrides` value; this chunk is where
-  Confirm and Cancel start meaning what they say — Confirm is `apply_overrides`, Cancel drops the
-  working copy.
-- **The captions have to carry their shortcuts** — a `PromptSpan` with a `PromptScheme(Gamepad)`
-  beside it, per the acceptance criteria above. That needs the shortcuts to exist first: B is bound
-  to `Back` for the screen as a whole rather than to Cancel in particular, and X is bound to nothing.
-- **Two-stage cancel**, which is the same B doing two things depending on whether a capture is live.
-  `Back` is one action with one observer today; this is where it grows the state to branch on.
-- **The screen stops being built once.** `OnEnter` spawns it from the mapping list and nothing
-  rebuilds it, which was true while nothing could change a row and stops being true here.
+from that model alone, 30 made the cells reachable, and 31 made pressing one do something: capture,
+steal, Confirm and Cancel each meaning what they say, and B meaning one of two things depending on
+whether a capture is live.
 
 ### 45. Presets
 
@@ -646,7 +617,7 @@ shared world, one viewport each.
 
 ---
 
-### 58. Split Friction's players and monsters
+### 60. Split Friction's players and monsters
 
 Placeholder rects become Tiny Dungeon character sprites, one per split-screen viewport. Monsters
 spawn into the generated dungeon and wander, or chase within a simple radius.
