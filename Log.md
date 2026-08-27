@@ -540,3 +540,46 @@ rather than a chunk, since nothing about it currently looks wrong.
 already owns "the rest of D4" per Requirements.md's own note by R8.4/R12.6. Nothing in-tree
 declares a class binding yet; the mechanism and its tests are the whole of this chunk, same as the
 roadmap section said going in.
+
+### Chunk 56: Split Friction's tileset
+
+`examples/split_friction/` did not exist before this chunk — chunk 27 (the device-selection screen
+this example exists to demonstrate) has not landed, contrary to how it reads elsewhere in this
+document's own recent history. This chunk needed nothing from it and landed anyway; `main.rs` today
+is only a hand-placed room proving [`tileset`]'s indices, with no `bevy_action_map` usage at all.
+Chunk 27 is still owed before the game is actually about anything.
+
+**Kenney's own tiles have no names, but Kenney's own sample map does.** Tiny Dungeon ships
+`tile_0000.png`…`tile_0131.png` — numbered, not described — so a tile's role has to come from its
+pixels. Eyeballing a scaled preview image got this **wrong**: a crop meant to isolate one quadrant
+for closer inspection landed on a row boundary that wasn't a multiple of the tile size, and every
+row/column read off it afterward was off by a fraction of a row. The reliable source turned out to
+be the `.tmx` sample map Kenney bundles alongside the sheet — a real dungeon Kenney built from these
+same tiles, with real tile-index data in its CSV layers. Decoding it (stripping Tiled's flip-flag
+bits from each GID) and rendering it back with the actual atlas confirmed the indices immediately: a
+coherent dungeon, not noise. Every constant in `tileset.rs` was checked against that render rather
+than read off a picture.
+
+**`Sprite`'s `texture_atlas` field wants a `TextureAtlasTemplate`, not `Option<TextureAtlas>`
+constructed by hand.** `Some(TextureAtlas { layout: ..., index })` inside `bsn!` fails two ways in
+sequence: `Some(...)` itself is parsed as a component-construction call (`bsn!`'s own syntax for
+`Foo(...)`), and even past that, the field's derived template type (`OptionTemplate
+<TextureAtlasTemplate>`) doesn't accept a raw `TextureAtlas` literal. Bevy's own
+`examples/usage/cooldown.rs` (for `ImageNode`, the UI equivalent) has the answer: write a plain
+function returning `bevy::image::TextureAtlasTemplate { layout: handle.into(), index }`, and assign
+its *call* to the `texture_atlas` field directly, no `Some` and no manual `Option`. The handle itself
+still wants building the ordinary way — `Assets<TextureAtlasLayout>::add` in a system with resource
+access, passed down as a plain `Handle` parameter — rather than through `asset_value`, which exists
+for constructing an asset inline and would have added one duplicate `TextureAtlasLayout` per tile.
+
+**A `Children`-only scene root needs `Visibility` alongside `Transform`, or its sprite children warn
+every frame.** `bsn! { Transform::default() Children [...] }` runs, but Bevy's hierarchy propagation
+logs a B0004 warning per child once render systems notice the parent has no `Visibility` for
+`InheritedVisibility` to propagate through. Adding `Visibility::default()` next to `Transform::
+default()` on the root silences it; nothing else in the render output changes.
+
+**Found, not fixed: a door's art doesn't share the plain wall-top tile's silhouette.** `DOOR_CLOSED`
+(index 46) has its stone arch reaching slightly higher within its 16×16 cell than `WALL_TOP` (index
+2) does, so a door dropped into a wall run pokes up above the row's otherwise level skyline.
+Cosmetic at this scale, and left as a note for chunk 57 rather than chased here — a generator
+choosing where doors go is the more natural place to decide whether that matters.

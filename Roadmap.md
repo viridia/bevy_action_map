@@ -187,6 +187,7 @@ where it fell short of its own description — Phase VII onward there, and every
 | 38 | Applying a rebind | done; the conflict policies it also carried → 54, the file → 23, a follower riding only some of a row's slots → 31 |
 | 54 | Conflict policy | landed as detection only: `conflicts_pending` against a working copy, resolution left to the app on existing `Overrides` primitives |
 | 25 | Control classes and class bindings | done; `character_producing` measured against a real kana IME and a dead key rather than reasoned from docs — both compose correctly upstream and need nothing extra here; a focused text field actually claiming the class → 49 |
+| 56 | Split Friction's tileset | done; landed ahead of chunk 27 (device selection), which has not — this chunk needed nothing from it |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -647,6 +648,44 @@ shared world, one viewport each.
   and it is the one part of §15 a developer cannot get right by reading a doc comment.
 - **Verified by:** playing it, with the pad on one mapping and the keyboard on the other, then
   swapping them.
+- **Visuals:** placeholder shapes only — rects for players, flat color for the world. Tiny Dungeon
+  sprites, a generated map, monsters and missiles are chunks 56–59, layered on once this lands, so
+  the device-selection code they build on stays exactly as reviewed here.
+
+---
+
+### 57. A generated dungeon
+
+Seeded procedural layout, replacing chunk 56's static grid: rooms and corridors from the seed, then
+each floor tile resolved to the correct wall/corner/edge sprite by its neighbors (autotiling).
+
+- Generation and tile-resolution are pure data — no ECS, no Bevy — so they are unit-tested directly
+  against fixed seeds rather than only through a running app.
+- **Not doing:** anything that is not the map. No players, monsters, or missiles yet; the acceptance
+  is that every seed produces a layout that fits together, with no floating walls and no unreachable
+  room.
+- **Verified by:** unit tests fixing a seed and asserting the tile grid it produces, plus running the
+  example against a handful of seeds and looking at the result.
+
+### 58. Split Friction's players and monsters
+
+Placeholder rects become Tiny Dungeon character sprites, one per split-screen viewport. Monsters
+spawn into the generated dungeon and wander, or chase within a simple radius.
+
+- **Not doing:** combat, death, or any interaction between the two. This chunk is "things that move
+  around the map convincingly," not the game Split Friction eventually becomes.
+- **Verified by:** playing it — a monster visibly reacts to a nearby player and does something
+  sensible when none is nearby.
+
+### 59. Missiles as spinning sprites
+
+A fired weapon becomes a sprite that rotates at a fixed rate as it travels, riding whatever
+`Fire`-shaped action Split Friction already binds.
+
+- **Not doing:** collision or damage. A missile that flies to the edge of the map and despawns is a
+  complete acceptance for this chunk; hitting something is Split Friction's own concern later, not
+  this sequence's.
+- **Verified by:** playing it.
 
 ---
 
