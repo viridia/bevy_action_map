@@ -1297,3 +1297,522 @@ the pulse's clock starts on the tick the change fires; the gate is a screen long
 be wrong.
 
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087
+
+### Chunk 47: a binding as a text span
+
+The presentation half of R18, made authorable. A component beside `TextSpan` names an action and
+fills in its own string, so a template says "Press ⟨whatever fires this⟩" with nothing in it naming
+a control. Disasteroids' two hand-formatted captions are now spans, and the `format!` and the `join`
+are gone from both.
+
+**The dependency graph decided where this lives, and that was not the plan.** The chunk was written
+as two components — one requiring `TextSpan`, one requiring `Text` — until the question "what does
+that cost" got asked. `TextSpan` is `bevy_text`, which drags `bevy_asset`, `bevy_image` and
+`bevy_log`, the crate this project's own manifest says it avoided for being std-only. `Text` is
+`bevy_ui`, which drags the render stack — and `bevy_ui` already depends on `bevy_input` and
+`bevy_input_focus`. An input crate depending on it inverts the layering and forecloses `bevy_ui`
+ever using action maps itself, which is a worse outcome than any amount of convenience is worth. So
+the split is by dependency weight rather than by subject: the crate keeps the lookup and the
+staleness signal, both free, and everything that draws is `examples/common/prompt_ui.rs` — shared
+by `#[path]`, covered by `tests/prompt_ui.rs` so it is tested rather than merely compiled, and
+waiting on a deferred row whose gate is Bevy taking the crate upstream. The two-component design
+went with it: a whole `Text` that is nothing but a prompt is a `Text` with one span under it, which
+is how Bevy already models it.
+
+**A resource that is touched, not an event, and the reasoning is worth keeping.** R18.5 wants
+invalidation that is not a per-frame poll. A broadcast event was the first proposal and the counter
+won on two grounds: three changes in one frame — a rebind, a context switching off, the entity
+carrying it despawning — coalesce into one pass rather than three sweeps over every prompt on
+screen, and the pass happens at a point in the schedule the reader picks, which matters because a
+caption wants rewriting before layout measures it. The half that made it uncontroversial is that
+resources are now entities: the touch is written as an *insert* rather than a mutable deref, so
+hooks fire, so a consumer can observe the resource instead of owning a system. There is a test
+pinning that, because it is a claim about Bevy rather than about us.
+
+**Component change detection is not an alternative, and it is worth writing down why.** The obvious
+implementation watches `Changed<InputContextState<C>>`. Evaluation writes that component every
+frame, so the filter is true constantly and detects nothing. What works is a signal raised
+deliberately, which happens to travel on the change-tick mechanism.
+
+**The third firing point is the one nobody would have written.** Two were obvious: a context
+activating, and a binding changing — that one is chunk 38's to raise, since nothing can rebind yet.
+The third is an instance of a context arriving or leaving, because the answer is folded over every
+entity carrying the context, so it moves from empty to non-empty with nothing calling `activate`.
+That is a hook on `InputContextState<C>` rather than on `C`, registered where `read_bindings`
+already is. It is also chunk 40's `PostStartup` ordering, arriving as a fix rather than a
+constraint: the corner hint went back to `Startup`, because a span asks after the fact and asks
+again when the answer moves, so which system ran first stopped mattering.
+
+**Absence as a third state, for the device a bare prompt speaks for.** The chunk had to decide what
+a span with no companions renders, and chunk 40 had already refused to rank devices. The framing
+that settled it is that nearly every game has one answer for its whole runtime — a console title
+names pad buttons even with a keyboard plugged in — so this is configuration rather than state, set
+once and usually never touched. `PromptDevice` therefore has no default: **absent** means the game
+has not said and is diagnosed where prompts are drawn, and **present holding `None`** means the game
+deliberately has no primary device. A default would have been a guess that fails silently, with
+every prompt in the game naming the wrong control and nothing reporting it.
+
+**A rename, and the sweep it exposed.** `Scope` and `Origin` became `PromptScope` and
+`ControlOrigin` — a prelude glob-imported into a BSN template puts a bare noun beside components
+from three other crates, and `Scope` in particular means something different in half of Bevy. The
+sweep found a dozen more (`Scheme`, `Mapping`, `Part`, `Phase`, `Intent`, the four transition
+events), which became chunk 48 rather than riding along in a feature chunk. That chunk has a shelf
+life: it costs a rename today and a deprecation story the moment anything outside this repository
+depends on the crate.
+
+**What the class narrowing cost, and what it bought.** `PromptScope` grew `of(ControlClass)`, which
+meant `ControlOrigin::Foreign` growing a `class` beside the `scheme` it already carried — symmetric,
+and the alternative was a narrowing no backend-supplied control could ever satisfy. An origin whose
+reporter said nothing about its class is excluded from a narrowed answer deliberately: handing a
+caller who asked for a button something nobody has claimed is one is worse than handing them
+nothing.
+
+**Fell short of its own description in one place.** R18.5 lists a keyboard *layout* change among the
+things that must invalidate a prompt, and nothing in Bevy reports either the current layout or a
+change to it — the same gap §10.3 records for `fallback_label`. The requirement is annotated rather
+than quietly satisfied: it is unobservable rather than unbuilt, and it becomes schedulable if winit
+surfaces the layout.
+
+### Chunk 44: bindings that travel together
+
+`.follows::<A>()` on a binding: it rides `A`'s mapping, contributes no row of its own, and moves
+with that row when the row moves. Disasteroids' three `Afterburner` bindings drop `private` for it,
+which was the chunk's stated acceptance test and is the whole of its diff in the example.
+
+**The bug it fixes is a gameplay bug, and it was latent rather than absent.** Rebind Thrust to `J`
+with the old model and the afterburner stays on `W` — and if the player later puts Fire on `W`,
+holding Fire afterburns. Nothing collides, so conflict detection could never have caught it: the
+failure is a *separation* that should not have been possible, and `conflicts()` looks for two rows
+holding one control. Chunk 38 was the deadline rather than the discoverer, which is why this landed
+first.
+
+**Resolution is by the controls, not by the name, and that is one lookup doing three jobs.** A
+follower names an action, and that action usually has several bindings — one per device. Matching
+the *source* picks the right one without either side naming a device, checks "the same controls"
+rather than trusting them, and guarantees that a follower's controls are its principal's slots,
+which is what will let a sub-row inherit the row's columns. It also rules out a chain of followers
+for free: a follower has no mapping, so nothing can ride one.
+
+**The roadmap's own check would have failed the roadmap's own acceptance test.** It said the target
+must "exist, be `mappable`, be in the same scheme, and read the same controls" — but Disasteroids'
+pad `Afterburner` follows the pad `Thrust`, which is deliberately listed-and-fixed, because the pad
+table is read-only and console remapping owns it. Requiring the target to be rebindable rejects it.
+The check is *listed*, not mappable: following a fixed row leaves nothing to rewrite and still keeps
+the duplicate off the screen, which is worth having alone. Worth recording because the plan and the
+example disagreed and only the example was right.
+
+**Two refusals rather than one, because the fix is in different places.** `FollowsNothing` is no
+binding of that action reading this — a typo, or a device bound on one side only. `FollowsUnlisted`
+is a binding that reads it and is `private`, so there is no mapping to lend; the repair is on the
+*other* binding, and one diagnostic covering both would have named the wrong one.
+
+**What the chunk deliberately did not do, and why the deferred table was wrong about it.** A
+follower is not listed separately — so nothing about this puts `Afterburner` back on a screen, which
+is what the deferred row for R18.3's condition half predicted would happen and used as its gate. Two
+things in that row were untrue. `private` was never what concealed the held-versus-tapped prompt
+collision: `a_private_binding_still_answers_a_prompt` has asserted since chunk 40 that a hidden
+binding answers prompts, so the collision has been reachable all along and what conceals it is that
+nothing in tree *prompts* `Afterburner`. And a gate that trips on a chunk which does not trip it is
+not a gate.
+
+So the row is deleted and the work is **chunk 50**, with a number rather than a gate. Asking what
+the player wants to see is what settled it: a player looking up "how do I boost?" cannot find out
+from the controls screen today, and will not be able to after this chunk either. The answer is one
+row, one set of keys, and a subordinate line beneath it — dimmer, not activatable, carrying its own
+whole formula ("Hold W") rather than a diff against the row above, because a bare "hold" in a cell
+is a qualifier with no control in it. That needs R18.3's condition half, which also has a second
+consumer in `PromptSpan`, which is what makes it a chunk instead of a corner of this one.
+
+### Chunk 50: what a held control says
+
+`ConditionDescriptor` in `condition.rs`: `None`, `Hold { duration }`, `MultiTap { count }`, derived
+from a binding's own `Vec<BindingCondition>` by `describe` — first match wins, and `HoldAndRelease`
+reads as `Hold` because the player still has to hold the control even though release is what fires.
+Its `fallback_format` is the whole formula ("Hold W", "W ×2") rather than a qualifier alone, on the
+same reasoning `fallback_label` already carries: a catalogue gets the pieces separately and composes
+its own word order, and only a game with no catalogue gets English glued together.
+
+Two consumers, as planned. `Prompt` gained a `condition` field, populated in `read_bindings`
+alongside the chord it already carried; `examples/common/prompt_ui.rs`'s `caption` runs the chord
+through first and the condition second, so a held chord renders "Hold Ctrl+S" rather than dropping
+one or the other. `Mapping` gained `followers: Vec<Follower>` — action, path, and the follower's own
+condition — built in a second pass over `InputContextBuilder::mappings` because a follower's row is
+found by its *leader's* declaration, which wants the whole binding list resolved rather than whatever
+`mappings` has accumulated so far. `examples/disasteroids/settings.rs` draws each follower as a
+`line` indented under its principal, sharing `cells`' shape but never `changeable`, so the selection
+cannot land on it.
+
+**The bug worth recording: a follower rides a binding, and a row can be several bindings.**
+Disasteroids' `Thrust` is one row with two keyboard slots — `KeyW` and `ArrowUp`, two separate
+`mappable` bindings merged by key and scheme — and `Afterburner` declares `.follows::<Thrust>()`
+once per key, because `leader_of` matches by exact source and a follower can only ride one binding
+at a time. Both follows-declarations resolve to leader bindings that feed the *same* mapping row, so
+the naive second pass pushed `Afterburner` onto that row's `followers` twice — one identical
+subordinate line drawn under the other. The fix is a dedup by the follower's action within one row's
+`followers` before pushing, which is also the right answer for the case that looks similar and
+isn't: two *different* followers, each riding a different slot of one row, are two real facts about
+it and both belong. `a_follower_riding_every_slot_of_a_row_is_still_one_sub_row` pins the one that
+looked like a corner case and turned out to be the acceptance test's actual shape.
+
+**Running Disasteroids to check the acceptance test found a second, unrelated thing.** The settings
+screen is now visibly taller than its two device tables account for, because `Menu` binds
+`Navigate`, `Accept` and `Back` with nothing marking them as machinery rather than controls, and
+listing-by-default puts all of them on the screen — exactly what chunk 53 already describes and was
+written to fix. Nothing about this chunk caused it; the extra row height chunk 50 adds is what made
+a pre-existing problem large enough to see. No new destination needed — 53 already is one — so
+"Known wrong today" now names it instead of leaving it for the next reader to rediscover.
+
+### Chunk 53: a context the player never sees, closed without a crate change
+
+**The chunk as written assumed a fact that turned out to be false.** It called for a builder-level
+declaration — `private` or some other spelling, on the whole context rather than on each binding —
+because the alternative was said to be filtering by context at every screen, which every future
+screen would then have to know how to do. But `Mapping` already carries `context: &'static str`,
+set from the declaring context's path since chunk 19 built it for the mapping-collision check
+(`report_mapping_collisions`). The data chunk 53 was written to add already existed; nobody had
+looked before designing around its absence.
+
+**Fixed at the one call site that has it, not in the crate.** `settings.rs`'s `screen` function
+already names `Menu`, `Navigate`, `Accept` and `Back` concretely — it is the function building this
+game's own screen, not the generic table renderer beneath it — so filtering `mapping.context !=
+Menu::PATH` there costs one line and touches nothing `table`, `cells`, or `follower_cells` read. The
+claim in this file's module doc, that nothing below `screen` names a context, stays true; the filter
+sits above it.
+
+**Why not build the crate feature anyway, for the games that will hit this later.** The case for it
+was that a screen written once should work in a different game without knowing its context types —
+but that was never a stated requirement, only a property chunk 19 inherited by reusing chunk 36's
+type-erased registry (built for R22.2's debug overlay) for the mapping list too, and later prose
+treated the inheritance as a design goal. With exactly one consumer of `mappings` in the tree today,
+declaring the exclusion once in the crate and filtering it once at the call site cost the same
+number of lines; the crate version added a builder method, a name to bikeshed, and a panic-ordering
+check against `mappable` for a case that has not happened yet. Revisit if a second screen needs the
+same exclusion and duplicates the filter — that is the point at which the crate is the one paying
+for the repetition rather than one call site.
+
+### Chunk 38: applying a rebind
+
+Twenty chunks of the player-facing model and none of them could change anything. Capture reported a
+choice, `mappings` read the compiled defaults, `conflicts` read the compiled defaults, and chunk
+44's follower link had nothing to follow *through*. What was missing in all four cases was the same
+thing: somewhere to write an answer.
+
+**Split before it was written, into 38 and 54.** The chunk as groomed carried the store, the apply
+path, the follower rewrite, `mappings()`'s meaning, the four conflict policies, R19.8's delegation
+outcome, the repeat-within-a-row question and the pending working copy. That is two chunks, and the
+seam is not arbitrary: a policy needs somewhere to put its answer, so every one of the deferred
+items sits *on top of* the store rather than beside it. Worth noting that ground rule 1's "split it
+before you write it" is easy to apply to a chunk that reads long and hard to apply to one that reads
+coherent — this one read coherent.
+
+**`Overrides` is a plain value, not a resource,** which was the author's call and changed the shape
+of the module. The crate defines the structure and applies it; where it lives is the app's business,
+so it can be a working copy on a settings screen, a field in a settings resource, or a payload sent
+to an account service. That is the same arrangement `bevy_feathers` gives a theme map, and it is
+what makes chunk 54's pending set free rather than a second type.
+
+**Three decisions §10.1 left to whoever built it, now in §10.1.**
+
+*Where the variant lives.* "Swapped into an entity's own state" reads as *only* the entity, and that
+answer has a bug in it: an instance spawned after a rebind — a player joining, a context respawned
+with a game state — silently gets the shipped bindings back. So `AppliedPlan<C>` is a second
+per-context resource holding the variant plan and the variant rows, `InputContextPlan<C>` is now
+literally untouched rather than untouched by convention, and its presence is exactly the answer to
+"has anything been overridden here".
+
+*What `mappings()` means*, which R17.1's note flagged as unanswerable and now is not: it reads the
+variant, and `declared_mappings()` reads the defaults. Every existing caller wanted current values
+and got them without changing. The one that was easy to miss is the *reverse lookup* — a prompt
+names the control that would fire the action, so it reads the variant too, and the test that caught
+it was the one about spawning an instance after a rebind rather than anything about prompts.
+
+*A variant keeps the declared plan's slot allocation*, which turned out not to be an optimization.
+An action whose every binding the player cleared would otherwise lose its slot and read as
+**unbound** — firing the "not bound in this context" warning, which exists to catch a typo and is
+exactly wrong for a control somebody deliberately emptied. Keeping the table also means action
+states and require-reset flags stay aligned across the swap.
+
+**The `Arc` change, and why the alternative lost.** `BindingModifier::Custom` and
+`BindingCondition::Custom` held a `Box`, so neither `BindingSpec` nor `Plan` could be cloned, so a
+variant could not be built by the obvious route. The alternative was sharing compiled per-binding
+data behind an `Arc` and rewriting only the source — cheaper per apply, no public type change — but
+it needs a precomputed key-to-binding index and a second code path deriving the row list. Cloning
+the authored specs and recompiling makes applying *literally* the pure function §10.1 already
+specified, and reuses `diagnose` on the result. Applying is rare by construction; the recompile is
+not the cost worth optimizing.
+
+**One walk, two readers.** The pass that assembles player-facing rows and the pass that rewrites
+them both need "which bindings feed this row, in slot order". They were going to be two walks
+agreeing by inspection, which is the failure mode worth a function to make impossible — a row built
+one way and written another puts the player's control in a slot the screen is not showing it in.
+`mapped_parts` is that function, and `mappings()` was refactored onto it rather than the applier
+duplicating it.
+
+**What the example found, which nothing else would have.** `examples/capture.rs` stopped at "nothing
+is rebound"; it now applies what it captured and prints the row, the rider, and the untouched
+declaration. Two things fell out of running it:
+
+- *Growing a slot on one part of a composite is wrong.* An empty slot is filled by copying the
+  binding beside it, which is right for a whole binding and produces "Move Down: S | S" for a
+  composite — the other three directions land in their own rows a second time. Refused now, with the
+  remedy being the second `mappable` composite a two-column movement table is written with anyway.
+  Found by writing `mappable_upto(2)` on a directional binding to see what happened, not by reading
+  the code.
+- *A follower riding only some of a row's slots is drawn as riding all of them.*
+  `Mapping::followers` is row-level and carries no slot, so the demo's `WallJump` — following one of
+  Jump's two bindings — printed "Hold R, Hold J" when only the first was true. Chunk 44 got this
+  right for Disasteroids, where `Afterburner` rides both of Thrust's bindings, so nothing in tree
+  had ever shown it. The example follows both now; the modelling question was written onto chunk 31,
+  with a plan-build diagnostic as the likely answer since a rider on some slots and not others is
+  far more likely a missing line than an intention — chunk 58 closed it a different way, replacing
+  `.follows()` with a builder call that derives coverage instead of declaring it.
+
+**Deliberately not here, each with a destination.** The conflict policies and the delegation outcome
+→ 54. Serde, `Reflect` and the file format → 23, which also inherits the question the `MappingKey`
+key raises: a row this build cannot resolve is reported and then dropped, and whether a save should
+preserve it is a format decision, not an apply decision. Per-player override sets → 26, which is the
+first chunk with two players; note that the variant already lives per instance, so a per-entity
+apply is a second entry point rather than a second implementation.
+
+**One new chunk, from noticing that a review note is not a destination.** Chunk 23 carried "open the
+file in a text editor and see whether you can tell what it says" as a review surface, which ground
+rule 5 does not accept — nobody is accountable for a note. It is now chunk 55, and it has something
+to be accountable *with*: a golden TOML document in a test, which fails when the file stops reading
+well. Writing 38's store made the reason concrete rather than aesthetic. `Overrides` keys rows by
+`(Scheme, MappingKey)`, and a derived `Serialize` over that map emits a tuple key — unreadable in
+every format and not a legal TOML table key at all. So the serialized shape has to differ from the
+in-memory one deliberately, and "deliberately" is the word that wants a test under it.
+
+### Chunk 54: Conflict policy
+
+Smaller than the roadmap section that described it. `conflicts_pending(mappings, pending, control,
+target)` in `capture.rs`: the same question `conflicts` answers, against a working copy of
+`Overrides` instead of what is applied, which is what a screen holding unconfirmed rebinds needs
+before either choice is committed. `conflicts` itself is now a thin call onto a shared walk with
+`pending: None`, so it is unchanged in behavior and untouched in its own tests.
+
+**Everything else the roadmap section asked for turned out to already exist, or not belong here.**
+The four named policies — reject, swap, duplicate-allowed, unbind-the-other — do not need a
+crate-owned enum or a `rebind()` that mutates rows on the app's behalf. `Overrides::bind`, `set` and
+`get` already say everything a policy needs to say: reject is not writing, duplicate-allowed is
+writing anyway, and swap and unbind-the-other are the app reading the conflicting row's own current
+list — `pending.get(scheme, key)` falling back to `Mapping::slots`, the same rule
+`conflicts_pending` itself uses — and writing it back with one control removed or traded. A first
+pass built the crate side of that anyway, as a `ConflictPolicy` enum and an `Overrides::rebind`
+resolving conflicts and writing several rows internally. Correctly rejected on review as the crate
+accreting a decision that is the app's to make, not a gap the app cannot fill itself — and not a
+hypothetical concern: this is feedback already heard from collaborators about the crate taking on
+more than it needs to. The doc comment on `conflicts_pending` now carries the four policies as
+worked examples instead, so a reader is not left to invent the pattern.
+
+R19.8's "not ours, delegate" outcome needed nothing at all: `Override::NotOurs`, landed with the
+store in chunk 38, already is that answer, read with `Overrides::get` before a screen ever starts a
+capture. Nothing about it required the delegation to be phrased as an outcome a rebind attempt
+returns.
+
+**The repeat-within-one-row gap chunk 39 left** (`conflicts` excludes the whole target mapping, so
+two slots of one row holding the same control is invisible to it) **resolves the same way, not with
+a crate-side check.** A caller about to write a row already has the candidate list in hand — the
+same list it is about to hand to `Overrides::bind` — and a duplicate in a `Vec<Control>` needs no
+help from this crate to notice. Recorded here rather than turned into an API, on the same reasoning
+as above.
+
+**The roadmap's own "review surface"** — whether a policy is a value the app picks once or a
+decision it makes per rebind — turned out to be answered by not building a crate-side policy API at
+all: the app already owns both cases with the primitives it has, a fixed policy applied every time
+or a modal that tries `Reject` first and calls its own resolution afterward. There is no outcome
+type here that would have needed to carry what a policy would have done instead.
+
+### Chunk 25: Control classes and class bindings
+
+The binding half of R4.9. Chunk 20 landed the shape half — `ControlClass` as capture's filter
+language; this adds a *binding* that targets a class, and a fourth class, `CharacterProducing`,
+whose membership depends on the event rather than the control.
+
+**Not `InputAction`.** The first design pass reused `InputAction`/`ActionOutput` so a class binding
+could dispatch through the same `Fired<A>` observers everything else does, and immediately hit a
+type it had no honest answer for: `ActionValue` has four shapes (`Bool`, `Axis1`, `Axis2`, `Axis3`),
+none of which is "which control fired, with its original event." Making `Control` satisfy
+`ActionOutput` would have meant an `into_action_value`/`from_action_value` pair that is never
+actually called, `unreachable!()`'d out — dead code standing in for a conversion nothing needed. A
+class binding never enters the per-tick fold, carries no modifiers or conditions, and has nothing to
+hold between ticks, so it got its own trait (`ClassBinding`, one associated `PATH`) and its own
+event (`ClassFired<A>`, carrying the original `RawEvent` untouched) instead. Smaller than reusing
+`InputAction` would have been, once the reuse stopped being free.
+
+**The payload is the raw event, not a synthesized `Control`.** The motivating consumer is a
+text-edit widget, which wants what `bevy_input_focus`-style widgets already work with — the
+logical key, the text, the repeat flag — not an identity it would have to reconstruct those from.
+`RawEvent` already carries all of it and was already `Clone + Debug + PartialEq`, so it is the
+payload verbatim. Different classes want different fields out of it; that is left to the app,
+matching to `RawEvent::Keyboard` or reading `RawEvent::control()` for the identity-only case,
+rather than this crate inventing one payload shape to fit every consumer.
+
+**The plan's second structure is a membership test, not a re-derivation of arbitration.** Design
+§4.1 describes "the per-control index" as something a class binding is consulted behind; in this
+evaluator (which folds from held state each tick rather than dispatching per binding per event)
+that turned out to mean exactly one thing: `Plan::indexed_controls`, every control any plain binding
+in the context reads, recomputed on every compile — including a variant's, since a rebind changes
+which controls are indexed even though it never touches the class list itself. A class binding
+never wins a control by being more specific; it is excluded outright the moment any plain binding
+names that control, which is what "it only ever wins by sitting in a higher-priority context"
+(§4.1) already said, just enforced up front rather than re-litigated per tick.
+
+**`character_producing` was measured, not reasoned, using a new example**
+(`examples/ime_diagnostic.rs`) **run against real input on the author's machine.** A macOS kana
+input source composed correctly: every keystroke arrived as its own `Pressed` `KeyboardInput` with
+`text: Some(single kana character)`, and the matching `Released` always carried `text: None`. That
+is exactly what the predicate (`text.is_some() && state == Pressed`) assumes, and it held with no
+exceptions across the run. A dead key looked wrong at first — Option+I then A, which should compose
+to `â`, arrived through this crate's bare diagnostic window as two independent plain letters, `i`
+then `a` — but a side-by-side run of Bevy's own text-input example against the same keystroke
+produced one composed character (visible as the font's missing-glyph box, not two letters), which
+means the composition the diagnostic window was missing is a property of *that window* — most
+likely IME not being enabled on it — and not something winit or Bevy fails to deliver in general.
+So the predicate needs nothing extra for dead keys: wherever composition happens upstream, it
+already lands as one `KeyboardInput` with `text: Some(the composed character)`, which is the exact
+shape the predicate already recognizes. Left genuinely unmeasured: committing a multi-candidate
+conversion through an IME's candidate popup. Reasoned rather than measured: it should be fine,
+since that commit happens through ordinary keystrokes (Space or Enter to pick a candidate) that the
+same per-event rule already judges independently — recorded as a comment next to the predicate
+rather than a chunk, since nothing about it currently looks wrong.
+
+**Deliberately not here.** Wiring an actual focused text field to `CharacterProducing` → 49, which
+already owns "the rest of D4" per Requirements.md's own note by R8.4/R12.6. Nothing in-tree
+declares a class binding yet; the mechanism and its tests are the whole of this chunk, same as the
+roadmap section said going in.
+
+### Chunk 56: Split Friction's tileset
+
+`examples/split_friction/` did not exist before this chunk — chunk 27 (the device-selection screen
+this example exists to demonstrate) has not landed, contrary to how it reads elsewhere in this
+document's own recent history. This chunk needed nothing from it and landed anyway; `main.rs` today
+is only a hand-placed room proving [`tileset`]'s indices, with no `bevy_action_map` usage at all.
+Chunk 27 is still owed before the game is actually about anything.
+
+**Kenney's own tiles have no names, but Kenney's own sample map does.** Tiny Dungeon ships
+`tile_0000.png`…`tile_0131.png` — numbered, not described — so a tile's role has to come from its
+pixels. Eyeballing a scaled preview image got this **wrong**: a crop meant to isolate one quadrant
+for closer inspection landed on a row boundary that wasn't a multiple of the tile size, and every
+row/column read off it afterward was off by a fraction of a row. The reliable source turned out to
+be the `.tmx` sample map Kenney bundles alongside the sheet — a real dungeon Kenney built from these
+same tiles, with real tile-index data in its CSV layers. Decoding it (stripping Tiled's flip-flag
+bits from each GID) and rendering it back with the actual atlas confirmed the indices immediately: a
+coherent dungeon, not noise. Every constant in `tileset.rs` was checked against that render rather
+than read off a picture.
+
+**`Sprite`'s `texture_atlas` field wants a `TextureAtlasTemplate`, not `Option<TextureAtlas>`
+constructed by hand.** `Some(TextureAtlas { layout: ..., index })` inside `bsn!` fails two ways in
+sequence: `Some(...)` itself is parsed as a component-construction call (`bsn!`'s own syntax for
+`Foo(...)`), and even past that, the field's derived template type (`OptionTemplate
+<TextureAtlasTemplate>`) doesn't accept a raw `TextureAtlas` literal. Bevy's own
+`examples/usage/cooldown.rs` (for `ImageNode`, the UI equivalent) has the answer: write a plain
+function returning `bevy::image::TextureAtlasTemplate { layout: handle.into(), index }`, and assign
+its *call* to the `texture_atlas` field directly, no `Some` and no manual `Option`. The handle itself
+still wants building the ordinary way — `Assets<TextureAtlasLayout>::add` in a system with resource
+access, passed down as a plain `Handle` parameter — rather than through `asset_value`, which exists
+for constructing an asset inline and would have added one duplicate `TextureAtlasLayout` per tile.
+
+**A `Children`-only scene root needs `Visibility` alongside `Transform`, or its sprite children warn
+every frame.** `bsn! { Transform::default() Children [...] }` runs, but Bevy's hierarchy propagation
+logs a B0004 warning per child once render systems notice the parent has no `Visibility` for
+`InheritedVisibility` to propagate through. Adding `Visibility::default()` next to `Transform::
+default()` on the root silences it; nothing else in the render output changes.
+
+**Found, not fixed: a door's art doesn't share the plain wall-top tile's silhouette.** `DOOR_CLOSED`
+(index 46) has its stone arch reaching slightly higher within its 16×16 cell than `WALL_TOP` (index
+2) does, so a door dropped into a wall run pokes up above the row's otherwise level skyline.
+Cosmetic at this scale, and left as a note for chunk 57 rather than chased here — a generator
+choosing where doors go is the more natural place to decide whether that matters.
+
+### Chunk 57: A generated dungeon
+
+Landed twice. The first pass built what the roadmap section described — rooms placed as
+non-overlapping rectangles, joined pairwise by straight 1-wide corridors — and it passed every unit
+test written for it (determinism, connectivity, no directional wall standing with no floor beside
+it). Looking at the render was still worth doing: reviewed against a 64×64 Gauntlet-sized playfield,
+it read as a maze of small disconnected rooms threaded by narrow halls, and a maze was not the
+target. **Gauntlet's actual shape is one open arena with obstacles in it, not a maze** — the fix was
+a different generator, not a bigger one: floor now fills the whole interior by default, and a
+handful of solid rectangles are punched back out of it, kept apart from each other and from the
+outer wall by [`CLEARANCE`](examples/split_friction/dungeon.rs) cells of guaranteed-open floor
+(2, so a walkway never narrows to a single-tile squeeze). No corridor-carving code survived; there
+is nothing left for it to connect.
+
+**Every solid cell needed to draw *something*, not "wall or nothing."** The room-and-corridor
+version only ever placed a wall tile adjacent to floor, by construction, so anything not floor and
+not wall-adjacent was background — invisible, correctly, since it was always outside every room.
+Punching obstacles out of an otherwise-solid-free arena breaks that assumption: an obstacle's own
+interior, and the corners of the outer border no directional rule reaches, are solid cells with no
+floor neighbor in any of the five directional patterns. Left as `Empty`, those cells rendered as
+literal holes — the arena's obstacles looked hollow, and the outer boundary had gaps at its
+corners. The fix is a sixth role, `WallFill`, the fallback for solid ground no directional piece
+claims, drawn from one of the flat brick tiles (`tileset::WALL_FILL`, index 36) that were sitting
+unused in the atlas already. `TileRole::Empty` is gone entirely now: every cell resolves to a real
+tile, so `tile_index` returns `usize` rather than `Option<usize>` and the render loop lost its
+`filter_map`.
+
+**A real bug, found while rewriting the file for the design change rather than while fixing it.**
+The floor branch of `resolve_cell` originally read: plain floor if the cell to the north is *also*
+floor, otherwise shadow-or-decorated depending on a second check
+(`is_wall_neighbor_north`) that, read closely, always agreed with the first — it was called only
+from the branch where north was already known not to be floor, so its own "is north floor"
+disjunct was a tautology, and the other two disjuncts it `||`ed against never mattered. Net effect:
+a floor cell only ever got a decorative variant when its north neighbor was floor, which silently
+excluded every shadowed row from ever showing a variant and was three lines doing the work of one.
+Replaced with the obvious rule — shadow if north is not floor, decorated floor otherwise — and the
+now-redundant helper deleted outright rather than kept dead.
+
+**Deliberately not here.** Doors: the previous chunk's `DOOR_CLOSED` constant has no generator-side
+placement logic yet, and isn't reintroduced by this chunk — nothing currently carves an opening that
+would want one. T-junctions and non-rectangular obstacle shapes: the directional-wall rule only
+promises a plain outer corner, which is what a rectangle always presents; an obstacle shape this
+rule cannot draw correctly was never generated in the first place, rather than generated and drawn
+wrong.
+
+### Chunk 58: `follow` replaces per-binding `follows`
+
+Found while scoping chunk 31, which inherited chunk 38's leftover: a follower drawn as riding every
+slot of a row when it had only declared `.follows()` on some of them. The roadmap's proposed fix was
+a plan-build diagnostic requiring full coverage. Looking at why partial coverage was writable at all
+found the actual defect one layer down: `.follows::<A>()` was a per-binding declaration, so a
+follower had to retype every control its leader already named — once per device, verbatim — and
+nothing tied the *count* of those repeats to the leader's own. A diagnostic would have caught the
+typo after the fact; it would not have removed the reason to make one.
+
+**`InputContextBuilder::follow::<Follower, Leader>(configure)` replaces `BindingHandle::follows`.**
+It reads every binding `Leader` has declared, generates one matching binding of `Follower` per
+control found, and runs `configure` on each — `controls.follow::<Afterburner, Thrust>(|b|
+b.hold(0.75))` where three hand-written `.bind().follows::<Thrust>()` calls stood before. Partial
+coverage of one row is no longer expressible: there is nothing left to under-declare, since the
+bindings are derived rather than retyped.
+
+**Resolves against the leader's bindings *so far*, not a snapshot taken at the end — a deliberate,
+costed choice.** An order-independent version (a pending list, resolved once every binding is known)
+was designed and rejected: it needs a boxed closure held in builder state to survive past the
+`follow` call, a struct re-deriving what `push_binding` already gets for free from a type parameter,
+and — because diagnostics run before the builder is finished — a second call site in `context.rs`,
+resolving pending follows before `report_diagnostics` runs so a private leader binding is still
+caught. Roughly three to four times the code, in two files, for a pattern nothing else in this
+builder uses. The order-dependent version costs none of that, and the rule it imposes — declare what
+you are naming before you name it — is the same rule every other call in this builder already
+follows. It has one real consequence: `examples/capture.rs`'s `WallJump` follows `Jump`'s keyboard
+bindings and not its pad one, and that is now because `follow` is called before `Jump`'s pad binding
+is declared, not because of a third follows-call nobody wrote.
+
+**The internal representation is untouched, on purpose.** `FollowsDecl`, `leader_of`'s
+match-by-source resolution, `rewrite_followers`, and the second pass in `mappings_of` all still work
+exactly as before — `follow` only changes how the `BindingSpec`s they operate on get authored, not
+what they are once declared. Follows is a build-time and rebind-time bookkeeping question; the
+evaluator never knows a binding is a follower at all, so there was nothing to gain at that layer from
+also making the relationship action-based rather than per-binding, and a real cost (losing the
+"provably reads what it claims to ride" self-check that source-matching gives for free).
+
+**One test deleted outright rather than adapted.**
+`following_an_action_that_reads_something_else_is_refused` exercised a mistake — a follower
+hand-bound to a control its leader never used — that `follow` cannot construct, since its sources
+are always copied from the leader. Likewise `a_binding_cannot_be_mappable_and_follow` (`mappable`
+declared *before* `follows`): `follow` always applies `follows` first, so that order is unreachable
+through the public API; the reverse order (`follows` then `mappable`, attempted inside `configure`)
+still panics, off the same guard in `declare_mapping` that was already independent of how `follows`
+got there.
