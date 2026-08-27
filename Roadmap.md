@@ -135,15 +135,15 @@ step and a real game is a better acceptance test than a synthetic one.
 
 | | |
 | --- | --- |
-| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves; and a screen that can be *operated* — a stick or a D-pad rounded to a compass point and narrowed to the ticks it moved on, which is a selection moving one step per direction entered, over a game that keeps running and never hears the controls the screen has taken; and two actions that deliberately share one control declared as sharing it, so that a rebind moves both; and a prompt or a mapping row that says when a binding wants more than a bare press — held, or tapped twice — as structure a localization layer can render for itself, with a fallback formula ("Hold W", "W ×2") for a game that ships no catalogue, and a mapping's followers drawn as a subordinate line under the row they ride rather than a row of their own; and **a rebind that takes effect** — a diff against the declared bindings, applied to every live context by compiling a variant plan and swapping it in, which cancels what was in flight and re-arms require-reset, moves every follower riding a row that changed, leaves the declaration intact so the next patch's revised defaults still reach anyone who never touched that row, and tells every prompt on screen to catch up; and conflict detection that can be asked against a working copy of overrides rather than only what is applied, which is what lets a screen with unconfirmed choices tell whether two of them clash before either is committed; and a **class binding** — a plan's second list, consulted only for a control no plain binding in the context already indexes, dispatching the original raw event (not a folded value, since there is no lifecycle to fold it into) to whatever declared it, which is the mechanism a focused text field will claim character-producing keys through without the app enumerating them; and **the settings screen finished** — pressing a boxed cell listens for a control and writes it into a working copy rather than the running game, a clash steals the control from whatever else already held it, Confirm applies the working copy in one call and Cancel discards it, B cancels a capture in progress before it cancels the screen, and every cell a capture or a steal touches is patched in place — `Text` on the exact entities named at spawn, nothing despawned or rebuilt, because a capture never changes a row's shape; and **exclusive contexts** — a context that treats every lower-priority one as inactive for as long as it is, canceling in-flight actions and re-arming require-reset exactly as an ordinary deactivation would, so a modal screen owns the whole input surface without enumerating the actions it takes it from. |
+| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves; and a screen that can be *operated* — a stick or a D-pad rounded to a compass point and narrowed to the ticks it moved on, which is a selection moving one step per direction entered, over a game that keeps running and never hears the controls the screen has taken; and two actions that deliberately share one control declared as sharing it, so that a rebind moves both; and a prompt or a mapping row that says when a binding wants more than a bare press — held, or tapped twice — as structure a localization layer can render for itself, with a fallback formula ("Hold W", "W ×2") for a game that ships no catalogue, and a mapping's followers drawn as a subordinate line under the row they ride rather than a row of their own; and **a rebind that takes effect** — a diff against the declared bindings, applied to every live context by compiling a variant plan and swapping it in, which cancels what was in flight and re-arms require-reset, moves every follower riding a row that changed, leaves the declaration intact so the next patch's revised defaults still reach anyone who never touched that row, and tells every prompt on screen to catch up; and conflict detection that can be asked against a working copy of overrides rather than only what is applied, which is what lets a screen with unconfirmed choices tell whether two of them clash before either is committed; and a **class binding** — a plan's second list, consulted only for a control no plain binding in the context already indexes, dispatching the original raw event (not a folded value, since there is no lifecycle to fold it into) to whatever declared it, which is the mechanism a focused text field will claim character-producing keys through without the app enumerating them; and **the settings screen finished** — pressing a boxed cell listens for a control and writes it into a working copy rather than the running game, a clash steals the control from whatever else already held it, Confirm applies the working copy in one call and Cancel discards it, B cancels a capture in progress before it cancels the screen, and every cell a capture or a steal touches is patched in place — `Text` on the exact entities named at spawn, nothing despawned or rebuilt, because a capture never changes a row's shape; and **exclusive contexts** — a context that treats every lower-priority one as inactive for as long as it is, canceling in-flight actions and re-arming require-reset exactly as an ordinary deactivation would, so a modal screen owns the whole input surface without enumerating the actions it takes it from; and **presets** — a named `Overrides` a game keeps its own list of, applied through the same path a rebind is via `apply_overrides_with_preset`, which exempts exactly the rows a preset names from the "not rebindable here" refusal that still stands for a capture, so a preset moves a `Fixed` row (every gamepad binding, sticks included) that a capture screen never offers a button for. |
 | **Known wrong today** | A widget that handles its own keyboard bypasses consumption entirely: `bevy_ui_widgets::Button` activates on `Space` whether or not a context claimed `Space`, because `InputDispatchPlugin` asks the mapper nothing (R8.2a, chunk 49). Disasteroids no longer shows a symptom of it — chunk 61's exclusive `Menu` closes the one collision that stood in front of it (`Fire` and a focused button both wanting `Space`) from the context side, leaving the gap real but unobserved there until chunk 49 finds a different vehicle. The prelude exports sixteen bare English nouns that a glob import drops into a template beside Bevy's own (chunk 48). A control capture refuses (wrong shape, wrong scheme, reserved) is silent on Disasteroids' screen — the session simply keeps listening, with nothing said about why the press did not take. |
-| **Never built** | Saving a rebind: an override set is a value in memory and nothing writes it to a file (chunk 23), and nothing has yet looked at what that file would read like (chunk 55). Also tunables, presets, and glyphs. And the class binding mechanism has no caller yet: nothing in-tree is a focused text field, so `ControlClass::CharacterProducing` has never been bound outside its own tests (chunk 49). |
+| **Never built** | Saving a rebind: an override set is a value in memory and nothing writes it to a file (chunk 23), and nothing has yet looked at what that file would read like (chunk 55). Also tunables and glyphs. And the class binding mechanism has no caller yet: nothing in-tree is a focused text field, so `ControlClass::CharacterProducing` has never been bound outside its own tests (chunk 49). |
 
 ---
 
 ## What has landed
 
-Forty-three chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+Forty-four chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
 where it fell short of its own description — Phase VII onward there, and everything before it in the
 [archive](./Log-archive.md). This table is only an index, and the sequence below is what remains.
 
@@ -192,6 +192,7 @@ where it fell short of its own description — Phase VII onward there, and every
 | 58 | `follow` replaces per-binding `follows` | done; found while scoping chunk 31 and landed ahead of it, since 31 inherited the follower-coverage problem this closes |
 | 31 | The settings screen, rebinding | done; steal chosen for R19.3's policy, and every capture patches the exact cells it touched rather than rebuilding — a capture never changes a row's shape |
 | 61 | Exclusive contexts | done; R7.8 landed as priority order alone, no named groups — R7.7's other half stays in the deferred table; the exclusion ceiling's device-blindness is written onto chunk 26 rather than solved twice |
+| 45 | Presets | done; landed as a starting point, not a layer — no persisted "which preset" identity, so chunk 23 inherits the `Overrides` shape it already had; tunables stay out of scope, format left open for them |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -243,10 +244,10 @@ rather than against its own description:
   vertical navigation, which one column would not.
 - **The gamepad table is read-only**, and has two columns: description and control. Neither fork of
   the audience rebinds a pad row from here. A game shipping on Steam or a console has the platform's
-  own remapper and should link to it; a game with neither gets **presets** — Default and Southpaw as
-  buttons under the table (chunk 45). That is the whole gamepad story, and it is why the pad rows
-  are listed-and-fixed rather than absent (R19.10): without chunk 43 there would be no table here at
-  all.
+  own remapper and should link to it; a game with neither gets **presets** instead — Default and
+  Southpaw as buttons under the table, which chunk 45 built. That is the whole gamepad story, and it
+  is why the pad rows are listed-and-fixed rather than absent (R19.10): without chunk 43 there would
+  be no table here at all.
 - **Confirm and Cancel at the bottom**, activatable three ways: mouse click; directional navigation
   then A; and a shortcut, B for cancel and X for confirm. **The button caption includes the
   shortcut**, which is R18.1's reverse lookup showing up as a UI requirement rather than a nicety —
@@ -264,35 +265,6 @@ capacity, and a capture names the slot it fills — 43 put the fixed rows on it,
 from that model alone, 30 made the cells reachable, and 31 made pressing one do something: capture,
 steal, Confirm and Cancel each meaning what they say, and B meaning one of two things depending on
 whether a capture is live.
-
-### 45. Presets
-
-R19.12, which had no chunk until the gamepad table needed one. A preset is a named arrangement of
-mappings and tunables applied as a unit — "Default", "Southpaw", "Lefty" — and for the device
-classes where per-mapping rebinding is not offered it is not a convenience but *the entire remapping
-story*. A stick has no row to press.
-
-- **Why after 38.** A preset is a set of assignments, so it applies through the same path a rebind
-  does (§10.1) rather than a second writer. Building it before there is an apply path means
-  inventing one, and then having two.
-- **Disasteroids is the acceptance test, and the fork is the lesson.** Its gamepad table is
-  read-only either way; what sits under it is the choice. A game on Steam or a console links to the
-  platform's remapper; a game with neither gets Default and Southpaw as buttons, which is the
-  arrangement most shipped games actually have. Disasteroids teaches the second, since the first is
-  chunk 42's territory and a demo cannot show both without becoming a lecture.
-- **Southpaw is the honest test case** — it swaps two *sticks*, so it cannot be expressed as a
-  keyboard-style rebind at all, and a preset mechanism that only rearranges buttons would pass a
-  weaker one.
-- **What has to be decided: whether a preset is a starting point or a layer.** If a player picks
-  Southpaw and then rebinds one row, does a later "Southpaw" reapply discard their edit? Both
-  answers ship in real games. This is the chunk that has to pick one, and 23 stores whichever it is:
-  a preset name, or a preset name plus a diff against it.
-- **Tunables are in scope by R19.12 and may not be in scope here.** They are a separate declaration
-  that does not exist yet, so the mapping half can land first — but the preset *format* has to leave
-  room, since retrofitting a second kind of entry into a saved file is the migration R17 exists to
-  avoid.
-- **Review surface:** whether a game with one preset pays anything. R19.13 says presets are
-  additive, and the shape that satisfies it is a default preset that no one has to declare.
 
 ### 23. Persistence of overrides
 
@@ -315,10 +287,10 @@ what remains here is what building it has to get right and what to look at in re
   returns.
   Preserving unresolved rows means the file's own representation is keyed by string and the store is
   what resolves it, which is this chunk's call to make and is cheap to make now and expensive later.
-- **Plus whatever chunk 45 decides a preset selection is** — a name, or a name and a diff against
-  it. That is one field or two, but it is the difference between reapplying a preset discarding the
-  player's edits and preserving them, and a file written before the question is answered answers it
-  by accident.
+- **Chunk 45 settled a preset selection as a starting point, not a layer**: no persisted identity,
+  since a preset's rows land in the working copy exactly as a manual rebind's do and nothing ever
+  reapplies one. This chunk therefore needs no second field for "which preset" — the `Overrides`
+  shape it already has is the whole of what a preset selection contributes to the file.
 - **Three states per mapping** (R17.7): absent, cleared, and owned by someone else. A format with
   two cannot express a player deliberately unbinding something, because absence already means
   default.

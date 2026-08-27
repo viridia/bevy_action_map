@@ -1053,10 +1053,13 @@ fn read_declared_mappings<C: InputContext + Component>(
 /// Rewrites one context's bindings for an override set, and swaps the result into every instance.
 ///
 /// Registered per context by `add_context`, like the readers above, and for the same reason: this is
-/// the last place `C` is available.
+/// the last place `C` is available. `preset` names the rows a preset authorized, exempting exactly
+/// those from the "not rebindable here" refusal that would otherwise stop a preset moving a `Fixed`
+/// row — see [`apply_overrides_with_preset`](crate::overrides::apply_overrides_with_preset).
 fn apply_to_context<C: InputContext + Component>(
     world: &mut World,
     overrides: &crate::overrides::Overrides,
+    preset: Option<&crate::overrides::Overrides>,
 ) -> alloc::vec::Vec<crate::overrides::OverrideProblem> {
     let Some(declared) = world.get_resource::<InputContextPlan<C>>() else {
         return alloc::vec::Vec::new();
@@ -1071,7 +1074,7 @@ fn apply_to_context<C: InputContext + Component>(
         .unwrap_or_default();
 
     let (variant, mappings, problems) =
-        crate::overrides::rewrite(&bindings, &rows, overrides, &reserved, C::PATH);
+        crate::overrides::rewrite(&bindings, &rows, overrides, preset, &reserved, C::PATH);
     let plan = Arc::new(Plan::variant_of(&template, variant));
 
     world.insert_resource(AppliedPlan::<C> {

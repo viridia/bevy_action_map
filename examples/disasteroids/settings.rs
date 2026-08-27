@@ -14,21 +14,24 @@
 //!
 //! # Working copy
 //!
-//! Nothing is applied to the running game until Confirm. Every capture instead writes into
-//! [`PendingOverrides`], and patches the cells it touched directly — the row's own slot, and any
-//! follower line riding that column.
+//! Nothing is applied to the running game until Confirm. Every capture and every preset press only
+//! write into [`PendingOverrides`] — never into the view directly. [`redraw_pending`] is the one
+//! place anything reads it back out and repaints a cell, run once per change rather than pushed by
+//! whatever changed it, the same way [`prompt_ui`](crate::common::prompt_ui) keeps prompts true.
 
 use bevy::input_focus::{AutoFocus, FocusCause, FocusGained, FocusLost, InputFocus};
 use bevy::math::CompassOctant;
 use bevy::prelude::*;
+use bevy::ui::UiSystems;
 use bevy::ui::auto_directional_navigation::{AutoDirectionalNavigation, AutoDirectionalNavigator};
 use bevy::ui_widgets::{Activate, Button};
-use bevy_action_map::mapping::fallback_label;
-use bevy_action_map::overrides::{Override, Overrides, apply_overrides};
+use bevy_action_map::mapping::{declared_mappings, fallback_label};
+use bevy_action_map::overrides::{Override, Overrides, apply_overrides_with_preset};
 use bevy_action_map::prelude::*;
+use bevy_action_map::preset::Preset;
 use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
-use crate::actions::{Accept, Back, Confirm, Menu, Navigate, ToggleSettings};
+use crate::actions::{Accept, Back, Confirm, Menu, Navigate, ToggleSettings, Turn};
 use crate::common::prompt_ui::{PromptScheme, PromptSpan};
 use crate::pause::Simulating;
 
@@ -48,6 +51,9 @@ const FOCUS: Color = Color::srgb(1.0, 0.85, 0.3);
 /// The background a cell shows while it is listening for the next control — without this, a
 /// capture in progress and one that has not started look identical.
 const LISTENING: Color = Color::srgb(0.4, 0.28, 0.05);
+/// The preset currently in effect, drawn distinct from the rest of the row — its own color, since
+/// "selected" and "listening" are not the same fact about a cell.
+const SELECTED: Color = Color::srgb(0.25, 0.55, 0.35);
 
 /// The width of the column holding what a row is called, and of each control column after it.
 const NAME_WIDTH: f32 = 210.0;
@@ -69,17 +75,38 @@ pub enum Settings {
 
 /// Every change the player has made on this visit to the screen, unconfirmed.
 ///
-/// Reset empty whenever the screen opens. Confirm is the only path from here into the running
-/// game, via [`apply_overrides`]; every capture writes here and patches the cells it touched to
-/// match, so what a row shows is always what Confirm would commit.
+/// Reset empty whenever the screen opens. Confirm is the only path from here into the running game,
+/// via [`apply_overrides_with_preset`]. Every capture and every preset press writes into `rows` and
+/// nothing else — this is a model, and [`redraw_pending`] is the only thing that reads it back out
+/// to repaint a cell, so what a row shows is always what Confirm would commit without either writer
+/// having to know how to draw one.
 #[derive(Resource, Default)]
-struct PendingOverrides(Overrides);
+struct PendingOverrides {
+    /// Captures and a preset's rows alike, the whole working copy Confirm applies.
+    rows: Overrides,
+    /// The rows the currently selected preset authorized, replaced wholesale on each preset press
+    /// and never accumulated — picking a new preset supersedes the last rather than layering onto
+    /// it. Confirm hands this to [`apply_overrides_with_preset`] so a preset's own rows still move
+    /// even though the row they name is `Fixed` everywhere a capture can reach.
+    preset_rows: Overrides,
+}
 
 pub fn plugin(app: &mut App) {
     app.init_state::<Settings>();
     app.init_resource::<PendingOverrides>();
     app.add_systems(OnEnter(Settings::Showing), (reset_pending, show));
     app.add_systems(OnExit(Settings::Showing), release_focus);
+    // Ahead of every UI system, so a cell that changed this frame is laid out at the width its new
+    // text wants rather than the width it used to be — the same reason `prompt_ui` runs where it
+    // does. `resource_changed` alone is enough: the cells a fresh screen spawns already read
+    // straight off the live mapping list, which is what an empty `PendingOverrides` already agrees
+    // with, so there is no "just spawned, still stale" case to also catch here.
+    app.add_systems(
+        PostUpdate,
+        redraw_pending
+            .before(UiSystems::Prepare)
+            .run_if(resource_changed::<PendingOverrides>),
+    );
 
     // `Menu` being exclusive already stops the ship answering; this stops the simulation
     // continuing to run behind a screen nobody can see it through. A second, independent
@@ -191,8 +218,10 @@ pub(crate) fn confirm(_: On<Fired<Confirm>>, mut commands: Commands) {
 
 /// The two ways Confirm is reached — the action above, and the button below — end here.
 fn apply_and_close(world: &mut World) {
-    let pending = world.resource::<PendingOverrides>().0.clone();
-    apply_overrides(world, &pending);
+    let pending = world.resource::<PendingOverrides>();
+    let rows = pending.rows.clone();
+    let preset_rows = pending.preset_rows.clone();
+    apply_overrides_with_preset(world, &rows, &preset_rows);
     world
         .resource_mut::<NextState<Settings>>()
         .set(Settings::Hidden);
@@ -214,6 +243,67 @@ fn ring_off(lost: On<FocusLost>, mut outlines: Query<&mut Outline>) {
     if let Ok(mut outline) = outlines.get_mut(lost.entity) {
         outline.color = Color::NONE;
     }
+}
+
+/// Every preset this game offers.
+///
+/// Built fresh against the world rather than declared once, the same way [`start_capture`] resolves
+/// a row: a `MappingKey` cannot be built outside the crate, so `Preset::build` is what asks the
+/// world what `Turn`'s gamepad row actually is, the same way `add_context` asks it what `Turn`
+/// itself is.
+fn presets(world: &World) -> Vec<Preset> {
+    vec![
+        Preset {
+            name: "disasteroids.default",
+            rows: Overrides::new(),
+        },
+        Preset::build(world, "disasteroids.southpaw", |southpaw| {
+            southpaw.bind::<Turn>(
+                Scheme::Gamepad,
+                [Control::GamepadAxis(GamepadAxis::RightStickX)],
+            );
+        }),
+    ]
+}
+
+/// The row named `scheme` and `key`, if any mapping in the list is.
+fn row_named(rows: &[Mapping], scheme: Scheme, key: MappingKey) -> Option<&Mapping> {
+    rows.iter()
+        .find(|row| row.scheme == scheme && row.key == key)
+}
+
+/// Which of `presets` currently matches what is bound, if any.
+///
+/// Checked against the union of every row any preset in the list names, not just this preset's own
+/// — a preset that names nothing (`Default`) is a claim that none of *them* have moved, which is
+/// only answerable by looking at what the others would have changed. A row a preset does not name
+/// reads as that row's own declared default, the same rule [`effective`] already applies to a
+/// pending row nobody has touched.
+fn selected_preset(
+    presets: &[Preset],
+    declared: &[Mapping],
+    live: &[Mapping],
+    pending: &Overrides,
+) -> Option<&'static str> {
+    let touched: Vec<(Scheme, MappingKey)> = presets
+        .iter()
+        .flat_map(|preset| preset.rows.iter().map(|(scheme, key, _)| (scheme, key)))
+        .collect();
+
+    presets
+        .iter()
+        .find(|preset| {
+            touched.iter().all(|&(scheme, key)| {
+                let Some(declared_row) = row_named(declared, scheme, key) else {
+                    return false;
+                };
+                let Some(live_row) = row_named(live, scheme, key) else {
+                    return false;
+                };
+                effective(declared_row, &preset.rows) == effective(live_row, pending)
+            })
+        })
+        .map(|preset| preset.name)
 }
 
 /// The whole screen, as a scene.
@@ -242,12 +332,13 @@ fn screen(world: &World) -> impl Scene {
             .collect()
     };
 
-    // One list of two, rather than two children: the tables are the same kind of thing, and a
-    // `Vec` of scenes is the scene list a `Children` block wants.
-    let tables = vec![
-        table("Keyboard & Mouse", rows(Scheme::KeyboardMouse)),
-        table("Gamepad", rows(Scheme::Gamepad)),
-    ];
+    // A stick has no boxed cell of its own to press, so a preset is that table's whole remapping
+    // story — the row of buttons below it is drawn distinct exactly where the current selection
+    // reads as matching what is bound.
+    let presets = presets(world);
+    let declared = declared_mappings(world);
+    let pending = world.resource::<PendingOverrides>().rows.clone();
+    let selected = selected_preset(&presets, &declared, &all, &pending);
 
     bsn! {
         // Closing the screen is nothing but despawning it, which the state can do on its own — and
@@ -279,7 +370,16 @@ fn screen(world: &World) -> impl Scene {
             ),
             (
                 Node { column_gap: Val::Px(64.0), align_items: AlignItems::Start }
-                Children [{tables}]
+                Children [
+                    ({table("Keyboard & Mouse", rows(Scheme::KeyboardMouse))}),
+                    (
+                        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(10.0) }
+                        Children [
+                            ({table("Gamepad", rows(Scheme::Gamepad))}),
+                            ({preset_row(&presets, selected)}),
+                        ]
+                    ),
+                ]
             ),
             (
                 Node { column_gap: Val::Px(16.0), margin: {UiRect::top(Val::Px(6.0))} }
@@ -391,6 +491,150 @@ fn cancel_pressed(_: On<Activate>, mut next: ResMut<NextState<Settings>>) {
 /// [`confirm`] instead.
 fn confirm_pressed(_: On<Activate>, mut commands: Commands) {
     commands.queue(apply_and_close);
+}
+
+/// The row of preset buttons under the gamepad table.
+///
+/// `+ use<>` on this and [`preset_button`] below: both build an owned scene from what they're
+/// handed rather than holding onto it, but Rust 2024's default `impl Trait` capture rule would tie
+/// the result to `presets`'s borrow anyway, which does not outlive the caller's own local of the
+/// same name in [`screen`].
+fn preset_row(presets: &[Preset], selected: Option<&'static str>) -> impl Scene + use<> {
+    let buttons: Vec<_> = presets
+        .iter()
+        .map(|preset| preset_button(preset, Some(preset.name) == selected))
+        .collect();
+    bsn! {
+        Node { column_gap: Val::Px(10.0) }
+        Children [{buttons}]
+    }
+}
+
+/// One preset's own button. The one currently in effect is drawn distinct from the rest — the same
+/// border/background swap [`LISTENING`] uses for "a capture is happening here", with its own color,
+/// since "selected" and "listening" are not the same fact about a cell.
+fn preset_button(preset: &Preset, selected: bool) -> impl Scene + use<> {
+    let name = preset.name;
+    let label = fallback_label(name);
+    let border = if selected { SELECTED } else { FIXED };
+    let background = if selected {
+        SELECTED.with_alpha(0.25)
+    } else {
+        Color::NONE
+    };
+    bsn! {
+        Button
+        on(preset_pressed)
+        focusable()
+        template_value(PresetButton(name))
+        Text::new(label)
+        TextFont { font_size: 15.0_f32 }
+        TextColor(TITLE)
+        BorderColor::all(border)
+        BackgroundColor(background)
+        Node {
+            border: {UiRect::all(Val::Px(1.0))},
+            border_radius: {BorderRadius::all(Val::Px(4.0))},
+            padding: {UiRect::axes(Val::Px(12.0), Val::Px(4.0))},
+        }
+    }
+}
+
+/// Names the preset a button selects, so a press can find its rows again — mirrors how
+/// [`RebindCell`] names a row by key rather than carrying the row's own data.
+#[derive(Component, Clone, Copy)]
+struct PresetButton(&'static str);
+
+/// Writes the pressed preset's rows into the working copy. Nothing else — no cell this observer
+/// could name is touched directly; [`redraw_pending`] notices the change and repaints everything
+/// that might have moved, including every preset button's own highlight.
+///
+/// Every row *any* registered preset names is cleared first, not just the ones this preset itself
+/// names: picking a new preset supersedes whatever the last one wrote rather than layering onto it,
+/// and a preset that names nothing (`Default`) is a claim about all of them, the same reading
+/// [`selected_preset`] already gives that case. Skipping this step is exactly the bug an earlier
+/// version of this function had — `Default`'s own rows are empty, so writing only what it names
+/// wrote nothing at all, and whatever the last preset had moved simply stayed moved.
+fn preset_pressed(activate: On<Activate>, buttons: Query<&PresetButton>, mut commands: Commands) {
+    let Ok(&PresetButton(name)) = buttons.get(activate.entity) else {
+        return;
+    };
+    commands.queue(move |world: &mut World| {
+        let presets = presets(world);
+        let Some(preset) = presets.iter().find(|preset| preset.name == name) else {
+            return;
+        };
+        let touched: Vec<(Scheme, MappingKey)> = presets
+            .iter()
+            .flat_map(|preset| preset.rows.iter().map(|(scheme, key, _)| (scheme, key)))
+            .collect();
+
+        let mut pending = world.resource_mut::<PendingOverrides>();
+        for (scheme, key) in touched {
+            pending.rows.reset(scheme, key);
+        }
+        for (scheme, key, over) in preset.rows.iter() {
+            pending.rows.set(scheme, key, over.clone());
+        }
+        pending.preset_rows = preset.rows.clone();
+    });
+}
+
+/// Rewrites every row and every preset button to match the pending working copy.
+///
+/// Every one of them rather than only the row a capture or a preset press actually named: a steal
+/// can move any row, and a preset can move several at once, so asking "which one" buys nothing a
+/// full pass does not already answer just as cheaply. What keeps that affordable is the run
+/// condition this is registered with — it does not run at all on a frame where
+/// [`PendingOverrides`] did not change — the same trade `prompt_ui::refresh_prompts` makes for the
+/// same reason.
+///
+/// Exclusive, because it reads every tagged cell in the table alongside the mapping list, the
+/// declared defaults, the preset list and the pending copy all at once.
+fn redraw_pending(world: &mut World) {
+    let live = mappings(world);
+    let declared = declared_mappings(world);
+    let presets = presets(world);
+    let pending = world.resource::<PendingOverrides>().rows.clone();
+
+    let mut principals = world.query::<(&RowCell, &mut Text)>();
+    for (cell, mut text) in principals.iter_mut(world) {
+        let Some(row) = row_named(&live, cell.0, cell.1) else {
+            continue;
+        };
+        *text = Text::new(
+            effective(row, &pending)
+                .get(cell.2)
+                .map(|control| control.fallback_label().into_owned())
+                .unwrap_or_default(),
+        );
+    }
+
+    let mut followers = world.query::<(&FollowerCell, &mut Text)>();
+    for (cell, mut text) in followers.iter_mut(world) {
+        let Some(row) = row_named(&live, cell.0, cell.1) else {
+            continue;
+        };
+        *text = Text::new(
+            effective(row, &pending)
+                .get(cell.2)
+                .map_or_else(String::new, |control| {
+                    cell.3.fallback_format(&control.fallback_label())
+                }),
+        );
+    }
+
+    let selected = selected_preset(&presets, &declared, &live, &pending);
+    let mut buttons = world.query::<(&PresetButton, &mut BorderColor, &mut BackgroundColor)>();
+    for (button, mut border, mut background) in buttons.iter_mut(world) {
+        let is_selected = Some(button.0) == selected;
+        *border = BorderColor::all(if is_selected { SELECTED } else { FIXED });
+        *background = BackgroundColor(if is_selected {
+            SELECTED.with_alpha(0.25)
+        } else {
+            Color::NONE
+        });
+    }
 }
 
 /// Everything a selection can land on carries these three, plus [`claim_focus`] to answer a click.
@@ -514,10 +758,14 @@ fn cells(mapping: &Mapping, columns: usize) -> Vec<Cell> {
             },
             // Exactly the cells the box is drawn around, which is what the box was always
             // promising: the selection can reach what the player may change, and skips the rest.
-            role: if changeable && exists {
+            // A slot that exists but is not changeable still gets an identity — `Fixed` rather
+            // than `Label` — because a preset may still move it even though a capture never will.
+            role: if !exists {
+                CellRole::Label
+            } else if changeable {
                 CellRole::Changeable(mapping.scheme, mapping.key, column)
             } else {
-                CellRole::Label
+                CellRole::Fixed(mapping.scheme, mapping.key, column)
             },
         });
     }
@@ -581,52 +829,27 @@ struct Cell {
     role: CellRole,
 }
 
-/// What kind of thing a cell is, which is also what a capture needs to find it again afterwards.
+/// What kind of thing a cell is, which is also what identifies it for [`redraw_pending`] and, where
+/// a capture applies, for starting one.
 ///
 /// `MappingKey` alone does not name a row — the same key is shared by a keyboard mapping and a
 /// gamepad one for the same action (it is derived from the action's path and part, and says nothing
 /// about the scheme), so every role that names a row carries its `Scheme` too.
 #[derive(Clone, Copy)]
 enum CellRole {
-    /// A heading, a row's name, or a follower's name — read, never pressed.
+    /// A heading, a row's name, or a follower's name — read, never pressed, and never moved by
+    /// anything this screen does.
     Label,
     /// A control the player may press to capture a new one into this slot.
     Changeable(Scheme, MappingKey, usize),
+    /// A control filled in but not player-capturable here — every gamepad row, since a preset
+    /// rather than this screen's own capture is that table's whole remapping story. Still named,
+    /// because a preset can still move it and [`redraw_pending`] has to find it again when one does.
+    Fixed(Scheme, MappingKey, usize),
     /// A follower's line under one column of the row above it, carrying the condition its caption
     /// is formatted with — a capture on that column has to reformat this cell too, not just the
     /// principal one.
     Follower(Scheme, MappingKey, usize, ConditionDescriptor),
-}
-
-/// Finds every cell belonging to one row — its own changeable cells and every follower's line
-/// beneath it — and rewrites each to match `controls`.
-///
-/// The only place a capture's result reaches the screen: nothing is despawned or rebuilt, because a
-/// capture never changes a row's shape, only what a cell says. Two full-table scans regardless of
-/// how many cells actually changed, which is cheap at this size and simpler than threading a "which
-/// columns moved" answer out of the caller — a steal can shift every column behind the one that was
-/// actually taken, so "repaint the whole row" is the correct answer as often as not.
-fn repaint_row(world: &mut World, scheme: Scheme, key: MappingKey, controls: &[Control]) {
-    let mut principals = world.query::<(&RebindCell, &mut Text)>();
-    for (cell, mut text) in principals.iter_mut(world) {
-        if cell.0 == scheme && cell.1 == key {
-            *text = Text::new(
-                controls
-                    .get(cell.2)
-                    .map(|control| control.fallback_label().into_owned())
-                    .unwrap_or_default(),
-            );
-        }
-    }
-
-    let mut followers = world.query::<(&FollowerCell, &mut Text)>();
-    for (cell, mut text) in followers.iter_mut(world) {
-        if cell.0 == scheme && cell.1 == key {
-            *text = Text::new(controls.get(cell.2).map_or_else(String::new, |control| {
-                cell.3.fallback_format(&control.fallback_label())
-            }));
-        }
-    }
 }
 
 /// `indent` is nonzero for exactly a follower's line — the mark of a row that is a fact about the
@@ -668,6 +891,15 @@ fn cell(cell: Cell) -> impl Scene {
     } else {
         None
     };
+    // Every principal cell gets this one, `Changeable` and `Fixed` alike — `redraw_pending` finds a
+    // row's cells this way regardless of who is allowed to capture into them, since a preset moves
+    // a `Fixed` row `RebindCell` was never attached to.
+    let row_tag = match cell.role {
+        CellRole::Changeable(scheme, key, slot) | CellRole::Fixed(scheme, key, slot) => {
+            Some(template_value(RowCell(scheme, key, slot)))
+        }
+        CellRole::Label | CellRole::Follower(..) => None,
+    };
     let follower_tag = if let CellRole::Follower(scheme, key, slot, condition) = cell.role {
         Some(template_value(FollowerCell(scheme, key, slot, condition)))
     } else {
@@ -678,6 +910,7 @@ fn cell(cell: Cell) -> impl Scene {
     bsn! {
         {selectable}
         {rebind_tag}
+        {row_tag}
         {follower_tag}
         Text({cell.text})
         TextFont { font_size: 15.0_f32 }
@@ -698,6 +931,13 @@ fn cell(cell: Cell) -> impl Scene {
 /// `Scheme` first because `MappingKey` alone does not name a row — see [`CellRole`].
 #[derive(Component, Clone, Copy)]
 struct RebindCell(Scheme, MappingKey, usize);
+
+/// Names the row and slot a principal cell displays, whether or not it is capturable — the identity
+/// [`redraw_pending`] finds any cell by. Separate from [`RebindCell`], which additionally marks "and
+/// this one is interactive": every `RebindCell` is also a `RowCell`, but a `Fixed` row's cell is a
+/// `RowCell` with no `RebindCell` beside it, since nothing on this screen may capture into one.
+#[derive(Component, Clone, Copy)]
+struct RowCell(Scheme, MappingKey, usize);
 
 /// Names the row, column and condition a follower's cell renders, so a capture on that column can
 /// reformat this cell's caption along with the principal's.
@@ -755,7 +995,8 @@ fn captured(captured: On<Captured>, cells: Query<&RebindCell>, mut commands: Com
 }
 
 /// What a mapping currently holds, the working copy laid over its declared slots — [`Overrides`]'s
-/// own three-state rule, read the same way [`apply_overrides`] and `conflicts_pending` both do.
+/// own three-state rule, read the same way [`apply_overrides_with_preset`] and `conflicts_pending`
+/// both do.
 fn effective(mapping: &Mapping, pending: &Overrides) -> Vec<Control> {
     match pending.get(mapping.scheme, mapping.key) {
         Some(Override::Controls(controls)) => controls.clone(),
@@ -765,8 +1006,10 @@ fn effective(mapping: &Mapping, pending: &Overrides) -> Vec<Control> {
 }
 
 /// The policy chunk 31 picked for R19.3: a captured control is stolen from whatever else already
-/// holds it rather than being refused or left to duplicate. Every row the steal or the capture
-/// itself touched is repainted before this returns.
+/// holds it rather than being refused or left to duplicate.
+///
+/// Writes into [`PendingOverrides`] and nothing else — no cell is touched from here; see
+/// [`redraw_pending`], which notices the change and repaints whatever it finds moved.
 ///
 /// Every row a steal can find is guaranteed to share `scheme` with the row captured into: `control`
 /// is itself scheme-specific (a key can never sit in a gamepad row's slots), so nothing outside this
@@ -788,35 +1031,25 @@ fn resolve_capture(
     else {
         return;
     };
-    let mut pending = world
-        .remove_resource::<PendingOverrides>()
-        .unwrap_or_default();
-    let mut touched = Vec::new();
+    let mut pending = world.resource_mut::<PendingOverrides>();
 
-    for clash in conflicts_pending(&all, &pending.0, control, Some(key)) {
+    for clash in conflicts_pending(&all, &pending.rows, control, Some(key)) {
         let Some(other) = all
             .iter()
             .find(|row| row.scheme == scheme && row.key == clash.mapping)
         else {
             continue;
         };
-        let mut controls = effective(other, &pending.0);
+        let mut controls = effective(other, &pending.rows);
         controls.retain(|&held| held != control);
-        pending.0.bind(other.scheme, other.key, controls.clone());
-        touched.push((other.key, controls));
+        pending.rows.bind(other.scheme, other.key, controls);
     }
 
-    let mut controls = effective(&target, &pending.0);
+    let mut controls = effective(&target, &pending.rows);
     if slot < controls.len() {
         controls[slot] = control;
     } else {
         controls.push(control);
     }
-    pending.0.bind(target.scheme, target.key, controls.clone());
-    touched.push((target.key, controls));
-
-    world.insert_resource(pending);
-    for (key, controls) in touched {
-        repaint_row(world, scheme, key, &controls);
-    }
+    pending.rows.bind(target.scheme, target.key, controls);
 }

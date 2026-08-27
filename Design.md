@@ -1020,9 +1020,59 @@ Three properties worth noting:
   without the UI knowing it drives a modifier parameter. This is what R20.5 needs and what keeps R5.8
   (modifiers never shown to players) satisfiable.
 
-**Presets** (R19.12) are a named set of mapping assignments and tunable values applied as a unit —
-how "Southpaw" is actually shipped, and the only remapping story for device classes where
-per-mapping rebinding is not offered.
+**Presets** (R19.12) are a named set of mapping assignments applied as a unit — how "Southpaw" is
+actually shipped, and the only remapping story for device classes where per-mapping rebinding is not
+offered. `Preset` (`crate::preset`) is nothing more than a name paired with an `Overrides` (§10.1):
+a preset is the diff it already is.
+
+**`Preset::build(world, name, |preset| { ... })` gives it §9.7's own ergonomics**, the reason being
+the same one that keeps `MappingKey` out of an app's hands anywhere else: `preset.bind::<A>(scheme,
+controls)` resolves `A`'s actual declared mapping in `scheme` and writes `Overrides::bind` under it,
+so an app never derives a key by hand or risks getting one wrong. It needs `&World` for exactly the
+reason chunk 45 found while building the crate's own example against it — a mapping key cannot be
+constructed outside this crate at all, so *asking* is the only way in, the same as `start_capture`
+resolving a row by asking the world rather than holding one. `bind` panics rather than guessing when
+an action has no mapping in that scheme, or more than one (a composite has one per part, and naming
+the action and scheme alone cannot say which): this is app-build code, the same tier and the same
+convention `add_context`'s own diagnostics already use for a mistake that is unreachable in a shipped
+game (§9.5).
+
+**Applying one collides with R19.10 as originally built, and the collision is the reason this section
+exists rather than a one-line "reuse §10.1".** `apply_overrides`'s `refusal` refuses any row whose
+`Rebinding` is not `Here` — right for a capture, since a `Fixed` row is a design decision the player's
+own screen must not override, but wrong for a preset, whose entire reason to exist is moving rows a
+capture screen never offers (every gamepad binding in a typical game, sticks especially). The fix is
+not a third `Rebinding` state: that would force every already-correct `Fixed` declaration in every
+game using this crate to be revisited for a fact about its binding that has not changed, which is
+what R19.13 (presets cost nothing when unused) rules out. Instead, `apply_overrides_with_preset(world,
+overrides, preset)` threads `preset` through to `refusal` as a second, narrower question — *is this
+row one a preset is naming, right now* — and exempts exactly those rows from the `NotRebindable`
+refusal. Every other refusal reason (capacity, scheme, shape, reserved) still applies to a preset row
+exactly as it does to a capture: a preset that names a keyboard control for a gamepad row is refused
+like any other, so R19.13's promise ("additive, never a precondition") extends to "a badly-formed
+preset cannot corrupt a row" as well.
+
+`overrides` must be the *whole* working copy — a preset's rows and any manual captures together —
+never only the preset's own rows. Two sequential apply calls do not compose: each `rewrite` starts
+over from the pristine declaration (§10.1's own "diff, not a snapshot"), so a smaller second call
+would silently revert every row it does not mention. `preset` is consulted only to decide which rows
+in `overrides` may bypass `NotRebindable`; it plays no other part in what gets applied.
+
+**A preset is a starting point, not a layer.** Selecting one writes its rows into the same working
+copy a manual capture writes into, indistinguishably — there is no persisted "which preset is active"
+identity anywhere, in the crate or in what a screen keeps between visits. This is what R19.12 already
+says ("a sensible starting point per control scheme"), and it is also the only answer compatible with
+`rewrite`'s own non-composing nature: a "layer" that reapplies later and reconciles against whatever
+the player has since changed would need machinery this crate does not have and R19.12 does not ask
+for. It also keeps §10.1/§17's persisted format exactly the `Overrides` shape it already has — "which
+preset is currently selected" is a fact a screen can *compute*, by comparing what is bound against
+each registered preset's own rows, rather than a second field anyone has to store.
+
+Disasteroids' Southpaw moves `Turn`'s gamepad row from the left stick's X axis to the right stick's —
+a `Fixed` row, since gamepad remapping there is presets' whole story, moved by a preset the same way
+`overrides::rewrite` moves any other row once `NotRebindable` no longer stands in the way. There is no
+crate-owned registry of presets, for the same reason `Overrides` has none (§10.1): a game keeps its
+own list, exactly as it keeps its own working copy.
 
 ### 9.8 Navigating a screen (R22.5)
 

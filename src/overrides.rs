@@ -242,6 +242,30 @@ pub enum OverrideProblemKind {
 ///
 /// Rows this build cannot use come back as [`OverrideProblem`]s; everything else is applied.
 pub fn apply_overrides(world: &mut World, overrides: &Overrides) -> Vec<OverrideProblem> {
+    apply_with(world, overrides, None)
+}
+
+/// Like [`apply_overrides`], but a preset's rows are exempt from the "not rebindable here"
+/// refusal — the one way a `Fixed` row (every gamepad binding in a typical game) still moves.
+///
+/// `overrides` is the whole working copy to apply — a preset's rows and any manual captures
+/// together, since applying always starts from the pristine declaration and a second call does
+/// not layer onto the first. `preset` is only consulted to decide which of those rows may bypass
+/// [`OverrideProblemKind::NotRebindable`]; pass the selected preset's own rows, or an empty
+/// [`Overrides`] if none is selected.
+pub fn apply_overrides_with_preset(
+    world: &mut World,
+    overrides: &Overrides,
+    preset: &Overrides,
+) -> Vec<OverrideProblem> {
+    apply_with(world, overrides, Some(preset))
+}
+
+fn apply_with(
+    world: &mut World,
+    overrides: &Overrides,
+    preset: Option<&Overrides>,
+) -> Vec<OverrideProblem> {
     let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
         return Vec::new();
     };
@@ -250,7 +274,7 @@ pub fn apply_overrides(world: &mut World, overrides: &Overrides) -> Vec<Override
 
     let mut problems = Vec::new();
     for apply in appliers {
-        problems.extend(apply(world, overrides));
+        problems.extend(apply(world, overrides, preset));
     }
 
     // Reported here rather than per context, because "no context declares this" is the only form
@@ -286,6 +310,7 @@ pub(crate) fn rewrite(
     declared: &[BindingSpec],
     rows: &[Mapping],
     overrides: &Overrides,
+    preset: Option<&Overrides>,
     reserved: &[Control],
     context: &'static str,
 ) -> (Vec<BindingSpec>, Vec<Mapping>, Vec<OverrideProblem>) {
@@ -323,7 +348,16 @@ pub(crate) fn rewrite(
             })
             .collect();
 
-        if let Some(kind) = refusal(row, wanted, reserved, &contributors, declared) {
+        let preset_authorized =
+            preset.is_some_and(|preset| preset.get(row.scheme, row.key).is_some());
+        if let Some(kind) = refusal(
+            row,
+            wanted,
+            reserved,
+            &contributors,
+            declared,
+            preset_authorized,
+        ) {
             problems.push(OverrideProblem {
                 scheme: row.scheme,
                 mapping: row.key,
@@ -381,15 +415,17 @@ pub(crate) fn rewrite(
 /// Why this row cannot take these controls, if it cannot.
 ///
 /// The whole row is refused rather than partly applied: half a rebind is worse than none, and the
-/// player still has the default.
+/// player still has the default. `preset_authorized` is the one exception to the rebindable-only
+/// rule below it: a preset moves a `Fixed` row on purpose, which is the whole point of one.
 fn refusal(
     row: &Mapping,
     wanted: &[Control],
     reserved: &[Control],
     contributors: &[&MappedPart],
     declared: &[BindingSpec],
+    preset_authorized: bool,
 ) -> Option<OverrideProblemKind> {
-    if !row.rebinding.is_rebindable() {
+    if !row.rebinding.is_rebindable() && !preset_authorized {
         return Some(OverrideProblemKind::NotRebindable);
     }
     // Capacity first: "this row has one slot" is both simpler and truer than anything below it
@@ -955,6 +991,41 @@ mod tests {
         assert_eq!(
             slots(&app, "override_tests.move.up"),
             [Control::Key(KeyCode::KeyW)]
+        );
+    }
+
+    /// R19.12's mechanism: a preset moves a `Fixed` row a capture cannot, exempting exactly the
+    /// rows it names from `NotRebindable` and nothing else.
+    #[test]
+    fn a_preset_moves_a_fixed_row_a_capture_cannot() {
+        let mut app = app();
+        let target = row(&app, "override_tests.settings");
+        assert_eq!(target.rebinding, Rebinding::Fixed);
+
+        let mut preset = Overrides::new();
+        preset.bind(target.scheme, target.key, [Control::Key(KeyCode::F2)]);
+
+        // Refused without a preset: a bare `apply_overrides` treats this row exactly as a capture
+        // screen would.
+        let problems = apply_overrides(app.world_mut(), &preset);
+        assert_eq!(
+            problems
+                .iter()
+                .map(|problem| problem.kind)
+                .collect::<Vec<_>>(),
+            [OverrideProblemKind::NotRebindable]
+        );
+        assert_eq!(
+            slots(&app, "override_tests.settings"),
+            [Control::Key(KeyCode::F1)]
+        );
+
+        // The same row moves once the same rows are named as the preset authorizing it.
+        let problems = apply_overrides_with_preset(app.world_mut(), &preset, &preset);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(
+            slots(&app, "override_tests.settings"),
+            [Control::Key(KeyCode::F2)]
         );
     }
 

@@ -98,9 +98,14 @@ pub(crate) struct DeclaredContext {
     // previews, and what an override is a diff against.
     pub(crate) declared_mappings: fn(&World) -> Vec<crate::mapping::Mapping>,
     // Rewrites this context's bindings for an override set and swaps the result into every
-    // instance. Exclusive because it writes both a resource and the components.
-    pub(crate) apply:
-        fn(&mut World, &crate::overrides::Overrides) -> Vec<crate::overrides::OverrideProblem>,
+    // instance. Exclusive because it writes both a resource and the components. The `Option`
+    // carries a preset's rows, exempted from the rebindable-only refusal that would otherwise
+    // stop a preset moving a `Fixed` row.
+    pub(crate) apply: fn(
+        &mut World,
+        &crate::overrides::Overrides,
+        Option<&crate::overrides::Overrides>,
+    ) -> Vec<crate::overrides::OverrideProblem>,
 }
 
 /// Every context declared so far, in declaration order.

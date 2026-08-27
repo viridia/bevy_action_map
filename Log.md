@@ -169,9 +169,11 @@ rule names: **the persistence design** and **the Steam grooming** are pre-work f
 both still unbuilt, and a chunk not yet written is exactly the case "nothing left in the sequence
 reasons from it" is not yet true for.
 
-**Chunk 31 stays for now, deliberately not swept in with the ten.** It landed this session, chunk 45
-(Presets) is next in the sequence and touches the same screen, and there has not yet been a session
-that needed to consult it and found it already gone. Revisit next time this rule runs.
+**Chunk 31 stayed here rather than moving with the ten, and chunk 45 (Presets) is why it was kept:**
+it reused `repaint_row` directly for a preset's own live redraw, so this was the session that needed
+to consult chunk 31 and found it still here rather than already gone. Whether it can move now is a
+question for the next housekeeping pass, which checks against every `###` section still open rather
+than against one chunk's own use of it.
 
 ### Chunk 31: The settings screen, rebinding
 
@@ -318,3 +320,121 @@ scheme, reserved) has no observer on this screen; the session simply keeps liste
 which is `CaptureSession`'s own documented behavior for anything not a deliberate press but is a
 real gap for the three reasons that are. No mechanism in this file renders a transient message of
 any kind, so this is left as a found-not-fixed rather than invented on the spot.
+
+### Chunk 45: Presets
+
+R19.12's own text ("a preset applies through the same path a rebind does") turned out to collide
+with what chunk 38 actually built, and finding that collision before writing any code is what this
+chunk mostly was. `overrides::refusal` refuses any row whose `Rebinding` is not `Here` — right for a
+capture, since a `Fixed` row is a design decision the player's own screen must not second-guess, but
+wrong for a preset, whose entire reason to exist is moving rows a capture screen never offers (every
+gamepad binding in Disasteroids, since none call `.mappable()`). Presets could not move a single pad
+button under the code as it stood.
+
+**The fix threads provenance through the existing apply path rather than adding a third `Rebinding`
+state.** A new state would have forced every already-correct `Fixed` declaration in every game using
+this crate to be revisited for a fact about the binding that had not changed, which is exactly what
+R19.13 (presets cost nothing when unused) rules out. Instead `apply_overrides_with_preset(world,
+overrides, preset)` threads `preset` down through `rewrite` to `refusal`, which now takes a
+`preset_authorized: bool` and exempts only `NotRebindable` for the rows a preset actually names —
+every other refusal reason (capacity, scheme, shape, reserved) still applies exactly as it does to a
+capture. `apply_overrides` itself keeps its exact signature, passing `None` at its one call site: a
+game with no presets pays nothing, not even a new argument to thread through.
+
+**`overrides` has to be the whole working copy, never only the preset's own rows — found by tracing
+`rewrite`'s own module doc rather than by writing code first.** `rewrite` starts over from the
+pristine declaration on every call ("a diff, not a snapshot," and the
+`the_defaults_survive_being_overridden` test proves it), so two sequential apply calls do not
+compose: a smaller second call would silently revert every row it does not mention. That is what
+settled "starting point, not layer" for what a preset selection *is* — the other question this chunk
+had to answer, left open in the roadmap. A preset's rows are written into the same working copy a
+manual capture writes into, indistinguishably, and nothing anywhere persists "which preset is
+currently selected" as an identity — a screen that wants to show one recomputes it, by comparing what
+is bound against each registered preset's own rows. This is also the only answer compatible with
+`rewrite`'s non-composing nature: a "layer" that reapplies later and reconciles against whatever the
+player has since changed would need machinery this crate does not have. It keeps chunk 23's eventual
+persisted format exactly the `Overrides` shape it already designed — no second field for "which
+preset."
+
+**`Preset` (`src/preset.rs`) is a name paired with an `Overrides`, nothing more** — no crate-owned
+registry, for the same reason `Overrides` itself has none: a game keeps its own list, the same way
+Disasteroids already keeps its own `PendingOverrides`. Building Southpaw's one row needed
+`mappings(world)` at runtime rather than a `const`, since a `MappingKey` cannot be constructed outside
+this crate — the same reason `start_capture` resolves a row by asking the world rather than holding
+one.
+
+**Southpaw moves `Turn`'s gamepad row from the left stick's X axis to the right stick's.** Disasteroids
+has no `Move`/`Look` twin-stick pair to literally swap two sticks between, as the roadmap's "Southpaw
+is the honest test case" language suggested — checked before building rather than assumed, since the
+game turned out not to match the sentence describing it. One `Fixed` axis row moved by a preset
+exercises exactly the same mechanism a two-stick swap would (a `GamepadAxis` control is no different
+to `rewrite` than a `KeyCode` one), without adding gameplay scope a presets chunk has no business
+adding.
+
+**The settings screen's Confirm/Cancel button row turned out to already be the right model for
+heterogeneous scene lists, once bsn!'s own grammar was read rather than guessed at.** `Children [
+({cancel_button()}), ({confirm_button()}) ]` splices two *different* `impl Scene` types side by side
+because each is its own `({expr})` splice; a `Vec<impl Scene>` spliced as `{tables}` only works
+because both entries come from the same `table()` call. Wrapping the gamepad table and its new preset
+button row in a `Node`-column child of the outer `Children [...]` list — rather than trying to make a
+mixed `Vec` — followed directly from that, once the distinction was clear.
+
+**Rust 2024's default `impl Trait` capture rule needed an explicit `+ use<>` on both new button
+functions — found by the compiler, not by review.** `preset_row(presets: &[Preset], ...)` and
+`preset_button(preset: &Preset, ...)` build an owned scene from what they're handed and keep no
+borrow past return, but the edition's default still ties the returned `impl Scene` to the input
+reference's lifetime unless told otherwise, which does not outlive `screen`'s own local `presets`
+`Vec`. `table()` never hit this because it takes `&'static str` and an owned `Vec` — this chunk was
+the first to pass a non-`'static` reference through a function returning `impl Scene`.
+
+**The controller touching the view directly hid two real bugs behind one another — found by playing
+it, not by review.** The first landed version had `preset_pressed` call `repaint_row` and a
+`recolor_preset_buttons` helper directly, mirroring `resolve_capture`'s own established style. Two
+things were wrong with it, and each one hid the other:
+
+- **Pressing `Default` after `Southpaw` changed nothing.** `preset_pressed` only ever wrote the
+  *pressed* preset's own rows into the pending copy — fine for `Southpaw`, which has one row, fatal
+  for `Default`, whose whole content is an empty `Overrides`. Writing zero rows left whatever the
+  last preset had written untouched, so `Default` never actually became the working copy's answer;
+  it only ever looked like a no-op. The fix reads every row *any* registered preset might touch and
+  resets it first, before writing the pressed one's own rows on top — "starting point, not layer"
+  said this already, in the doc comment, without the code actually doing it.
+- **The gamepad table's own text never updated at all, first press or later.** `repaint_row` finds a
+  cell by its `RebindCell` tag, and `cells()` only ever attached that tag to a *capturable*
+  (`Rebinding::Here`) cell — exactly the ones a preset never needs to move, since every gamepad row
+  is `Fixed`. `Turn`'s cell had no tag `repaint_row` could find it by, so every preset press silently
+  repainted nothing; only closing and reopening the screen, which rebuilds the table straight from
+  `mappings(world)`, ever showed the real state. `CellRole` gained a `Fixed(Scheme, MappingKey,
+  usize)` case distinct from a blank/nonexistent slot, and a new `RowCell` tag is attached to *every*
+  principal cell regardless of whether `RebindCell` also is — identity for finding a cell again is
+  now separate from permission to capture into it.
+
+**Both were symptoms of the same thing, raised directly:** a controller (an observer, or a command
+queue it pushed) was reaching into the view and repainting it inline, rather than only writing the
+model and letting something else notice. The fix follows a pattern the crate already had, reviewed
+and shipped — `present::PromptGeneration` plus `resource_changed::<PromptGeneration>()`, which
+`examples/common/prompt_ui.rs::refresh_prompts` already consumes exactly this way. `PendingOverrides`
+needed no new counter: an ordinary `ResMut`/`Mut` write already marks a resource changed, so
+`redraw_pending`, gated on `resource_changed::<PendingOverrides>` and run in `PostUpdate` ahead of
+`UiSystems::Prepare`, is the only place anything reads the pending copy back out to touch a `Text`,
+`BorderColor` or `BackgroundColor`. `resolve_capture` was simplified the same way — it no longer
+threads a `touched: Vec<(MappingKey, Vec<Control>)>` out to repaint the rows it changed; every row is
+just re-derived and repainted on the next redraw pass, cheap at this table's size for the same reason
+`repaint_row`'s own two-full-table-scan design already was. Fixing the second bug also fixed the
+first for free: once redraw is a full re-derivation from `(mappings(world), PendingOverrides)`
+instead of a list of touched rows, there is no "which cells changed" bookkeeping left to get wrong.
+
+**Preset construction was raw plumbing, raised directly, and worth fixing before landing.** The first
+version of `presets()` hand-rolled a `mappings(world)`-then-`Overrides::bind` dance the same way
+`start_capture` does for a single row — correct, but exactly the boilerplate `add_context`'s own
+builder exists to spare an author. `Preset::build(world, name, |preset| { preset.bind::<Turn>(scheme,
+controls); })` is now real crate API (`src/preset.rs`), not example-only code, since any game
+building a preset needs the same by-action-type resolution `Turn`'s row needed here. `bind` panics
+rather than silently guessing when an action's mapping in a scheme is missing or ambiguous (a
+composite has one row per part) — the same tier and the same convention `add_context`'s own
+diagnostics already use (§9.5), since this is an author mistake at declaration time, not a player-
+facing one.
+
+**Not done: R18.7.** The user asked whether this chunk subsumes the PlayStation confirm/cancel
+button-convention region swap. It does not — checked directly, and nothing in the crate or the
+example branches on region or button convention anywhere. Untouched, separate future work.
