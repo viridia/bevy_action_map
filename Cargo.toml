@@ -54,6 +54,9 @@ bevy = { git = "https://github.com/bevyengine/bevy.git", features = [
   "dynamic_linking",
 ] }
 trybuild = "1.0"
+# Picked as the concrete format for chunk 55's golden persistence test — a format this crate never
+# learns about outside that one test (§10.1).
+toml = "0.8"
 
 [features]
 default = ["std", "bevy_reflect", "keyboard", "mouse", "gamepad", "state"]

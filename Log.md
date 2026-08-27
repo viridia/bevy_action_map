@@ -438,3 +438,58 @@ facing one.
 **Not done: R18.7.** The user asked whether this chunk subsumes the PlayStation confirm/cancel
 button-convention region swap. It does not — checked directly, and nothing in the crate or the
 example branches on region or button convention anywhere. Untouched, separate future work.
+
+### Chunks 23 and 55: Persistence, and the file that validates it
+
+Landed together on the user's own call: 55 is a golden test for what 23 builds, so reviewing them
+apart would mean reading the format twice. `Overrides` now has hand-written `Serialize` and a
+`DeserializeSeed`-based loader behind the `serialize` feature; nothing writes the result to an
+actual file, which was always the app's decision and stays one — R17.1 through R17.9 are about the
+value that round-trips, not about disk I/O.
+
+**The "cleared middle slot" case Design §10.1 describes turned out unreachable, checked before
+building rather than assumed.** `Override::Controls(Vec<Control>)` has no way to express a hole —
+a row is however many controls are bound, compacted from the front — and nothing in the crate or
+Disasteroids' own settings screen ever produces one: a steal's `retain` (chunk 31) already just
+compacts the list it took from, which chunk 31's own log entry treats as the accepted behavior, not
+a bug. Building a marker for a state the type cannot hold would have been exactly the unrequested
+abstraction the house style warns against, so the golden document has no case for it.
+
+**Whether an unresolved mapping name survives a save was chunk 23's own flagged decision, and the
+user picked the simpler side.** A row naming an action this build no longer declares could be kept
+as a raw string alongside the resolved rows, so a rename that reverts before the next save loses
+nothing — chunk 23's roadmap text called this "cheap to make now and expensive later." Declined:
+`Overrides` stays keyed only by `MappingKey` exactly as chunk 38 left it, and a save simply omits
+what it cannot resolve, same as `apply_overrides` already does. Revisiting this later means adding
+a second store to `Overrides`, not patching one; the roadmap's own warning about the cost is now on
+record rather than merely implied.
+
+**A `MappingKey` cannot be manufactured from a loaded string, which is why loading is a
+`DeserializeSeed` and not a plain `Deserialize` impl.** The type holds a `&'static str`, always
+one the game's own `MappingKey::new` produced at startup — an app cannot construct one at all,
+`new` is `pub(crate)`. So resolving a saved row means finding the *existing* key among what
+`declared_mappings` already returns, string-matched by `Display`, never building a new one. A name
+that matches nothing has no `MappingKey` to put in an `OverrideProblem` (whose `mapping` field
+requires one), so it comes back in a separate `UnresolvedMapping` list instead, carrying the raw
+text — an unrecognized *control* name, by contrast, is discovered only after its mapping already
+resolved, so that one does fit `OverrideProblem` and got a new `UnknownControl` variant.
+
+**That variant cost `OverrideProblemKind` its `Copy` derive** — a `String` field is incompatible
+with it — and every call site collecting `.kind` out from behind a `&OverrideProblem` needed
+`.clone()` added. Mechanical, and the compiler found every site.
+
+**The wire shape is a hand-written `Serialize`, not a derive, because `Overrides`' own shape (a
+`BTreeMap` keyed by `(Scheme, MappingKey)`) has no honest table-key representation.** Rows are
+grouped by scheme into their own table, each keyed by the mapping's `Display` string; a row holding
+one control writes as a bare scalar and reads back from either a scalar or a list, so a mapping
+with one binding never needs brackets. `Cleared` and `NotOurs` write as the bare words `"cleared"`
+and `"external"`, chosen because every real control name carries a `/` (chunk 37's own naming
+scheme), so neither word can ever collide with one. `version` is serialized before `bindings`
+deliberately: TOML requires a table's scalar fields to precede any nested table header, so the two
+calls have to happen in that order rather than through an unordered map — the version field itself
+reads but does not yet branch on anything, since only one exists so far.
+
+**The golden literal matched what `toml::to_string` produced on the first run**, which is the
+opposite of a coincidence: `BindingsTable`'s manual `serialize_map` walks a `BTreeMap<Scheme, _>`
+in `Scheme`'s own declared order rather than sorting scheme names alphabetically, which is what
+keeps `keyboard_mouse` ahead of `gamepad` in the file despite "g" sorting first.

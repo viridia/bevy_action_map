@@ -38,6 +38,8 @@
 //! use, and applies everything else.
 
 use alloc::collections::BTreeMap;
+#[cfg(feature = "serialize")]
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use bevy_ecs::world::World;
@@ -184,7 +186,10 @@ pub struct OverrideProblem {
 }
 
 /// What was wrong with an override row.
-#[derive(Clone, Copy, Debug, PartialEq)]
+///
+/// No longer `Copy` once a loaded control name has to be carried — clone a `kind` you want to hold
+/// onto rather than moving it out from behind a reference.
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum OverrideProblemKind {
     /// No mapping of that name in that scheme is declared any more.
@@ -227,6 +232,286 @@ pub enum OverrideProblemKind {
     /// as a second `mappable` binding of the same action and the player gets a filled second slot on
     /// all four rows at once, which is how a keyboard table with two columns is actually written.
     CompositeCannotGrow,
+    /// A saved control name this build does not recognize.
+    ///
+    /// What a control renamed or removed since the file was written looks like. Distinct from
+    /// [`WrongScheme`](Self::WrongScheme) and [`WrongShape`](Self::WrongShape), which both name an
+    /// actual [`Control`] — this one has none, because the text a loaded row held did not resolve
+    /// to one at all.
+    #[cfg(feature = "serialize")]
+    UnknownControl {
+        /// The text the file held, exactly as saved.
+        name: String,
+    },
+}
+
+/// This crate's own on-disk format version (R17.3).
+///
+/// Only one exists so far, so nothing yet reads it beyond requiring it be present — it exists so a
+/// later chunk has somewhere to hang a migration once a second version does.
+#[cfg(feature = "serialize")]
+const FORMAT_VERSION: u32 = 1;
+
+/// The name a saved file uses for a scheme, stable independent of [`Scheme`]'s own variant names
+/// (R17.9's stability obligation applies here too, not only to a control).
+#[cfg(feature = "serialize")]
+const fn scheme_name(scheme: Scheme) -> &'static str {
+    match scheme {
+        Scheme::KeyboardMouse => "keyboard_mouse",
+        Scheme::Gamepad => "gamepad",
+    }
+}
+
+#[cfg(feature = "serialize")]
+fn scheme_from_name(name: &str) -> Option<Scheme> {
+    match name {
+        "keyboard_mouse" => Some(Scheme::KeyboardMouse),
+        "gamepad" => Some(Scheme::Gamepad),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "serialize")]
+impl serde::Serialize for Override {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            // Bare words a person reads as neither a control nor a mistake — every real control
+            // name carries a `/` (chunk 37), so the two can never collide with one (R17.7).
+            Override::Cleared => serializer.serialize_str("cleared"),
+            Override::NotOurs => serializer.serialize_str("external"),
+            // A scalar is the same thing as a one-element list, and most rows hold one — a player
+            // editing this by hand should not have to type brackets to say so (§10.1).
+            Override::Controls(controls) if controls.len() == 1 => {
+                serializer.serialize_str(controls[0].name().as_ref())
+            }
+            Override::Controls(controls) => {
+                use serde::ser::SerializeSeq;
+                let mut seq = serializer.serialize_seq(Some(controls.len()))?;
+                for control in controls {
+                    seq.serialize_element(control.name().as_ref())?;
+                }
+                seq.end()
+            }
+        }
+    }
+}
+
+/// The `[bindings.*]` half of the file: one table per scheme (R17.4), in `Scheme`'s own declared
+/// order rather than sorted by name — so `gamepad` never jumps ahead of `keyboard_mouse` merely
+/// because "g" sorts before "k".
+#[cfg(feature = "serialize")]
+struct BindingsTable<'a>(BTreeMap<Scheme, BTreeMap<String, &'a Override>>);
+
+#[cfg(feature = "serialize")]
+impl serde::Serialize for BindingsTable<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (scheme, rows) in &self.0 {
+            map.serialize_entry(scheme_name(*scheme), rows)?;
+        }
+        map.end()
+    }
+}
+
+#[cfg(feature = "serialize")]
+impl serde::Serialize for Overrides {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        // Grouped by scheme first — a keyboard remap has to read as visibly separate from the
+        // pad's (§10.1) — and within a scheme sorted by the key's own text, so the file reads the
+        // same way twice running.
+        let mut by_scheme: BTreeMap<Scheme, BTreeMap<String, &Override>> = BTreeMap::new();
+        for (scheme, key, value) in self.iter() {
+            by_scheme
+                .entry(scheme)
+                .or_default()
+                .insert(key.to_string(), value);
+        }
+
+        // "version" before "bindings": TOML requires a table's own key/value pairs to precede any
+        // nested table header, so the order these two are emitted in is load-bearing, not cosmetic.
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("version", &FORMAT_VERSION)?;
+        map.serialize_entry("bindings", &BindingsTable(by_scheme))?;
+        map.end()
+    }
+}
+
+/// A row a saved file named that this build cannot turn into a [`MappingKey`] at all.
+///
+/// Distinct from [`OverrideProblem`]: every `OverrideProblem` names a mapping this build has, and
+/// this one specifically does not. A [`MappingKey`] can only ever be one the game's own
+/// [`declared_mappings`](crate::mapping::declared_mappings) already holds — it is derived from
+/// `&'static` strings the game compiled in, not manufactured from a loaded one — so a name a save
+/// wrote for an action since renamed or removed has nothing to become. It is reported rather than
+/// dropped in silence, which is what carrying the raw text here does; a rewritten save simply omits
+/// it.
+#[cfg(feature = "serialize")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UnresolvedMapping {
+    /// The scheme table the row was filed under.
+    pub scheme: Scheme,
+    /// The mapping name exactly as the file spelled it.
+    pub name: String,
+}
+
+#[cfg(feature = "serialize")]
+#[derive(serde::Deserialize)]
+struct RawOverrides {
+    version: u32,
+    #[serde(default)]
+    bindings: BTreeMap<String, BTreeMap<String, RawOverride>>,
+}
+
+/// A row's value, before its mapping name has been resolved against anything.
+#[cfg(feature = "serialize")]
+enum RawOverride {
+    Controls(Vec<String>),
+    Cleared,
+    NotOurs,
+}
+
+#[cfg(feature = "serialize")]
+impl<'de> serde::Deserialize<'de> for RawOverride {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct RowVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for RowVisitor {
+            type Value = RawOverride;
+
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str("a control name, a list of them, \"cleared\", or \"external\"")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(match v {
+                    "cleared" => RawOverride::Cleared,
+                    "external" => RawOverride::NotOurs,
+                    other => RawOverride::Controls(alloc::vec![String::from(other)]),
+                })
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut controls = Vec::new();
+                while let Some(name) = seq.next_element::<String>()? {
+                    controls.push(name);
+                }
+                Ok(RawOverride::Controls(controls))
+            }
+        }
+
+        deserializer.deserialize_any(RowVisitor)
+    }
+}
+
+/// Turns what a file said into what this build can use.
+///
+/// Each row's mapping name is matched against `declared`, since a [`MappingKey`] can only ever be
+/// one the game already has (§10.1). A name that matches nothing comes back in the returned
+/// [`UnresolvedMapping`] list rather than being dropped in silence (R17.2); a control name that
+/// does not parse becomes an [`OverrideProblem`] instead, because by that point the mapping *did*
+/// resolve and there is a row to file the problem against.
+#[cfg(feature = "serialize")]
+fn resolve(
+    raw: RawOverrides,
+    declared: &[Mapping],
+) -> (Overrides, Vec<OverrideProblem>, Vec<UnresolvedMapping>) {
+    // Read for its presence (R17.3) — there is only one version so far, so nothing yet branches on
+    // its value.
+    let _version = raw.version;
+
+    let mut overrides = Overrides::new();
+    let mut problems = Vec::new();
+    let mut unresolved = Vec::new();
+
+    for (scheme_text, rows) in raw.bindings {
+        // Not one of ours — a foreign or future top-level key. Nothing typed to report this
+        // against, so R17.2's tolerance is all this can be: skip the table, keep the rest.
+        let Some(scheme) = scheme_from_name(&scheme_text) else {
+            continue;
+        };
+        for (name, row) in rows {
+            let Some(mapping) = declared
+                .iter()
+                .find(|candidate| candidate.scheme == scheme && candidate.key.to_string() == name)
+            else {
+                unresolved.push(UnresolvedMapping { scheme, name });
+                continue;
+            };
+
+            let names = match row {
+                RawOverride::Cleared => {
+                    overrides.set(scheme, mapping.key, Override::Cleared);
+                    continue;
+                }
+                RawOverride::NotOurs => {
+                    overrides.set(scheme, mapping.key, Override::NotOurs);
+                    continue;
+                }
+                RawOverride::Controls(names) => names,
+            };
+
+            let mut controls = Vec::with_capacity(names.len());
+            let mut all_known = true;
+            for name in &names {
+                match Control::from_name(name) {
+                    Some(control) => controls.push(control),
+                    None => {
+                        all_known = false;
+                        problems.push(OverrideProblem {
+                            scheme,
+                            mapping: mapping.key,
+                            kind: OverrideProblemKind::UnknownControl { name: name.clone() },
+                        });
+                    }
+                }
+            }
+            if all_known {
+                // An empty list and `Cleared` mean the same thing (§10.1); `bind` already folds one
+                // into the other, so a hand-edited `[]` reads exactly like the dedicated word does.
+                overrides.bind(scheme, mapping.key, controls);
+            }
+        }
+    }
+
+    (overrides, problems, unresolved)
+}
+
+/// Deserializes a saved override set, resolving it against what this build currently declares.
+///
+/// Needs `declared` because a [`MappingKey`] cannot be manufactured from a loaded string — see
+/// [`UnresolvedMapping`] — so this is a [`DeserializeSeed`](serde::de::DeserializeSeed) rather than
+/// a plain [`Deserialize`](serde::Deserialize) impl on [`Overrides`] itself.
+///
+/// ```ignore
+/// let declared = declared_mappings(world);
+/// let mut de = toml::Deserializer::new(&text);
+/// let (overrides, problems, unresolved) =
+///     OverridesLoader { declared: &declared }.deserialize(&mut de)?;
+/// ```
+#[cfg(feature = "serialize")]
+pub struct OverridesLoader<'a> {
+    /// What the game currently declares —
+    /// [`declared_mappings`](crate::mapping::declared_mappings)'s own output, or a subset of it.
+    pub declared: &'a [Mapping],
+}
+
+#[cfg(feature = "serialize")]
+impl<'de> serde::de::DeserializeSeed<'de> for OverridesLoader<'_> {
+    type Value = (Overrides, Vec<OverrideProblem>, Vec<UnresolvedMapping>);
+
+    fn deserialize<D: serde::Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Self::Value, D::Error> {
+        let raw = <RawOverrides as serde::Deserialize>::deserialize(deserializer)?;
+        Ok(resolve(raw, self.declared))
+    }
 }
 
 /// Makes a running game agree with an override set.
@@ -906,7 +1191,10 @@ mod tests {
         );
 
         let problems = apply_overrides(app.world_mut(), &overrides);
-        let kinds: Vec<_> = problems.iter().map(|problem| problem.kind).collect();
+        let kinds: Vec<_> = problems
+            .iter()
+            .map(|problem| problem.kind.clone())
+            .collect();
 
         assert!(kinds.contains(&OverrideProblemKind::NoSuchMapping));
         assert!(
@@ -943,7 +1231,7 @@ mod tests {
         assert_eq!(
             problems
                 .iter()
-                .map(|problem| problem.kind)
+                .map(|problem| problem.kind.clone())
                 .collect::<Vec<_>>(),
             [OverrideProblemKind::WrongShape {
                 control: Control::MouseMotion,
@@ -1011,7 +1299,7 @@ mod tests {
         assert_eq!(
             problems
                 .iter()
-                .map(|problem| problem.kind)
+                .map(|problem| problem.kind.clone())
                 .collect::<Vec<_>>(),
             [OverrideProblemKind::NotRebindable]
         );
@@ -1077,7 +1365,7 @@ mod tests {
         assert_eq!(
             problems
                 .iter()
-                .map(|problem| problem.kind)
+                .map(|problem| problem.kind.clone())
                 .collect::<Vec<_>>(),
             [OverrideProblemKind::CompositeCannotGrow]
         );
@@ -1138,5 +1426,181 @@ mod tests {
             ],
             "and the other rows kept both of theirs"
         );
+    }
+
+    /// Chunk 55: the file a person edits by hand, pinned by a golden document rather than by an
+    /// intention nobody rechecks.
+    #[cfg(all(feature = "gamepad", feature = "serialize"))]
+    mod persistence {
+        use super::*;
+
+        use bevy_input::gamepad::GamepadButton;
+        use serde::de::DeserializeSeed;
+
+        #[derive(InputAction)]
+        #[action(path = "persist_tests.move", output = bevy_math::Vec2, intent = Directional2)]
+        struct Move;
+
+        #[derive(InputAction)]
+        #[action(path = "persist_tests.jump", output = bool, intent = Button)]
+        struct Jump;
+
+        #[derive(InputAction)]
+        #[action(path = "persist_tests.settings", output = bool, intent = Button)]
+        struct OpenSettings;
+
+        #[derive(InputContext)]
+        #[context(path = "persist_tests.playing", tick = Render)]
+        struct Playing;
+
+        /// `Move` on WASD (four keyboard rows, none of them overridden below), `Jump` on Space with
+        /// room for a secondary and on the pad's South button, and a settings key an external
+        /// backend will claim.
+        fn declared() -> Vec<Mapping> {
+            let mut app = App::new();
+            app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+            app.add_context::<Playing>(|controls| {
+                controls.bind::<Move>(DirectionalButtons::wasd()).mappable();
+                controls.bind::<Jump>(KeyCode::Space).mappable_upto(2);
+                controls.bind::<Jump>(GamepadButton::South).mappable();
+                controls.bind::<OpenSettings>(KeyCode::F1).mappable();
+            });
+            declared_mappings(app.world())
+        }
+
+        fn mapping_key(declared: &[Mapping], scheme: Scheme, name: &str) -> MappingKey {
+            declared
+                .iter()
+                .find(|mapping| mapping.scheme == scheme && mapping.key.to_string() == name)
+                .unwrap_or_else(|| panic!("no mapping named {name} in {scheme:?}"))
+                .key
+        }
+
+        const GOLDEN: &str = "version = 1\n\
+            \n\
+            [bindings.keyboard_mouse]\n\
+            \"persist_tests.jump\" = [\"key/Space\", \"key/KeyJ\"]\n\
+            \"persist_tests.move.up\" = \"key/KeyI\"\n\
+            \"persist_tests.settings\" = \"external\"\n\
+            \n\
+            [bindings.gamepad]\n\
+            \"persist_tests.jump\" = \"cleared\"\n";
+
+        /// The whole point of the chunk: what `Overrides` writes is a document a person would be
+        /// willing to write by hand, and reading it back produces the identical value — a scalar
+        /// for the row that holds one control, a list for the row that holds two, and the two
+        /// three-state words neither of which could ever be mistaken for a control name.
+        #[test]
+        fn a_saved_override_set_round_trips_through_a_legible_file() {
+            let declared = declared();
+            let mut overrides = Overrides::new();
+            overrides.bind(
+                Scheme::KeyboardMouse,
+                mapping_key(&declared, Scheme::KeyboardMouse, "persist_tests.move.up"),
+                [Control::Key(KeyCode::KeyI)],
+            );
+            overrides.bind(
+                Scheme::KeyboardMouse,
+                mapping_key(&declared, Scheme::KeyboardMouse, "persist_tests.jump"),
+                [Control::Key(KeyCode::Space), Control::Key(KeyCode::KeyJ)],
+            );
+            overrides.set(
+                Scheme::KeyboardMouse,
+                mapping_key(&declared, Scheme::KeyboardMouse, "persist_tests.settings"),
+                Override::NotOurs,
+            );
+            overrides.set(
+                Scheme::Gamepad,
+                mapping_key(&declared, Scheme::Gamepad, "persist_tests.jump"),
+                Override::Cleared,
+            );
+
+            let text = toml::to_string(&overrides).expect("serializes");
+            assert_eq!(text, GOLDEN);
+
+            let (loaded, problems, unresolved) = OverridesLoader {
+                declared: &declared,
+            }
+            .deserialize(toml::Deserializer::new(&text))
+            .expect("deserializes");
+
+            assert!(problems.is_empty(), "{problems:?}");
+            assert!(unresolved.is_empty(), "{unresolved:?}");
+            assert_eq!(loaded, overrides);
+        }
+
+        /// R17.2's control half: a name this build cannot turn into a `Control` is reported rather
+        /// than dropped in silence, and the row after it in the same file still loads.
+        #[test]
+        fn an_unknown_control_is_reported_and_the_rest_still_loads() {
+            let declared = declared();
+            let text = "version = 1\n\
+                \n\
+                [bindings.keyboard_mouse]\n\
+                \"persist_tests.move.up\" = \"key/DoesNotExist\"\n\
+                \"persist_tests.jump\" = \"key/Space\"\n";
+
+            let (loaded, problems, unresolved) = OverridesLoader {
+                declared: &declared,
+            }
+            .deserialize(toml::Deserializer::new(text))
+            .expect("deserializes");
+
+            assert!(unresolved.is_empty(), "{unresolved:?}");
+            assert_eq!(
+                problems
+                    .iter()
+                    .map(|problem| problem.kind.clone())
+                    .collect::<Vec<_>>(),
+                [OverrideProblemKind::UnknownControl {
+                    name: "key/DoesNotExist".into()
+                }]
+            );
+            // Refused whole: the row that named it holds nothing rather than half a rebind.
+            assert_eq!(
+                loaded.get(
+                    Scheme::KeyboardMouse,
+                    mapping_key(&declared, Scheme::KeyboardMouse, "persist_tests.move.up")
+                ),
+                None
+            );
+            // And the row after it in the file still loaded.
+            assert_eq!(
+                loaded.get(
+                    Scheme::KeyboardMouse,
+                    mapping_key(&declared, Scheme::KeyboardMouse, "persist_tests.jump")
+                ),
+                Some(&Override::Controls(alloc::vec![Control::Key(
+                    KeyCode::Space
+                )]))
+            );
+        }
+
+        /// R17.2's mapping half: a renamed or removed action's row comes back named rather than
+        /// vanishing without a trace.
+        #[test]
+        fn an_unresolved_mapping_name_is_reported_by_name() {
+            let declared = declared();
+            let text = "version = 1\n\
+                \n\
+                [bindings.keyboard_mouse]\n\
+                \"persist_tests.no_such_action\" = \"key/KeyZ\"\n";
+
+            let (loaded, problems, unresolved) = OverridesLoader {
+                declared: &declared,
+            }
+            .deserialize(toml::Deserializer::new(text))
+            .expect("deserializes");
+
+            assert!(problems.is_empty(), "{problems:?}");
+            assert!(loaded.is_empty());
+            assert_eq!(
+                unresolved,
+                [UnresolvedMapping {
+                    scheme: Scheme::KeyboardMouse,
+                    name: "persist_tests.no_such_action".into()
+                }]
+            );
+        }
     }
 }

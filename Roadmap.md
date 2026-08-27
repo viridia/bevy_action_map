@@ -135,15 +135,15 @@ step and a real game is a better acceptance test than a synthetic one.
 
 | | |
 | --- | --- |
-| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves; and a screen that can be *operated* — a stick or a D-pad rounded to a compass point and narrowed to the ticks it moved on, which is a selection moving one step per direction entered, over a game that keeps running and never hears the controls the screen has taken; and two actions that deliberately share one control declared as sharing it, so that a rebind moves both; and a prompt or a mapping row that says when a binding wants more than a bare press — held, or tapped twice — as structure a localization layer can render for itself, with a fallback formula ("Hold W", "W ×2") for a game that ships no catalogue, and a mapping's followers drawn as a subordinate line under the row they ride rather than a row of their own; and **a rebind that takes effect** — a diff against the declared bindings, applied to every live context by compiling a variant plan and swapping it in, which cancels what was in flight and re-arms require-reset, moves every follower riding a row that changed, leaves the declaration intact so the next patch's revised defaults still reach anyone who never touched that row, and tells every prompt on screen to catch up; and conflict detection that can be asked against a working copy of overrides rather than only what is applied, which is what lets a screen with unconfirmed choices tell whether two of them clash before either is committed; and a **class binding** — a plan's second list, consulted only for a control no plain binding in the context already indexes, dispatching the original raw event (not a folded value, since there is no lifecycle to fold it into) to whatever declared it, which is the mechanism a focused text field will claim character-producing keys through without the app enumerating them; and **the settings screen finished** — pressing a boxed cell listens for a control and writes it into a working copy rather than the running game, a clash steals the control from whatever else already held it, Confirm applies the working copy in one call and Cancel discards it, B cancels a capture in progress before it cancels the screen, and every cell a capture or a steal touches is patched in place — `Text` on the exact entities named at spawn, nothing despawned or rebuilt, because a capture never changes a row's shape; and **exclusive contexts** — a context that treats every lower-priority one as inactive for as long as it is, canceling in-flight actions and re-arming require-reset exactly as an ordinary deactivation would, so a modal screen owns the whole input surface without enumerating the actions it takes it from; and **presets** — a named `Overrides` a game keeps its own list of, applied through the same path a rebind is via `apply_overrides_with_preset`, which exempts exactly the rows a preset names from the "not rebindable here" refusal that still stands for a capture, so a preset moves a `Fixed` row (every gamepad binding, sticks included) that a capture screen never offers a button for. |
+| **Works today** | Actions and contexts as types; keyboard, mouse buttons and motion, and raw gamepad into an input frame; per-entity context state; N bindings per action folded by intent; the design-stage deadzone; render/fixed evaluation ordered ahead of its readers; each context draining the frame from its own cursor; the three-property model — a source's channel shape checked against the action's intent, with the conversions between shapes settled; mappings and the names to render them with, each holding an ordered list of controls with a capacity, which is what a primary-and-secondary table is, every binding listed for the player to read and only the declared ones rebindable; interactive capture per slot, with reserved and excluded controls and read-only conflict detection; the first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping list alone, one per device, whose column count comes out of the data rather than the layout; and the lookup that runs the other way, from an action to the controls that would fire it now, behind a trait an external authority can answer for; and that lookup as a **text span** a template can write, which fills in its own string and is told when the answer moves; and a screen that can be *operated* — a stick or a D-pad rounded to a compass point and narrowed to the ticks it moved on, which is a selection moving one step per direction entered, over a game that keeps running and never hears the controls the screen has taken; and two actions that deliberately share one control declared as sharing it, so that a rebind moves both; and a prompt or a mapping row that says when a binding wants more than a bare press — held, or tapped twice — as structure a localization layer can render for itself, with a fallback formula ("Hold W", "W ×2") for a game that ships no catalogue, and a mapping's followers drawn as a subordinate line under the row they ride rather than a row of their own; and **a rebind that takes effect** — a diff against the declared bindings, applied to every live context by compiling a variant plan and swapping it in, which cancels what was in flight and re-arms require-reset, moves every follower riding a row that changed, leaves the declaration intact so the next patch's revised defaults still reach anyone who never touched that row, and tells every prompt on screen to catch up; and conflict detection that can be asked against a working copy of overrides rather than only what is applied, which is what lets a screen with unconfirmed choices tell whether two of them clash before either is committed; and a **class binding** — a plan's second list, consulted only for a control no plain binding in the context already indexes, dispatching the original raw event (not a folded value, since there is no lifecycle to fold it into) to whatever declared it, which is the mechanism a focused text field will claim character-producing keys through without the app enumerating them; and **the settings screen finished** — pressing a boxed cell listens for a control and writes it into a working copy rather than the running game, a clash steals the control from whatever else already held it, Confirm applies the working copy in one call and Cancel discards it, B cancels a capture in progress before it cancels the screen, and every cell a capture or a steal touches is patched in place — `Text` on the exact entities named at spawn, nothing despawned or rebuilt, because a capture never changes a row's shape; and **exclusive contexts** — a context that treats every lower-priority one as inactive for as long as it is, canceling in-flight actions and re-arming require-reset exactly as an ordinary deactivation would, so a modal screen owns the whole input surface without enumerating the actions it takes it from; and **presets** — a named `Overrides` a game keeps its own list of, applied through the same path a rebind is via `apply_overrides_with_preset`, which exempts exactly the rows a preset names from the "not rebindable here" refusal that still stands for a capture, so a preset moves a `Fixed` row (every gamepad binding, sticks included) that a capture screen never offers a button for; and **persistence** — `Overrides` serializes through `serde` behind the `serialize` feature, hand-written rather than derived so a row holding one control writes as a bare scalar and the three per-mapping states spell as words no control name could ever collide with, one table per scheme, pinned by a golden TOML document; loading resolves a saved mapping name against what the game currently declares, since a `MappingKey` can only ever be one already declared, reporting an unresolved name or an unrecognized control rather than dropping either in silence, while a renamed action's row is simply dropped on the next save rather than preserved unresolved. |
 | **Known wrong today** | A widget that handles its own keyboard bypasses consumption entirely: `bevy_ui_widgets::Button` activates on `Space` whether or not a context claimed `Space`, because `InputDispatchPlugin` asks the mapper nothing (R8.2a, chunk 49). Disasteroids no longer shows a symptom of it — chunk 61's exclusive `Menu` closes the one collision that stood in front of it (`Fire` and a focused button both wanting `Space`) from the context side, leaving the gap real but unobserved there until chunk 49 finds a different vehicle. The prelude exports sixteen bare English nouns that a glob import drops into a template beside Bevy's own (chunk 48). A control capture refuses (wrong shape, wrong scheme, reserved) is silent on Disasteroids' screen — the session simply keeps listening, with nothing said about why the press did not take. |
-| **Never built** | Saving a rebind: an override set is a value in memory and nothing writes it to a file (chunk 23), and nothing has yet looked at what that file would read like (chunk 55). Also tunables and glyphs. And the class binding mechanism has no caller yet: nothing in-tree is a focused text field, so `ControlClass::CharacterProducing` has never been bound outside its own tests (chunk 49). |
+| **Never built** | Tunables and glyphs. Writing a saved override set to an actual file — the crate now serializes and deserializes one, but where the bytes go was always the app's own decision, never this crate's. And the class binding mechanism has no caller yet: nothing in-tree is a focused text field, so `ControlClass::CharacterProducing` has never been bound outside its own tests (chunk 49). |
 
 ---
 
 ## What has landed
 
-Forty-four chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+Forty-six chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
 where it fell short of its own description — Phase VII onward there, and everything before it in the
 [archive](./Log-archive.md). This table is only an index, and the sequence below is what remains.
 
@@ -193,6 +193,8 @@ where it fell short of its own description — Phase VII onward there, and every
 | 31 | The settings screen, rebinding | done; steal chosen for R19.3's policy, and every capture patches the exact cells it touched rather than rebuilding — a capture never changes a row's shape |
 | 61 | Exclusive contexts | done; R7.8 landed as priority order alone, no named groups — R7.7's other half stays in the deferred table; the exclusion ceiling's device-blindness is written onto chunk 26 rather than solved twice |
 | 45 | Presets | done; landed as a starting point, not a layer — no persisted "which preset" identity, so chunk 23 inherits the `Overrides` shape it already had; tunables stay out of scope, format left open for them |
+| 23 | Persistence of overrides | done; landed together with chunk 55, which is its own test — hand-written `Serialize`/`Deserialize` behind the `serialize` feature rather than a derive, since the wire shape (one scheme per table, a scalar for a one-control row) is not `Overrides`' own shape; an unresolved mapping name is dropped on save rather than preserved, decided rather than merely deferred |
+| 55 | A file a person can read | done; the golden TOML round-trip test that validates chunk 23 |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -265,100 +267,6 @@ capacity, and a capture names the slot it fills — 43 put the fixed rows on it,
 from that model alone, 30 made the cells reachable, and 31 made pressing one do something: capture,
 steal, Confirm and Cancel each meaning what they say, and B meaning one of two things depending on
 whether a capture is live.
-
-### 23. Persistence of overrides
-
-A rebind that does not survive a restart is a demo, not a feature. **Designed in Design §10.1**;
-what remains here is what building it has to get right and what to look at in review.
-
-- **The crate defines the structure and never learns where it goes.** `Reflect` plus serde behind
-  the `serialize` feature; a game embeds it in its own settings resource, an account payload, or
-  anywhere else. `bevy_settings` is one vehicle rather than the vehicle.
-- **Rows keyed by mapping, valued by control** — not by action, and not by binding. Which makes this
-  chunk depend on 19 for the keys, on 20 for the capture that produces the values, and on 38 for the
-  structure itself: by the time this runs, the only thing missing is the file. Chunk 38 built
-  `Overrides` with no derives at all, deliberately — `Reflect` and serde are this chunk's, because
-  the *format* questions below are what they encode.
-- **Inherited from chunk 38: a row this build cannot resolve.** `Overrides` is keyed by
-  `MappingKey`, which holds `&'static str`, so a row naming a mapping the build no longer declares
-  cannot be held in the store at all — it is reported as `NoSuchMapping` and goes no further. That
-  is right for applying and is a decision for saving: re-writing the file then drops the row, and a
-  player who had it loses that binding for good rather than getting it back when the mapping
-  returns.
-  Preserving unresolved rows means the file's own representation is keyed by string and the store is
-  what resolves it, which is this chunk's call to make and is cheap to make now and expensive later.
-- **Chunk 45 settled a preset selection as a starting point, not a layer**: no persisted identity,
-  since a preset's rows land in the working copy exactly as a manual rebind's do and nothing ever
-  reapplies one. This chunk therefore needs no second field for "which preset" — the `Overrides`
-  shape it already has is the whole of what a preset selection contributes to the file.
-- **Three states per mapping** (R17.7): absent, cleared, and owned by someone else. A format with
-  two cannot express a player deliberately unbinding something, because absence already means
-  default.
-- **No device identity in it** (R17.8). Bindings name a device class; pairing and calibration are
-  separate stores keyed by persistent identity. Two players with identical pads and identical
-  mappings differ only in pairing.
-- **The control encoding is ours** (R17.9) and **built in chunk 37**: `Control::name` and
-  `from_name`, round-trip tested over every variant. The `key/` prefix leaves room for the logical
-  half of R12.1, which the binding layer cannot express yet.
-- **Applying to a live context is the only path in,** with startup as the first call. An authority
-  backend can rewrite bindings mid-session (R18.10), so a startup-only path would be wrong on at
-  least one platform before it shipped.
-- **Inherited from chunk 17b: unknown controls.** R4.8 names them, and 17b could not write the
-  check — `Control` is a typed enum, so a control that does not exist cannot be spelled. A name
-  read from a file can be anything, which is where the check belongs.
-- **Check before committing to `bevy_settings`:** R17.2 requires an entry that no longer resolves
-  to be **reported rather than dropped**, which is what stops a renamed action silently discarding
-  a player's rebind. A settings crate that deserializes and quietly ignores what it does not
-  recognise cannot satisfy that, and most do exactly that. If it cannot be made to, the diff layer
-  is ours and only the file handling is theirs.
-- **Review surface:** whether an entry that no longer resolves survives a *save*. Reporting it on
-  load is R17.2 and is settled; writing the file back without it is how a player loses a binding
-  permanently, and chunk 38 left that question here deliberately.
-- **Whether it reads well is chunk 55**, which is the next one and holds the test.
-
-### 55. A file a person can read
-
-R17 is satisfied by anything that round-trips, and something that round-trips can still be
-unreadable. This is the chunk that opens the file. **Its deliverable is a golden test**: a literal TOML document
-in the test source, written from an `Overrides` and read back to the same value, so that the file's
-appearance is pinned by something that fails rather than by an intention nobody rechecks.
-
-**Why it is not part of 23.** 23 makes the file survive a schema change — an action that has gone,
-a control that has been renamed, a version older than this build. 55 makes it survive a *person*.
-The two fail in different ways and are caught by different tests: one by loading a file an older
-build wrote, the other by reading one.
-
-**The in-memory shape is not the serialized shape, and that is most of the work.** `Overrides` keys
-rows by `(Scheme, MappingKey)`. A derived `Serialize` over that map produces a tuple key, which is
-unreadable in every format and not expressible as a TOML table key at all — so the serialized form
-is a table per scheme whose keys are `MappingKey`'s `Display`, and loading resolves those strings
-against the declared rows. That resolution is not extra work: R17.2 requires it regardless, because
-"no mapping of that name" is one of the problems a load has to report.
-
-**Each of §10.1's legibility decisions becomes a case in the golden document:**
-
-- a row holding one control writes as a **scalar** and reads back from either a scalar or a
-  one-element list. Most rows hold one, and a player editing by hand should not have to type
-  brackets to say so;
-- position is meaningful, so a cleared *middle* slot writes the cleared marker rather than a
-  shortened list — a shortened list silently promotes the secondary to primary;
-- one table per scheme, so a keyboard remap is visibly separate from the pad's;
-- a `version` a person can see at the top;
-- the three states of R17.7 need spellings a person can read *and write*: absent is absence, and
-  cleared and not-ours need words that do not read as controls;
-- room beside them for a `[tunables.*]` table and a preset selection, whose shape chunk 45 decides —
-  the format has to leave the space even while both are empty.
-
-**Delivers:** hand-written serde where the derive is wrong, `toml` as a dev-dependency, and the
-golden test. Nothing in `src/` learns about TOML: the crate serializes through serde and the test
-picks a concrete format to look at, which is the only way to look at one.
-
-**Deliberately not:** choosing a settings crate, or a path on disk. Where the file goes stays the
-app's business, which is what makes the crate's half testable without one.
-
-**Review surface:** whether the literal in the test is a document you would be willing to write by
-hand. If it is awkward to type, the format is awkward, and the test is the one place that shows it
-before a player finds out.
 
 ### 49. Dispatch the mapper can filter
 
