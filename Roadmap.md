@@ -387,6 +387,42 @@ app's business, which is what makes the crate's half testable without one.
 hand. If it is awkward to type, the format is awkward, and the test is the one place that shows it
 before a player finds out.
 
+### 61. Exclusive contexts
+
+Disasteroids' settings screen consumes only the controls it names — `Navigate`, `Accept`, `Back`,
+`Confirm` — so `Thrust` and `Fire` keep answering while a full-screen modal covers the ship. R8.2's
+opt-in-per-binding model is right for a menu that wants `Escape` and nothing else (the worked
+example the requirement itself gives), but wrong for a screen that wants to own the whole input
+surface: enumerating every action in `Flying` and `Shell` as a no-op consuming binding is exactly
+the kind of thing that silently goes stale the next time either context grows one.
+
+R7.8 (new) is the fix: a context declares itself `exclusive`, and every lower-priority context is
+treated as inactive for as long as it is — reusing `deactivate`'s existing cancel-in-flight behavior
+(R7.4) rather than adding a third context state. Designed in Design §5.3.
+
+- **Delivers:** `#[context(path = "...", tick = ..., priority = ..., exclusive)]` — a bare flag next
+  to `priority`, the same shape `#[action(..., consume)]` already has — expanding to a
+  `const EXCLUSIVE: bool` on `InputContext` beside `PRIORITY`; the per-schedule exclusion-ceiling
+  resource and the priority-ordered activation check described in Design §5.3; and the builder-side
+  equivalent for a context declared by hand rather than derived.
+- **In Disasteroids:** `Menu` is declared `exclusive`, and `Swallowed` and its two private bindings
+  are deleted — their whole reason was working around exactly this. `ToggleSettings` also drives
+  `Game` to `Paused` alongside opening the screen, so the simulation stops as well as the ship's
+  controls; the two are independent (one is input arbitration, the other is sim state) and both were
+  asked for. The test: `Thrust` and `Fire` must not fire while the screen is open, and a key still
+  held when it closes must resume rather than double-fire (R7.5).
+- **Not doing:** named/free-form mutually-exclusive groups where two independently-exclusive
+  contexts must coexist rather than one dominating the other by priority — R7.7's other half, left
+  in the deferred table.
+- **Inherits chunk 26's gap rather than reopening it.** The exclusion ceiling is one resource per
+  schedule, with no notion of *whose* exclusive context raised it — the same device-blindness R15.3
+  already names for `ConsumedControls`. Disasteroids is single-player and never sees it; a two-player
+  game must not reach for `exclusive` until chunk 26's routing reaches the ceiling too, which is
+  written onto that chunk rather than guessed at here.
+- **Verified by:** a headless test asserting a lower-priority context's action does not fire while an
+  exclusive higher-priority one is active, resumes on deactivation, and honors require-reset on a
+  control held through the transition; and playing Disasteroids with the settings screen open.
+
 ### 49. Dispatch the mapper can filter
 
 `InputDispatchPlugin` turns a global keyboard event into a `FocusedInput` at the focus entity, and
@@ -401,9 +437,15 @@ widget beside them (R8.2a). Chunk 30 found it and worked around it; this closes 
 - **The ordering is the design question.** Consumption is decided during evaluation, and dispatch
   currently runs wherever `InputDispatchPlugin` put it. A claim has to be visible before the event
   it suppresses is dispatched, which is R22.11's constraint arriving from the other direction.
-- **In Disasteroids:** `Swallowed` is deleted, and `Accept` binds `Enter` and `Space` alongside the
-  pad's A like an ordinary action — which is also the test, since the button must then be pressed
-  once rather than twice.
+- **In Disasteroids:** was going to be proven by deleting `Swallowed` and watching the focused
+  button stop double-firing `Fire` — but chunk 61 already deletes `Swallowed`, and for a different
+  reason: once `Menu` is exclusive, `Flying` is inactive while the screen is up, so `Fire` cannot
+  fire regardless of what dispatch does with `Space`. That closes the observable symptom this chunk
+  was going to point at, without touching R8.2a at all, and leaves this chunk with no in-tree
+  acceptance vehicle in Disasteroids. What R8.2a still wants — a context withholding a control from
+  the widget layer itself, not just from another context — needs either a headless test that fakes a
+  focused button under a consuming context, or a real focused text field to fall out of somewhere
+  before this can point at Disasteroids again.
 - **Also worth checking here:** whether the same filter wants to cover `bevy_picking`, since R22.4
   names pointer coexistence and a consumed mouse button is the same question one device over.
 - **Also inherited:** a focused text field claiming `ControlClass::CharacterProducing` (R8.4,
@@ -570,6 +612,9 @@ second implementation.
 
 - **Inherited from chunk 14:** R22.1's fifth obstacle, "device not owned by this player", which is
   unanswerable until something knows who owns what.
+- **Inherited from chunk 61:** the exclusion-ceiling resource an exclusive context raises is one per
+  schedule, with no player on it — routing has to reach it the same way it reaches
+  `ConsumedControls`, or one player's modal shadows every other player's gameplay context.
 - **The gate here was miscounted.** This sat under "deliberately deferred, gated on a real second
   device", but a keyboard is a device: one pad plus a keyboard is two, and a mixed-scheme pair is the
   arrangement most likely to expose a routing bug, since the two do not share a code path. What
@@ -646,9 +691,11 @@ not exist. Both read a neighbouring slot rather than their own value, which need
 evaluated first: slots ordered topologically, and a cycle rejected at plan build with a
 diagnostic naming the loop.
 
-- **Why it waits:** self-contained, and nothing in tree wants it. The motivating cases are a
-  modal that blocks an action while it is open, and a chord on an action rather than a key — both
-  of which the settings screen may turn up, and neither of which is worth guessing at first.
+- **Why it waits:** self-contained, and nothing in tree wants it. It carried two motivating cases;
+  the settings screen turned up and claimed the first — a modal that blocks an action while it is
+  open turned out to be chunk 61's exclusive contexts, not a condition, because the block is
+  per-context ("this screen owns everything beneath it") rather than per-action. What is left is a
+  chord on an action rather than a key, which is not worth guessing at on its own.
 - **Carried from chunks 11 and 14.**
 - **Inherited from chunk 44: whether this subsumes `follows`.** Afterburner is genuinely "Thrust,
   still held", and a game that could say that in a condition would need no link at all — the second
@@ -854,6 +901,7 @@ gate.
 | Focus-driven context activation (R22.8) and text input | chunks 14 and 25 — priority, arbitration, and class bindings are what *claiming* a control means |
 | **Dispatch as an action's effect (R22.7)** | **a widget that intercepts.** Chunk 29 was to build this and declined after asking what bubbling is *for*: it exists so that something can swallow an event before it reaches the default handler, and chunk 30's screen has nothing that wants to swallow a direction. Its observer calls the navigator directly, in four lines, and a `FocusedInput` carrying a navigation instruction would have been ceremony around the same call. The gate is a slider, a scroll area or a text field — a widget where a direction means something to the widget *first*. That is also the point at which the entry point belongs upstream beside `handle_tab_navigation`, because the interception cases are what it is for. A MUST deferred rather than met, and the reason is on record so that the next reader can disagree with it |
 | An initial delay distinct from the repeat rate (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both: the change fires on the crossing and the pulse's clock starts on that tick, so the first repeat is one interval later and every one after is evenly spaced. Two numbers means a `delay` field on `Pulse`, which is small — what is missing is a case where equal is wrong, and a two-table settings screen is not it |
+| Free-form mutually-exclusive context sets (R7.7 remainder) | nothing in tree needs two independently-exclusive contexts to coexist rather than one dominating the other by priority. Chunk 61 meets R7.7's stack case with priority order alone; a named-grouping mechanism beyond that is the harder half, and no game here has asked for it yet |
 | **Guardian migration**                            | porting guardian from bevy 0.16.1 to 0.20-dev — four versions, its own job |
 
 Guardian is worth restating: it is on **bevy 0.16.1** with `bevy_enhanced_input 0.12`, and we target

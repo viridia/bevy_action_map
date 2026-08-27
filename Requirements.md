@@ -594,6 +594,13 @@ replacements) — the layer concept is underused elsewhere and is exactly right 
   binding graph); if a rebuild is needed it must be incremental and change-detection driven (§23).
 - **R7.7 (SHOULD)** A declarative way to express "these contexts are mutually exclusive" (a stack) as
   well as free-form sets, since most games want a stack and reimplement it every time.
+- **R7.8 (MUST)** A context may declare itself **exclusive**: while active, every context whose
+  priority is lower is treated as inactive for as long as the exclusive one is — canceling in-flight
+  actions per R7.4, and re-arming require-reset per R7.5 when it becomes active again. _This is
+  R7.7's stack case, met by priority order alone rather than a named grouping: a context above the
+  exclusive one's priority is never touched, which is how a hotkey survives a modal without an
+  opt-out list. Free-form mutually-exclusive sets outside priority order are not this — R7.7 stays
+  open for them._
 
 ---
 

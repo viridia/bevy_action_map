@@ -389,6 +389,49 @@ is what keeps R8.3's single deterministic pass single and deterministic.
 
 ---
 
+### 5.3 Exclusive contexts
+
+R7.8 asks for a context that fully displaces everything beneath it, not merely wins the controls it
+names — Steam's Action Set, next to the additive Action Set Layer R7.3 already describes. The
+mechanism reuses two things this section already has rather than inventing a third context state:
+priority order, and `deactivate`'s existing cancel-in-flight behavior (R7.4).
+
+**An exclusion ceiling, one per schedule.** A resource holds the highest priority of any
+currently-active exclusive context evaluated so far this tick — `None` until one is found. Each
+context's own activation system, which already runs in priority order (above), checks the ceiling
+before trusting its own condition (`active_in_state` or otherwise): a priority at or below the
+ceiling calls `deactivate()` instead, whatever the condition says. An exclusive context that is
+itself active raises the ceiling to its own priority before anything lower runs.
+
+| | |
+| --- | --- |
+| No exclusive context active this tick | ceiling is `None`, nothing changes |
+| An exclusive context activates | every lower-priority context deactivates that tick — in-flight actions canceled, R7.4 |
+| It stays active | lower contexts stay deactivated; their own conditions are not re-evaluated while shadowed |
+| It deactivates | shadowed contexts resume on their own condition next tick, `require_reset` per R7.5 — a control still held does not re-fire |
+
+**Same clear/read cadence as consumption (§5.2), for the same reason.** The ceiling is set once by
+the render-tick pass in `PreUpdate` and read — never rewritten — by every `FixedPreUpdate` run that
+frame, then cleared at the frame's top by the same sampler that clears `ConsumedControls`. An
+exclusive fixed-tick context inherits §5.2's existing limitation and cannot shadow a render-tick one
+within a frame; nobody has asked for that direction either.
+
+**`why_not` needs nothing new.** A shadowed context is genuinely inactive — `deactivate()` sets the
+same flag `active_in_state` would clear on its own — so R8.5's existing "context inactive"
+diagnostic already names it. There is no third state to add a case for.
+
+**What this is not.** R7.7's other half — free-form sets, where two independently-exclusive
+contexts must be told apart rather than one dominating the other by priority — is still open; see
+the deferred table in Roadmap.md.
+
+**The ceiling is global, and that is the same gap `ConsumedControls` already has (R15.3).** Nothing
+in it says *whose* exclusive context raised it, so one player's modal would shadow every other
+player's gameplay context too. Single-player is unaffected, since there is only ever one player to
+shadow; per-player scoping is chunk 26's device routing, and this inherits that obligation rather
+than solving it twice.
+
+---
+
 ## 6. State and storage — the OQ-3 commitment
 
 The requirements framed this as a choice between four layouts for one state store. The framing is
@@ -1035,7 +1078,9 @@ feature with the rest of D4 (R22.10), which is where `src/focus.rs` is already r
 it is chunk 49. The dependency direction survives: the replacement depends on `bevy_input_focus`,
 which the feature already admits, and nothing in `bevy_ui_widgets` learns that we exist. Until it
 lands the workaround is an action that consumes and does nothing, which is what Disasteroids'
-`Swallowed` is.
+`Swallowed` was — chunk 61's exclusive contexts close the collision it existed for (`Fire` and a
+focused button both wanting `Space`) from the context side rather than the dispatch side, so the gap
+R8.2a names is still real but no longer has that example standing in front of it.
 
 ---
 
