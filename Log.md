@@ -594,3 +594,60 @@ New doc comments cited R-numbers and a chunk number, which `///` comments on thi
 style must never do, and several ran longer than their sibling comments needed. Fixing that after
 formatting reflowed lines that then needed reformatting again; the fix going forward is to check
 comment style before the formatting pass, not after.
+
+### Focus-driven dispatch, and R22.7 withdrawn
+
+Chunk 49's blocker — a public `bevy_input_focus::FocusedInput` constructor — landed upstream this
+session, which reopened `FocusedInput<KeyboardInput>` as `bevy_ui_widgets::Button`'s whole keyboard
+story. A drop-in replacement for `InputDispatchPlugin` was designed and even built: `FocusBridge`, a
+lowest-priority context feeding dispatch through the existing class-binding pipeline rather than a
+second raw-message read (`class_dispatch` already checks `ConsumedControls` and per-context indexing
+at exactly the right point). It was set aside before landing — Roadmap.md's deferred table carries the
+design — because building it on spec, with no widget in tree that actually needed it, was exactly what
+chunk 49's own history already warned against: chunk 30 worked around the gap with `Swallowed`, and
+chunk 61 closed the one collision that motivated it for a reason that had nothing to do with dispatch.
+
+**What replaced it is more explicit than `FocusBridge` and needed no crate change at all.** Instead of
+a generic relay answering for *any* `FocusedInput`-consuming widget, Disasteroids now declares
+`ButtonFocused` (`examples/common/widget_focus.rs`) — an ordinary context, active only while
+`InputFocus` names an entity tagged `WidgetKind::BUTTON`, binding `Enter`, `Space` and the pad's accept
+button to one action whose observer triggers `bevy_ui_widgets::Activate` at the focused entity
+directly. `WidgetKind` is registered as a required component of `Button`, so nothing that spawns one
+has to remember to tag it. This retired `Accept` — the gamepad-only action Disasteroids carried since
+the settings screen shipped, with a doc comment explaining that "the keyboard half already works" via
+`InputDispatchPlugin` — and let the game disable `InputDispatchPlugin` outright: one context now
+answers for every device the same way, rather than splitting the work between a crate default and a
+hand-written observer.
+
+**The author's read, confirmed by building it rather than merely arguing it: R22.7's bubbling was
+never the requirement.** `FocusedInput` bubbles because focus is the only arbitration
+`bevy_input_focus` has of its own — a widget that declines a key lets it fall through to whatever is
+listening further up the entity chain, window included, which is how a global shortcut survives a
+widget not wanting a key. A mapper with priority and consumption already answers that question,
+better: whether something else claims a control is decided by evaluation order before a
+focus-activated context ever runs, and `why_not` (R22.1) can name the context that took it.
+`ButtonFocused` drives a real widget on every device without dispatching a bubbling event anywhere —
+an ordinary `Fired<A>` observer, at a priority that keeps it from being shadowed by `Menu`.
+Requirements.md now marks R22.7 withdrawn on this basis, and R22.8 carries a note that it is answered
+by composition rather than by a crate feature: `active_if` already takes any run condition, so a
+focus-kind check needed nothing new, and the three cases R22.8 names (nothing focused, an ambiguous
+match, a despawned focus) all fall out of the same lookup rather than wanting special-case handling —
+nothing focused and a despawned focus both make it miss, and a required component keeps one entity
+from ever carrying two kinds at once.
+
+**`bevy_picking` was checked and is not part of this story.** A mouse click on a widget goes through
+`Pointer<E>` events with their own `PointerTraversal`, structurally similar to `FocusedInput`'s
+bubble-to-window but a wholly separate pipeline — triggered by pointer state, not by `InputFocus`, and
+untouched by anything here. R22.4's "how pointer actions coexist with picking" stays exactly as open
+as it was.
+
+**What is still open.** `WidgetKind` and the `*Focused`-context pattern live in `examples/common/`
+only, the same status `prompt_ui.rs` has — proven, not promoted. Whether either belongs in the crate
+waits on [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native widget-kind
+id and a mapper-driven remote-press mechanism: promoting a shape this crate invented first, ahead of
+that conversation, would risk committing to the wrong one. A widget kind with no `*Focused` context of
+its own now gets no keyboard or gamepad input at all, `InputDispatchPlugin` being fully retired in
+Disasteroids — deliberate, and the same "additive, never a silent default" bet R19.13 already makes
+elsewhere, but worth stating since it is a real cost of going explicit rather than a free lunch.
+
+[bevy#25592]: https://github.com/bevyengine/bevy/issues/25592

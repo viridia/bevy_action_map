@@ -31,8 +31,9 @@ use bevy_action_map::prelude::*;
 use bevy_action_map::preset::Preset;
 use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
-use crate::actions::{Accept, Back, Confirm, Menu, Navigate, ToggleSettings, Turn};
+use crate::actions::{Back, Confirm, Menu, Navigate, ToggleSettings, Turn};
 use crate::common::prompt_ui::{PromptScheme, PromptSpan};
+use crate::common::widget_focus::ButtonFocused;
 use crate::pause::Simulating;
 
 // Colors
@@ -173,22 +174,6 @@ pub(crate) fn navigate(fired: On<Fired<Navigate>>, mut nav: AutoDirectionalNavig
     let _ = nav.navigate(CompassOctant::from(direction));
 }
 
-/// Presses whatever is selected, on a device the widget layer cannot hear.
-///
-/// The bridge R22.9 says has to exist and has to be written by a third party. `bevy_ui_widgets`
-/// does not depend on this crate and this crate does not depend on it; the game depends on both,
-/// and so the game is the only place allowed to know that A on a pad means what `Enter` means to a
-/// button. Four lines, and everything downstream of the [`Activate`] is identical whichever device
-/// pressed it.
-///
-/// It answers only for the pad, because the keyboard half already works —
-/// [`Swallowed`](crate::actions::Swallowed) records why that is a seam rather than a saving.
-pub(crate) fn accept(_: On<Fired<Accept>>, focus: Res<InputFocus>, mut commands: Commands) {
-    if let Some(entity) = focus.get() {
-        commands.trigger(Activate { entity });
-    }
-}
-
 /// Cancels a capture in progress, or — with none in progress — leaves the screen without applying
 /// anything.
 ///
@@ -320,10 +305,11 @@ fn screen(world: &World) -> impl Scene {
     // this very screen — are machinery for operating the settings screen, not controls a player
     // thinks of as part of the game. `mappings` cannot tell the two apart on its own, so this is
     // the one place the screen names a context: everything from here down still reads `Mapping`
-    // alone.
+    // alone. `ButtonFocused` is excluded for the same reason — `common::widget_focus`'s bridge, not
+    // a control this screen's own player thinks of as bindable.
     let all: Vec<Mapping> = mappings(world)
         .into_iter()
-        .filter(|mapping| mapping.context != Menu::PATH)
+        .filter(|mapping| mapping.context != Menu::PATH && mapping.context != ButtonFocused::PATH)
         .collect();
     let rows = |scheme| -> Vec<Mapping> {
         all.iter()
@@ -346,7 +332,6 @@ fn screen(world: &World) -> impl Scene {
         DespawnOnExit::<Settings>(Settings::Showing)
         Menu
         on(navigate)
-        on(accept)
         on(back)
         on(confirm)
         on(toggle)

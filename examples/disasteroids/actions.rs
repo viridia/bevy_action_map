@@ -71,16 +71,6 @@ pub struct ToggleSettings;
 #[action(path = "disasteroids.navigate", output = Vec2, intent = Directional2, category = "disasteroids.menu")]
 pub struct Navigate;
 
-/// Presses whatever the selection is on.
-///
-/// Bound on the pad only, and the reason is a seam rather than a preference. `bevy_ui_widgets`
-/// already activates a focused button on `Enter` and `Space`: it observes a `FocusedInput` carrying
-/// a keyboard event, which no gamepad will ever produce. So the keyboard half of this action is
-/// already built by somebody else, and what is left for an action to do is the half that is not.
-#[derive(InputAction)]
-#[action(path = "disasteroids.accept", output = bool, intent = Button, category = "disasteroids.menu")]
-pub struct Accept;
-
 /// Leaves the screen, discarding anything not yet confirmed.
 ///
 /// While a row is listening for a new control, this cancels only that capture instead — press it
@@ -266,11 +256,6 @@ pub fn plugin(app: &mut App) {
             .on_change()
             .pulse(MENU_REPEAT);
 
-        controls.bind::<Accept>(GamepadButton::South).press();
-        // No keyboard binding, and no observer answers this on the keyboard's behalf either:
-        // `bevy_ui_widgets` already activates a focused button on `Enter` and `Space` on its own,
-        // and `Flying`'s `Fire` — bound to `Space` too — cannot fire behind it once this context is
-        // exclusive. There is nothing left here for an action to claim.
         controls.bind::<Back>(GamepadButton::East).press();
         controls.bind::<Back>(KeyCode::Escape).press();
 

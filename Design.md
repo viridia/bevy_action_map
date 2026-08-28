@@ -1779,7 +1779,7 @@ exists, the split is speculative, and the module layout above makes it a move ra
 
 **Tensions to resolve.**
 
-1. **R22.7 effects vs. R10.2 purity.** Resolved here by recording effects and draining them outside the
+1. **Action effects (observers) vs. R10.2 purity.** Resolved here by recording effects and draining them outside the
    evaluator — but this means an effect fired during a resimulated tick is discarded, so an action
    whose *only* observable result is an effect is invisible to rollback. Correct for UI dispatch;
    worth confirming no gameplay action wants to work that way.

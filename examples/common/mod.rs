@@ -7,3 +7,4 @@
 #![allow(dead_code)]
 
 pub mod prompt_ui;
+pub mod widget_focus;

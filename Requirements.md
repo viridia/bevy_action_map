@@ -639,7 +639,9 @@ PassThrough actions, first-match for others.
   with it is R8.2 met on paper and unmet in the game. The path in question is `InputDispatchPlugin`,
   the only thing that turns a global keyboard event into a focused one. The fix is a mapper-aware
   plugin in its place — `DefaultPlugins` is a group, so an app can disable one member and add
-  another — and it is chunk 49, behind the `focus` feature with the rest of D4._
+  another. Chunk 49 explored it and deferred rather than built it: chunk 61's exclusivity closed the
+  one collision Disasteroids exposed, leaving no in-tree symptom to build against. See the deferred
+  table in Roadmap.md, which also carries the design that was sketched._
 - **R8.3 (MUST)** Consumption must be resolvable in one deterministic pass with no ordering ambiguity
   between systems.
 - **R8.4 (MUST)** Interop with focus/UI: per D4 (§22), a focused widget claims controls by activating
@@ -1363,40 +1365,46 @@ surface.
   them is the repeat. Two clauses are short of the letter. **Delay and rate are one number**, because
   the pulse's clock starts on the same tick the change fires — an independent initial delay is
   deferred with a stated gate. And **"rather than as a parallel input path" is not yet true of the
-  widget side**, which is R8.2a and chunk 49._
+  widget side**, which is R8.2a — deferred with its own gate, see Roadmap.md._
 - **R22.6 (SHOULD)** A documented migration path from LWIM and bevy_enhanced_input, since the ecosystem
   will ask.
 
 ### Focus integration (D4)
 
-Rather than UI suppressing gameplay wholesale, focus participates in the action system itself, via two
-mechanisms:
-
-1. **Dispatch is an action effect.** Certain actions, when they fire, emit a bubbling `FocusedInput`
-   event at the current focus entity instead of (or as well as) exposing a value. Dispatch stays
-   `bevy_input_focus`'s job; we only trigger it.
-2. **Focus type drives context activation.** Contexts are activated by what kind of widget currently
-   has focus — a focused slider activates a context mapping `Increment`/`Decrement` plus the
-   directional-navigation actions. The focused widget thereby intercepts the inputs it cares about,
-   while anything it does not claim falls through to global shortcuts.
+Rather than UI suppressing gameplay wholesale, focus participates in the action system itself:
+**focus type drives context activation.** Contexts are activated by what kind of widget currently has
+focus — a focused slider activates a context mapping `Increment`/`Decrement`, a focused button one
+mapping `Enter`, `Space` and the pad's accept button to whatever event that widget expects. The
+focused widget thereby claims the inputs it cares about, while anything it does not bind falls
+through to whatever else is bound — decided by ordinary context priority, not by bubbling; R22.7's
+withdrawal is why bubbling turned out not to be the mechanism this needed.
 
 This is a better shape than blanket suppression: interception becomes declarative and inspectable
 (R22.1 can say _which_ focus-activated context consumed a control), and text-entry suppression
 (§12.R12.6) stops being a special case — a focused text field simply activates a context that claims
 character keys.
 
-- **R22.7 (MUST)** An action's effect must be expressible as "dispatch as a bubbling event at the
-  current focus entity", not only as "produce a value". This is a distinct axis from the value model
-  in §2 and the state machine in §3, both of which describe only what an action *reports*, not what
-  firing it *does*. _Unbuilt, and deliberately so after chunk 29 declined it. Bubbling exists so that
-  something can **intercept**, and chunk 30's screen has nothing that wants to swallow a direction —
-  its observer calls the navigator directly, in four lines, and a bubbling event would have been
-  ceremony around the same call. The gate is a widget that intercepts: a slider, a scroll area or a
-  text field, where a direction means something to the widget before it means "move the selection".
-  Deferred with that gate rather than carried by a chunk._
+- **R22.7 (WITHDRAWN)** ~~An action's effect must be expressible as "dispatch as a bubbling event at
+  the current focus entity", not only as "produce a value".~~
+
+  Withdrawn because bubbling was `bevy_input_focus`'s own answer to a question this crate already
+  answers better: whether a focused widget's decline of a control means something else should get it.
+  Bubbling exists because focus is the *only* arbitration `bevy_input_focus` has of its own; a mapper
+  with priority and consumption does not need a second one — evaluation order already decides who
+  claims a control, and R22.1's `why_not` can even name who did. Chunk 29 found the gate ("a widget
+  that intercepts") and declined to build against it; `ButtonFocused`
+  (`examples/common/widget_focus.rs`) is the widget that reached it, and it answers R8.4 for every
+  device without dispatching a bubbling event at all — an ordinary `Fired<A>` observer, at whatever
+  priority keeps it from being shadowed, is R22.8 doing the whole job R22.7 was proposed for.
 - **R22.8 (MUST)** Context activation must be bindable to the _kind_ of the focused entity, re-evaluated
   when focus changes. Must handle: nothing focused, a focus entity matching several such contexts, and
-  a focus entity despawned while focused.
+  a focus entity despawned while focused. _Answered by composition, not by a build: `active_if` (§9.7)
+  already takes any run condition, so a focus-kind check is an ordinary one — `ButtonFocused`
+  (`examples/common/widget_focus.rs`) reads `InputFocus` and a tag component, and the three cases
+  above fall out for free: nothing focused and a despawned focus both make the lookup miss, and a
+  widget-kind tag is a required component of the widget it names, so one entity never carries two.
+  Still example-side rather than crate API, since R22.9's own mechanism question is still open — see
+  Roadmap.md's deferred table._
 - **R22.9 (MUST)** **Neither crate may depend on the other.** A widget library must not gain a
   dependency on this crate, and this crate must not require a widget library — using widgets without
   input mapping, and input mapping without widgets, are both first-class. This rules out any
@@ -1562,7 +1570,7 @@ produce APIs in which the simplest case stops being simple.
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
 | **D1** | Actions are declared as **types**, with a derive macro specifying shape and metadata.                                                                                      | §1, §2, §3        |
 | **D3** | **External binding backends are supported** (Steam Input and equivalents may be the source of truth).                                                                      | §0, §4, §18, §19  |
-| **D4** | **Focus integration is by action, not by suppression**: dispatch-to-focus is an action effect, and focus _type_ drives context activation.                                 | §8, §22           |
+| **D4** | **Focus integration is by activation, not by suppression**: focus _type_ drives context activation, and what a claim does once made is ordinary composition — not a second, bubbling arbitration a mapper with priority never needed (R22.7, withdrawn). | §8, §22           |
 | **D5** | **Interception is static only.** A focus-activated context claims a control before dispatch; a widget never decides at handling time whether to let an input fall through. | §8, §22           |
 | **D6** | **We own the whole deadzone chain**, consuming Bevy's _raw_ gamepad events, and model it as three separate stages rather than one negotiated number.                       | §5, §11, §14      |
 | **D7** | **The presentation model is separate from the binding model**: players see opt-in _mappings_, _named tunables_, and _presets_; modifiers and composites stay developer-only. | §2, §4, §5, §19, §20 |

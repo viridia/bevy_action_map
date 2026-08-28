@@ -37,22 +37,30 @@ mod ship;
 mod common;
 
 use common::prompt_ui::{self, PromptSpan};
+use common::widget_focus;
 
 fn main() {
     App::new()
         .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "Disasteroids".into(),
-                    resolution: (
-                        field::HALF_EXTENT.x as u32 * 2,
-                        field::HALF_EXTENT.y as u32 * 2,
-                    )
-                        .into(),
+            // `InputDispatchPlugin` is disabled rather than kept: it only ever answered for the
+            // keyboard half of a focused `Button`, the pad went through a hand-written observer
+            // beside it, and `widget_focus::plugin` now answers for both the same way. See
+            // `common::widget_focus`.
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Disasteroids".into(),
+                        resolution: (
+                            field::HALF_EXTENT.x as u32 * 2,
+                            field::HALF_EXTENT.y as u32 * 2,
+                        )
+                            .into(),
+                        ..default()
+                    }),
                     ..default()
-                }),
-                ..default()
-            }),
+                })
+                .build()
+                .disable::<bevy::input_focus::InputDispatchPlugin>(),
             bevy_action_map::ActionMapPlugin,
             // Not in `DefaultPlugins`, unlike the focus and widget plugins beside it. It holds the
             // navigation graph, which this game never writes an edge to — but the automatic
@@ -69,6 +77,7 @@ fn main() {
             overlay::plugin,
             settings::plugin,
             prompt_ui::plugin,
+            widget_focus::plugin,
         ))
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))
         // Disasteroids is a desktop game: its prompts name keys even when a pad is plugged in, and
