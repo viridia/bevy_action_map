@@ -42,46 +42,107 @@
 //!
 //! ## Actions and contexts
 //!
-//! An [action] is a type, not a value: `#[derive(InputAction)]` gives it the Rust type your
+//! An [action] is a type, not a value. `#[derive(InputAction)]` gives it the Rust type your
 //! gameplay reads (`bool`, `f32`, `Vec2`, …) and an [`Intent`](action::Intent) saying what that
-//! value means — a button, a continuous axis, a direction to keep moving, or a delta that already
-//! happened this frame. A [context] groups the actions that are active together (on foot, in a
-//! vehicle, in a menu); [`add_context`](context::ActionMapAppExt::add_context) declares one and
-//! assigns it to an entity, and contexts have a priority, so a higher one can claim a control
-//! before a lower one ever sees it.
+//! value means: a button, a continuous axis, a direction to keep moving, or a delta that already
+//! happened this frame. A mouse delta and a stick position are both `Vec2`, but one already
+//! happened and the other tells you which way to keep moving. Intent is what keeps a binding from
+//! mixing the two up. Every action also declares a stable `path` such as `"gameplay.jump"`, which
+//! is what a settings file stores; it does not have to match the Rust type name, and should not
+//! change when the type is renamed.
+//!
+//! A [context] groups the actions that are active together: on foot, in a vehicle, in a menu.
+//! [`add_context`](context::ActionMapAppExt::add_context) declares one and assigns it to an
+//! entity, and that entity carries the live state for every action in it. Local multiplayer
+//! follows directly: give each player's entity its own context instance, and query them with
+//! [`ActionsQuery`](context::ActionsQuery) instead of [`Actions`](context::Actions) when there may
+//! be more than one live at a time.
+//!
+//! A context can be always active, or gated with
+//! [`active_in_state`](binding::InputContextBuilder::active_in_state) or
+//! [`active_if`](binding::InputContextBuilder::active_if). Contexts also carry a priority
+//! (`#[context(priority = …)]`): while a menu's context is active and consumes the arrow keys for
+//! navigation, a lower-priority gameplay context never sees them move the player.
 //!
 //! ## Bindings, modifiers, and conditions
 //!
-//! A [binding] pairs a control with the action it drives. [Modifiers](binding) reshape the raw
-//! value on the way in — dead zones, response curves, scale, negate — and [conditions](condition)
-//! decide *when* a binding counts as firing: on the press itself, after a hold, on a double tap.
-//! Several bindings can feed one action; the crate resolves them by specificity, so a chord beats
-//! a plain key bound in the same context.
+//! A [binding] pairs a control with the action it drives, and reads left to right as a pipeline:
+//!
+//! ```ignore
+//! context.bind::<Move>(Stick::Left).dead_zone(DeadZone::radial(0.15));
+//! ```
+//!
+//! Several bindings can feed one action, such as a key and a gamepad button for the same jump, or
+//! four keys combined into one `Move` composite. The crate resolves them by specificity, so
+//! `Ctrl+S` beats a plain `S` bound in the same context without either binding knowing the other
+//! exists.
+//!
+//! [Modifiers](binding) reshape the raw value on its way to the action: dead zones, response
+//! curves, scale, negate, swizzle, clamping, and rate conversion (turning a stick's *position*
+//! into the same per-frame *delta* a mouse reports). [Conditions](condition) decide *when* a
+//! binding counts as firing. Without one, a binding fires whenever its control is off rest;
+//! `.hold(0.4)` instead waits for the control to stay down for that long, and `.multi_tap(2, 0.3)`
+//! waits for two presses inside a window. Every duration is measured in the context's own
+//! simulated seconds, so a paused clock pauses them and a fixed-tick replay reproduces them
+//! exactly.
+//!
+//! A binding can carry several conditions. They combine in three ways: *explicit* conditions need
+//! at least one satisfied, *implicit* ones all need to be, and a *blocking* one vetoes the binding
+//! outright if satisfied. So `.press()` and `.hold(0.5)` together read as "either a press or a
+//! long hold."
 //!
 //! ## Reading actions
 //!
-//! Read an action by polling [`Actions`](context::Actions) in a system, or by observing a
-//! transition [event] — [`Fired`](event::Fired), [`Started`](event::Started),
-//! [`Completed`](event::Completed), [`Canceled`](event::Canceled) — delivered to the entity
-//! holding the context. Every action has a [`Phase`](action::Phase) each tick, so a hold that is
-//! charging and a hold that just fired are never confused with each other.
+//! Read an action by polling [`Actions`](context::Actions) or
+//! [`ActionsQuery`](context::ActionsQuery) in a system (`input.value::<Move>()`,
+//! `input.fired::<Jump>()`, `input.phase::<Jump>()`), or by observing a transition [event] such as
+//! [`Fired`](event::Fired), [`Started`](event::Started), [`Completed`](event::Completed), or
+//! [`Canceled`](event::Canceled), delivered to the entity holding the context. Polling suits
+//! `FixedUpdate` simulation code that wants an answer every tick regardless of whether anything
+//! changed; observing suits a one-shot reaction, such as a UI confirm or a sound effect, that
+//! would otherwise mean remembering last tick's value just to detect the edge.
+//!
+//! Every action has a [`Phase`](action::Phase) each tick (`Idle`, `Started`, `Ongoing`, `Fired`,
+//! `Completed`, `Canceled`), so a hold that has just begun and a hold that is still charging are
+//! never confused with each other, and a UI can show a charge meter the instant it appears rather
+//! than reconstructing that edge from a boolean. When an action does not fire and it is not
+//! obvious why, [`why_not`](context::Actions::why_not) answers with the specific
+//! [`Obstacle`](context::Obstacle): an inactive context, a higher-priority consumer, a longer
+//! chord winning, an unmet condition, or a device that is not this player's.
 //!
 //! ## Tick domains
 //!
-//! A context runs on the render tick or the fixed tick ([`TickDomain`](action::TickDomain)), and
-//! evaluation happens once per tick of whichever one it declared. Fixed-tick contexts still see
-//! every press and release exactly once, however many times — or few — `FixedUpdate` runs between
-//! one render frame and the next.
+//! A context declares a [`TickDomain`](action::TickDomain), `Render` or `Fixed`, and evaluates
+//! once per tick of whichever one it picked: a camera-look context on the render tick, a gameplay
+//! context on the fixed tick, both reading the same devices without either one guessing at the
+//! other's timing. Fixed and render ticks disagree about how often they run relative to each
+//! other, so a fixed-tick context still sees every press and release exactly once, however many
+//! times (or how few) `FixedUpdate` runs between one rendered frame and the next; the crate queues
+//! timestamped input and drains it by time window rather than by polling a live snapshot.
+//!
+//! An action needed at both rates must be declared in two contexts, one per domain — a context's
+//! tick domain is fixed at declaration time, not chosen per read.
 //!
 //! ## Presentation
 //!
-//! Marking a binding [`mappable`](binding::BindingHandle::mappable) adds it to a smaller model
-//! built for presentation: a named [mapping] with an ordered list of slots, which a settings
-//! screen can walk without knowing anything else about your actions. From there the crate can
-//! list what is bound, run an interactive [capture] for a new control with conflict detection,
-//! apply the result as a live [override](overrides), and keep an on-screen [prompt](present)
-//! correct across the change. [Presets](preset) apply a whole named arrangement of mappings at
-//! once.
+//! The binding API above is a developer's model. Dead zones and response curves are
+//! implementation detail nobody rebinding "move forward" should have to think about. Marking a
+//! binding [`mappable`](binding::BindingHandle::mappable) adds it to a smaller model built for
+//! presentation instead: a named [mapping] with an ordered list of slots ("Primary",
+//! "Secondary"), which a settings screen can walk without knowing anything else about your
+//! actions or bindings.
+//!
+//! From there the crate can list what is bound, run an interactive [capture] for a new control
+//! (with conflict detection against everything else in the context, and reserved controls a game
+//! never wants handed out), and apply the result as a live [override](overrides) that cancels
+//! whatever was in flight and takes effect immediately. [Presets](preset) apply a whole named
+//! arrangement of mappings at once, for a game that ships alternate control schemes (`Southpaw`,
+//! `Classic`) rather than leaving a player to rebind every row by hand.
+//!
+//! An on-screen [prompt](present) ("Press W") stays correct across a rebind because it is derived
+//! from the same data the settings screen edits, not typed out separately. The control half of
+//! that prompt is also a stable, storage-safe string, so a save file and a localization catalogue
+//! can both key off it without depending on any one platform's names for its buttons.
 //!
 //! # Feature flags
 //!
