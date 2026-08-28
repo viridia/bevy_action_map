@@ -38,10 +38,10 @@ while writing a loader.
 **The starting proposal was one row per action path, holding an encoded binding.** Three things
 break that, and each pushes the row in the same direction:
 
-- an action has several bindings, so `Jump` is Space *and* South;
+- an action has several bindings, so `Jump` is Space _and_ South;
 - the unit of rebinding is the mapping rather than the action, which D7 settled and which a
   composite makes unavoidable — the player rebinds "move forward", never `Move`;
-- only the *source* belongs to the player at all. Modifiers, conditions and chord structure are
+- only the _source_ belongs to the player at all. Modifiers, conditions and chord structure are
   developer data, and the knobs a player does get are tunables.
 
 So a row is keyed by mapping and holds a control, not a binding. Everything stays a scalar, which is
@@ -56,14 +56,14 @@ loses one of them silently.
 
 **Two players with identical controllers is a persistence question in disguise.** If a stored
 binding could name a device instance, the file would say "player 1 uses the pad with GUID abc123"
-and break when a controller is replaced. It cannot, so bindings name a device *class*, and pairing
+and break when a controller is replaced. It cannot, so bindings name a device _class_, and pairing
 and calibration are separate stores keyed by persistent identity — R17.8. Two players with identical
 pads and identical mappings then share one table and differ only in pairing, which is chunk 26's
 business and correctly invisible here.
 
 **Steam's IGA file is not a binding file**, which is the answer to whether it should inspire the
 format. It declares action sets, layers, and actions with their types; the bindings live per-user in
-Steam's own storage. So it is the counterpart of our action *declarations*, and we already match it
+Steam's own storage. So it is the counterpart of our action _declarations_, and we already match it
 — their action types are our `Intent`, existing for the same reason, and their localization block is
 R19.14. Two things did come out of reading it that way: an authority backend rewriting bindings
 mid-session is normal rather than exotic, which is why applying to a live context is the only path
@@ -92,7 +92,7 @@ authority case §0 predicted, and nothing about the four-layer split had to move
 
 **What did not survive is the assumption that L2 is where a backend takes over.** Steam presents a
 pad it is driving as an emulated gamepad, so the platform enumerates it and `sample_input` records it
-while the backend is also reporting it — every input twice. R0.4 stops us *computing* the action; it
+while the backend is also reporting it — every input twice. R0.4 stops us _computing_ the action; it
 never said anything about sampling the hardware underneath. That is R0.6, and it is not a Steam
 workaround: a replay backend needs the same verb for the same reason, and the demo is unusable
 without it. Worth noting how it was found — by asking what the first five minutes of running the
@@ -102,7 +102,7 @@ thing would look like, not by reading the requirements again.
 
 - **A backend writes a value, not a state.** Steam returns a level with no edge and no timestamp, so
   §9's timing cannot be reconstructed from it — but `fired()` has to keep working or R0.5 is false.
-  Both hold if the write substitutes for the fold's output *inside* the evaluator, letting our
+  Both hold if the write substitutes for the fold's output _inside_ the evaluator, letting our
   existing state machine synthesize the edges. The alternative, a second write path into
   `InputContextState::actions`, would need its own copy of R6.1, and two implementations of the
   button state machine is precisely the drift R0.5 exists to prevent. Falsified if a backend-owned
@@ -128,7 +128,7 @@ which was written as policy and becomes true.
 **One correction.** R18.9 said backend glyphs arrive as opaque handles or raw image bytes. Steam
 returns a filesystem path, which is neither and which the app has to load. The requirement's
 substance was right and only its enumeration of shapes was short — but the same gap one level up is
-load-bearing: a backend's *origins* are its own enumeration of physical controls, covering device
+load-bearing: a backend's _origins_ are its own enumeration of physical controls, covering device
 families we have no `Control` for, so a reverse lookup returning `Vec<Control>` quietly makes the
 trait ours-only. That is now chunk 40's second review surface.
 
@@ -140,11 +140,11 @@ paying for it during the bootstrap. Eleven entries moved to
 housekeeping entry between 47 and 44 — leaving 324 lines.
 
 **The admission rule was the problem, not the length.** The archive said it held "phases I–VI,
-closed", which is a rule about *age*, and an age rule cannot shrink this file while a phase is open:
+closed", which is a rule about _age_, and an age rule cannot shrink this file while a phase is open:
 Phase VII still has five chunks in it, so a phase boundary would have archived nothing at all. The
 rule it was actually applying — its own header says so one line further down — is **closed and no
 longer consulted**, which is about what is still load-bearing. Stated properly: an entry moves when
-every obligation it created is written somewhere else *and* nothing left in the sequence reasons
+every obligation it created is written somewhere else _and_ nothing left in the sequence reasons
 from the entry itself. That archives a chunk the week it finishes and keeps a grooming note for a
 year, which is the right shape.
 
@@ -191,9 +191,9 @@ marker component; reviewed before being written, and rejected for churn no captu
 The second pass narrowed that to a `bevy_reactor`-style trick — a `bundle_template` that despawns an
 entity's children in the same frame new ones are spawned, reapplied to a container holding just the
 two tables — also reviewed before being written, and rejected once it was clear a capture never
-changes a row's *shape*: column count, which cells are boxed, and the follower lines under them are
+changes a row's _shape_: column count, which cells are boxed, and the follower lines under them are
 all declaration-level facts capacity and rebindability, never touched by an override. What actually
-changes is what a handful of cells *say*. The landed version tags every boxed cell with
+changes is what a handful of cells _say_. The landed version tags every boxed cell with
 `RebindCell(Scheme, MappingKey, usize)` and every follower's cell with `FollowerCell(Scheme,
 MappingKey, usize, ConditionDescriptor)` at spawn time, and a capture patches `Text` on exactly the
 cells named by the rows it touched — the row captured into, and every row a steal emptied — found by
@@ -204,7 +204,7 @@ for far less code.
 
 **`MappingKey` alone does not name a row, and the first version of the two tags above forgot it —
 found by playing it, not by review.** `Hyperspace`'s keyboard cell refused every capture; logging
-`start_capture`'s lookup showed it resolving to `Hyperspace`'s *gamepad* mapping instead —
+`start_capture`'s lookup showed it resolving to `Hyperspace`'s _gamepad_ mapping instead —
 `Rebinding::Fixed`, wrong capacity, refused on the first check. `MappingKey` is derived from the
 action's path and part alone (§19.R19.9's own doc says so), so the same key names two different rows
 whenever an action is bound in both schemes, which every action in Disasteroids is. `mappings(world)`
@@ -252,10 +252,10 @@ work" worked example, arrived at for free.
 going in was to mirror `ConsumedControls`'s per-schedule bookkeeping, since both describe something
 claimed across a frame that spans multiple fixed ticks. But a control's actuation is genuinely
 per-tick data — the reason a fixed tick's consumption claim has to be released before the next one —
-while a context's *activity* does not reset between fixed ticks at all; it only changes on an
+while a context's _activity_ does not reset between fixed ticks at all; it only changes on an
 activate/deactivate edge. So the ceiling only needs a monotonic raise and one reset at the top of the
 frame, and it composes stacked exclusive contexts correctly with no extra code: an exclusive context
-only raises the ceiling if it is itself still active *after* being checked against whatever a
+only raises the ceiling if it is itself still active _after_ being checked against whatever a
 higher-priority one already set, so a third exclusive context shadowing a second correctly stops the
 second from also shadowing the first.
 
@@ -281,7 +281,7 @@ Closing happens four ways — `Back`, Cancel, Confirm, and (once duplicated for 
 `ToggleSettings` again — and only one of them would have handed the pause back, leaving the other
 three exits stuck paused with no visible cause. Worse: since `ToggleSettings` was already reachable
 regardless of `Game`'s state (`Shell` has no activation condition), a player who paused first and
-then opened settings would have had the close path *unpause* a game that was already paused before
+then opened settings would have had the close path _unpause_ a game that was already paused before
 the screen existed. Landed instead as a second, independent `run_if` on `Simulating` — the set
 `pause.rs` already exports for exactly this — gated on `Settings::Hidden` rather than `Game`. Nothing
 needs to remember what the state was before, because nothing is mutated: `Simulating` already ANDs
@@ -306,7 +306,7 @@ applied to `PromptScheme(Scheme::Gamepad)`, used here for the first time outside
 **Two more findings from playing it, both small.** A capture in progress looked identical to one
 that had not started — nothing on screen said "listening" — so `LISTENING`, an amber
 `BackgroundColor`, is set on the cell in `start_capture` and cleared in both ways a capture ends
-(`captured`, and `back`'s mid-capture branch). And the help text never said how to *start* a
+(`captured`, and `back`'s mid-capture branch). And the help text never said how to _start_ a
 capture at all; it now reads "press one, then press what you want bound there" instead of stopping
 at "the ones this game offers for rebinding". Raised and declined: a gamepad row reading "West
 Button" rather than a controller's own printed label (X, on the pad tested against) — this is
@@ -346,7 +346,7 @@ game with no presets pays nothing, not even a new argument to thread through.
 pristine declaration on every call ("a diff, not a snapshot," and the
 `the_defaults_survive_being_overridden` test proves it), so two sequential apply calls do not
 compose: a smaller second call would silently revert every row it does not mention. That is what
-settled "starting point, not layer" for what a preset selection *is* — the other question this chunk
+settled "starting point, not layer" for what a preset selection _is_ — the other question this chunk
 had to answer, left open in the roadmap. A preset's rows are written into the same working copy a
 manual capture writes into, indistinguishably, and nothing anywhere persists "which preset is
 currently selected" as an identity — a screen that wants to show one recomputes it, by comparing what
@@ -373,7 +373,7 @@ adding.
 
 **The settings screen's Confirm/Cancel button row turned out to already be the right model for
 heterogeneous scene lists, once bsn!'s own grammar was read rather than guessed at.** `Children [
-({cancel_button()}), ({confirm_button()}) ]` splices two *different* `impl Scene` types side by side
+({cancel_button()}), ({confirm_button()}) ]` splices two _different_ `impl Scene` types side by side
 because each is its own `({expr})` splice; a `Vec<impl Scene>` spliced as `{tables}` only works
 because both entries come from the same `table()` call. Wrapping the gamepad table and its new preset
 button row in a `Node`-column child of the outer `Children [...]` list — rather than trying to make a
@@ -393,19 +393,19 @@ it, not by review.** The first landed version had `preset_pressed` call `repaint
 things were wrong with it, and each one hid the other:
 
 - **Pressing `Default` after `Southpaw` changed nothing.** `preset_pressed` only ever wrote the
-  *pressed* preset's own rows into the pending copy — fine for `Southpaw`, which has one row, fatal
+  _pressed_ preset's own rows into the pending copy — fine for `Southpaw`, which has one row, fatal
   for `Default`, whose whole content is an empty `Overrides`. Writing zero rows left whatever the
   last preset had written untouched, so `Default` never actually became the working copy's answer;
-  it only ever looked like a no-op. The fix reads every row *any* registered preset might touch and
+  it only ever looked like a no-op. The fix reads every row _any_ registered preset might touch and
   resets it first, before writing the pressed one's own rows on top — "starting point, not layer"
   said this already, in the doc comment, without the code actually doing it.
 - **The gamepad table's own text never updated at all, first press or later.** `repaint_row` finds a
-  cell by its `RebindCell` tag, and `cells()` only ever attached that tag to a *capturable*
+  cell by its `RebindCell` tag, and `cells()` only ever attached that tag to a _capturable_
   (`Rebinding::Here`) cell — exactly the ones a preset never needs to move, since every gamepad row
   is `Fixed`. `Turn`'s cell had no tag `repaint_row` could find it by, so every preset press silently
   repainted nothing; only closing and reopening the screen, which rebuilds the table straight from
   `mappings(world)`, ever showed the real state. `CellRole` gained a `Fixed(Scheme, MappingKey,
-  usize)` case distinct from a blank/nonexistent slot, and a new `RowCell` tag is attached to *every*
+usize)` case distinct from a blank/nonexistent slot, and a new `RowCell` tag is attached to _every_
   principal cell regardless of whether `RebindCell` also is — identity for finding a cell again is
   now separate from permission to capture into it.
 
@@ -467,11 +467,11 @@ record rather than merely implied.
 **A `MappingKey` cannot be manufactured from a loaded string, which is why loading is a
 `DeserializeSeed` and not a plain `Deserialize` impl.** The type holds a `&'static str`, always
 one the game's own `MappingKey::new` produced at startup — an app cannot construct one at all,
-`new` is `pub(crate)`. So resolving a saved row means finding the *existing* key among what
+`new` is `pub(crate)`. So resolving a saved row means finding the _existing_ key among what
 `declared_mappings` already returns, string-matched by `Display`, never building a new one. A name
 that matches nothing has no `MappingKey` to put in an `OverrideProblem` (whose `mapping` field
 requires one), so it comes back in a separate `UnresolvedMapping` list instead, carrying the raw
-text — an unrecognized *control* name, by contrast, is discovered only after its mapping already
+text — an unrecognized _control_ name, by contrast, is discovered only after its mapping already
 resolved, so that one does fit `OverrideProblem` and got a new `UnknownControl` variant.
 
 **That variant cost `OverrideProblemKind` its `Copy` derive** — a `String` field is incompatible
@@ -493,3 +493,27 @@ reads but does not yet branch on anything, since only one exists so far.
 opposite of a coincidence: `BindingsTable`'s manual `serialize_map` walks a `BTreeMap<Scheme, _>`
 in `Scheme`'s own declared order rather than sorting scheme names alphabetically, which is what
 keeps `keyboard_mouse` ahead of `gamepad` in the file despite "g" sorting first.
+
+### The forgiveness grooming, before chunk 34
+
+Outside feedback that the crate shoulders responsibility that belongs to the app named two
+examples: disabling an action (R3.7, chunk 35) and forgiveness windows (R6.5, chunk 34). The two do
+not hold up the same way under that question.
+
+**R3.7 stays.** "The app just ignores the event" does not reproduce what disabling buys: R3.6 gives
+a bound action consumption priority over lower-priority contexts, so an ignored-but-still-bound
+action keeps its control away from anything else bound to it — exactly the gap R3.7 exists to close
+without requiring an unbind. Chunk 35's own note already found the mechanism mostly built
+(`require_reset`, a `StateFlags` bit); what is missing is the public verb, so the cost of keeping
+this is close to zero.
+
+**R6.5 is withdrawn.** Buffering and coyote time, in the form named, turn on a crossing the crate
+cannot see: landing, leaving the ground, or whatever app-domain transition "valid" means for a given
+action, is state the crate has no view into, so a crate-side condition could not implement the named
+pattern either, only a narrower piece of it. That piece — "was this control active in the last N
+ms" — is already answered by what §3 ships: R3.2's events give the press/release edges, R3.4 gives
+elapsed time in the current state measured in the app's own simulated seconds, and recording a
+timestamp off an event the app already receives is composition, not a missing primitive. Chunk 34
+keeps R6.4's ordered sequences, a different question — the ordering is between the crate's own
+actions, never against app state — and drops the forgiveness half entirely. Requirements.md marks
+R6.5 withdrawn in place, same convention as R2.4.

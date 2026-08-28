@@ -163,7 +163,7 @@ where it fell short of its own description — Phase VII onward there, and every
 | 16 | Disasteroids, first playable | playable; no death, which is polish |
 | 12 | Transition log and observers | done |
 | 13 | Context activation lifecycle | done |
-| 11 | Conditions and the scratch table | done; forgiveness windows → 34 |
+| 11 | Conditions and the scratch table | done; forgiveness windows withdrawn (R6.5), sequences → 34 |
 | 14 | Arbitration and consumption | done; chords on *actions* → 33 |
 | 32 | Activation by run condition | done, out of order |
 | 17a | Runtime failures (R24.4) | done; the silence it creates → 17b |
@@ -400,6 +400,14 @@ provide; `conflicts()` goes with them, since it is a query over the mapping list
 basis. If this chunk finds the doc sentence insufficient, the next step is a convenience filter, not
 a smaller model.
 
+**A second scope question, resolved ahead of this chunk rather than saved for it.** Feedback that
+the crate does too much also named disabling an action (R3.7) and forgiveness windows (R6.5). Only
+the second gave, since it turns out fully answerable from primitives §3 already ships rather than a
+crate feature at all — Log.md's "The forgiveness grooming, before chunk 34" has the argument, and
+Requirements.md marks R6.5 withdrawn. R3.7 stays, and cheaply, for the reason recorded there. Kept
+here as the same kind of finding this chunk is a survey for, in case the collapse candidates below
+suggest others like it.
+
 ### 48. Names that survive a glob import
 
 The prelude exports sixteen bare English nouns — `Scheme`, `Mapping`, `Capacity`, `Conflict`,
@@ -549,20 +557,16 @@ diagnostic naming the loop.
   when this lands whether the overlap is large enough that one of them should go, since carrying
   both when either would do is the sort of thing an outside reader notices first.
 
-### 34. Forgiveness and sequences
+### 34. Sequences
 
-R6.5's **buffering** — accepting an input pressed slightly before it became valid, and firing it
-when it does — and **coyote time**, its mirror image. Plus R6.4's ordered sequences, for combos and
-cheat codes.
+R6.4's ordered sequences (double-tap-dash, motion inputs, cheat codes) — inputs that must arrive in
+order within a time window.
 
-- **Why it waits, and why it is not deferred outright:** the requirements name the absence of
-  forgiveness windows as a frequent reason teams abandon a general input crate and hand-roll one.
-  That makes it load-bearing rather than optional — but it is also exactly the kind of thing that
-  goes wrong when guessed at, because the right window lengths and the right *which input* are
-  questions only a real game answers. Disasteroids does not need it. A platformer would,
-  immediately.
-- **Both fit the scratch record** as Design §6 predicted, so this is a condition each, not a
-  redesign.
+- **R6.5's forgiveness windows (buffering, coyote time) do not carry here.** Withdrawn instead — see
+  Requirements.md. The crossing point in both directions is app-domain state (landing, leaving the
+  ground) the crate cannot see, and R3.2's events plus R3.4's elapsed time already give the app what
+  it needs to compose the pattern itself.
+- **Fits the scratch record** as Design §6 predicted, so this is a condition, not a redesign.
 - **Carried from chunk 11.**
 
 ### 35. Disabling an action

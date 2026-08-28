@@ -550,12 +550,21 @@ inputs (quarter-circle) and input buffering, which none of the above handle nati
 - **R6.4 (SHOULD)** Sequence/combo conditions (ordered inputs within a time window) — needed for
   double-tap-dash, motion inputs, and cheat codes; if deferred, the condition trait must be able to
   express them without a breaking change.
-- **R6.5 (SHOULD)** Forgiveness windows, in both directions. _Buffering_ accepts an input pressed
-  slightly **before** it became valid and fires it when it does (pressing jump just before landing,
-  queuing the next attack mid-swing). _Coyote time_ is the mirror image: accepting an input slightly
-  **after** it stopped being valid (jumping a few frames after walking off a ledge). Both are
-  configurable windows, and the lack of them is a frequent reason teams abandon a general input crate
-  and hand-roll one.
+- **R6.5 (WITHDRAWN)** ~~Forgiveness windows, in both directions.~~ _Buffering_ accepts an input
+  pressed slightly **before** it became valid and fires it when it does (pressing jump just before
+  landing, queuing the next attack mid-swing). _Coyote time_ is the mirror image: accepting an input
+  slightly **after** it stopped being valid (jumping a few frames after walking off a ledge). Both
+  are named because the lack of them is a frequent reason teams abandon a general input crate and
+  hand-roll one.
+
+  Withdrawn because the moment either window opens or closes — landing, leaving the ground, or
+  whatever else "valid" means for a given action — is app-domain state the crate has no view into,
+  so a crate-side condition could not implement the pattern named above either, only a narrower
+  piece of it: "was this control active within the last N ms". R3.2's events and R3.4's elapsed
+  time already give the app that piece — record a timestamp off an event already delivered, compare
+  it against the app's own clock when its own domain-side transition happens — so there is no crate
+  surface left to build. R6.4's sequences are a different question, ordering the crate's own
+  actions rather than checking against app state, and stay live.
 - **R6.6 (MUST)** Third-party conditions registerable, same constraints as R5.6/R5.7.
 - **R6.7 (MUST)** Conditions must not depend on real time or on frame count (§10).
 
