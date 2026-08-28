@@ -804,11 +804,11 @@ The ordering guarantee is that observers for a `Fixed` context run at simulation
 `FixedPostUpdate`, after that tick's evaluation — not at render rate, which would silently
 double-fire during catch-up.
 
-### 9.7 The player-facing surface (D7)
+### 9.7 The presentation surface (D7)
 
 The binding model above is a *developer* model. Players get a deliberately smaller one, because the
 internal model has no player-comprehensible reading — nobody rebinding "move forward" should meet a
-swizzle. D7 separates the two, and the separation costs less than it sounds: the player-facing surface
+swizzle. D7 separates the two, and the separation costs less than it sounds: the presentation surface
 is three additive declarations over bindings that already exist.
 
 ```rust
@@ -1002,7 +1002,7 @@ by `scheme` for which device's worth to show — and because a category is a loc
 any other, `mapping::fallback_label` renders one for the game that ships no catalogue, which is the
 same courtesy `MappingKey` gets and is written in terms of.
 
-The keys are the whole player-facing vocabulary, and none of them is a string this crate renders.
+The keys are the whole presentation vocabulary, and none of them is a string this crate renders.
 That is what keeps R18.3's "no hard-coded English" honest across a whole rebinding row rather than
 only the control column — and it is why a mapping carries a key rather than a label: a
 label would be a second string to translate, sitting in the binding declaration where no translator

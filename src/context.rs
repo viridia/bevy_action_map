@@ -60,7 +60,7 @@ pub(crate) struct InputContextPlan<C> {
     // The bindings as authored, kept so that an override can be applied as a diff against them.
     // Cloned and rewritten per apply rather than mutated, for the reason above.
     bindings: alloc::vec::Vec<crate::binding::BindingSpec>,
-    // The player-facing view of the same bindings, empty unless some were declared mappable.
+    // The presentation view of the same bindings, empty unless some were declared mappable.
     mappings: alloc::vec::Vec<crate::mapping::Mapping>,
     // Whether an instance is live the moment it is spawned. False for a context whose activation
     // follows something else, so that it does not fire for one frame before the something else
@@ -72,7 +72,7 @@ pub(crate) struct InputContextPlan<C> {
 ///
 /// Absent until something applies one, which is what makes its presence the answer to "has anything
 /// been overridden here". Everything that asks what is bound *now* — a spawning instance, the
-/// player-facing mapping list — reads this and falls back to `InputContextPlan<C>`.
+/// presentation mapping list — reads this and falls back to `InputContextPlan<C>`.
 #[derive(Resource)]
 pub(crate) struct AppliedPlan<C> {
     pub(crate) plan: Arc<Plan<C>>,
@@ -1093,7 +1093,7 @@ fn apply_to_context<C: InputContext + Component>(
 /// Reads one context's bindings back out for a reverse lookup, once its type is no longer known.
 ///
 /// Registered beside `read_mappings`, and answering a different question: this one is about what
-/// would fire now, so it reads the compiled plan rather than the player-facing rows, and it asks
+/// would fire now, so it reads the compiled plan rather than the presentation rows, and it asks
 /// whether anything is carrying the context at all.
 fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::ContextBindings {
     use crate::present::{BoundControl, ContextBindings};
@@ -1131,7 +1131,7 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
         let condition = crate::condition::describe(&binding.conditions);
 
         // By part rather than by control, so that a composite answers once per direction and a
-        // stick answers once rather than twice — the same view the player-facing model takes.
+        // stick answers once rather than twice — the same view the presentation model takes.
         binding.source.for_each_part(|part, control| {
             prompts.push(BoundControl {
                 action,

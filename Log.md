@@ -27,7 +27,7 @@ Two kinds of entry appear below, and the distinction is the useful one:
 
 ---
 
-## Phase VII — the player-facing model
+## Phase VII — the presentation model
 
 ### The persistence design, before any of it was built
 

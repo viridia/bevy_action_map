@@ -122,7 +122,7 @@ pub enum DiagnosticKind {
         /// The action it was told to follow.
         target: &'static str,
     },
-    /// A binding follows one that is itself off the player-facing list.
+    /// A binding follows one that is itself off the presentation list.
     FollowsUnlisted {
         /// The action it was told to follow.
         target: &'static str,

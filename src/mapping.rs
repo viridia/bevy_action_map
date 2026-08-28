@@ -1,4 +1,4 @@
-//! The player-facing model: mappings, tunables, and presets.
+//! The presentation model: mappings, tunables, and presets.
 //!
 //! The binding model is a developer's model. Negate, swizzle and response curves are adapters for
 //! fitting a control to an action, and nobody rebinding "move forward" should meet one. What a
@@ -247,18 +247,18 @@ pub struct Mapping {
     /// The path of the context the binding lives in.
     pub context: &'static str,
     /// Other actions riding this row's controls, declared with
-    /// [`follows`](crate::binding::BindingHandle::follows).
+    /// [`follow`](crate::binding::InputContextBuilder::follow).
     ///
     /// Empty for almost every mapping. A follower contributes no slot of its own — its controls are
     /// this row's by construction — so a screen draws it as a subordinate line under the row rather
-    /// than a row of its own, which is the whole reason `.follows` exists: two actions sharing one
+    /// than a row of its own, which is the whole reason `.follow` exists: two actions sharing one
     /// control read as one thing to rebind, not two.
     pub followers: Vec<Follower>,
 }
 
 /// One other action riding a mapping's row, contributing no controls of its own.
 ///
-/// What [`follows`](crate::binding::BindingHandle::follows) declares. The follower reads exactly the
+/// What [`follow`](crate::binding::InputContextBuilder::follow) declares. The follower reads exactly the
 /// controls its principal's row lists, so nothing here repeats them — a screen names the row above
 /// again, usually with [`condition`](Self::condition) added, rather than drawing a row of its own.
 #[derive(Clone, Debug, PartialEq)]

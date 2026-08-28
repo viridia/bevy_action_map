@@ -247,7 +247,7 @@ this chunk builds the modifier under a name the plan-build check already counts 
 
 ---
 
-## Phase VII — the player-facing model
+## Phase VII — the presentation model
 
 D7 made real. This is the half of the crate a player ever sees, and per the audience commitment it
 must stay additive: a game that declares none of it keeps working exactly as before (R19.13, R24.7).
@@ -673,7 +673,7 @@ redundancy" — may be the wrong job:
 - **Not doing: shortening for its own sake.** The rationale given in place is why these documents
   are worth reading at all, and a requirement stripped to its `MUST` clause is one nobody can argue
   with — which is the opposite of what the ask is for.
-- **Why this late.** The documents are still moving. Phase VII rewrites the player-facing half of
+- **Why this late.** The documents are still moving. Phase VII rewrites the presentation half of
   both, and a redundancy pass run before it lands gets redone.
 - **Review surface:** hand it to someone who has read none of it and watch where they stop. That is
   the only measurement of this chunk that means anything, and it is available cheaply — the same
@@ -712,7 +712,7 @@ of things that would quietly never happen.
   reliably is — but "does the ECS-ness earn its keep here". State activation is a case where it
   does; the comparison should say which cases do not, and why.
 - **Why last:** the first item can be done at any time and the other two document a moving target.
-  The README wants chunk 19, after which the feature list stops growing in the player-facing
+  The README wants chunk 19, after which the feature list stops growing in the presentation
   direction; the comparison wants chunks 11 and 14, since conditions and arbitration are where the
   three crates genuinely differ rather than differ in spelling.
 

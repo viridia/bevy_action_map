@@ -750,7 +750,7 @@ fn refusal(
     None
 }
 
-/// How many player-facing rows one binding feeds: one for a plain control, four for a directional
+/// How many presentation rows one binding feeds: one for a plain control, four for a directional
 /// composite.
 fn parts_in(source: &crate::binding::BindingSource) -> usize {
     let mut count = 0;
@@ -799,7 +799,7 @@ fn clone_onto(binding: &BindingSpec, part: crate::binding::Part, control: Contro
     grown
 }
 
-/// The player-facing rows for a variant, keyed to the declared ones.
+/// The presentation rows for a variant, keyed to the declared ones.
 ///
 /// Derived from the rewritten bindings rather than patched, so the rows and the plan cannot disagree
 /// about what is bound — with one exception the derivation cannot express on its own: a row the

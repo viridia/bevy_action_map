@@ -1178,7 +1178,7 @@ curves ([IGA file][steam-iga]).
   rebinding API must be able to report "not rebindable here, delegate instead" as a normal outcome —
   and R19.3's conflict detection does not apply to those actions, since we do not own the rules.
 
-### The player-facing model
+### The presentation model
 
 - **R19.9 (MUST)** The unit of rebinding is a **mapping**, not a binding. For a composite, each
   _part_ is its own mapping — "move forward" is a mapping, `Move` is not — so the composite is never
@@ -1565,7 +1565,7 @@ produce APIs in which the simplest case stops being simple.
 | **D4** | **Focus integration is by action, not by suppression**: dispatch-to-focus is an action effect, and focus _type_ drives context activation.                                 | §8, §22           |
 | **D5** | **Interception is static only.** A focus-activated context claims a control before dispatch; a widget never decides at handling time whether to let an input fall through. | §8, §22           |
 | **D6** | **We own the whole deadzone chain**, consuming Bevy's _raw_ gamepad events, and model it as three separate stages rather than one negotiated number.                       | §5, §11, §14      |
-| **D7** | **The player-facing model is separate from the binding model**: players see opt-in _mappings_, _named tunables_, and _presets_; modifiers and composites stay developer-only. | §2, §4, §5, §19, §20 |
+| **D7** | **The presentation model is separate from the binding model**: players see opt-in _mappings_, _named tunables_, and _presets_; modifiers and composites stay developer-only. | §2, §4, §5, §19, §20 |
 | **D8** | **Serialized identity is a declared path, not the Rust type path**, and the derive requires it — a saved binding must not depend on where a type lives. Namespacing moves to the naming convention (R1.8). | §1, §17, §18 |
 
 There is deliberately no decision here about how action state is stored, or about whether actions are

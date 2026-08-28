@@ -673,7 +673,7 @@ overlay, not that we ship an inspector, and `InputDump` is plain enough for anyo
 
 ---
 
-## Phase VII — the player-facing model
+## Phase VII — the presentation model
 
 Closed entries only. The phase itself is still open in [Roadmap.md](./Roadmap.md); what is here is the
 part of it that no longer has anything outstanding.
@@ -1014,7 +1014,7 @@ motion and buttons in its own problem statement and then had requirements for on
 
 ### Chunk 43: listed by default
 
-The player-facing list was opt-in in both senses at once. A binding with no mapping was neither
+The presentation list was opt-in in both senses at once. A binding with no mapping was neither
 rebindable nor *visible*, so the only rows a screen could draw were the ones a game had already
 offered for remapping — and the commonest gamepad screen in the industry is a read-only list of what
 the pad does, with the remapping owned by the platform. We could not draw it from our own data.
@@ -1492,7 +1492,7 @@ for the repetition rather than one call site.
 
 ### Chunk 38: applying a rebind
 
-Twenty chunks of the player-facing model and none of them could change anything. Capture reported a
+Twenty chunks of the presentation model and none of them could change anything. Capture reported a
 choice, `mappings` read the compiled defaults, `conflicts` read the compiled defaults, and chunk
 44's follower link had nothing to follow *through*. What was missing in all four cases was the same
 thing: somewhere to write an answer.
@@ -1541,7 +1541,7 @@ the authored specs and recompiling makes applying *literally* the pure function 
 specified, and reuses `diagnose` on the result. Applying is rare by construction; the recompile is
 not the cost worth optimizing.
 
-**One walk, two readers.** The pass that assembles player-facing rows and the pass that rewrites
+**One walk, two readers.** The pass that assembles presentation rows and the pass that rewrites
 them both need "which bindings feed this row, in slot order". They were going to be two walks
 agreeing by inspection, which is the failure mode worth a function to make impossible — a row built
 one way and written another puts the player's control in a slot the screen is not showing it in.

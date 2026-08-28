@@ -256,7 +256,7 @@ const fn widest(
     }
 }
 
-/// What a binding contributes to the player-facing list.
+/// What a binding contributes to the presentation list.
 ///
 /// Every binding has one of these unless it was declared `private`, because a controls screen that
 /// shows only the rebindable half is a controls screen with holes in it.
@@ -765,7 +765,7 @@ impl BindingSource {
                 visit(Part::Right, parts.right.into());
             }
             // A stick and a mouse have no parts a player would rebind one of. They are one thing
-            // as far as the player-facing model is concerned, and what they get instead of
+            // as far as the presentation model is concerned, and what they get instead of
             // per-part rebinding is a tunable.
             Self::MouseMotion => visit(Part::Whole, Control::MouseMotion),
             #[cfg(feature = "gamepad")]
@@ -1399,7 +1399,7 @@ impl<'a, C> BindingHandle<'a, C> {
         self.declare_mapping(None, crate::mapping::Capacity::UpTo(1))
     }
 
-    /// Keeps this binding out of the player-facing list entirely.
+    /// Keeps this binding out of the presentation list entirely.
     ///
     /// Listing is the default, because a player is entitled to see what their controls do and a
     /// screen that shows only the rebindable half has holes in it. This is the exception: a binding
@@ -1776,7 +1776,7 @@ impl<C> InputContextBuilder<C> {
     /// the class shows up — the mechanism a focused text field uses to claim character-producing
     /// keys without the app enumerating them. It fires once per matching, otherwise-unclaimed event,
     /// carrying that event untouched; there is no value to combine and nothing to hold between
-    /// ticks, so it skips modifiers, conditions and the player-facing mapping list entirely.
+    /// ticks, so it skips modifiers, conditions and the presentation mapping list entirely.
     ///
     /// ```ignore
     /// struct CharacterInput;
@@ -1821,7 +1821,7 @@ impl<C> InputContextBuilder<C> {
         found
     }
 
-    /// The player-facing view of these bindings: one mapping per mappable part.
+    /// The presentation view of these bindings: one mapping per mappable part.
     pub(crate) fn mappings(&self, context: &'static str) -> Vec<crate::mapping::Mapping> {
         mappings_of(&self.bindings, context)
     }

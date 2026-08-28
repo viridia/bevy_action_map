@@ -13,7 +13,7 @@ them what is bound, let them change it, and keep every prompt on screen in sync.
 
 > **Status: early and public for review, not for production.** The core mapping pipeline —
 > keyboard, mouse, gamepad, modifiers, conditions, arbitration, fixed/render tick handling — is
-> built and exercised by a real game (below). The player-facing rebinding UI works end to end for
+> built and exercised by a real game (below). The rebinding UI works end to end for
 > that game but hasn't shipped a persistence format yet. There's no crate-level API documentation
 > on docs.rs, and this crate isn't published to crates.io. See [Roadmap.md](./Roadmap.md) for what's
 > done and what's left.
@@ -59,7 +59,7 @@ shipped game needs more than a mapping:
   edges and duplicates none, whatever the frame rate is doing.
 - **Read actions by polling or by observer** — `Actions<C>` in a system, or `On<Fired<Jump>>` as an
   entity event, whichever fits the call site.
-- **A player-facing mapping model**, derived from the same bindings gameplay uses: which controls
+- **A presentation mapping model**, derived from the same bindings gameplay uses: which controls
   are shown, which are changeable, primary/secondary slots, two actions sharing one control on
   purpose (tap to dodge, hold to sprint — rebind the control, not either action).
 - **Interactive rebinding capture** with conflict detection, reserved controls, and live text
@@ -177,11 +177,11 @@ Every action has a **phase** each tick — `Idle`, `Started`, `Ongoing`, `Fired`
 distinguishable, whether you read it by polling `Actions<C>` or by listening for `Fired<A>` /
 `Started<A>` / `Completed<A>` / `Canceled<A>` as entity events on the context's own entity.
 
-### The player-facing side: mapping and rebinding
+### Presentation: mapping and rebinding
 
 The binding API above is a developer's model — dead zones and response curves are implementation
 detail nobody rebinding "move forward" should have to think about. Marking a binding `.mappable()`
-adds it to a smaller, player-facing model instead: a named **mapping** with an ordered list of slots
+adds it to a smaller presentation model instead: a named **mapping** with an ordered list of slots
 ("Primary", "Secondary"), which a settings screen walks without needing to know anything else about
 your action or binding declarations. From there the crate can show what's bound, capture a new
 control interactively (with conflict detection against everything else in the context), and keep any

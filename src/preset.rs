@@ -8,7 +8,7 @@
 //! apply_overrides_with_preset(world, &southpaw.rows, &southpaw.rows);
 //! ```
 //!
-//! A preset is an [`Overrides`](crate::overrides::Overrides) with a name attached, nothing more.
+//! A preset is an [`Overrides`] with a name attached, nothing more.
 //! Applying one calls
 //! [`apply_overrides_with_preset`](crate::overrides::apply_overrides_with_preset), which lets a
 //! preset move a row that a player's own capture screen cannot offer, such as a gamepad stick.
