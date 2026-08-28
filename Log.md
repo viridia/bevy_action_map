@@ -534,3 +534,63 @@ chunk on a guess.
 
 **Not exhaustive.** §9, §22, and §23 were not checked against code this pass. The author asked for
 another sweep later rather than one pass covering everything now.
+
+### Chunk 62: Release on focus loss and disconnect
+
+R16.1/R16.2 (window focus loss) and R11.4 (gamepad disconnect) landed as one mechanism: a third
+`Fold` variant, `Interrupted`, rather than the blanket `deactivate`/`activate` the roadmap entry
+proposed. The author picked surgical over blanket directly: an unrelated device disappearing must
+not cancel an action a surviving binding is still holding, and the crate had never had to make that
+call before, since `deactivate` and `shadow` are already whole-context by design.
+
+**The blanket approach would have been wrong twice, not just coarser — found by tracing the state
+machine before writing anything.** `update_action_state` reports `Completed` for an ordinary release
+and `Canceled` only for an interruption (`deactivate`, `shadow`), and the distinction is real:
+`Completed<A>` and `Canceled<A>` are separate observer-triggerable events, so an app's hold-to-charge
+attack listens for one and its "held too briefly" feedback listens for the other. Clearing the held
+state and letting the ordinary per-event fold run to completion — the simplest reading of "surgical"
+— produces `Completed`, because nothing about a normal release-shaped fold pass says *this release
+was forced*. Alt-tabbing mid-hold would have silently completed the action for free. `Fold::Interrupted`
+exists to carry that one bit: it reads exactly like `Level` (same slots wanted, same combine), and
+the only place it diverges is the branch where a binding that was firing reads at rest this pass,
+which reports `Canceled` instead.
+
+**Scoping fell out of the existing per-event fold design for free, with no per-binding bookkeeping
+added.** `apply_level_event` clears only the held-state the trigger names — `held_buttons` and
+`held_mouse_buttons` on `RawEvent::FocusLost`, `held_gamepad_buttons`/`held_gamepad_axes` on a
+`RawGamepadEvent::Connection(Disconnected)` — and the fold that immediately follows recomputes every
+binding's contribution from scratch, the same as it does for a real press or release. A slot with a
+surviving binding on an unaffected device simply computes the same value it already had; nothing
+extra was needed to leave it alone, and `a_surviving_binding_is_untouched_by_the_others_device_going_away`
+is the test that would catch a regression back to blanket cancellation.
+
+**`require_reset` needed no changes here, unlike `activate`.** A context reactivating can find a
+control already true because `apply_level_event` keeps running against an inactive context (R7.6),
+so held state can go stale *while still being sampled* — that is what `require_reset` exists to gate.
+Focus loss is the opposite failure: events stop arriving at all, so a key that never transitions
+never produces a new `Pressed` for the fold to see, and clearing the held state is sufficient on its
+own to guarantee R16.2 — no press edge is synthesized until a real release-then-press cycle happens.
+
+**Gamepad state is not per-device, so a disconnect clears every pad's readings at once.**
+`held_gamepad_buttons`/`held_gamepad_axes` are keyed by `GamepadButton`/`GamepadAxis` alone; the
+`gamepad: Entity` field on `RawGamepadButtonChangedEvent` is already dropped elsewhere in this file,
+which is chunk 26/27's own gap (device routing), not a new one. Recorded in the "Known wrong today"
+row rather than fixed, since building per-device tracking for one chunk's edge case would be scope
+this chunk did not ask for.
+
+**`RawEvent::FocusLost` is gated on the `keyboard` feature alone**, because `KeyboardFocusLost` is
+the only trigger available — it lives behind `bevy_input`'s own `keyboard` feature, and there is no
+upstream `MouseFocusLost` to fall back on. A `mouse`-only, no-`keyboard` build has no way to detect
+focus loss at all; a pre-existing gap in what Bevy offers, not one this chunk could close.
+
+**R16.3 (mobile/console suspend) stayed in the deferred table rather than riding along as originally
+planned.** The roadmap entry proposed treating it as "the same trigger, not a separate design," but
+nothing in this crate's supported platforms actually emits a suspend/resume signal, and R16.3 also
+wants a device re-enumeration step this crate has no concept of yet — there was nothing to point the
+mechanism at, so it is a gate rather than a line of code.
+
+**A style pass after the first `cargo fmt` cost a second one — found by the author, not by review.**
+New doc comments cited R-numbers and a chunk number, which `///` comments on this crate's own house
+style must never do, and several ran longer than their sibling comments needed. Fixing that after
+formatting reflowed lines that then needed reformatting again; the fix going forward is to check
+comment style before the formatting pass, not after.

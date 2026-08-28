@@ -10,7 +10,7 @@ use bevy_ecs::prelude::{Commands, Query, Res};
 #[cfg(any(feature = "keyboard", feature = "mouse"))]
 use bevy_input::ButtonState;
 #[cfg(feature = "gamepad")]
-use bevy_input::gamepad::{GamepadAxis, RawGamepadEvent};
+use bevy_input::gamepad::{GamepadAxis, GamepadConnection, RawGamepadEvent};
 #[cfg(feature = "keyboard")]
 use bevy_input::keyboard::KeyboardInput;
 #[cfg(feature = "mouse")]
@@ -256,6 +256,27 @@ enum Fold {
     /// Controls with no value at an instant, only a total over an interval — mouse motion. Summed
     /// across the whole window and read once, because half of a movement is not a position.
     Delta,
+    /// A level pass triggered by a source disappearing — focus loss or a device disconnect — rather
+    /// than a player releasing a control. Reads exactly like `Level`; the only difference is that a
+    /// binding which was firing and reads at rest this pass reports `Canceled` rather than
+    /// `Completed`, since nothing was let go. A binding on an unaffected device is untouched.
+    Interrupted,
+}
+
+/// Whether this event means the source is gone — a window losing focus or a device disconnecting —
+/// rather than an ordinary press, release, or motion.
+fn interruption_kind(event: &RawEvent) -> Fold {
+    match event {
+        #[cfg(feature = "keyboard")]
+        RawEvent::FocusLost => Fold::Interrupted,
+        #[cfg(feature = "gamepad")]
+        RawEvent::Gamepad(RawGamepadEvent::Connection(connection))
+            if matches!(connection.connection, GamepadConnection::Disconnected) =>
+        {
+            Fold::Interrupted
+        }
+        _ => Fold::Level,
+    }
 }
 
 impl<C: InputContext> InputContextState<C> {
@@ -296,7 +317,14 @@ impl<C: InputContext> InputContextState<C> {
                 continue;
             }
             self.apply_level_event(&event.event, threshold);
-            self.fold(threshold, Vec2::ZERO, delta, Fold::Level, consumed, claims);
+            self.fold(
+                threshold,
+                Vec2::ZERO,
+                delta,
+                interruption_kind(&event.event),
+                consumed,
+                claims,
+            );
             // After the fold, not before: Design §4.1's ordering. A class binding never competes on
             // specificity, so it only ever gets a look at a control the fold's own bindings did not
             // already index — checked once here rather than woven into the fold itself.
@@ -356,8 +384,22 @@ impl<C: InputContext> InputContextState<C> {
                     reading.pressed = threshold.pressed(raw_button.value, reading.pressed);
                     reading.value = raw_button.value;
                 }
-                RawGamepadEvent::Connection(_) => {}
+                // A disconnect leaves no release event to correct a stale reading — the backend has
+                // nothing left to send one from (R11.4). Connecting needs nothing: the device's own
+                // events repopulate these maps normally.
+                RawGamepadEvent::Connection(connection) => {
+                    if matches!(connection.connection, GamepadConnection::Disconnected) {
+                        self.held_gamepad_buttons.clear();
+                        self.held_gamepad_axes.clear();
+                    }
+                }
             },
+            #[cfg(feature = "keyboard")]
+            RawEvent::FocusLost => {
+                self.held_buttons.clear();
+                #[cfg(feature = "mouse")]
+                self.held_mouse_buttons.clear();
+            }
         }
     }
 
@@ -380,6 +422,10 @@ impl<C: InputContext> InputContextState<C> {
             RawEvent::Gamepad(RawGamepadEvent::Axis(raw_axis)) => raw_axis.value != 0.0,
             #[cfg(feature = "gamepad")]
             RawEvent::Gamepad(RawGamepadEvent::Connection(_)) => false,
+            // Unreachable in practice: `control()` is `None` for this event, and `class_dispatch`
+            // returns before ever asking. Kept for exhaustiveness, same as the arm above.
+            #[cfg(feature = "keyboard")]
+            RawEvent::FocusLost => false,
         }
     }
 
@@ -506,7 +552,7 @@ impl<C: InputContext> InputContextState<C> {
             // so no slot can want both passes.
             let wanted = match kind {
                 Fold::Delta => intent == Intent::Delta2,
-                Fold::Level => intent != Intent::Delta2,
+                Fold::Level | Fold::Interrupted => intent != Intent::Delta2,
             };
             if !wanted {
                 while index < bindings.len() && bindings[index].slot == slot {
@@ -663,7 +709,7 @@ impl<C: InputContext> InputContextState<C> {
                     require_reset[slot] = false;
                 }
 
-                let phase = update_action_state(&mut actions[slot], value, best);
+                let phase = update_action_state(&mut actions[slot], value, best, kind);
                 // Only the edges. `Idle` and `Ongoing` say that nothing changed, and an observer
                 // firing every tick for a held button would be noise rather than information.
                 if matches!(phase, Phase::Fired | Phase::Completed | Phase::Canceled) {
@@ -751,10 +797,14 @@ fn apply_modifiers(
 /// that is `Ongoing` with a value is firing, and one that is `Ongoing` at rest is a condition still
 /// building toward firing. That is what makes giving up on a hold a `Canceled` rather than a
 /// `Completed` — the action never actually happened.
+///
+/// `kind` is `Fold::Interrupted` for a pass forced by a source disappearing rather than an ordinary
+/// release; only there does a firing-then-idle transition become `Canceled` instead of `Completed`.
 fn update_action_state(
     action_state: &mut crate::action::ActionState,
     value: ActionValue,
     verdict: Verdict,
+    kind: Fold,
 ) -> Phase {
     let was_firing = matches!(
         action_state.phase,
@@ -784,7 +834,11 @@ fn update_action_state(
         }
         Verdict::Idle => {
             if was_firing {
-                Phase::Completed
+                if kind == Fold::Interrupted {
+                    Phase::Canceled
+                } else {
+                    Phase::Completed
+                }
             } else if was_building {
                 Phase::Canceled
             } else {
@@ -1126,6 +1180,207 @@ mod tests {
         let mut state = jump_context();
         state.deactivate();
         assert!(state.transitions.is_empty());
+    }
+
+    /// Losing focus while a button is down must not read as the player finishing it — that would
+    /// let alt-tab complete a hold-to-fire action for free. It resolves as an interruption instead,
+    /// the same `Canceled` transition `deactivate` already uses — not the `Completed` an ordinary
+    /// release produces (`the_log_records_edges_and_not_held_state`, above).
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn focus_loss_cancels_what_a_release_would_have_completed() {
+        let mut state = jump_context();
+        let threshold = ButtonThreshold::default();
+        let mut frame = InputFrame::default();
+
+        frame.record(key(ButtonState::Pressed));
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
+        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+        state.transitions.clear();
+
+        frame.record(RawEvent::FocusLost);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
+
+        let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
+        assert_eq!(
+            phases,
+            [Phase::Canceled],
+            "not Completed: nothing was let go"
+        );
+        assert!(!state.value::<Jump>());
+    }
+
+    /// A control still physically held when focus returns must not re-fire on its own. Bevy never
+    /// resends the press that never released, so nothing here needs to re-arm anything — the fix is
+    /// that no press event arrives at all, proven by the absence of a further transition even though
+    /// the key is, by construction, still down.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn focus_loss_requires_a_fresh_press_before_refiring() {
+        let mut state = jump_context();
+        let threshold = ButtonThreshold::default();
+        let mut frame = InputFrame::default();
+
+        frame.record(key(ButtonState::Pressed));
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
+        frame.record(RawEvent::FocusLost);
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
+        state.transitions.clear();
+
+        // Focus returns; the key was never physically released, so no event says anything changed.
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
+        assert!(
+            state.transitions.is_empty(),
+            "a control focus already released must not refire on its own"
+        );
+
+        // Only an actual release-and-press cycle brings it back.
+        frame.record(key(ButtonState::Released));
+        frame.record(key(ButtonState::Pressed));
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
+        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+    }
+
+    /// The gamepad half of the same policy: a disconnect leaves no release event to correct a stale
+    /// reading, so the crate has to notice the connection event itself and cancel what it was
+    /// holding rather than leave it stuck.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn gamepad_disconnect_cancels_what_it_was_holding() {
+        use bevy_input::gamepad::{GamepadButton, GamepadConnection, GamepadConnectionEvent};
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Jump>(GamepadButton::South);
+        let plan = Arc::new({
+            let (bindings, class_bindings) = builder.finish();
+            Plan::from_bindings(bindings, class_bindings)
+        });
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        let threshold = ButtonThreshold::default();
+        let mut frame = InputFrame::default();
+
+        frame.record(RawEvent::Gamepad(RawGamepadEvent::Button(
+            bevy_input::gamepad::RawGamepadButtonChangedEvent::new(
+                bevy_ecs::entity::Entity::PLACEHOLDER,
+                GamepadButton::South,
+                1.0,
+            ),
+        )));
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
+        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+        state.transitions.clear();
+
+        frame.record(RawEvent::Gamepad(RawGamepadEvent::Connection(
+            GamepadConnectionEvent::new(
+                bevy_ecs::entity::Entity::PLACEHOLDER,
+                GamepadConnection::Disconnected,
+            ),
+        )));
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
+
+        let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
+        assert_eq!(phases, [Phase::Canceled]);
+        assert!(!state.value::<Jump>());
+    }
+
+    /// Neither trigger reaches past the device it names. An action held through a surviving
+    /// binding must survive — over-cancelling a keyboard-driven `Jump` because an unrelated gamepad
+    /// disconnected would be as much a bug as leaving a stuck key would be.
+    #[cfg(all(feature = "keyboard", feature = "gamepad"))]
+    #[test]
+    fn a_surviving_binding_is_untouched_by_the_others_device_going_away() {
+        use bevy_input::gamepad::{GamepadButton, GamepadConnection, GamepadConnectionEvent};
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Jump>(bevy_input::keyboard::KeyCode::Space);
+        builder.bind::<Jump>(GamepadButton::South);
+        let plan = Arc::new({
+            let (bindings, class_bindings) = builder.finish();
+            Plan::from_bindings(bindings, class_bindings)
+        });
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        let threshold = ButtonThreshold::default();
+        let mut frame = InputFrame::default();
+
+        // Held on the keyboard side only.
+        frame.record(key(ButtonState::Pressed));
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
+        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+        state.transitions.clear();
+
+        // The pad going away must not touch it: nothing was ever held there.
+        frame.record(RawEvent::Gamepad(RawGamepadEvent::Connection(
+            GamepadConnectionEvent::new(
+                bevy_ecs::entity::Entity::PLACEHOLDER,
+                GamepadConnection::Disconnected,
+            ),
+        )));
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+        );
+        assert!(
+            state.transitions.is_empty(),
+            "an unrelated device disconnecting canceled a still-held action"
+        );
+        assert!(state.value::<Jump>(), "the key is still down");
     }
 
     /// A stick reports how fast, a mouse reports how far, and the two are only addable once the

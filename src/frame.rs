@@ -40,7 +40,7 @@ use bevy_input::InputSystems;
 #[cfg(feature = "gamepad")]
 use bevy_input::gamepad::RawGamepadEvent;
 #[cfg(feature = "keyboard")]
-use bevy_input::keyboard::KeyboardInput;
+use bevy_input::keyboard::{KeyboardFocusLost, KeyboardInput};
 #[cfg(feature = "mouse")]
 use bevy_input::mouse::{MouseButtonInput, MouseMotion};
 
@@ -92,14 +92,18 @@ pub enum RawEvent {
     /// A raw gamepad event sampled before Bevy's per-axis deadzone processing.
     #[cfg(feature = "gamepad")]
     Gamepad(RawGamepadEvent),
+    /// The window lost input focus, reported by Bevy's `KeyboardFocusLost` — alt-tab, a lock screen,
+    /// a suspend. Every physically-held keyboard and mouse control is released as of this event.
+    #[cfg(feature = "keyboard")]
+    FocusLost,
 }
 
 impl RawEvent {
     /// The physical control this event reports on, if it names one.
     ///
-    /// `None` only for a gamepad connection event, which is about the device rather than any one
-    /// control on it. Every other variant has exactly one control behind it, which lets a class
-    /// binding match events by control without deriving it itself.
+    /// `None` for a gamepad connection event and a focus-loss event, both of which are about the
+    /// device or window rather than any one control. Every other variant has exactly one control
+    /// behind it, which lets a class binding match events by control without deriving it itself.
     pub fn control(&self) -> Option<crate::binding::Control> {
         use crate::binding::Control;
         match self {
@@ -114,6 +118,8 @@ impl RawEvent {
             }
             #[cfg(feature = "gamepad")]
             Self::Gamepad(RawGamepadEvent::Axis(axis)) => Some(Control::GamepadAxis(axis.axis)),
+            #[cfg(feature = "keyboard")]
+            Self::FocusLost => None,
             #[cfg(feature = "gamepad")]
             Self::Gamepad(RawGamepadEvent::Connection(_)) => None,
         }
@@ -266,6 +272,7 @@ impl InputFrame {
 pub fn sample_input(
     mut frame: bevy_ecs::system::ResMut<InputFrame>,
     #[cfg(feature = "keyboard")] mut keyboard_inputs: MessageReader<KeyboardInput>,
+    #[cfg(feature = "keyboard")] mut focus_lost: MessageReader<KeyboardFocusLost>,
     #[cfg(feature = "mouse")] mut mouse_button_inputs: MessageReader<MouseButtonInput>,
     #[cfg(feature = "mouse")] mut mouse_motion_inputs: MessageReader<MouseMotion>,
     #[cfg(feature = "gamepad")] mut gamepad_inputs: MessageReader<RawGamepadEvent>,
@@ -274,6 +281,11 @@ pub fn sample_input(
     #[cfg(feature = "keyboard")]
     for event in keyboard_inputs.read() {
         frame.record(RawEvent::Keyboard(event.clone()));
+    }
+
+    #[cfg(feature = "keyboard")]
+    for _ in focus_lost.read() {
+        frame.record(RawEvent::FocusLost);
     }
 
     #[cfg(feature = "mouse")]
@@ -323,6 +335,7 @@ impl Plugin for InputFramePlugin {
         #[cfg(feature = "keyboard")]
         {
             app.add_message::<KeyboardInput>();
+            app.add_message::<KeyboardFocusLost>();
         }
 
         #[cfg(feature = "mouse")]

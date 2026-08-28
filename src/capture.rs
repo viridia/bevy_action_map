@@ -593,6 +593,9 @@ fn arrival(event: &RawEvent, threshold: &ButtonThreshold) -> Option<Arrival> {
                 }),
             bevy_input::gamepad::RawGamepadEvent::Connection(_) => None,
         },
+        // Losing focus never arrives as a control a player meant to bind.
+        #[cfg(feature = "keyboard")]
+        RawEvent::FocusLost => None,
     }
 }
 
