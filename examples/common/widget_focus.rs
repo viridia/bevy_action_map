@@ -31,6 +31,8 @@ pub struct WidgetKind(pub &'static str);
 impl WidgetKind {
     /// What every `Button` is tagged with, via a required component ([`plugin`]).
     pub const BUTTON: WidgetKind = WidgetKind("button");
+    /// What every [`Stepper`] is tagged with, via a required component ([`plugin`]).
+    pub const STEPPER: WidgetKind = WidgetKind("stepper");
 }
 
 /// True while the focused entity is tagged `kind`.
@@ -73,12 +75,116 @@ fn press_focused_button(_: On<Fired<Activate>>, focus: Res<InputFocus>, mut comm
     }
 }
 
-/// Wires up [`ButtonFocused`] and spawns its one, permanent instance.
+/// Root of a widget that changes a value by discrete steps — a stepper, in the sense of a numeric
+/// input with a decrement and an increment side, not a stepped/paused simulation.
+///
+/// Carries no value of its own. [`Adjusted`] fires at this entity when a step is taken; what the
+/// step is worth, its range, and its display are entirely the observer's business — this module
+/// only ever asks for one step, in one direction, from one device or another.
+#[derive(Component, Clone, Copy, Default)]
+pub struct Stepper;
+
+/// Fired at a stepper's own entity when it should move by one step. `delta` is `1.0` or `-1.0`,
+/// never scaled or repeated here — a held control's repeat comes from the binding's own `pulse`,
+/// which already re-fires [`Adjust`] on an interval, so there is no second rate to agree with.
+#[derive(EntityEvent, Clone, Copy)]
+pub struct Adjusted {
+    /// The stepper this step applies to.
+    #[event_target]
+    pub entity: Entity,
+    /// `1.0` to increment, `-1.0` to decrement.
+    pub delta: f32,
+}
+
+/// Moves whatever stepper is focused, whichever device or chevron asked.
+#[derive(InputAction)]
+#[action(path = "common.widget_focus.adjust", output = f32, intent = Analog1)]
+struct Adjust;
+
+/// How long a held `Adjust` binding waits between repeats — the stepper's own equivalent of a
+/// menu's `MENU_REPEAT`, kept local rather than shared: the two have no reason to move together.
+const ADJUST_REPEAT: f32 = 0.2;
+
+/// Live only while a stepper has focus, at the same priority as [`ButtonFocused`] and for the same
+/// reason: it has to outrank `Menu` (priority 10, exclusive) to answer at all.
+///
+/// `Adjust` claims the pad's D-pad left and right specifically, not the whole pad — `Menu`'s own
+/// `Navigate` reads the D-pad as one four-button composite for its own binding, and a claimed
+/// control simply reads as unactuated to a lower-priority binding, so up and down still move the
+/// selection while a stepper has focus and only left/right are taken. The keyboard has no such
+/// redundancy — arrow keys are `Navigate`'s only source there — so `-`/`+` stand in instead.
+#[derive(InputContext)]
+#[context(path = "common.widget_focus.stepper_focused", tick = Render, priority = 20)]
+pub struct StepperFocused;
+
+fn stepper_focused() -> impl Scene {
+    bsn! {
+        StepperFocused
+        on(adjust_focused_stepper)
+    }
+}
+
+fn adjust_focused_stepper(
+    fired: On<Fired<Adjust>>,
+    focus: Res<InputFocus>,
+    mut commands: Commands,
+) {
+    if let Some(entity) = focus.get() {
+        commands.trigger(Adjusted {
+            entity,
+            delta: fired.value,
+        });
+    }
+}
+
+/// A chevron pressed — `bevy_ui_widgets::Activate`'s own doing, whether that was a mouse click or
+/// `ButtonFocused` pressing a focused chevron. Finds the stepper by parentage rather than carrying
+/// its entity: the chevron is spawned as the stepper's own direct child in the same scene.
+///
+/// Does not claim focus itself — a pointer press already does, the moment it lands, through
+/// whatever intercepts `bevy_input_focus`'s own `AcquireFocus` for a focusable ancestor (a game's
+/// own bridge for a non-`TabIndex` navigation scheme, or `acquire_focus_tab_index` for one that
+/// uses `TabIndex`). By the time `Activate` fires here, the stepper is already focused.
+fn chevron_pressed(
+    pressed: Entity,
+    delta: f32,
+    parents: &Query<&ChildOf>,
+    commands: &mut Commands,
+) {
+    if let Ok(parent) = parents.get(pressed) {
+        commands.trigger(Adjusted {
+            entity: parent.parent(),
+            delta,
+        });
+    }
+}
+
+/// The decrement chevron's half of [`chevron_pressed`].
+pub fn decrement_pressed(
+    pressed: On<WidgetActivate>,
+    parents: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    chevron_pressed(pressed.entity, -1.0, &parents, &mut commands);
+}
+
+/// The increment chevron's half of [`chevron_pressed`].
+pub fn increment_pressed(
+    pressed: On<WidgetActivate>,
+    parents: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    chevron_pressed(pressed.entity, 1.0, &parents, &mut commands);
+}
+
+/// Wires up [`ButtonFocused`] and [`StepperFocused`], and spawns their one, permanent instance
+/// each.
 pub fn plugin(app: &mut App) {
-    // Required rather than a tag every `Button` spawn site adds by hand — the same reason
-    // `bevy_ui_widgets` itself uses required components for `Pressed`, `InteractionDisabled` and
-    // the rest: a fact about *what a widget is* should not be something a call site can forget.
+    // Required rather than a tag every spawn site adds by hand — the same reason `bevy_ui_widgets`
+    // itself uses required components for `Pressed`, `InteractionDisabled` and the rest: a fact
+    // about *what a widget is* should not be something a call site can forget.
     app.register_required_components_with::<Button, WidgetKind>(|| WidgetKind::BUTTON);
+    app.register_required_components_with::<Stepper, WidgetKind>(|| WidgetKind::STEPPER);
 
     app.add_context::<ButtonFocused>(|controls| {
         controls.active_if(focus_is(WidgetKind::BUTTON));
@@ -86,5 +192,19 @@ pub fn plugin(app: &mut App) {
         controls.bind::<Activate>(KeyCode::Space).press();
         controls.bind::<Activate>(GamepadButton::South).press();
     });
-    app.add_systems(Startup, button_focused.spawn());
+    app.add_context::<StepperFocused>(|controls| {
+        controls.active_if(focus_is(WidgetKind::STEPPER));
+        controls
+            .bind::<Adjust>(AxisButtons::new(KeyCode::Minus, KeyCode::Equal))
+            .pulse(ADJUST_REPEAT)
+            .consume();
+        controls
+            .bind::<Adjust>(AxisButtons::new(
+                GamepadButton::DPadLeft,
+                GamepadButton::DPadRight,
+            ))
+            .pulse(ADJUST_REPEAT)
+            .consume();
+    });
+    app.add_systems(Startup, (button_focused.spawn(), stepper_focused.spawn()));
 }

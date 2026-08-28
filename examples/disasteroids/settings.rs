@@ -19,7 +19,7 @@
 //! place anything reads it back out and repaints a cell, run once per change rather than pushed by
 //! whatever changed it, the same way [`prompt_ui`](crate::common::prompt_ui) keeps prompts true.
 
-use bevy::input_focus::{AutoFocus, FocusCause, FocusGained, FocusLost, InputFocus};
+use bevy::input_focus::{AcquireFocus, AutoFocus, FocusCause, FocusGained, FocusLost, InputFocus};
 use bevy::math::CompassOctant;
 use bevy::prelude::*;
 use bevy::ui::UiSystems;
@@ -33,7 +33,9 @@ use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
 use crate::actions::{Back, Confirm, Menu, Navigate, ToggleSettings, Turn};
 use crate::common::prompt_ui::{PromptScheme, PromptSpan};
-use crate::common::widget_focus::ButtonFocused;
+use crate::common::widget_focus::{
+    Adjusted, ButtonFocused, Stepper, decrement_pressed, increment_pressed,
+};
 use crate::pause::Simulating;
 
 // Colors
@@ -61,6 +63,29 @@ const NAME_WIDTH: f32 = 210.0;
 const CONTROL_WIDTH: f32 = 155.0;
 /// How far a follower's line sits under the row it rides.
 const FOLLOWER_INDENT: f32 = 20.0;
+
+/// Player-adjustable values with nowhere yet to land — the stepper's second sample point,
+/// alongside [`Button`]. `dead_zone` does not reach `Turn`'s own binding, which still reads the
+/// fixed `DeadZone::radial(0.15)` `actions.rs` declares at app-build time: making it live is
+/// chunk 22's own "preference stage" work, not something a resource can do on its own. This proves
+/// the stepper on a second kind of value; it is not a working setting yet.
+///
+/// Named `Prefs` rather than `Settings`, which this file already uses for the screen's own
+/// visibility state.
+#[derive(Resource, Clone, Copy)]
+struct Prefs {
+    dead_zone: f32,
+}
+
+impl Default for Prefs {
+    fn default() -> Self {
+        Self { dead_zone: 0.15 }
+    }
+}
+
+const DEAD_ZONE_MIN: f32 = 0.0;
+const DEAD_ZONE_MAX: f32 = 0.5;
+const DEAD_ZONE_STEP: f32 = 0.05;
 
 /// Whether the controls screen is up.
 ///
@@ -95,6 +120,8 @@ struct PendingOverrides {
 pub fn plugin(app: &mut App) {
     app.init_state::<Settings>();
     app.init_resource::<PendingOverrides>();
+    app.init_resource::<Prefs>();
+    app.add_observer(acquire_focus_directional);
     app.add_systems(OnEnter(Settings::Showing), (reset_pending, show));
     app.add_systems(OnExit(Settings::Showing), release_focus);
     // Ahead of every UI system, so a cell that changed this frame is laid out at the width its new
@@ -104,9 +131,11 @@ pub fn plugin(app: &mut App) {
     // with, so there is no "just spawned, still stale" case to also catch here.
     app.add_systems(
         PostUpdate,
-        redraw_pending
-            .before(UiSystems::Prepare)
-            .run_if(resource_changed::<PendingOverrides>),
+        (
+            redraw_pending.run_if(resource_changed::<PendingOverrides>),
+            redraw_dead_zone.run_if(resource_changed::<Prefs>),
+        )
+            .before(UiSystems::Prepare),
     );
 
     // `Menu` being exclusive already stops the ship answering; this stops the simulation
@@ -325,6 +354,7 @@ fn screen(world: &World) -> impl Scene {
     let declared = declared_mappings(world);
     let pending = world.resource::<PendingOverrides>().rows.clone();
     let selected = selected_preset(&presets, &declared, &all, &pending);
+    let dead_zone = world.resource::<Prefs>().dead_zone;
 
     bsn! {
         // Closing the screen is nothing but despawning it, which the state can do on its own — and
@@ -362,6 +392,7 @@ fn screen(world: &World) -> impl Scene {
                         Children [
                             ({table("Gamepad", rows(Scheme::Gamepad))}),
                             ({preset_row(&presets, selected)}),
+                            ({dead_zone_row(dead_zone)}),
                         ]
                     ),
                 ]
@@ -525,6 +556,72 @@ fn preset_button(preset: &Preset, selected: bool) -> impl Scene + use<> {
     }
 }
 
+/// A label and its stepper, the same "row names what it is, then draws the control" shape the two
+/// tables already use.
+fn dead_zone_row(value: f32) -> impl Scene {
+    bsn! {
+        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(4.0) }
+        Children [
+            (Text::new("Dead zone") TextFont { font_size: 14.0_f32 } TextColor(HEADING)),
+            ({stepper(value)}),
+        ]
+    }
+}
+
+/// One chevron on either side of the value, `justify_content: SpaceBetween` so the row's own width
+/// is what spaces them rather than a gap that would also grow the digits between them.
+///
+/// The chevrons are `Button`s but not `focusable()`: this row is the one tab stop, the same
+/// distinction [`common::widget_focus`](crate::common::widget_focus) draws between a stepper and
+/// the widgets inside it — a click still presses one (`bevy_ui_widgets` sees to that on its own),
+/// it just never moves the selection.
+fn stepper(value: f32) -> impl Scene {
+    bsn! {
+        Stepper
+        on(apply_dead_zone_delta)
+        focusable()
+        Node {
+            width: Val::Px(130.0),
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            border: {UiRect::all(Val::Px(1.0))},
+            border_radius: {BorderRadius::all(Val::Px(4.0))},
+            padding: {UiRect::axes(Val::Px(8.0), Val::Px(4.0))},
+        }
+        BorderColor::all(CHANGEABLE)
+        Children [
+            (Button on(decrement_pressed) Text::new("<") TextFont { font_size: 16.0_f32 } TextColor(TITLE)),
+            (
+                DeadZoneValue
+                Text::new(format!("{value:.2}"))
+                TextFont { font_size: 15.0_f32 }
+                TextColor(TITLE)
+            ),
+            (Button on(increment_pressed) Text::new(">") TextFont { font_size: 16.0_f32 } TextColor(TITLE)),
+        ]
+    }
+}
+
+/// Names the stepper's own value `Text`, so [`redraw_dead_zone`] can find it again — mirrors how
+/// [`RowCell`] names a cell rather than a system holding onto the entity itself.
+#[derive(Component, Default, Clone, Copy)]
+struct DeadZoneValue;
+
+/// Applies one step, clamped. Never touches the view directly — [`redraw_dead_zone`] is the one
+/// place anything reads [`Settings`] back out, the same division [`redraw_pending`] keeps.
+fn apply_dead_zone_delta(adjusted: On<Adjusted>, mut prefs: ResMut<Prefs>) {
+    prefs.dead_zone =
+        (prefs.dead_zone + adjusted.delta * DEAD_ZONE_STEP).clamp(DEAD_ZONE_MIN, DEAD_ZONE_MAX);
+}
+
+/// Repaints the stepper's value after [`apply_dead_zone_delta`] changes it — run once per change
+/// rather than pushed by the observer that caused it, same as [`redraw_pending`].
+fn redraw_dead_zone(prefs: Res<Prefs>, mut value: Query<&mut Text, With<DeadZoneValue>>) {
+    if let Ok(mut text) = value.single_mut() {
+        *text = Text::new(format!("{:.2}", prefs.dead_zone));
+    }
+}
+
 /// Names the preset a button selects, so a press can find its rows again — mirrors how
 /// [`RebindCell`] names a row by key rather than carrying the row's own data.
 #[derive(Component, Clone, Copy)]
@@ -622,32 +719,44 @@ fn redraw_pending(world: &mut World) {
     }
 }
 
-/// Everything a selection can land on carries these three, plus [`claim_focus`] to answer a click.
+/// Everything a selection can land on carries these three.
 ///
-/// [`AutoDirectionalNavigation`] is what makes an entity a candidate; the [`Outline`] is the ring,
-/// kept colourless until the selection arrives so that showing it is a colour change rather than a
-/// component insertion; and the two observers are what change it.
+/// [`AutoDirectionalNavigation`] is what makes an entity a candidate, and what
+/// [`acquire_focus_directional`] answers a click through; the [`Outline`] is the ring, kept
+/// colourless until the selection arrives so that showing it is a colour change rather than a
+/// component insertion; the two observers are what change it.
 fn focusable() -> impl Scene {
     bsn! {
         AutoDirectionalNavigation
         Outline { width: Val::Px(2.0), offset: Val::Px(2.0), color: Color::NONE }
         on(ring_on)
         on(ring_off)
-        on(claim_focus)
     }
 }
 
-/// A mouse click on any focusable widget takes the focus, the same way keyboard and gamepad
-/// navigation already do.
+/// Claims focus for a [`focusable`] widget the moment a pointer presses it, rather than after
+/// `Activate` fires at release.
 ///
-/// Without this, a click activates the button — `bevy_ui_widgets` sees to that — but never claims
-/// [`InputFocus`], because this screen's selection is driven by [`AutoDirectionalNavigation`] rather
-/// than the `TabIndex`-based bridge `bevy_input_focus`'s own click handler resolves through. A click
-/// with nothing to claim it then reads as "clicked outside everything" and *clears* focus instead,
-/// which leaves directional navigation with nowhere to resume from the next time a direction is
-/// pressed.
-fn claim_focus(activate: On<Activate>, mut focus: ResMut<InputFocus>) {
-    focus.set(activate.entity, FocusCause::Pressed);
+/// `bevy_input_focus`'s own `click_to_focus` triggers a bubbling `AcquireFocus` on every pointer
+/// press, before `bevy_ui_widgets` has decided whether a click landed. This screen's selection is
+/// driven by [`AutoDirectionalNavigation`] rather than `TabIndex`, so nothing intercepted that
+/// request — it bubbled all the way to the window and *cleared* focus, restored only once
+/// `Activate` fired at release. Reclaiming after the fact is a visible blink whenever press and
+/// release land on different entities, which a widget with interactive children of its own (a
+/// stepper's two chevrons) makes routine rather than rare. This is
+/// `bevy_input_focus::tab_navigation::acquire_focus_tab_index`'s own fix, `AutoDirectionalNavigation`
+/// standing in for `TabIndex`.
+fn acquire_focus_directional(
+    mut acquire: On<AcquireFocus>,
+    focusable: Query<(), With<AutoDirectionalNavigation>>,
+    mut focus: ResMut<InputFocus>,
+) {
+    if focusable.contains(acquire.focused_entity) {
+        acquire.propagate(false);
+        if focus.get() != Some(acquire.focused_entity) {
+            focus.set(acquire.focused_entity, FocusCause::Pressed);
+        }
+    }
 }
 
 /// One device's worth of rows, under a heading and grouped by category.

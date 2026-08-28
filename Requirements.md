@@ -1399,12 +1399,13 @@ character keys.
 - **R22.8 (MUST)** Context activation must be bindable to the _kind_ of the focused entity, re-evaluated
   when focus changes. Must handle: nothing focused, a focus entity matching several such contexts, and
   a focus entity despawned while focused. _Answered by composition, not by a build: `active_if` (§9.7)
-  already takes any run condition, so a focus-kind check is an ordinary one — `ButtonFocused`
-  (`examples/common/widget_focus.rs`) reads `InputFocus` and a tag component, and the three cases
-  above fall out for free: nothing focused and a despawned focus both make the lookup miss, and a
-  widget-kind tag is a required component of the widget it names, so one entity never carries two.
-  Still example-side rather than crate API, since R22.9's own mechanism question is still open — see
-  Roadmap.md's deferred table._
+  already takes any run condition, so a focus-kind check is an ordinary one — `ButtonFocused` and
+  `StepperFocused` (`examples/common/widget_focus.rs`) both read `InputFocus` and a tag component, and
+  the three cases above fall out for free: nothing focused and a despawned focus both make the lookup
+  miss, and a widget-kind tag is a required component of the widget it names, so one entity never
+  carries two. Two independent widget kinds built the same way is the pattern holding, not a
+  coincidence of the first one. Still example-side rather than crate API, since R22.9's own mechanism
+  question is still open — see Roadmap.md's deferred table._
 - **R22.9 (MUST)** **Neither crate may depend on the other.** A widget library must not gain a
   dependency on this crate, and this crate must not require a widget library — using widgets without
   input mapping, and input mapping without widgets, are both first-class. This rules out any

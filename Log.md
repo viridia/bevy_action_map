@@ -651,3 +651,46 @@ Disasteroids — deliberate, and the same "additive, never a silent default" bet
 elsewhere, but worth stating since it is a real cost of going explicit rather than a free lunch.
 
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
+
+### A second widget kind, and a focus-claiming bug worth fixing upstream
+
+`StepperFocused` (`examples/common/widget_focus.rs`) followed `ButtonFocused`'s exact shape — a
+focus-kind-activated context, `WidgetKind::STEPPER` a required component of a new `Stepper` marker,
+an `Adjusted` event fired at the stepper's own entity — for a widget kind `bevy_ui_widgets` does not
+ship: a numeric stepper with a decrement and an increment chevron, bound to `-`/`+` on the keyboard
+and the pad's D-pad left/right. R22.8's proof is no longer a single data point; two independent widget
+kinds built from nothing but `active_if` and an ordinary context is the pattern holding, not a
+coincidence of the first one.
+
+**The D-pad half needed `.consume()`, not a new mechanism.** The fold already treats a claimed
+control as unactuated for every lower-priority binding that reads it, composites included — "one
+part of a composite going away should leave the other three working" is a comment already in
+`eval.rs`, not something this session added. What was missing was simpler: `StepperFocused`'s
+`Adjust` bindings never called `.consume()`, so nothing was ever recorded in `ConsumedControls` for
+`Menu`'s `Navigate` (reading the same D-pad as one four-button composite) to see. Once claimed,
+up/down keeps moving the row selection and only left/right are taken — exactly the degradation the
+fold was already built for.
+
+**Mouse clicks on the stepper's chevrons blinked the focus ring, which turned out to be a real bug
+in already-committed code, not something new.** `focusable()`'s `claim_focus` (chunk 31) reclaims
+`InputFocus` reactively, when `Activate` fires at pointer release — and its own doc comment already
+named the reason: `bevy_input_focus`'s `click_to_focus` fires a bubbling `AcquireFocus` on pointer
+*press*, before `bevy_ui_widgets` decides whether a click landed, and since this game's selection is
+`AutoDirectionalNavigation` rather than `TabIndex`, nothing intercepts that request — it bubbles to
+the window and clears focus. Reclaiming after the fact patches the symptom but not the gap: for a
+plain button, press and release land on the same entity, so the clear-then-reclaim happens within a
+frame or two and was never reported as visible. A stepper's chevron is a different entity from the
+stepper itself, so the same race has a whole gesture to be seen in.
+
+The fix moved the claim earlier: `acquire_focus_directional`, a global observer on `AcquireFocus`
+that stops propagation and claims focus the instant a press lands on anything carrying
+`AutoDirectionalNavigation` — the same job `bevy_input_focus::tab_navigation::acquire_focus_tab_index`
+already does for `TabIndex`, just keyed to this game's own navigation marker instead. `claim_focus`
+is gone; nothing needs it once the request never reaches the window.
+
+**The author intends to raise this upstream.** `PointerFocusPlugin` bridges `TabIndex`-based
+navigation for free (`acquire_focus_tab_index` is installed by the plugin itself), but a game using
+any other focus-navigation scheme — `AutoDirectionalNavigation` here, and anything else a third
+party writes — gets no equivalent bridge and no signal that it needs one; the natural-looking fix
+(reclaim on the widget's own activation event) is the one that leaves the gap open. No issue filed
+yet, unlike [bevy#25592][] — recorded here so the finding survives until one exists.
