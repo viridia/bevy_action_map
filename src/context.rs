@@ -442,9 +442,9 @@ impl<C: InputContext> InputContextState<C> {
     /// without touching what its own activation thinks — that stays `active`'s business, so the two
     /// do not fight each other once the shadow lifts.
     ///
-    /// R7.8's mechanism: cancels in-flight actions exactly as `deactivate` does, because a control
-    /// held through a modal opening must not stay "held forever" any more than one held through an
-    /// ordinary deactivation would.
+    /// Cancels in-flight actions exactly as `deactivate` does, because a control held through a
+    /// modal opening must not stay "held forever" any more than one held through an ordinary
+    /// deactivation would.
     pub(crate) fn shadow(&mut self) {
         if self.shadowed {
             return;
@@ -453,8 +453,8 @@ impl<C: InputContext> InputContextState<C> {
         self.cancel_in_flight();
     }
 
-    /// Lifts a shadow, re-arming require-reset (R7.5) so a control still held when it lifts does
-    /// not read as a fresh press.
+    /// Lifts a shadow, re-arming require-reset so a control still held when it lifts does not
+    /// read as a fresh press.
     pub(crate) fn unshadow(&mut self) {
         if !self.shadowed {
             return;
@@ -739,10 +739,10 @@ fn attach_context_state<C: InputContext + Component>(
 /// Says that a prompt naming this context's controls may now say something else.
 ///
 /// Registered on the *state* rather than on `C`, because it is the state that says whether the
-/// context is being carried at all: a prompt is the fold of that over every instance, so it
+/// context is being carried at all: a prompt depends on whether any instance exists, so it
 /// changes when the first one appears and when the last one goes away, with nothing calling
-/// `activate` in either case. Deliberately not generic — the hook is the same code for every
-/// context, and one copy of it is enough.
+/// `activate` in either case. Not generic — the hook is the same code for every context, and one
+/// copy of it is enough.
 fn invalidate_prompts(mut world: DeferredWorld<'_>, _context: HookContext) {
     crate::present::PromptGeneration::invalidate(&mut world.commands());
 }
@@ -978,9 +978,9 @@ struct DeclaredPriorities {
 
 /// Orders a newly seen priority against every other in its schedule.
 ///
-/// Done once per distinct priority at app build rather than per frame, which is what keeps R8.3's
-/// single deterministic pass free of any run-time ordering decision. The number of distinct
-/// priorities is small — it is a handful of layers, not a handful per context.
+/// Done once per distinct priority at app build rather than per frame, keeping the single
+/// deterministic evaluation pass free of any run-time ordering decision. The number of distinct
+/// priorities is small — a handful of layers, not a handful per context.
 fn order_by_priority(
     app: &mut App,
     schedule: impl bevy_ecs::schedule::ScheduleLabel + Clone,
@@ -1683,9 +1683,9 @@ mod tests {
         phase: Phase,
     }
 
-    /// One trigger, bound twice: once to an analog action and once to a button action. R2.10 says
-    /// the two views are independent, and the assertions below only hold if they are — at 0.42 the
-    /// travel is live while the press has not yet happened.
+    /// One trigger, bound twice: once to an analog action and once to a button action. The two
+    /// views are independent, and the assertions below only hold if they are — at 0.42 the travel
+    /// is live while the press has not yet happened.
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_trigger_serves_an_analog_and_a_button_action_at_once() {
@@ -1860,8 +1860,8 @@ mod tests {
     }
 
     /// A substate has no `State` resource at all while its parent does not select it. Reading that
-    /// resource unconditionally panics the moment anyone reaches for a nested state, which is a
-    /// perfectly ordinary thing to want — pause is usually a substate of playing.
+    /// resource unconditionally panics the moment anyone reads a nested state, which is a
+    /// perfectly ordinary thing to want — pause is often a substate of playing.
     #[cfg(all(feature = "state", feature = "keyboard"))]
     #[test]
     fn a_context_can_follow_a_substate_that_does_not_exist_yet() {
@@ -2038,9 +2038,9 @@ mod tests {
         assert!(!active(&mut app), "and stands down again when it says no");
     }
 
-    /// R7.5 through the door `active_if` opens: whatever brings a context up, a control the player
-    /// was already holding must not read as a fresh press. Otherwise the button that satisfies the
-    /// condition is also the button that acts on what the condition just enabled.
+    /// Whatever brings a context up through `active_if`, a control the player was already holding
+    /// must not read as a fresh press. Otherwise the button that satisfies the condition is also
+    /// the button that acts on what the condition just enabled.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_condition_bringing_a_context_up_ignores_a_control_already_held() {
@@ -2110,9 +2110,9 @@ mod tests {
         });
     }
 
-    /// The case R24.4 names as a runtime failure rather than a developer mistake: the entity
-    /// carrying the context is gone, because whatever it belonged to was destroyed. The system
-    /// that reads it stands down for the run instead of bringing the game down with it.
+    /// A runtime failure rather than a developer mistake: the entity carrying the context is
+    /// gone, because whatever it belonged to was destroyed. The system that reads it stands down
+    /// for the run instead of bringing the game down with it.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_reader_is_skipped_rather_than_broken_when_its_context_is_gone() {
@@ -2204,9 +2204,9 @@ mod tests {
         assert_eq!((count.0, count.1), (2, 2));
     }
 
-    /// R24.4's other runtime failure: an action read where it was never bound. It reads as though
-    /// nobody is touching the control, rather than taking the game down over a mistake that is the
-    /// developer's and not the player's.
+    /// Another runtime failure rather than a developer mistake: an action read where it was never
+    /// bound. It reads as though nobody is touching the control, rather than taking the game down
+    /// over a mistake that is the developer's and not the player's.
     #[cfg(feature = "keyboard")]
     #[test]
     fn an_unbound_action_reads_as_untouched() {
@@ -2287,7 +2287,6 @@ mod tests {
 
     /// A context declared and never spawned is the failure that looks like "that key does nothing":
     /// the bindings compile, the systems run, and no entity is carrying the state they would write.
-    /// Saying so is the whole of chunk 13's inherited debt.
     ///
     /// Both halves live in one test because they share the process-wide logger above.
     #[cfg(feature = "keyboard")]
@@ -2348,8 +2347,8 @@ mod tests {
         assert_eq!(capture::seen(), before + 1);
     }
 
-    /// The list in that warning is the useful half of it — the answer is usually a neighbouring
-    /// action or the same one in another context — so it is worth knowing it reads as a sentence.
+    /// The list in that warning is the useful half of it — often a neighbouring action or the
+    /// same one in another context — and it reads as a plain sentence.
     #[test]
     fn the_unbound_warning_lists_what_is_bound() {
         use alloc::format;
@@ -2435,12 +2434,12 @@ mod tests {
         );
     }
 
-    /// R8.2, in the words the requirement uses: a menu consumes `Escape` so the game behind it does
-    /// not also act on it, while a global screenshot key on `F12` goes on working. Consumption is
-    /// per binding rather than per context precisely so those two can differ.
+    /// A menu consumes `Escape` so the game behind it does not also act on it, while a global
+    /// screenshot key on `F12` goes on working. Consumption is per binding rather than per context
+    /// precisely so those two can differ.
     ///
-    /// `FreeLook` is declared at a higher priority than `OnFoot`, and both are render-tick here so
-    /// that one schedule orders them — which is the only direction Design §5.2 allows.
+    /// `Menu` is declared at a higher priority than `Behind`, and both are render-tick here
+    /// because that is the only way one schedule can order them.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_consuming_binding_takes_only_the_control_it_named() {
@@ -2505,11 +2504,11 @@ mod tests {
         );
     }
 
-    /// R7.8: an exclusive context shadows every lower-priority one exactly as `deactivate` would —
+    /// An exclusive context shadows every lower-priority one exactly as `deactivate` would —
     /// canceling what was in flight — and releases it exactly as `activate` would, honoring
-    /// require-reset (R7.5) so a control held through the whole transition does not fire again on
-    /// its own. `Menu` is render-tick and `OnFoot` fixed, which is the one direction Design §5.2
-    /// allows and the direction Disasteroids' settings screen actually uses.
+    /// require-reset so a control held through the whole transition does not fire again on its
+    /// own. `Menu` is render-tick and `OnFoot` fixed, which is the direction a settings screen
+    /// actually uses.
     #[cfg(feature = "keyboard")]
     #[test]
     fn an_exclusive_context_shadows_and_releases_everything_below_it() {
@@ -2579,7 +2578,7 @@ mod tests {
         );
     }
 
-    /// R7.8's other half of the worked example: a context above the exclusive one's priority is
+    /// The other half of the worked example: a context above the exclusive one's priority is
     /// never touched, which is how a global hotkey survives a modal without an opt-out list —
     /// settled by placement rather than a second mechanism.
     #[cfg(feature = "keyboard")]
@@ -2813,8 +2812,8 @@ mod tests {
         let _ = &mut world;
     }
 
-    /// R8.1: the longest chord wins, and nothing has to be declared for it. Three bindings on one
-    /// key, distinguished only by what is held alongside.
+    /// The longest chord wins, and nothing has to be declared for it. Three bindings on one key,
+    /// distinguished only by what is held alongside.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_longer_chord_takes_the_control_from_a_shorter_one() {
@@ -3091,8 +3090,8 @@ mod tests {
         assert!(push_to(&mut app, -0.9));
     }
 
-    /// R14.2: a finger resting near the threshold makes the value wobble. Without a release
-    /// threshold below the press one, every wobble would be another `Fired`.
+    /// A finger resting near the threshold makes the value wobble. Without a release threshold
+    /// below the press one, every wobble would be another `Fired`.
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_trigger_held_near_the_threshold_does_not_chatter() {
@@ -3136,9 +3135,9 @@ mod tests {
         assert!(!pull_to(&mut app, midband).pressed);
     }
 
-    /// R14.3: the D-pad has no axis pair anywhere below us, so it becomes a direction the same way
-    /// WASD does. Both composites drive one action, and the two are asserted against the same
-    /// expected vectors so that a divergence between the keyboard and gamepad paths fails here.
+    /// The D-pad has no axis pair anywhere below us, so it becomes a direction the same way WASD
+    /// does. Both composites drive one action, and the two are asserted against the same expected
+    /// vectors so that a divergence between the keyboard and gamepad paths fails here.
     #[cfg(all(feature = "keyboard", feature = "gamepad"))]
     #[test]
     fn a_dpad_and_four_keys_drive_one_composite_alike() {

@@ -5,9 +5,9 @@
 //! player jumped rather than which button they jumped with. Rebinding wants exactly the half that
 //! gets discarded, so capture reads the input frame directly instead of going through a binding.
 //!
-//! That is not an implementation shortcut; it is what makes rebinding work in a game that is not
-//! running (R19.5). A main-menu settings screen has no gameplay contexts spawned and no evaluator
-//! stepping, and capture does not care: the frame is filled by the sampler either way.
+//! This lets rebinding work in a game that is not running. A main-menu settings screen has no
+//! gameplay contexts spawned and no evaluator stepping, and capture does not care: the frame is
+//! filled by the sampler either way.
 //!
 //! ```ignore
 //! // The player activated a table cell on the settings screen. A mapping holds an ordered list of
@@ -34,12 +34,11 @@
 //!
 //! - **Shape and scheme.** A mapping holding a key accepts another key, not a stick axis and not a
 //!   gamepad button — the first because the action cannot use it, the second because a rebind is
-//!   scoped to one control scheme (R19.7) and moving a binding across schemes would mean moving it
-//!   to a different mapping.
-//! - **Excluded** ([`excluding`](CaptureSession::excluding)): the screen's own controls, so that it
-//!   stays operable while listening (R19.2). Silent, and deliberately so — an excluded control is
-//!   not being refused, it is busy doing its normal job, which is how the key that cancels a
-//!   capture gets through to cancel it.
+//!   scoped to one control scheme, and moving a binding across schemes would mean moving it to a
+//!   different mapping.
+//! - **Excluded** ([`excluding`](CaptureSession::excluding)): the screen's own controls, so it
+//!   stays operable while listening. Silent: an excluded control is not being refused, it is busy
+//!   doing its normal job, which is how the key that cancels a capture gets through to cancel it.
 //! - **Reserved** ([`reserved`](crate::binding::BindingHandle::reserved)): declared on a binding,
 //!   global across its scheme. Loud, because a player who just pressed it meant to bind it and is
 //!   owed the reason.
@@ -75,20 +74,18 @@ pub const MOUSE_MOTION: f32 = 8.0;
 
 /// A set of controls named by what its members are, rather than by listing them.
 ///
-/// This is the shape half of the class vocabulary (R4.9), and it is the language capture filters
-/// in. A class is defined by the channel a control reports on, never by an enumeration of
-/// `KeyCode` and `GamepadButton` variants — which is what lets a device kind that does not exist
-/// yet join a class the day its backend ships, rather than needing to be added to a list here
-/// (R11.2).
+/// This is the language capture filters in. A class is defined by the channel a control reports
+/// on, never by an enumeration of `KeyCode` and `GamepadButton` variants, which lets a device kind
+/// that does not exist yet join a class the day its backend ships, rather than needing to be added
+/// to a list here.
 ///
-/// The set of classes is closed, per R4.10: a class earns its place only where writing the members
-/// out is not reasonable. "Any button-shaped control" qualifies because the device set is open.
-/// "The arrow keys" does not — there are four of them, and naming them is clearer.
+/// The set of classes is closed: a class earns its place only where writing the members out is not
+/// reasonable. "Any button-shaped control" qualifies because the device set is open. "The arrow
+/// keys" does not — there are four of them, and naming them is clearer.
 ///
-/// **There is no class of two-dimensional controls,** which the roadmap expected there to be. No
-/// single control reports a position in two dimensions: a stick is two axes and a directional
-/// composite is four buttons. Since a player rebinds one part at a time (R19.9), the case a
-/// two-dimensional class would serve never reaches capture.
+/// **There is no class of two-dimensional controls.** No single control reports a position in two
+/// dimensions: a stick is two axes and a directional composite is four buttons. A player rebinds
+/// one part at a time, so the case a two-dimensional class would serve never reaches capture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ControlClass {
     /// Anything with a pressed sense: keyboard keys, gamepad buttons, and analog triggers, which
@@ -139,8 +136,8 @@ impl ControlClass {
     /// The class of controls that can fill a mapping expecting this channel.
     ///
     /// `None` for [`Axis2`](ChannelShape::Axis2), because no one control reports one — see the note
-    /// on this type. A mapping that accepts `Axis2` is a stick or a mouse bound whole, which §9.7
-    /// gives a tunable rather than a rebinding row.
+    /// on this type. A mapping that accepts `Axis2` is a stick or a mouse bound whole, and gets a
+    /// tunable rather than a rebinding row.
     pub const fn of(shape: ChannelShape) -> Option<Self> {
         match shape {
             ChannelShape::Button => Some(Self::AnyButton),
@@ -306,9 +303,9 @@ impl CaptureSession {
 
     /// Ignores these controls entirely, so they keep doing whatever they normally do.
     ///
-    /// This is what keeps the screen usable while it is listening (R19.2): the control that cancels
-    /// a capture has to reach the thing that cancels it, which means capture must neither take it
-    /// nor swallow it.
+    /// This is what keeps the screen usable while it is listening: the control that cancels a
+    /// capture has to reach the thing that cancels it, so capture must neither take it nor swallow
+    /// it.
     pub fn excluding(mut self, controls: impl IntoIterator<Item = Control>) -> Self {
         self.excluded.extend(controls);
         self
@@ -451,10 +448,9 @@ pub enum Overlap {
 
 /// Which mappings already hold a control.
 ///
-/// The read-only half of R19.3, and the half that can be answered before anything is committed to:
-/// a screen calls this with what capture just reported and decides what to say. Deciding what to
-/// *do* — reject, swap, unbind the other — needs somewhere to write the answer, which is a
-/// separate matter.
+/// This can be answered before anything is committed to: a screen calls this with what capture
+/// just reported and decides what to say. Deciding what to *do* — reject, swap, unbind the
+/// other — needs somewhere to write the answer, which is a separate matter.
 ///
 /// `target` is the mapping being rebound, and is excluded from the result: a mapping does not
 /// conflict with itself, and rebinding a control to where it already is should report nothing. The
@@ -462,7 +458,7 @@ pub enum Overlap {
 /// while its first already holds it is not reported here — a repeat *within* one row is a question
 /// for the conflict policy that applies a rebind, not for the detection that precedes it.
 ///
-/// Conflicts are per scheme, so a keyboard binding never clashes with a gamepad one (R19.3).
+/// Conflicts are per scheme, so a keyboard binding never clashes with a gamepad one.
 /// Comparison is at control granularity: two bindings that share a control but differ in their
 /// chords are reported as an overlap even though arbitration would separate them. That errs toward
 /// telling a player about something harmless rather than staying quiet about something real.
@@ -603,7 +599,7 @@ fn arrival(event: &RawEvent, threshold: &ButtonThreshold) -> Option<Arrival> {
 /// Reads the frame on behalf of every live capture session.
 ///
 /// Runs between sampling and evaluation, which is what lets it claim what it saw before any context
-/// gets to act on it (R19.5).
+/// gets to act on it.
 pub fn run_captures(
     mut commands: Commands<'_, '_>,
     frame: Res<'_, InputFrame>,
@@ -772,8 +768,8 @@ mod tests {
         assert!(app.world().get::<CaptureSession>(row).is_none());
     }
 
-    /// R19.5, and the reason capture reads the frame rather than a binding: no context is spawned
-    /// here at all, and capture does not notice.
+    /// The reason capture reads the frame rather than a binding: no context is spawned here at
+    /// all, and capture does not notice.
     #[test]
     fn capture_works_with_no_context_spawned() {
         let mut app = app();
@@ -791,8 +787,8 @@ mod tests {
         );
     }
 
-    /// The half of OQ-10 that does the work. Reserving would be worth little if the screen key
-    /// merely had no mapping of its own — anything else could still be bound over the top of it.
+    /// Reserving would be worth little if the screen key merely had no mapping of its own —
+    /// anything else could still be bound over the top of it.
     #[test]
     fn a_reserved_control_is_refused_out_loud() {
         let mut app = app();
@@ -838,7 +834,7 @@ mod tests {
         assert!(heard.refused.is_empty(), "silent, not refused");
     }
 
-    /// A mapping is rebound within its scheme (R19.7), so the pad cannot answer for the keyboard.
+    /// A mapping is rebound within its scheme, so the pad cannot answer for the keyboard.
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_control_from_the_other_scheme_is_refused() {
@@ -865,8 +861,7 @@ mod tests {
         );
     }
 
-    /// R19.5's other half: what the player presses at a rebinding screen must not also play the
-    /// game.
+    /// What the player presses at a rebinding screen must not also play the game.
     #[test]
     fn a_captured_control_is_taken_from_the_game() {
         let mut app = app();
@@ -885,7 +880,6 @@ mod tests {
         );
     }
 
-    /// The read-only half of R19.3.
     #[test]
     fn conflicts_name_the_slots_that_already_hold_a_control() {
         let app = app();
@@ -955,8 +949,8 @@ mod tests {
         assert_eq!(found[0].action_path, "capture_tests.jump");
     }
 
-    /// R17.7's third state, read the same way applying does: a row someone else owns is neither
-    /// cleared nor untouched, and a pending `NotOurs` must not read as freeing up its control.
+    /// Read the same way applying does: a row someone else owns is neither cleared nor untouched,
+    /// and a pending `NotOurs` must not read as freeing up its control.
     #[test]
     fn a_pending_not_ours_row_still_holds_its_control() {
         let app = app();
@@ -1108,7 +1102,7 @@ mod tests {
         assert!(heard.refused.is_empty());
     }
 
-    /// A class is a property, not a list — which is the whole of R4.9's first bullet.
+    /// A class is a property, not a list.
     #[test]
     fn classes_are_decided_by_the_channel_a_control_reports_on() {
         assert!(ControlClass::AnyButton.contains(Control::Key(KeyCode::KeyA)));
@@ -1123,8 +1117,8 @@ mod tests {
         assert_eq!(ControlClass::of(ChannelShape::Axis2), None);
     }
 
-    /// `CharacterProducing` cannot be decided from a bare control — R4.9's second property — so
-    /// `contains` always says no, and only `contains_event` can actually answer.
+    /// `CharacterProducing` cannot be decided from a bare control, so `contains` always says no,
+    /// and only `contains_event` can actually answer.
     #[cfg(feature = "keyboard")]
     #[test]
     fn character_producing_is_a_property_of_the_event_not_the_control() {
@@ -1233,10 +1227,10 @@ mod tests {
     /// An observer may do anything to the entity it is handed, despawning it included — a settings
     /// row that closes on being answered is an ordinary thing to write.
     ///
-    /// A guard rather than a reproduction, and worth being straight about which: the bug this was
-    /// written for showed up under `DefaultPlugins` and not here, because whether an observer's
-    /// deferred commands run before or after the ones already queued depends on the executor. The
-    /// test below is the one that actually fails without the fix. This one states the contract.
+    /// This is a guard, not a reproduction: the bug this was written for showed up under
+    /// `DefaultPlugins` and not here, because whether an observer's deferred commands run before
+    /// or after the ones already queued depends on the executor. The test below is the one that
+    /// actually fails without the fix; this one states the contract.
     #[test]
     fn an_observer_may_despawn_the_entity_it_is_answered_on() {
         let mut app = app();

@@ -76,7 +76,7 @@ impl From<GamepadButton> for ButtonControl {
 /// ```
 ///
 /// Note what the second line is doing: a stick axis already reports signed, so it needs no
-/// composite. Both bindings feed the same action, and the player uses whichever they reach for.
+/// composite. Both bindings feed the same action, and the player may use either.
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AxisButtons {
@@ -230,8 +230,8 @@ pub(crate) struct BindingSpec {
 /// One class binding as [`InputContextBuilder::bind_class`] declared it.
 ///
 /// Deliberately not a `BindingSpec`: a class binding has no source to modify, no chord, no mapping,
-/// and nothing to fold — the only things it carries are the class it watches, whether it consumes
-/// what it catches, and where to send it.
+/// and nothing to combine — the only things it carries are the class it watches, whether it
+/// consumes what it catches, and where to send it.
 pub(crate) struct ClassBindingSpec {
     pub(crate) action_path: &'static str,
     pub(crate) class: crate::capture::ControlClass,
@@ -242,8 +242,8 @@ pub(crate) struct ClassBindingSpec {
 /// The more permissive of two capacities.
 ///
 /// Several bindings can feed one mapping, and each carries whatever its own combinator asked for.
-/// The mapping takes the widest, because a narrower declaration elsewhere is not a statement that
-/// this mapping must be narrow — it is a statement about a binding that happens to share the row.
+/// The mapping takes the widest: a narrower declaration on one binding says nothing about the
+/// mapping itself, only about a binding that happens to share the row.
 const fn widest(
     a: crate::mapping::Capacity,
     b: crate::mapping::Capacity,
@@ -312,10 +312,10 @@ pub(crate) fn leader_of(bindings: &[BindingSpec], index: usize) -> Option<usize>
 /// One control an authored [`BindingSpec`] contributes to one
 /// [`Mapping`](crate::mapping::Mapping) row.
 ///
-/// This is a fact read off a binding, not a declaration of its own — every `MappedPart` is derived
-/// from [`BindingSpec`]s that already exist, by [`mapped_parts`]. `binding` and `part` say exactly
-/// where it came from: which entry in the binding list, and which of that binding's parts (the
-/// whole thing, for a plain control; one direction, for a composite).
+/// This is a fact read off an existing binding, produced by [`mapped_parts`] rather than declared
+/// on its own. `binding` and `part` say exactly where it came from: which entry in the binding
+/// list, and which of that binding's parts (the whole thing, for a plain control; one direction,
+/// for a composite).
 ///
 /// The order these arrive in is the order a mapping's slots fill, which is what makes the first one
 /// the primary.
@@ -331,12 +331,11 @@ pub(crate) struct MappedPart {
 
 /// Every mapped part of every listed binding, in slot order.
 ///
-/// Two different passes read this instead of walking `bindings` themselves: [`mappings_of`] folds
+/// Two different passes read this instead of walking `bindings` themselves: [`mappings_of`] turns
 /// it into the [`Mapping`](crate::mapping::Mapping) list a settings screen reads, and
 /// [`rewrite`](crate::overrides::rewrite) walks it to find exactly which binding and part to change
-/// when a player's override lands. A row built one way and rewritten another is the failure worth
-/// spending a function to make impossible: it would put the player's new control in a slot the
-/// screen is not showing it in.
+/// when a player's override lands. The two must agree on what each row holds, or the player's new
+/// control ends up in a slot the screen is not showing it in.
 pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
     let mut parts = Vec::new();
     for (index, binding) in bindings.iter().enumerate() {
@@ -369,8 +368,8 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
 /// Bindings that derive the same key in the same scheme for the same action are **merged into
 /// one mapping** holding both controls, because that is what a player sees: one row for Jump with
 /// a primary and a secondary, not two rows both called Jump. Merging is keyed by scheme as well
-/// as by name, so the keyboard and gamepad rows stay separate (R19.7); and by action, so two
-/// *different* actions reaching for one name is still the collision R19.15 wants reported.
+/// as by name, so the keyboard and gamepad rows stay separate; and by action, so two different
+/// actions landing on one name is still reported as a collision.
 pub(crate) fn mappings_of(
     bindings: &[BindingSpec],
     context: &'static str,
@@ -582,7 +581,7 @@ impl Control {
     ///
     /// The counterpart of [`BindingSource::channel_shape`] for a single control rather than an
     /// arrangement of them, and what decides whether a captured control fits the mapping it was
-    /// captured for (R19.1).
+    /// captured for.
     ///
     /// Note what is missing: no control answers [`Axis2`](ChannelShape::Axis2). A stick is two
     /// axes and a directional composite is four buttons, so a two-dimensional reading is always
@@ -708,8 +707,8 @@ impl BindingSource {
     /// consumption and chord clashes are recorded against, so that taking a composite takes its
     /// parts rather than an arrangement nothing else can name.
     ///
-    /// Allocation-free, because it runs per binding per tick (R23.2). Use
-    /// [`controls`](Self::controls) where a collection is more convenient than a callback.
+    /// Allocation-free, because it runs per binding per tick. Use [`controls`](Self::controls)
+    /// where a collection is more convenient than a callback.
     pub fn for_each_control(&self, mut visit: impl FnMut(Control)) {
         match self {
             #[cfg(feature = "keyboard")]
@@ -885,7 +884,7 @@ impl Stick {
 
 /// A value that names a control you can bind an action to.
 ///
-/// Implemented for the control types you would reach for directly — a [`KeyCode`], a
+/// Implemented for the control types you would use directly — a [`KeyCode`], a
 /// [`GamepadButton`], a [`Stick`], [`MouseMove`], a [`DirectionalButtons`] composite — so that
 /// [`bind`](InputContextBuilder::bind) accepts any of them.
 ///
@@ -1406,8 +1405,8 @@ impl<'a, C> BindingHandle<'a, C> {
     /// screen that shows only the rebindable half has holes in it. This is the exception: a binding
     /// that is genuinely the game's own business and would only confuse a controls screen.
     ///
-    /// Reach for it where a binding is an implementation detail of another one — a second reading of
-    /// a control that already appears under a different name — rather than a control the player
+    /// Use it where a binding is an implementation detail of another one — a second reading of a
+    /// control that already appears under a different name — rather than a control the player
     /// operates.
     ///
     /// ```ignore
@@ -1435,8 +1434,8 @@ impl<'a, C> BindingHandle<'a, C> {
     ///
     /// As [`mappable`](Self::mappable), with the given key in place of the action's path — so a
     /// composite declared `mappable_as("gameplay.strafe")` has mappings `gameplay.strafe.up` and
-    /// its three neighbours. Reach for it when two would otherwise derive the same key, which
-    /// happens when one action is bound in two contexts.
+    /// its three neighbours. Use it when two would otherwise derive the same key, which happens
+    /// when one action is bound in two contexts.
     pub fn mappable_as(self, key: &'static str) -> Self {
         self.declare_mapping(Some(key), crate::mapping::Capacity::UpTo(1))
     }
@@ -1715,8 +1714,8 @@ impl<C> InputContextBuilder<C> {
 
     /// Declares `Follower` as riding every one of `Leader`'s bindings, one for one.
     ///
-    /// Reach for it where an action deliberately shares a control with another — tap to dodge and
-    /// hold to sprint, or a throttle that opens up when it is held down. `Leader` must already have
+    /// Use it where an action deliberately shares a control with another — tap to dodge and hold
+    /// to sprint, or a throttle that opens up when it is held down. `Leader` must already have
     /// its bindings declared: this reads them off, generates one matching binding of `Follower` per
     /// device `Leader` reads, and runs `configure` on each. The player rebinds *the control*, once,
     /// and every action riding it moves with it.
@@ -1776,8 +1775,8 @@ impl<C> InputContextBuilder<C> {
     /// Where a plain [`bind`](Self::bind) reads one control you name, this reads whichever member of
     /// the class shows up — the mechanism a focused text field uses to claim character-producing
     /// keys without the app enumerating them. It fires once per matching, otherwise-unclaimed event,
-    /// carrying that event untouched; there is no value to fold and nothing to hold between ticks, so
-    /// it skips modifiers, conditions and the player-facing mapping list entirely.
+    /// carrying that event untouched; there is no value to combine and nothing to hold between
+    /// ticks, so it skips modifiers, conditions and the player-facing mapping list entirely.
     ///
     /// ```ignore
     /// struct CharacterInput;
@@ -2142,8 +2141,8 @@ mod tests {
         ));
     }
 
-    /// The two cases R2.10 names: a trigger that is button-shaped despite carrying a fraction, and
-    /// a directional composite that is direction-shaped despite being made of buttons.
+    /// Two cases: a trigger that is button-shaped despite carrying a fraction, and a directional
+    /// composite that is direction-shaped despite being made of buttons.
     #[test]
     fn a_source_reports_the_channel_it_arrives_on() {
         #[cfg(feature = "keyboard")]
@@ -2223,8 +2222,8 @@ mod tests {
         );
     }
 
-    /// The case chunk 15 exists for: an analog action driven by a control that arrives on a button
-    /// channel. Nothing about the binding is special, which is the point.
+    /// An analog action driven by a control that arrives on a button channel. Nothing about the
+    /// binding is special, which is the point.
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_trigger_can_drive_an_analog_action() {

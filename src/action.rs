@@ -18,9 +18,8 @@
 //!
 //! # Choosing a path
 //!
-//! The path is required rather than derived from the Rust type, because it outlives your code: it
-//! is a key in your players' saved settings, and it should not change when you rename a struct or
-//! move it to a different module.
+//! The path is required rather than derived from the Rust type. It is a key in your players'
+//! saved settings, and stays put when you rename a struct or move it to a different module.
 //!
 //! Write it as `namespace.name`, all lowercase, with `snake_case` segments separated by dots:
 //!
@@ -314,11 +313,10 @@ pub enum Phase {
 /// condition and each stateful modifier, so two conditions on one binding cannot tread on each
 /// other.
 ///
-/// It is deliberately one fixed shape rather than a per-condition type. Everything a condition
-/// needs to remember turns out to fit, once the *parameters* are recognised as belonging to the
-/// binding rather than to its state — a hold's duration and a multi-tap's window do not change from
-/// tick to tick, so they live in the compiled plan and never appear here. What is left is uniform
-/// and `Copy`, which is what lets a whole context's state be snapshotted by copying two slices.
+/// This is one fixed shape rather than a type per condition. A hold's duration and a
+/// multi-tap's window do not change from tick to tick, so they live in the compiled plan and
+/// never appear here. What is left is uniform and `Copy`, which lets a whole context's state be
+/// snapshotted by copying two slices.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -597,8 +595,8 @@ pub trait InputAction: Send + Sync + 'static {
     /// a name that appears outside your code, so it should survive a refactor. Actions that share a
     /// category are shown together — the four parts of a movement action, say, under "Movement".
     ///
-    /// Actions in the same group should give the same key, which is why it lives here rather than
-    /// on each binding: one place to change, and no way for two of them to disagree.
+    /// Actions in the same group should give the same key. It lives on the action rather than on
+    /// each binding, so there is one place to change it and no way for two bindings to disagree.
     const CATEGORY: Option<&'static str> = None;
 
     /// Whether bindings of this action take their controls away from lower-priority contexts.
@@ -690,9 +688,9 @@ fn with_registry<T>(read: impl FnOnce(&ActionRegistry) -> T) -> T {
 
 /// Remembers the [`ActionId`] for one action so it is resolved once rather than on every read.
 ///
-/// The derive generates one of these per action and you will not normally name it. Reach for it
-/// only if you are writing an `InputAction` impl by hand and want reads to cost the same as a
-/// derived one:
+/// The derive generates one of these per action and you will not normally name it. Use it only
+/// if you are writing an `InputAction` impl by hand and want reads to cost the same as a derived
+/// one:
 ///
 /// ```rust
 /// use bevy_action_map::action::{ActionId, ActionIdCache, InputAction, Intent};
@@ -890,9 +888,8 @@ mod tests {
         assert!(Intent::Delta2.supports_output::<Vec2>());
     }
 
-    /// Every cell of the shape conversion table, written out. R2.2 requires these to be decided
-    /// rather than inherited from whoever wrote a conversion first, and this is where the decision
-    /// lives in executable form.
+    /// Every cell of the shape conversion table, written out, so a change to any cell has to be
+    /// made here as well as in the code.
     #[test]
     fn every_shape_converts_to_every_other() {
         // Chosen so that no two answers coincide: 3-4-5 and 1-2-2 have integral lengths, and 0.4
@@ -949,8 +946,8 @@ mod tests {
         }
     }
 
-    /// The specific mistake R2.2 was strengthened over: a control pulled part way is not pushed
-    /// diagonally, and every widening conversion has to agree about that.
+    /// A control pulled part way is not pushed diagonally, and every widening conversion has to
+    /// agree about that.
     #[test]
     fn widening_does_not_invent_a_direction() {
         assert_eq!(

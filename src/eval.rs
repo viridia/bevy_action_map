@@ -29,9 +29,9 @@ use crate::frame::{InputFrame, RawEvent};
 
 /// Which controls have already been claimed this frame, and by which schedule.
 ///
-/// Keyed by schedule rather than held flat, so that the three cases in Design §5.2 come out right:
-/// what `PreUpdate` claimed stays claimed for every fixed tick in the frame, what one fixed tick
-/// claimed does not bind the next, and nothing survives into a frame where no fixed tick runs.
+/// Keyed by schedule rather than held flat, so that three cases come out right: what `PreUpdate`
+/// claimed stays claimed for every fixed tick in the frame, what one fixed tick claimed does not
+/// bind the next, and nothing survives into a frame where no fixed tick runs.
 #[derive(bevy_ecs::resource::Resource, Default)]
 pub struct ConsumedControls {
     // Which context took it, not merely that something did: "consumed" is one of five reasons an
@@ -63,7 +63,7 @@ impl ConsumedControls {
     }
 
     /// Takes a control on behalf of a live capture, so that what a player presses at a rebinding
-    /// screen does not also play the game (R19.5).
+    /// screen does not also play the game.
     ///
     /// Claimed under `PreUpdate`, where capture runs, which is what carries it through to the fixed
     /// schedules: a fixed tick releases only its own claims, so this one still stands when a
@@ -91,16 +91,15 @@ pub fn release_consumed_controls(mut consumed: bevy_ecs::prelude::ResMut<'_, Con
     consumed.release_all();
 }
 
-/// The priority of the highest-priority active exclusive context seen so far this frame — R7.8's
-/// mechanism, and Design §5.3.
+/// The priority of the highest-priority active exclusive context seen so far this frame.
 ///
 /// Unlike [`ConsumedControls`], this needs no per-schedule bookkeeping: a context's activity does
 /// not reset between fixed ticks the way a control's actuation does, so an exclusive context simply
 /// re-raises the ceiling to the same value every time it runs. One number, reset once at the top of
 /// the frame, is the whole mechanism — set by whichever exclusive context runs first in priority
-/// order (render-tick contexts run before fixed-tick ones, per §5.2, so the same forward-only
-/// direction applies here too), and read by everything lower that runs after it, in either domain,
-/// for the rest of the frame.
+/// order (render-tick contexts run before fixed-tick ones, so the same forward-only direction
+/// applies here too), and read by everything lower that runs after it, in either domain, for the
+/// rest of the frame.
 #[derive(bevy_ecs::resource::Resource, Default)]
 pub(crate) struct ExclusionCeiling(Option<i32>);
 
@@ -151,7 +150,7 @@ pub(crate) struct Transition {
 /// Turns each logged transition into its typed event.
 ///
 /// Separate from evaluation because observers run arbitrary code with `&mut World`, and the
-/// evaluator has to stay a pure function of its inputs (R10.2).
+/// evaluator has to stay a pure function of its inputs.
 pub fn dispatch_transitions<C: InputContext + Component>(
     mut commands: Commands<'_, '_>,
     mut states: Query<'_, '_, (Entity, &mut InputContextState<C>)>,
@@ -384,7 +383,7 @@ impl<C: InputContext> InputContextState<C> {
         }
     }
 
-    /// Tests one raw event against the plan's class list, Design §4.1's second structure.
+    /// Tests one raw event against the plan's class list.
     ///
     /// Called once per level event, after the fold: a class binding never competes on specificity,
     /// so it only ever sees a control no plain binding in this context already indexes, and only
@@ -675,7 +674,7 @@ impl<C: InputContext> InputContextState<C> {
     }
 }
 
-/// Folds one more binding's contribution into an action's value.
+/// Combines one more binding's contribution into an action's value.
 ///
 /// A delta is a displacement, so two of them add. Everything else is a position or a press, where
 /// adding would be a units error: the strongest contribution wins instead, and ties keep the
@@ -927,9 +926,9 @@ mod tests {
         assert_eq!(state.transitions[0].phase, Phase::Completed);
     }
 
-    /// R9.3's other half. A player who taps faster than the tick rate still tapped, and collapsing
-    /// the window to its final state loses the whole event: press and release cancel in the held
-    /// state, and a single fold afterwards sees nothing happen at all.
+    /// A player who taps faster than the tick rate still tapped, and collapsing the window to its
+    /// final state loses the whole event: press and release cancel in the held state, and a single
+    /// fold afterwards sees nothing happen at all.
     ///
     /// Polling cannot express this — one `Phase` per read — which is why the log exists.
     #[cfg(feature = "keyboard")]
@@ -997,8 +996,8 @@ mod tests {
         assert_eq!(state.value::<Look>(), Vec2::new(4.0, -2.0), "summed");
     }
 
-    /// R7.5, which names this bug class outright: closing a menu with the same key that interacts
-    /// with the world must not interact the instant the menu disappears. The key is still down, and
+    /// Closing a menu with the same key that interacts with the world must not interact the instant
+    /// the menu disappears. The key is still down, and
     /// a context that started reading it now would see a press that the player made for the menu.
     #[cfg(feature = "keyboard")]
     #[test]
@@ -1092,8 +1091,8 @@ mod tests {
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
     }
 
-    /// R7.4. An action interrupted by a context going away has to resolve: left as it was, a hold
-    /// would still read as held for as long as the menu is up, and would never complete.
+    /// An action interrupted by a context going away has to resolve: left as it was, a hold would
+    /// still read as held for as long as the menu is up, and would never complete.
     #[cfg(feature = "keyboard")]
     #[test]
     fn deactivating_cancels_what_was_in_flight() {
@@ -1129,9 +1128,8 @@ mod tests {
         assert!(state.transitions.is_empty());
     }
 
-    /// R2.9's conversion, which chunk 15 refused for want of it. A stick reports how fast, a mouse
-    /// reports how far, and the two are only addable once the first has been multiplied by how long
-    /// the tick was.
+    /// A stick reports how fast, a mouse reports how far, and the two are only addable once the
+    /// first has been multiplied by how long the tick was.
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_rate_becomes_the_distance_it_covered_this_tick() {
@@ -1384,9 +1382,9 @@ mod tests {
         assert!(state.value::<Jump>());
     }
 
-    /// The gap chunk 15 left. A press derived from an axis was thresholded with no memory of what
-    /// it decided last tick, so a stick wobbling across the line chattered — the same defect the
-    /// button channel had fixed, in the neighbouring case.
+    /// A press derived from an axis was thresholded with no memory of what it decided last tick, so
+    /// a stick wobbling across the line chattered — the same defect the button channel had fixed,
+    /// in the neighbouring case.
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_press_derived_from_an_axis_does_not_chatter() {
@@ -1492,7 +1490,7 @@ mod tests {
     }
 
     /// A control already read by a plain binding never reaches the class list, even when it would
-    /// also match — the per-control index wins unconditionally, per Design §4.1.
+    /// also match — the per-control index wins unconditionally.
     #[cfg(feature = "keyboard")]
     #[test]
     fn an_indexed_control_never_reaches_the_class_list() {

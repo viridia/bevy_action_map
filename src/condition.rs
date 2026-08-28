@@ -139,9 +139,9 @@ pub enum BindingCondition {
 /// press, release, down, a tap's own ceiling, a pulse, a change — read the same as a bare press to a
 /// player, so they carry [`None`](Self::None) here.
 ///
-/// R18.3 wants this handed to a localization layer as structure rather than as rendered text, so a
-/// translator chooses its own word order; [`fallback_format`](Self::fallback_format) is the built-in
-/// renderer for a game that ships no catalogue (R19.13).
+/// This is handed to a localization layer as structure rather than as rendered text, so a
+/// translator chooses its own word order; [`fallback_format`](Self::fallback_format) is the
+/// built-in renderer for a game that ships no catalogue.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ConditionDescriptor {
     /// Nothing to add: the control's own name is the whole answer.
@@ -353,7 +353,8 @@ fn verdict(fired: bool) -> Verdict {
     if fired { Verdict::Fired } else { Verdict::Idle }
 }
 
-/// Folds every condition on one binding into a single answer, per the rules on this module.
+/// Combines every condition on one binding into a single answer, following the rules described in
+/// this module.
 ///
 /// With no conditions at all, a binding fires whenever its control is off rest — which is what a
 /// binding does before anyone asks for anything more specific.
@@ -543,7 +544,7 @@ mod tests {
         );
     }
 
-    /// R6.2's three-way split. Each kind is checked for the thing only it can do.
+    /// The three-way split. Each kind is checked for the thing only it can do.
     #[test]
     fn the_three_kinds_compose_as_documented() {
         struct Always(Verdict, ConditionKind);
@@ -642,8 +643,8 @@ mod tests {
         );
     }
 
-    /// A held direction has to keep saying something, because consumption (§8) follows the verdict:
-    /// a menu that dropped to `Idle` between two crossings would hand the stick back to the game
+    /// A held direction has to keep saying something, because consumption follows the verdict: a
+    /// menu that dropped to `Idle` between two crossings would hand the stick back to the game
     /// underneath it for those ticks.
     #[test]
     fn a_held_direction_stays_ongoing_between_changes() {
@@ -659,8 +660,8 @@ mod tests {
         );
     }
 
-    /// What the roadmap called auto-repeat out of two conditions that exist for other reasons: the
-    /// change fires on the crossing, and the pulse keeps firing while the direction is held.
+    /// Auto-repeat, built from two conditions that exist for other reasons: the change fires on the
+    /// crossing, and the pulse keeps firing while the direction is held.
     #[test]
     fn a_change_and_a_pulse_together_are_auto_repeat() {
         use Verdict::{Fired, Ongoing};
@@ -683,8 +684,8 @@ mod tests {
         assert_eq!(verdicts, [Fired, Ongoing, Fired, Ongoing, Ongoing, Fired]);
     }
 
-    /// The two conditions R18.3's condition half exists for, and the one that reads the same as a
-    /// bare press and so has nothing to add.
+    /// Hold and multi-tap, the two conditions that need a caption of their own, and a bare press,
+    /// which reads the same as no condition and so has nothing to add.
     #[test]
     fn describing_finds_the_hold_or_the_multi_tap() {
         assert_eq!(

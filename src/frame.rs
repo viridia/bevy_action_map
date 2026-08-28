@@ -98,9 +98,8 @@ impl RawEvent {
     /// The physical control this event reports on, if it names one.
     ///
     /// `None` only for a gamepad connection event, which is about the device rather than any one
-    /// control on it. Every other variant has exactly one control behind it, which is what lets a
-    /// class binding (R4.9) test a freshly arrived event against the plan's per-control index
-    /// without re-deriving the control from scratch at each call site.
+    /// control on it. Every other variant has exactly one control behind it, which lets a class
+    /// binding match events by control without deriving it itself.
     pub fn control(&self) -> Option<crate::binding::Control> {
         use crate::binding::Control;
         match self {
@@ -139,11 +138,11 @@ pub struct TimedRawEvent {
 /// ordered, timestamped queue, which is easier to replay, easier to test, and a better handoff to
 /// the mapping layer.
 ///
-/// It is a queue rather than a per-frame snapshot for a reason worth knowing if you read from it
-/// yourself: a fixed timestep runs a variable number of times per rendered frame, sometimes zero.
-/// A snapshot replaced each frame would lose a key that was pressed and released between two
-/// simulation ticks. Events instead stay queued until read, and each consumer asks for what has
-/// happened since it last looked, via [`events_after`](InputFrame::events_after).
+/// It is a queue rather than a per-frame snapshot: a fixed timestep runs a variable number of
+/// times per rendered frame, sometimes zero. A snapshot replaced each frame would lose a key that
+/// was pressed and released between two simulation ticks. Events instead stay queued until read,
+/// and each consumer asks for what has happened since it last looked, via
+/// [`events_after`](InputFrame::events_after).
 // Theory of operation. The queue is appended to once a frame, read independently by each consumer,
 // and retired wholesale. Three rules keep those from interfering.
 //

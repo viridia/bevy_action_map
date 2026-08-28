@@ -245,15 +245,14 @@ pub enum OverrideProblemKind {
     },
 }
 
-/// This crate's own on-disk format version (R17.3).
+/// This crate's own on-disk format version.
 ///
-/// Only one exists so far, so nothing yet reads it beyond requiring it be present — it exists so a
-/// later chunk has somewhere to hang a migration once a second version does.
+/// Only one exists so far, so nothing yet reads it beyond requiring it be present. It exists so a
+/// migration has somewhere to attach once a second version does.
 #[cfg(feature = "serialize")]
 const FORMAT_VERSION: u32 = 1;
 
-/// The name a saved file uses for a scheme, stable independent of [`Scheme`]'s own variant names
-/// (R17.9's stability obligation applies here too, not only to a control).
+/// The name a saved file uses for a scheme, stable independent of [`Scheme`]'s own variant names.
 #[cfg(feature = "serialize")]
 const fn scheme_name(scheme: Scheme) -> &'static str {
     match scheme {
@@ -296,9 +295,9 @@ impl serde::Serialize for Override {
     }
 }
 
-/// The `[bindings.*]` half of the file: one table per scheme (R17.4), in `Scheme`'s own declared
-/// order rather than sorted by name — so `gamepad` never jumps ahead of `keyboard_mouse` merely
-/// because "g" sorts before "k".
+/// The `[bindings.*]` half of the file: one table per scheme, in `Scheme`'s own declared order
+/// rather than sorted by name — so `gamepad` never jumps ahead of `keyboard_mouse` merely because
+/// "g" sorts before "k".
 #[cfg(feature = "serialize")]
 struct BindingsTable<'a>(BTreeMap<Scheme, BTreeMap<String, &'a Override>>);
 
@@ -412,10 +411,10 @@ impl<'de> serde::Deserialize<'de> for RawOverride {
 /// Turns what a file said into what this build can use.
 ///
 /// Each row's mapping name is matched against `declared`, since a [`MappingKey`] can only ever be
-/// one the game already has (§10.1). A name that matches nothing comes back in the returned
-/// [`UnresolvedMapping`] list rather than being dropped in silence (R17.2); a control name that
-/// does not parse becomes an [`OverrideProblem`] instead, because by that point the mapping *did*
-/// resolve and there is a row to file the problem against.
+/// one the game already has. A name that matches nothing comes back in the returned
+/// [`UnresolvedMapping`] list rather than being dropped in silence; a control name that does not
+/// parse becomes an [`OverrideProblem`] instead, because by that point the mapping *did* resolve
+/// and there is a row to file the problem against.
 #[cfg(feature = "serialize")]
 fn resolve(
     raw: RawOverrides,
@@ -589,8 +588,7 @@ fn apply_with(
 
 /// The pure half: authored bindings and an override set in, rewritten bindings and rows out.
 ///
-/// Separate from the ECS work so that it can be reasoned about and tested without a `World`, and
-/// because §10.1 asks for exactly this function.
+/// Separate from the ECS work so that it can be reasoned about and tested without a `World`.
 pub(crate) fn rewrite(
     declared: &[BindingSpec],
     rows: &[Mapping],
@@ -775,9 +773,9 @@ fn followers_of<'a>(
 
 /// Moves every rider of `leader` onto the control the leader just took.
 ///
-/// The half chunk 44 left undone. Without it a rebind separates two actions that were declared to
-/// share a control: the throttle moves and the afterburner stays on the old key, where whatever the
-/// player binds next quietly acquires an afterburner.
+/// Without it a rebind separates two actions that were declared to share a control: the throttle
+/// moves and the afterburner stays on the old key, where whatever the player binds next quietly
+/// acquires an afterburner.
 fn rewrite_followers(
     declared: &[BindingSpec],
     leaders: &[Option<usize>],
@@ -906,7 +904,7 @@ mod tests {
         overrides
     }
 
-    /// The whole point of the chunk: a row the player changed reads back changed.
+    /// A row the player changed reads back changed.
     #[test]
     fn applying_an_override_moves_a_row() {
         let mut app = app();
@@ -934,9 +932,9 @@ mod tests {
         );
     }
 
-    /// R17.1. A diff has to be taken against the defaults, so the defaults have to still be there
-    /// after the first apply — otherwise a revised default never again reaches a player who has
-    /// changed anything.
+    /// A diff has to be taken against the defaults, so the defaults have to still be there after
+    /// the first apply — otherwise a revised default never again reaches a player who has changed
+    /// anything.
     #[test]
     fn the_defaults_survive_being_overridden() {
         let mut app = app();
@@ -962,8 +960,8 @@ mod tests {
         );
     }
 
-    /// R19.16, and the half chunk 44 left undone. `Lunge` is `Jump` held; rebinding Jump has to take
-    /// Lunge with it, or the two actions the game declared as sharing a control stop sharing one.
+    /// `Lunge` is `Jump` held; rebinding Jump has to take Lunge with it, or the two actions the
+    /// game declared as sharing a control stop sharing one.
     #[test]
     fn a_follower_moves_with_the_row_it_rides() {
         let mut app = app();
@@ -989,8 +987,8 @@ mod tests {
         );
     }
 
-    /// R17.7's middle state. Clearing is not the same as never having touched the row: the action
-    /// stays declared and readable, and nothing fires it.
+    /// Clearing is not the same as never having touched the row: the action stays declared and
+    /// readable, and nothing fires it.
     #[test]
     fn a_cleared_row_leaves_the_action_bound_but_silent() {
         let mut app = app();
@@ -1147,9 +1145,8 @@ mod tests {
         );
     }
 
-    /// R18.5's clause nothing could reach until now: a binding *changing* is the third thing that
-    /// makes a prompt on screen stale, and without this a caption goes on naming the key the player
-    /// just replaced.
+    /// A binding *changing* is one of the things that makes a prompt on screen stale, and without
+    /// this a caption goes on naming the key the player just replaced.
     #[test]
     fn applying_says_prompts_may_have_changed() {
         let mut app = app();
@@ -1170,8 +1167,8 @@ mod tests {
         assert!(after > before, "a rebind said nothing about prompts");
     }
 
-    /// R17.2. A saved set outlives the build that wrote it, so every one of these is a thing a file
-    /// can say — and each is reported rather than dropped, while everything else still applies.
+    /// A saved set outlives the build that wrote it, so every one of these is a thing a file can
+    /// say — and each is reported rather than dropped, while everything else still applies.
     #[test]
     fn every_unusable_row_is_reported_rather_than_dropped() {
         let mut app = app();
@@ -1240,8 +1237,8 @@ mod tests {
         );
     }
 
-    /// R19.4. Removing a row *is* the reset, which is the whole benefit of storing a diff — and it
-    /// works at each of the four granularities the requirement names.
+    /// Removing a row *is* the reset, which is the whole benefit of storing a diff — and it works
+    /// at each of the four granularities: one row, one action, one context, or everything.
     #[test]
     fn resetting_puts_a_row_back_to_what_the_game_declared() {
         let mut app = app();
@@ -1282,8 +1279,8 @@ mod tests {
         );
     }
 
-    /// R19.12's mechanism: a preset moves a `Fixed` row a capture cannot, exempting exactly the
-    /// rows it names from `NotRebindable` and nothing else.
+    /// A preset moves a `Fixed` row a capture cannot, exempting exactly the rows it names from
+    /// `NotRebindable` and nothing else.
     #[test]
     fn a_preset_moves_a_fixed_row_a_capture_cannot() {
         let mut app = app();
@@ -1428,8 +1425,8 @@ mod tests {
         );
     }
 
-    /// Chunk 55: the file a person edits by hand, pinned by a golden document rather than by an
-    /// intention nobody rechecks.
+    /// The file a person edits by hand, pinned by a golden document rather than by an intention
+    /// nobody rechecks.
     #[cfg(all(feature = "gamepad", feature = "serialize"))]
     mod persistence {
         use super::*;
@@ -1486,10 +1483,10 @@ mod tests {
             [bindings.gamepad]\n\
             \"persist_tests.jump\" = \"cleared\"\n";
 
-        /// The whole point of the chunk: what `Overrides` writes is a document a person would be
-        /// willing to write by hand, and reading it back produces the identical value — a scalar
-        /// for the row that holds one control, a list for the row that holds two, and the two
-        /// three-state words neither of which could ever be mistaken for a control name.
+        /// What `Overrides` writes is a document a person would be willing to write by hand, and
+        /// reading it back produces the identical value — a scalar for the row that holds one
+        /// control, a list for the row that holds two, and the two three-state words neither of
+        /// which could ever be mistaken for a control name.
         #[test]
         fn a_saved_override_set_round_trips_through_a_legible_file() {
             let declared = declared();
@@ -1529,8 +1526,8 @@ mod tests {
             assert_eq!(loaded, overrides);
         }
 
-        /// R17.2's control half: a name this build cannot turn into a `Control` is reported rather
-        /// than dropped in silence, and the row after it in the same file still loads.
+        /// A name this build cannot turn into a `Control` is reported rather than dropped in
+        /// silence, and the row after it in the same file still loads.
         #[test]
         fn an_unknown_control_is_reported_and_the_rest_still_loads() {
             let declared = declared();
@@ -1576,8 +1573,8 @@ mod tests {
             );
         }
 
-        /// R17.2's mapping half: a renamed or removed action's row comes back named rather than
-        /// vanishing without a trace.
+        /// A renamed or removed action's row comes back named rather than vanishing without a
+        /// trace.
         #[test]
         fn an_unresolved_mapping_name_is_reported_by_name() {
             let declared = declared();

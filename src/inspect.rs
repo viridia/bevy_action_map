@@ -165,7 +165,7 @@ mod tests {
     #[context(path = "inspect_tests.menu", tick = Render, priority = 10)]
     struct Menu;
 
-    /// The whole point of the dump: everything is named at run time. Nothing here reaches for
+    /// The whole point of the dump: everything is named at run time. Nothing here calls
     /// `value::<Jump>()`, and a tool built on this works for actions it was never compiled against.
     #[test]
     fn the_dump_names_every_context_and_action_without_naming_a_type() {
@@ -209,8 +209,8 @@ mod tests {
         assert!(menu.instances.is_empty());
     }
 
-    /// The reason a dump beats a printout of action values: it carries the answer to "so why is
-    /// nothing happening", which is the question anyone reading an overlay actually has.
+    /// A dump carries the answer to "so why is nothing happening", the question anyone reading an
+    /// overlay actually has.
     #[test]
     fn the_dump_carries_the_obstacle_for_each_action() {
         use crate::context::{InputContextState, Obstacle};

@@ -1241,8 +1241,8 @@ mod prompt_tests {
         );
     }
 
-    /// R18.3's condition half: `Thrust` and `Afterburner` share a control and a prompt is the only
-    /// place that would otherwise show them as identical.
+    /// `Thrust` and `Afterburner` share a control and a prompt is the only place that would
+    /// otherwise show them as identical.
     #[test]
     fn a_hold_travels_with_the_control_it_qualifies() {
         use crate::condition::ConditionDescriptor;
@@ -1271,8 +1271,8 @@ mod prompt_tests {
         );
     }
 
-    /// R18.2's other half. A control a stronger context takes for something else does not fire this
-    /// action, whatever the binding says, so a prompt naming it is a lie the player can check.
+    /// A control a stronger context takes for something else does not fire this action, whatever
+    /// the binding says, so a prompt naming it is a lie the player can check.
     #[test]
     fn a_stronger_context_taking_a_control_takes_it_out_of_the_prompt() {
         let mut app = app();
@@ -1358,8 +1358,8 @@ mod prompt_tests {
     }
 
     /// A backend that said nothing about the class is not the same as a control with no class, and
-    /// the difference is load-bearing: a caller narrowing to buttons must not be handed something
-    /// nobody has claimed is one.
+    /// the difference matters: a caller narrowing to buttons must not be handed something nobody
+    /// has claimed is one.
     #[test]
     fn an_origin_that_never_said_what_it_was_has_no_class() {
         let unsaid = ControlOrigin::Foreign {
@@ -1413,7 +1413,7 @@ mod prompt_tests {
             .map_or(0, |generation| generation.0)
     }
 
-    /// The case no `activate` call covers: the answer is folded over every entity carrying the
+    /// The case no `activate` call covers: the answer is combined across every entity carrying the
     /// context, so it changes when the first one arrives and when the last one leaves.
     #[test]
     fn an_instance_arriving_or_leaving_says_prompts_may_have_changed() {

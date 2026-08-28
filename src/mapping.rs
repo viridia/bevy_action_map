@@ -266,7 +266,7 @@ pub struct Follower {
     /// The action riding this row.
     pub action: ActionId,
     /// That action's declared path, mirroring the `action`/`action_path` pair
-    /// [`Mapping`] itself carries. A localization key (R19.14), so a catalogue answers it and
+    /// [`Mapping`] itself carries. A localization key, so a catalogue answers it and
     /// [`fallback_label`](Self::fallback_label) derives "Afterburner" for a game without one.
     pub action_path: &'static str,
     /// What distinguishes this action's firing from a bare press of the row's controls — held a
@@ -624,7 +624,7 @@ mod tests {
 
     /// The same name in two schemes is not a collision, and this is the ordinary way to write a
     /// game that offers rebinding on both devices: one key and one button, both mappable, both
-    /// called `jump`. They land in separate tables (§10.1), so nothing can be confused for anything.
+    /// called `jump`. They land in separate tables, so nothing can be confused for anything.
     #[cfg(feature = "gamepad")]
     #[test]
     fn one_name_in_two_schemes_is_two_rows_rather_than_a_collision() {
@@ -768,8 +768,8 @@ mod tests {
         assert_eq!(follower.fallback_label(), "Lunge");
     }
 
-    /// The condition half of R18.3: a follower's hold is what a screen draws beside the row it
-    /// rides, and it travels on the follower rather than being derived again from the world.
+    /// A follower's hold is what a screen draws beside the row it rides, and it travels on the
+    /// follower rather than being derived again from the world.
     #[test]
     fn a_follower_carries_its_own_condition() {
         #[derive(InputContext)]

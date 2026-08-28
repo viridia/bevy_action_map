@@ -424,7 +424,7 @@ impl CompiledBinding {
 }
 
 /// An authored class binding, resolved to nothing but itself — there is no slot, because there is
-/// no fold to put one in.
+/// nothing to hold between ticks.
 ///
 /// No `action_path` here, unlike `BindingSpec`/`CompiledBinding`: the one diagnostic that needs to
 /// name a class binding's action runs on the authored `ClassBindingSpec` list before compilation,
@@ -775,7 +775,7 @@ mod tests {
         assert!(!plan.is_indexed(Control::Key(KeyCode::KeyA)));
     }
 
-    /// Two class bindings watching the same class: the second can never fire, and R4.8 wants that
+    /// Two class bindings watching the same class: the second can never fire, and that should be
     /// caught rather than discovered by a player.
     #[cfg(feature = "keyboard")]
     #[test]

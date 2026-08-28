@@ -95,6 +95,29 @@ theories of operation and call out subtleties; if necessary it can go into
 detail about an algorithm or data structure. However, it should avoid explaining
 basic information that any bevy maintainer or rust programmer would already know.
 
+**User-facing prose tone.** Doc comments and the README are the actual user manual — the internal
+docs' voice (reasoning-heavy, decision-by-decision, comfortable with a metaphor) belongs to a
+different audience and does not transfer. Watch for:
+
+- **Retired metaphors.** "Load-bearing", "seam", "fold", "reach for" instead of "use" — each was
+  novel once and is a tic now, and some ask the reader to learn what the word means in this codebase
+  before the sentence parses. A metaphor earns its place by being clearer than the plain word; once
+  it isn't, it's jargon.
+- **Defend nothing.** State what a thing does and how to use it. The argument for why it works that
+  way, or what alternative was rejected, belongs in Design.md or the review conversation — never in
+  a doc comment, for the same reason it's kept out of `Requirements.md` above.
+- **No manufactured significance.** "The honest answer is…", "Crucially,", "It's worth noting that"
+  ask for attention a plain sentence already has. Save emphasis (bold, a warning admonition) for what
+  is actually surprising; spent on everything, it stops working on anything.
+- **No project history.** Written for someone who has never seen a roadmap chunk, a requirement
+  number, or a design section, and shouldn't need to.
+- **Say it once.** A hedge ("generally", "in most cases", "typically") that isn't gating a real
+  exception is filler — either the exception is real and worth a sentence, or the qualifier goes.
+- **Vary the connectors.** A constant diet of em-dash asides and "not X, but Y" reads as a
+  fingerprint once a reader notices it; a plain period is usually clearer anyway.
+- **Concise, not thin.** Comprehensive still means every parameter, every panic, every non-obvious
+  edge case — cut the padding around that content, not the content itself.
+
 ---
 
 ## Cross-cutting: the timestamp shim

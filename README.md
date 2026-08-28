@@ -1,6 +1,6 @@
 # bevy_action_map
 
-An comprehensive input action manager for [Bevy](https://bevyengine.org).
+A comprehensive input action manager for [Bevy](https://bevyengine.org).
 
 Declare what your game reacts to, bind whatever devices should drive it, and let players change their minds later.
 
@@ -26,8 +26,9 @@ Input management entails more than just "map a `KeyCode` to an enum", because a
 shipped game needs more than a mapping:
 
 - **Devices disagree about what a value means.** A mouse delta and a stick deflection are both
-  `Vec2`, but one already happened this frame and the other tells you which way to keep moving. In keeping with the Rust philosophy, these distinctions are represented as _types_: the crate tracks that distinction (an action's _intent_) so it can convert between the two correctly
-  instead of leaving you to remember which is which at every call site.
+  `Vec2`, but one already happened this frame and the other tells you which way to keep moving. The
+  crate tracks that distinction as a type (an action's _intent_) and converts between the two
+  correctly, instead of leaving you to remember which is which at every call site.
 - **Real games have more than one thing listening to the keyboard.** A pause menu, a chat box, and
   a player's ship shouldn't all react to `Escape`. Contexts have priority and consume input, so a
   higher-priority context can claim a control without the lower one ever knowing it happened.
@@ -46,7 +47,7 @@ shipped game needs more than a mapping:
   a declared, stable name for each — the identity that survives a rename or a save file.
 - **Keyboard, mouse, and gamepad**, each an optional feature, sharing one pipeline. `no_std` at the
   core (`alloc` only), so the mapping logic itself doesn't require `std`.
-- **Multiple bindings per action**, folded together — chords (`Ctrl+S`), alternatives (`Space` or
+- **Multiple bindings per action**, combined — chords (`Ctrl+S`), alternatives (`Space` or
   gamepad South), and composites (WASD as one `Vec2`) all resolve through the same arbitration.
 - **Modifiers**: dead zones, response curves, scale, negate, swizzle, clamping, and rate conversion
   (turning a stick's _position_ into the same per-frame _delta_ a mouse reports).
@@ -154,9 +155,9 @@ context.bind::<Charge>(KeyCode::Space).hold(0.4);
 **Modifiers** reshape the raw value — dead zone, response curve, scale, clamp — before it becomes the
 action's value. **Conditions** decide _when_ a binding counts as firing: without one, a binding fires
 whenever its control is off rest; `.hold(0.4)` instead waits for half a second, reporting progress as
-it builds so a UI can show a charge meter. Several bindings can feed one action, and the plan folds
-them by specificity, so `Ctrl+S` beats a plain `S` bound in the same context without either binding
-knowing about the other.
+it builds so a UI can show a charge meter. Several bindings can feed one action, and the crate
+resolves them by specificity, so `Ctrl+S` beats a plain `S` bound in the same context without either
+binding knowing about the other.
 
 ### Reading actions: poll or observe
 
@@ -297,7 +298,7 @@ Default features are `std`, `bevy_reflect`, `keyboard`, `mouse`, `gamepad`, and 
 ## Project documents
 
 This crate is being built from a written requirements and design process, kept in the repository
-rather than in an issue tracker, in the order a reviewer would actually want to read them:
+rather than in an issue tracker, in the order a reviewer would want to read them:
 
 | Document                                                | What it is                                                                                                                    |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |

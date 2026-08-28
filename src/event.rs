@@ -96,10 +96,11 @@ pub(crate) fn dispatch_for<A: InputAction>(
     }
 }
 
-/// Identifies one class binding, the way [`InputAction`] identifies a folded one.
+/// Identifies one class binding, the way [`InputAction`] identifies an action.
 ///
-/// Deliberately not `InputAction`: a class binding never enters the per-tick fold, carries no
-/// modifiers or conditions, and has nothing to hold between ticks. It only needs a stable name.
+/// Deliberately not `InputAction`: a class binding is never combined into per-tick action state,
+/// carries no modifiers or conditions, and has nothing to hold between ticks. It only needs a
+/// stable name.
 ///
 /// ```rust
 /// use bevy_action_map::event::ClassBinding;
