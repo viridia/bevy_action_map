@@ -1612,6 +1612,28 @@ is a question about the screen they sit on, and a game that wants all of them ha
 `join`. The load-bearing half is that a prompt is a hint rather than a manual: "Press W to thrust"
 is the sentence, and "Press W or Up Arrow to thrust" is a worse one even where both are true.
 
+### 10.8 Brand resolution and the generic tier
+
+R18.4's fallback chain — brand → generic → text — has never had "generic" designed. The gap matters
+because brand is frequently unknowable: R11.6 admits `vendor_id`/`product_id` are `Option`, absent
+on wasm and on some Linux setups, so "brand unknown" is a routine case rather than a rare one.
+
+**Xbox and PlayStation share close enough conventions that one generic tier can serve both.**
+Nintendo is the exception rather than a peer family: its face buttons sit mirrored relative to the
+other two (A/B and X/Y swapped), so a generic tier built on the Xbox/PlayStation convention does not
+degrade gracefully for an unidentified Switch-family pad — it names the wrong button rather than a
+merely-generic one. That family is also the rarer one in practice, which makes defaulting "generic"
+to the Xbox/PlayStation convention a reasonable bet — but a bet, not a certainty, and one whose
+failure mode is "actively wrong" rather than "imprecise."
+
+**This decides only the label/glyph content of the generic tier, not brand resolution itself**
+(R11.6 stays its own open item: a `vendor_id`/`product_id` lookup against something like
+[SDL_GameControllerDB][sdl-db]). It also does not yet decide whether text labels want the same
+treatment glyphs get. `fallback_label` is brand-agnostic today by omission — `"South Button"`, not
+`"A"` — not by decision. Whether it gains brand → generic → text tiering to match R18.4, or stays
+positional and leaves brand-specific text to an app's own localization catalogue (§18.R18.3 already
+puts display strings there), is the open call this note exists to record rather than resolve.
+
 ---
 
 ## 11. Crate structure and upstream boundaries
@@ -1791,6 +1813,7 @@ exists, the split is speculative, and the module layout above makes it a move ra
   behavior on one attribute. If that list grows, the derive becomes a configuration language and the
   metadata should move to a builder instead.
 
+[sdl-db]: https://github.com/mdqinc/SDL_GameControllerDB
 [bevy-input-focus]: https://github.com/bevyengine/bevy/blob/17e28cdedca8f66cd01ba88bd40ec33591e6bf37/crates/bevy_input_focus/src/lib.rs#L198-L206
 [bevy-scene]: https://github.com/bevyengine/bevy/blob/17e28cdedca8f66cd01ba88bd40ec33591e6bf37/crates/bevy_scene/src/scene.rs#L568-L577
 [bevy-6183]: https://github.com/bevyengine/bevy/issues/6183

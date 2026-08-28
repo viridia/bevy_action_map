@@ -245,6 +245,30 @@ this chunk builds the modifier under a name the plan-build check already counts 
   *definitions* (R17.6, R22.16), which is deferred, so this is no longer on the path to anything
   scheduled.
 
+### 62. Release on focus loss and disconnect
+
+R16.1–R16.3 and R11.4: a control still reads as held after the thing holding it stops being real —
+alt-tab, a suspend, a disconnected pad. The fix is `deactivate`'s existing cancel-and-require-reset
+behavior (R7.4, R7.5) against two new triggers, not a second mechanism.
+
+- **Found by the first grooming sweep, not by a game hitting the bug.** Nothing in `src/` or this
+  document mentioned R16.1 at all — a MUST with no destination, the thing ground rule 5 forbids,
+  rather than a symptom of one.
+- **One mechanism, two triggers.** `KeyboardFocusLost` and a gamepad disconnect both mean "this
+  source is gone now": cancel whatever it was doing, require-reset before it fires again.
+- **R16.3's suspend/resume rides along** as the same trigger on a platform this crate does not yet
+  target, not a separate design.
+
+### 63. Multi-window
+
+R13.5: an input frame carries no source window, so nothing can scope a binding to one — a MUST with
+zero code behind it (`RawEvent` has no window field to filter on).
+
+- **Why it waits:** nothing in tree has a second window. Disasteroids and Split Friction are both
+  single-window; of everything the sweep found, this is the one with no in-tree pressure behind it
+  at all.
+- **Carried from the first grooming sweep**, not from an earlier chunk.
+
 ---
 
 ## Phase VII — the presentation model
@@ -320,6 +344,20 @@ widget beside them (R8.2a). Chunk 30 found it and worked around it; this closes 
   R12.6). Chunk 25 landed the class binding mechanism and measured the predicate against a real
   IME, but nothing in-tree is a focused text field yet — that needs the rest of D4's
   focus-activated context, which is this chunk's to build.
+
+### 64. Tunables and hold-vs-toggle
+
+R19.11 and R20.2: player-adjustable numbers exposed as named, typed, range-bounded values a generic
+UI can render — sensitivity, deadzone amount, hold-vs-toggle — without ever showing a player the
+modifier chain underneath (R5.8).
+
+- **Why now.** The deferred table's tunables row argued with itself: gated on "nothing in tree
+  wants one" while naming Disasteroids' stick deadzone as the tunable a player would reach for
+  first. The contradiction is the finding; this chunk is the destination.
+- **`hold_or_toggle` rides along.** R19.11 already names it as the worked example, and it has no
+  chunk of its own either (R20.2).
+- **Feeds chunk 22's stage 3** (the deadzone preference stage), which needs this mechanism and
+  currently has none to use.
 
 ---
 
@@ -724,7 +762,8 @@ Still out of scope for the sequence above. Rebinding, persistence and presentati
 table because Disasteroids needs them; device routing and local multiplayer have left it because
 Split Friction does, and because the gate turned out to be met already. Reverse lookup (R18.1) left
 it in chunk 39's grooming, which is also when the §18 row was found to be claiming an asset gate for
-two requirements that have nothing to do with assets.
+two requirements that have nothing to do with assets. Tunables (R19.11) left it in the first
+grooming sweep, when the row's own text was found arguing against its own gate → chunk 64.
 
 Those two — live prompt invalidation (R18.5) and most-recently-used device (R18.6) — left it as
 well, and only one of them survived the trip. R18.5's gate is a good example of one a chunk meets by
@@ -766,7 +805,6 @@ gate.
 | Persistent device identity and calibration (§11)  | two units of the *same kind*, which pad-plus-keyboard does not give         |
 | Mouse wheel as a binding source (R13.3)           | nothing in tree wants it. Chunk 41 landed mouse *buttons* and stopped there deliberately: the wheel is a delta on its own channel, needs the `Line`/`Pixel` normalization R13.3 describes, and shares nothing with a button but the device |
 | Glyph ids (R18.4)                                 | asset-pipeline questions this document does not touch — but *the art is no longer one of them*: **Kenney's input prompt set** covers keyboard, mouse and the three pad brands and is CC0, so an example can ship one without a licensing conversation. Confirm the licence and the coverage before relying on either. What stays open is the identifier scheme, and Kenney is the way to falsify it: R18.4 wants a key of (brand, control) with a brand → generic → text fallback, and chunk 37's stored names are already the control half — `pad/South` plus a brand is nearly the whole id. If that mapping does not survive contact with a real atlas's file names, R18.4 is wrong rather than merely unbuilt |
-| Tunables (R19.11)                                 | nothing in tree adjusts one. Chunk 19 landed mappings and left tunables reading "23 and later", which is the destination ground rule 5 refuses; chunk 45 needs the preset *format* to leave room for them and does not need them to exist. Wanted by R20.5 and by Disasteroids, whose stick deadzone is the tunable a player would reach for first, so this row is a question to reopen rather than a settled no |
 | Glyphs from a backend (R18.9) | the same asset-pipeline questions as the R18.4 row, arriving from the other side. The *origin* half of this row is closed: chunk 40's `ControlOrigin` has a variant for a control that is not one of ours, carrying the same stored name and fallback label everything else renders from, so what is deferred is the image rather than room for it. Chunk 47 widened that variant with the class its reporter claims, so a foreign control can be narrowed to like one of ours |
 | **A presentation crate** (`bevy_action_map_ui`, or wherever it lands) | **Bevy deciding to take this crate upstream.** That is the point at which the workspace has to be arranged properly regardless, and it is also when the layering matters to someone other than us: an input crate that pulls `bevy_ui` cannot go upstream, and `bevy_ui` could not then use action maps. Until then the layer is `examples/common/prompt_ui.rs`, which every example shares and an integration test covers, and the cost of waiting is a `#[path]` import |
 | Netcode injection and rollback (§10)              | a testbed that actually rolls back; also wants held device state made snapshot-able (R10.3), which chunk 9 left as `BTreeSet`/`HashMap` |

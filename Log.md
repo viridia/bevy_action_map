@@ -517,3 +517,20 @@ timestamp off an event the app already receives is composition, not a missing pr
 keeps R6.4's ordered sequences, a different question — the ordering is between the crate's own
 actions, never against app state — and drops the forgiveness half entirely. Requirements.md marks
 R6.5 withdrawn in place, same convention as R2.4.
+
+### The first grooming sweep, before chunks 62–64
+
+Prompted by tunables (R19.11) having a deferred-table row that argued against its own gate.
+Grepped `src/` rather than trusting the documents' account of themselves, and three more MUSTs
+turned up with no destination anywhere — not even a deferred-table row: R16.1–R16.3 (focus loss and
+suspend release held controls), R11.4 (a disconnected device releases them the same way), and R13.5
+(input frames carry no source window to filter a binding on). Chunks 62 and 63 are the destination
+for those; chunk 64 is tunables' own, with R20.2's hold-vs-toggle riding along since R19.11 already
+names it as the worked example.
+
+**R11.6 (device brand/class resolution) is flagged, not chunked.** Loosely covered by the glyphs
+row's asset-pipeline gate but never named in it — left for the next sweep rather than forced into a
+chunk on a guess.
+
+**Not exhaustive.** §9, §22, and §23 were not checked against code this pass. The author asked for
+another sweep later rather than one pass covering everything now.
