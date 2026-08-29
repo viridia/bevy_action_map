@@ -25,7 +25,7 @@ use crate::binding::Stick;
 use crate::binding::{BindingSource, ButtonThreshold, Control};
 use crate::condition::Verdict;
 use crate::context::InputContextState;
-use crate::frame::{InputFrame, RawEvent};
+use crate::frame::{InputFrame, RawEvent, TimedRawEvent};
 
 /// Which controls have already been claimed this frame, and by which schedule.
 ///
@@ -209,7 +209,7 @@ pub(crate) fn evaluate_context<
     // The generic clock, which Bevy points at the fixed timestep inside the fixed schedules — so a
     // context is told how long its own tick was rather than how long the frame was (R9.6).
     time: Res<'_, bevy_time::Time>,
-    mut states: Query<'_, '_, &mut InputContextState<C>>,
+    mut states: Query<'_, '_, (&mut InputContextState<C>, Option<&crate::player::Paired>)>,
 ) {
     let delta = time.delta_secs();
     // Read once, before this context's own instances can raise it further — evaluation order is
@@ -217,7 +217,7 @@ pub(crate) fn evaluate_context<
     // this frame is visible here, and nothing this context does can affect its own shadowing.
     let shadowed = ceiling.shadows(C::PRIORITY);
     let mut any_active = false;
-    for mut state in &mut states {
+    for (mut state, pairing) in &mut states {
         if shadowed {
             state.shadow();
         } else {
@@ -230,7 +230,7 @@ pub(crate) fn evaluate_context<
         // Every instance of one context sees the same claims and adds to them together, so two
         // players sharing a context cannot take controls from each other.
         let mut claims = Vec::new();
-        state.apply_frame(&frame, &threshold, delta, &consumed, &mut claims);
+        state.apply_frame(&frame, &threshold, delta, &consumed, &mut claims, pairing);
         for control in claims {
             consumed.claim::<S>(control, C::PATH);
         }
@@ -287,19 +287,26 @@ impl<C: InputContext> InputContextState<C> {
         delta: f32,
         consumed: &ConsumedControls,
         claims: &mut Vec<Control>,
+        pairing: Option<&crate::player::Paired>,
     ) {
         // Only what has arrived since this context last looked. Re-reading the whole queue is what
-        // made one mouse delta count three times across three fixed ticks.
+        // made one mouse delta count three times across three fixed ticks. The cursor advances past
+        // the full unfiltered slice — including another device's events an unpaired viewer never
+        // touches below — so nothing here is ever offered twice.
         let unread = frame.events_after(self.read_through);
         if let Some(last) = unread.last() {
             self.read_through = Some(last.timestamp);
         }
+        // Absent pairing reads every device, which is today's exact behavior (R15.3): a device's
+        // input must not reach a context paired to someone else, but a context nobody paired stays
+        // deaf to nothing.
+        let owns = |event: &TimedRawEvent| pairing.is_none_or(|p| p.contains(event.event.device()));
 
         // An inactive context still tracks its devices, shadowed or not. Skipping that would leave
         // the held state stale, so reactivating would need a rebuild — and R7.6 wants activation to
         // be free.
         if !self.is_active() {
-            for event in unread {
+            for event in unread.iter().filter(|e| owns(e)) {
                 self.apply_level_event(&event.event, threshold);
             }
             return;
@@ -311,7 +318,7 @@ impl<C: InputContext> InputContextState<C> {
         // Replayed one at a time rather than collapsed. Draining the whole window and then folding
         // once is what made a press and release inside a single window vanish: the two cancel in
         // the held state, and the fold sees nothing happen (R9.3).
-        for event in unread {
+        for event in unread.iter().filter(|e| owns(e)) {
             if let RawEvent::MouseMotion(delta) = &event.event {
                 mouse_delta += *delta;
                 continue;
@@ -972,6 +979,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.transitions.len(), 1);
         assert_eq!(state.transitions[0].phase, Phase::Fired);
@@ -986,6 +994,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert!(
             state.transitions.is_empty(),
@@ -1004,6 +1013,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.transitions.len(), 1);
         assert_eq!(state.transitions[0].phase, Phase::Completed);
@@ -1030,6 +1040,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
 
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
@@ -1072,6 +1083,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
 
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
@@ -1099,6 +1111,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(
             state.phase::<Jump>(),
@@ -1113,6 +1126,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(
             state.phase::<Jump>(),
@@ -1129,6 +1143,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.phase::<Jump>(), Phase::Idle);
         assert!(state.transitions.is_empty());
@@ -1141,6 +1156,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
     }
@@ -1161,6 +1177,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
 
         state.activate_including_held();
@@ -1170,6 +1187,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
     }
@@ -1190,6 +1208,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
         state.transitions.clear();
@@ -1229,6 +1248,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
         state.transitions.clear();
@@ -1240,6 +1260,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
 
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
@@ -1269,6 +1290,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         frame.record(RawEvent::FocusLost);
         state.apply_frame(
@@ -1277,6 +1299,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         state.transitions.clear();
 
@@ -1287,6 +1310,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert!(
             state.transitions.is_empty(),
@@ -1302,6 +1326,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
     }
@@ -1337,6 +1362,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
         state.transitions.clear();
@@ -1353,6 +1379,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
 
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
@@ -1387,6 +1414,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
         state.transitions.clear();
@@ -1404,6 +1432,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert!(
             state.transitions.is_empty(),
@@ -1457,6 +1486,7 @@ mod tests {
             0.25,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.value::<Look>().x, 22.5);
 
@@ -1467,6 +1497,7 @@ mod tests {
             0.125,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.value::<Look>().x, 11.25);
     }
@@ -1549,6 +1580,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.value::<Counted>(), 1.0);
         // ...and to two on the next tick, having each kept their own count.
@@ -1558,6 +1590,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.value::<Counted>(), 2.0);
     }
@@ -1594,6 +1627,7 @@ mod tests {
                 TICK,
                 &ConsumedControls::default(),
                 &mut Vec::new(),
+                None,
             );
         }
 
@@ -1688,6 +1722,7 @@ mod tests {
                 0.1,
                 &ConsumedControls::default(),
                 &mut Vec::new(),
+                None,
             );
             state.phase::<Jump>()
         };
@@ -1743,6 +1778,7 @@ mod tests {
             0.1,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.phase::<Jump>(), Phase::Started);
 
@@ -1762,6 +1798,7 @@ mod tests {
             0.1,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
         assert_eq!(state.phase::<Jump>(), Phase::Fired);
         assert!(state.value::<Jump>());
@@ -1800,6 +1837,7 @@ mod tests {
                 TICK,
                 &ConsumedControls::default(),
                 &mut Vec::new(),
+                None,
             );
             state.value::<Jump>()
         };
@@ -1860,6 +1898,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut claims,
+            None,
         );
 
         assert_eq!(state.class_fires.len(), 1);
@@ -1902,6 +1941,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut Vec::new(),
+            None,
         );
 
         assert!(state.class_fires.is_empty());
@@ -1934,6 +1974,7 @@ mod tests {
             TICK,
             &ConsumedControls::default(),
             &mut claims,
+            None,
         );
 
         assert_eq!(state.class_fires.len(), 1, "it still fires");

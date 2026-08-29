@@ -124,6 +124,30 @@ impl RawEvent {
             Self::Gamepad(RawGamepadEvent::Connection(_)) => None,
         }
     }
+
+    /// The device this event was sampled from.
+    ///
+    /// Unlike [`control`](Self::control), every variant answers this — a gamepad connecting or
+    /// disconnecting is about a device even though it names no control, and a window losing focus
+    /// is the keyboard and mouse's own event.
+    pub fn device(&self) -> crate::device::DeviceHandle {
+        use crate::device::DeviceHandle;
+        match self {
+            #[cfg(feature = "keyboard")]
+            Self::Keyboard(_) => DeviceHandle::KeyboardMouse,
+            #[cfg(feature = "mouse")]
+            Self::MouseButton(_) => DeviceHandle::KeyboardMouse,
+            Self::MouseMotion(_) => DeviceHandle::KeyboardMouse,
+            #[cfg(feature = "gamepad")]
+            Self::Gamepad(event) => DeviceHandle::Gamepad(match event {
+                RawGamepadEvent::Button(button) => button.gamepad,
+                RawGamepadEvent::Axis(axis) => axis.gamepad,
+                RawGamepadEvent::Connection(connection) => connection.gamepad,
+            }),
+            #[cfg(feature = "keyboard")]
+            Self::FocusLost => DeviceHandle::KeyboardMouse,
+        }
+    }
 }
 
 /// A raw input event paired with the timestamp it was sampled under.

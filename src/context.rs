@@ -3429,6 +3429,126 @@ mod tests {
         assert!(app.world().resource::<Probe>().value, "gamepad binding");
     }
 
+    /// R15.3's mixed case: a keyboard-paired instance and a gamepad-paired instance of the same
+    /// context, sharing no code path, so a routing bug cannot hide behind symmetry the way it could
+    /// between two identical pads.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_keyboard_paired_and_a_gamepad_paired_instance_are_deaf_to_each_other() {
+        use crate::device::DeviceHandle;
+        use crate::player::Paired;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+            context.bind::<Jump>(GamepadButton::South);
+        });
+        let kb_player = app
+            .world_mut()
+            .spawn((OnFoot, Paired::to(DeviceHandle::KeyboardMouse)))
+            .id();
+        let pad_player = app
+            .world_mut()
+            .spawn((
+                OnFoot,
+                Paired::to(DeviceHandle::Gamepad(bevy_ecs::entity::Entity::from_bits(
+                    1,
+                ))),
+            ))
+            .id();
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        run_fixed_tick(&mut app);
+        assert_eq!(
+            app.world()
+                .get::<InputContextState<OnFoot>>(kb_player)
+                .unwrap()
+                .phase::<Jump>(),
+            Phase::Fired,
+            "the keyboard-paired instance saw its own device"
+        );
+        assert_eq!(
+            app.world()
+                .get::<InputContextState<OnFoot>>(pad_player)
+                .unwrap()
+                .phase::<Jump>(),
+            Phase::Idle,
+            "the gamepad-paired instance never sees the keyboard"
+        );
+
+        app.world_mut()
+            .write_message(RawGamepadEvent::Button(RawGamepadButtonChangedEvent::new(
+                bevy_ecs::entity::Entity::from_bits(1),
+                GamepadButton::South,
+                1.0,
+            )));
+        app.update();
+        run_fixed_tick(&mut app);
+        assert_eq!(
+            app.world()
+                .get::<InputContextState<OnFoot>>(pad_player)
+                .unwrap()
+                .phase::<Jump>(),
+            Phase::Fired,
+            "the gamepad-paired instance saw its own device"
+        );
+    }
+
+    /// R15.3's identity case: two pads of the same model, where kind alone cannot tell them apart
+    /// and only the device handle does. This is the test that fails without routing — every context
+    /// reads the whole frame today, so an unpaired build sees both presses as its own.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn two_identically_bound_gamepads_do_not_drive_each_others_instance() {
+        use crate::device::DeviceHandle;
+        use crate::player::Paired;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context.bind::<Jump>(GamepadButton::South);
+        });
+        let pad_a = bevy_ecs::entity::Entity::from_bits(1);
+        let pad_b = bevy_ecs::entity::Entity::from_bits(2);
+        let player_a = app
+            .world_mut()
+            .spawn((OnFoot, Paired::to(DeviceHandle::Gamepad(pad_a))))
+            .id();
+        let player_b = app
+            .world_mut()
+            .spawn((OnFoot, Paired::to(DeviceHandle::Gamepad(pad_b))))
+            .id();
+
+        app.world_mut()
+            .write_message(RawGamepadEvent::Button(RawGamepadButtonChangedEvent::new(
+                pad_a,
+                GamepadButton::South,
+                1.0,
+            )));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        assert_eq!(
+            app.world()
+                .get::<InputContextState<OnFoot>>(player_a)
+                .unwrap()
+                .phase::<Jump>(),
+            Phase::Fired,
+            "the pad that pressed drives its own paired instance"
+        );
+        assert_eq!(
+            app.world()
+                .get::<InputContextState<OnFoot>>(player_b)
+                .unwrap()
+                .phase::<Jump>(),
+            Phase::Idle,
+            "a sibling pad's press must not reach an instance paired to a different pad"
+        );
+    }
+
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_directional_action_takes_its_strongest_binding() {

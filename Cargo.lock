@@ -481,6 +481,7 @@ dependencies = [
  "bevy_utils",
  "log",
  "serde",
+ "smallvec",
  "toml 0.8.23",
  "trybuild",
 ]

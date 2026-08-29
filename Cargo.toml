@@ -48,6 +48,9 @@ log = { version = "0.4", default-features = false }
 # For `once!`, which is the `no_std` half of `bevy_log::warn_once!`. Already in the graph beneath
 # `bevy_ecs`, so it costs a line here and nothing to build.
 bevy_utils = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
+# For `DeviceHandleSet` (§15): a handful of devices per occupant, heap-spilling rather than
+# hard-capping. Already in the graph beneath `bevy_ecs`.
+smallvec = { version = "1", default-features = false }
 
 [dev-dependencies]
 bevy = { git = "https://github.com/bevyengine/bevy.git", features = [

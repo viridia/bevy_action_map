@@ -243,4 +243,60 @@ of one context diverge, nothing can yet ask "what does *this* one currently show
 doc comment on `BindingTable` already names the shape of this gap ("a per-player record"); it is
 recorded in Roadmap.md's deferred table rather than answered here, since nothing in tree needs it yet.
 
+### Chunk 26: Device routing (core)
+
+§15 made real, cut down to what single-player owes nothing for and local co-op only has to make
+*possible* — the roadmap's own framing for why this landed narrower than its original scope (once
+"device routing and the join flow" together, before the join gesture split off as chunk 66 and
+per-entity overrides split off as chunk 67, both alongside this session's own work).
+
+`DeviceHandle` (`device.rs`) is a runtime-only handle — the keyboard and mouse as one
+`KeyboardMouse` value, a gamepad as the backend's own `Entity` for it — explicitly not persistent,
+so nothing reaches for it across a reconnect. `DeviceHandleSet` backs it with a `smallvec` inline
+array rather than a hard cap, and is a plain value type with no component derive, deliberately: that
+is what lets `Paired` (`player.rs`), the component that actually attaches one to a context entity,
+expose it through `Deref` for `.contains()`/`.owner_for()`, and what will let a future presentation
+filter take a set by value without threading `Option<&Paired>` through a query tuple.
+
+**The device dimension does not touch `Control` or the plan.** `RawEvent::device()` (`frame.rs`)
+answers "which device produced this," mirroring `control()`'s existing cfg pattern; the one new
+filter is in `InputContextState::apply_frame`, which now takes `pairing: Option<&Paired>` and drops
+any event whose device the pairing does not claim before anything else — not in `evaluate_context`,
+which needed only a widened query to pass that component through, and not in `ConsumedControls` or
+`ExclusionCeiling`, both untouched (see below). An unpaired instance's filter is `pairing.is_none_or`
+against `None`, which is unconditionally true, so a game that never mentions `Paired` reads every
+device exactly as it always has — bit-for-bit, not just in intent, since the filter predicate itself
+degenerates to a no-op rather than being skipped by a branch.
+
+**One `cfg` wrinkle, resolved by checking rather than assuming.** The design sketch gated
+`DeviceHandle::KeyboardMouse` on `any(keyboard, mouse)`, mirroring `Control`'s own gating. But
+`RawEvent::MouseMotion` — the variant `device()` must answer for — is deliberately *not*
+feature-gated (`frame.rs`'s own comment: "keeps this enum inhabited when every source feature is
+off"), and an existing test (`records_mouse_motion_events`) constructs one with no `cfg` at all,
+confirming it really is reachable with every device feature off. `KeyboardMouse` needed the same
+"always inhabited" treatment, not the gate `Control` uses — the two enums answer different
+questions and don't have to share a shape.
+
+**This alone satisfies R15.3's literal text** ("a device's input must not reach a player who does
+not own it... enforced at L1/L2") and fixes, for any instance that does pair, the
+`held_gamepad_buttons`/`held_gamepad_axes` flat-map bug the roadmap had already named: a disconnect
+clears only the paired device's readings, because the event never reaches an instance paired
+elsewhere. Nothing in tree pairs yet — Disasteroids is single-player and unpaired, so the
+known-wrong-today row in Roadmap.md still describes what a reader will actually see until chunk 27.
+
+**Deferred rather than built, on the same reasoning the plan gave rather than reasoned fresh here:**
+owner-scoping `ConsumedControls`/`ExclusionCeiling` (R15.3's cross-context remainder) and per-entity
+presentation both went to Roadmap.md's deferred table with a stated gate — a real in-tree case
+neither has today, since Split Friction (chunk 27) declines rebinding UI and pairs through chunk
+66's `JoinSession` rather than a declared `InputContext`. `evaluate_context` needed no change at all
+as a result: `shadowed`/`ceiling.raise` stay computed once per context type, not per pairing.
+
+**Test plan followed the roadmap's own two-part shape exactly, and it was right to insist on both.**
+A pad-and-a-keyboard test exercises the mixed case (the two devices share no code path, so a routing
+bug there cannot hide behind symmetry); a same-model two-pads test exercises identity, where kind
+alone tells a filter nothing and only the device handle distinguishes them. Both are in `context.rs`
+alongside the crate's other full-`App` gamepad tests, driving two spawned context entities through
+real `evaluate_context` scheduling rather than calling `apply_frame` directly — `InputContextState`
+is queried back per entity the same way chunk 67's own per-entity test already reads it.
+
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
