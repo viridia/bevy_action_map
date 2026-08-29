@@ -1121,16 +1121,18 @@ becomes a focused one through `InputDispatchPlugin`, which asks the mapper nothi
 `bevy_ui_widgets::Button` activates itself on `Space` whether or not a context has claimed `Space`,
 and a screen that swallows a control still lets that control press a button.
 
-The fix is a mapper-aware plugin in that one's place, and it is **ours to write rather than Bevy's**:
-`DefaultPlugins` is a plugin group, so an app can `.disable::<InputDispatchPlugin>()` and add a
-replacement that consults `ConsumedControls` before dispatching. It belongs behind the `focus`
-feature with the rest of D4 (R22.10), which is where `src/focus.rs` is already reserved for it, and
-it is chunk 49. The dependency direction survives: the replacement depends on `bevy_input_focus`,
-which the feature already admits, and nothing in `bevy_ui_widgets` learns that we exist. Until it
-lands the workaround is an action that consumes and does nothing, which is what Disasteroids'
-`Swallowed` was — chunk 61's exclusive contexts close the collision it existed for (`Fire` and a
-focused button both wanting `Space`) from the context side rather than the dispatch side, so the gap
-R8.2a names is still real but no longer has that example standing in front of it.
+A generic fix would be a mapper-aware plugin in that one's place, and it would be **ours to write
+rather than Bevy's**: `DefaultPlugins` is a plugin group, so an app can
+`.disable::<InputDispatchPlugin>()` and add a replacement that consults `ConsumedControls` before
+dispatching, behind the `focus` feature with the rest of D4 (R22.10), where `src/focus.rs` is already
+reserved for it. That design is sketched and deferred (Roadmap.md's deferred table, "Consumption-aware
+`FocusedInput` dispatch") rather than built, since nothing in tree needs a widget generic over *any*
+focused widget kind. What Disasteroids does instead is narrower and already shipped: a `*Focused`
+context per widget kind (`ButtonFocused`, `StepperFocused` in `examples/common/`) that disables
+`InputDispatchPlugin` outright and answers each kind's activation directly, sidestepping R8.2a rather
+than filtering it. The gap R8.2a names is still real for a third-party widget using `bevy_ui_widgets`
+unmodified — chunk 61's exclusive contexts only closed the one collision Disasteroids exposed (`Fire`
+and a focused button both wanting `Space`), from the context side rather than the dispatch side.
 
 ---
 

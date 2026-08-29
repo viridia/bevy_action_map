@@ -167,8 +167,10 @@ step and a real game is a better acceptance test than a synthetic one.
 ## What has landed
 
 Forty-eight chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
-where it fell short of its own description — Phase VII onward there, and everything before it in the
-[archive](./Log-archive.md). This table is only an index, and the sequence below is what remains.
+where it fell short of its own description, for the entries the work in flight still reasons from;
+the [archive](./Log-archive.md) holds the rest, phase by phase but not bounded by phase — a phase can
+be partly closed and partly still open. This table is only an index, and the sequence below is what
+remains.
 
 | # | Chunk | State |
 | --- | --- | --- |
@@ -202,7 +204,7 @@ where it fell short of its own description — Phase VII onward there, and every
 | 21 | The settings screen, read-only | done; the caption's reverse lookup → 40, taking the controls → 30 |
 | 40 | Reverse lookup | done; invalidation and device ranking → 47, glyphs still deferred |
 | 47 | A binding as a text span | done; the presentation layer lives in `examples/common/` until the deferred table's promotion gate trips, and the prelude's other bare nouns → 48 |
-| 29 | Directional navigation | done, folded into 30; bubbling dispatch (R22.7) declined, later withdrawn — see the deferred table's R22.8 row and Log.md; an independent repeat delay → deferred table |
+| 29 | Directional navigation | done, folded into 30; bubbling dispatch (R22.7) declined, later withdrawn — see the deferred table's R22.8 row and Log-archive.md; an independent repeat delay → deferred table |
 | 30 | The settings screen, interactive | done; the widget layer's own keyboard path → 49 |
 | 44 | Bindings that travel together | done; the subordinate row it earns, and the descriptor that row needs → 50 |
 | 50 | What a held control says | done; the context-level filter the settings screen also needs → 53 |
@@ -742,9 +744,9 @@ this table had not held before. R22.7's bubbling dispatch was chunk 29's stated 
 declined on the grounds that bubbling exists so something can intercept and nothing yet wants to —
 recorded as a real gate rather than filed away, on the theory that a MUST sitting in a deferred table
 is worth noticing. The next widget that reached the gate, `ButtonFocused`
-(`examples/common/widget_focus.rs`), answered without bubbling at all — see Log.md's "Focus-driven
-dispatch, and R22.7 withdrawn" — so the row is gone rather than met, and R22.7 is withdrawn in
-Requirements.md. The other row Chunk 30 added is R22.5's separate repeat delay, which is a SHOULD and
+(`examples/common/widget_focus.rs`), answered without bubbling at all — see Log-archive.md's
+"Focus-driven dispatch, and R22.7 withdrawn" — so the row is gone rather than met, and R22.7 is
+withdrawn in Requirements.md. The other row Chunk 30 added is R22.5's separate repeat delay, which is a SHOULD and
 ordinary and stays below. Note what did *not* come here: the widget-side gap chunk 30 found looked
 like an upstream row and is not one, because `DefaultPlugins` is a group whose members can be
 swapped — so it became R8.2a's own row above rather than a gate.
