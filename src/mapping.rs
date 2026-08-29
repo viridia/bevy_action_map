@@ -29,7 +29,7 @@
 //! A **tunable** is the other half of the presentation model: a named, typed value — a range or a
 //! switch — that adjusts one binding without ever showing the modifier it drives.
 //! [`tunable_dead_zone`](crate::binding::BindingHandle::tunable_dead_zone) and
-//! [`hold_or_toggle`](crate::binding::BindingHandle::hold_or_toggle) both declare one; a screen
+//! [`hold_or_toggle`](crate::binding::InputContextBuilder::hold_or_toggle) both declare one; a screen
 //! walks them with [`tunables`] the same way it walks mappings with [`mappings`].
 //!
 //! ```ignore
@@ -341,7 +341,7 @@ pub enum TunableValue {
 /// One player-adjustable value, as a rebinding screen's tunables section reads it.
 ///
 /// [`tunable_dead_zone`](crate::binding::BindingHandle::tunable_dead_zone) and
-/// [`hold_or_toggle`](crate::binding::BindingHandle::hold_or_toggle) are what declares one.
+/// [`hold_or_toggle`](crate::binding::InputContextBuilder::hold_or_toggle) are what declares one.
 /// [`key`](Self::key) is a localization key rather than text to show, the same courtesy
 /// [`Mapping::key`] gets — render it through [`fallback_label`] for a game with no catalogue.
 #[derive(Clone, Copy, Debug, PartialEq)]

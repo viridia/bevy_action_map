@@ -300,3 +300,35 @@ real `evaluate_context` scheduling rather than calling `apply_frame` directly �
 is queried back per entity the same way chunk 67's own per-entity test already reads it.
 
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
+
+### Chunk 66: The join gesture
+
+Landed with almost none of the code its own Roadmap text proposed, once R15.4's own words —
+"observe input from unassigned devices (*with bindings applied*)" — were read literally rather than
+through the roadmap entry's own paraphrase ("reusing capture's own `arrival()` classifier"). That
+paraphrase misread its own citation: `arrival()` is a raw, un-bound classifier ("any button, from
+anywhere"), which answers nothing about "bindings applied," and reusing it would have needed a
+second per-device evaluation path running parallel to the one §3 already runs, just to get device
+identity back out of it.
+
+What R15.4 actually wants was already sitting in chunk 25's class-binding mechanism, unused for
+this. `bind_class::<Join>(ControlClass::AnyButton)` — or a narrower class — declares "join" as an
+ordinary action on an ordinary context. Left with no `Paired` of its own, that context reads every
+device exactly as any other unpaired context does (chunk 26's own behavior, unconditional).
+`ClassFired`'s event is the untouched `RawEvent` a class binding already dispatches, and
+`RawEvent::device()` — the same method `apply_frame`'s own pairing filter calls — answers which
+device fired it. Neither half needed new code.
+
+The one real gap: nothing filters a class binding's dispatch against the world's `Paired` set,
+because `Paired` did not exist when class bindings landed. `join::is_claimed` (`join.rs`) is the
+whole of the new code — an iterator over `&Paired` checked against one `DeviceHandle` — meant to be
+called from the app's own `ClassFired` observer rather than threaded into `apply_frame` itself: an
+unpaired join context already reads every device on purpose, and pushing "already claimed" into the
+sampling filter would only move one `.any()` call the app writes anyway into the crate, in exchange
+for needing a way to say "read everyone except the claimed ones" that nothing else here needs.
+
+**Lesson for the record:** a roadmap entry's own paraphrase of a requirement is not the requirement.
+`arrival()` reuse read as settled and cited an R-number, and was still the wrong mechanism — caught
+only by rereading R15.4's actual clause against what `arrival()` actually does, and by checking
+whether an existing mechanism (class bindings) already answered the question before writing a new
+one.

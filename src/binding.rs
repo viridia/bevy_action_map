@@ -281,7 +281,7 @@ pub(crate) struct MappingDecl {
 /// What a player may tune on one binding.
 ///
 /// [`tunable_dead_zone`](BindingHandle::tunable_dead_zone) and
-/// [`hold_or_toggle`](BindingHandle::hold_or_toggle) both declare one of these: a named, typed
+/// [`hold_or_toggle`](InputContextBuilder::hold_or_toggle) both declare one of these: a named, typed
 /// value that overwrites one field of one modifier already on the binding, applied the same way a
 /// rebind is — by rewriting `modifiers[modifier_index]` and recompiling (R19.11).
 #[derive(Clone, Copy, Debug)]
@@ -1285,7 +1285,7 @@ pub enum BindingModifier {
     /// held control. `active: true` flips the latch on each press edge and reports the latch state
     /// instead of the raw one, so a condition reading the result sees "on" continuously between two
     /// presses rather than only while the control is physically down. What
-    /// [`hold_or_toggle`](BindingHandle::hold_or_toggle) declares; `active` is the field a tunable
+    /// [`hold_or_toggle`](InputContextBuilder::hold_or_toggle) declares; `active` is the field a tunable
     /// adjusts.
     Toggle {
         /// Whether the latch is live. Off is a held control; on is a toggle.

@@ -1140,11 +1140,12 @@ and a focused button both wanting `Space`), from the context side rather than th
 
 Enough to show the architecture accommodates them; each deserves its own document.
 
-- **Devices and pairing** (Requirements §11, §15)**.** A `DeviceId` registry with persistent identity (vendor/product/
-  serial or SDL GUID) distinct from the runtime handle. Device→player is a many-to-many table
-  consulted by the router between L1 and L2, so an unowned device's input never reaches a player's
-  evaluator. Join-by-button-press works by evaluating a designated context against *unassigned*
-  devices.
+- **Persistent device identity** (Requirements §11.5, §15.6)**.** A `DeviceId` registry
+  (vendor/product/serial or SDL GUID) distinct from the runtime handle, so a reconnect can restore a
+  prior assignment instead of treating a returning pad as a stranger. Not yet built; `DeviceHandle`
+  (§10.9) is the runtime-only half that exists today.
+- **Device pairing and the join gesture** (Requirements §15)**.** Designed in §10.9 rather than
+  sketched.
 - **Presentation** (Requirements §18)**.** Glyph resolution returns an identifier, or an opaque
   handle when an authority backend supplies it. Everything else here is built: the naming half in
   §10.3 and the reverse lookup in §10.6.
@@ -1635,6 +1636,47 @@ treatment glyphs get. `fallback_label` is brand-agnostic today by omission — `
 `"A"` — not by decision. Whether it gains brand → generic → text tiering to match R18.4, or stays
 positional and leaves brand-specific text to an app's own localization catalogue (§18.R18.3 already
 puts display strings there), is the open call this note exists to record rather than resolve.
+
+### 10.9 Device pairing and the join gesture
+
+**Pairing is a runtime-only handle, not R11.5's persistent identity.** `DeviceHandle` (`device`)
+models the keyboard and mouse as one value, `KeyboardMouse`, and a gamepad as the backend's own
+`Entity` for it — nothing a save file should ever compare across a restart, since a backend
+reassigns gamepad entities on every reconnect. `DeviceHandleSet` is a plain value type holding a
+handful of `DeviceHandle`s, not a component; `Paired` (`player`) is the component that attaches one
+to a context entity.
+
+**Filtering happens once, at the earliest point a raw event reaches a context.**
+`InputContextState::apply_frame` takes an optional `&Paired` and drops any event whose device the
+pairing does not claim before anything else sees it — not a second filter layered onto
+`ConsumedControls` or `ExclusionCeiling`, both of which stay computed once per context *type* and
+untouched by pairing. A context with no `Paired` reads every device unconditionally (`pairing
+.is_none_or(...)` against `None`, not a branch skipped), so nothing that predates this component
+changes behavior.
+
+**§15's cross-context remainder — owner-scoping `ConsumedControls`/`ExclusionCeiling` themselves —
+stays open.** Nothing in tree needs it yet: no game pairs two different-priority contexts to
+different devices where one's consumption would wrongly reach the other.
+
+**The join gesture (R15.4) needed no new evaluation path.** The sketch this replaces proposed
+evaluating a designated context against every unassigned device, which would have meant a second
+per-device evaluation cycle running parallel to the one §3 already runs. What ships instead reuses
+§4.1's class binding mechanism as-is: a game declares "press anything to join" as an ordinary
+action, bound with `bind_class` to `ControlClass::AnyButton` (or a narrower class) on a context with
+no `Paired` of its own, so it reads every device exactly as any other unpaired context does.
+`ClassFired`'s event is the untouched `RawEvent` a class binding already dispatches, and
+`RawEvent::device()` — the same method `apply_frame`'s own filter calls — says which device fired
+it. The one piece of new code is `join::is_claimed`: a device some `Paired` already names never
+counts, which is what stops two waiting slots on one screen racing for the same device. Everything
+else — how many slots, which slot an accepted device fills, "any button" versus one control per
+scheme — is ordinary binding declaration and ordinary application logic, not a mechanism this crate
+owns.
+
+**Per-entity overrides (R17) piggyback on the `adopt` a world-wide rebind already uses.**
+`apply_overrides_for` calls it on one named entity instead of every instance a query finds, so two
+occupants sharing a context type persist and apply an `Overrides` independently. The declared
+`InputContextPlan` and the world-wide `AppliedPlan` both stay untouched, so a third instance spawned
+later still inherits the unmodified default.
 
 ---
 

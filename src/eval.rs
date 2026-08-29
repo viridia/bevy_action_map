@@ -178,7 +178,7 @@ pub(crate) struct ClassFire {
     pub(crate) event: RawEvent,
 }
 
-/// [`ClassFire`]'s counterpart to [`dispatch_transitions`], and separate for the same reason.
+/// `ClassFire`'s counterpart to [`dispatch_transitions`], and separate for the same reason.
 pub fn dispatch_class_fires<C: InputContext + Component>(
     mut commands: Commands<'_, '_>,
     mut states: Query<'_, '_, (Entity, &mut InputContextState<C>)>,

@@ -123,6 +123,24 @@
 //! An action needed at both rates must be declared in two contexts, one per domain — a context's
 //! tick domain is fixed at declaration time, not chosen per read.
 //!
+//! ## Local co-op
+//!
+//! Two players on one machine means two devices, and neither should see the other's input. A
+//! [`Paired`](player::Paired) component, sibling to the context, narrows a context instance to the
+//! devices it names; a context with no `Paired` reads every device, which is why nothing above
+//! needed this to stay single-player. [`apply_overrides_for`](overrides::apply_overrides_for)
+//! reaches one paired instance's own bindings rather than every one, so two players on identical
+//! pads can rebind independently without either becoming the new default a third inherits.
+//!
+//! Getting a device into a `Paired` in the first place is a [join] gesture: declare "press anything
+//! to join" as an ordinary action bound with
+//! [`bind_class`](binding::InputContextBuilder::bind_class) to
+//! [`ControlClass::AnyButton`](capture::ControlClass::AnyButton) (or to whichever class fits), and
+//! read which device fired it straight off [`ClassFired`](event::ClassFired)'s untouched raw event.
+//! [`join::is_claimed`] answers the one question a settings screen still needs — whether some other
+//! `Paired` already has that device — so a screen offering an open slot never hands it to a player
+//! someone else already claimed.
+//!
 //! ## Presentation
 //!
 //! The binding API above is a developer's model. Dead zones and response curves are
@@ -185,6 +203,7 @@ pub mod player;
 // L3
 pub mod capture;
 pub mod inspect;
+pub mod join;
 pub mod mapping;
 pub mod overrides;
 pub mod present;
@@ -319,6 +338,7 @@ pub mod prelude {
     pub use crate::context::{ActionMapAppExt, Actions, ActionsQuery, InputContextState, Obstacle};
     pub use crate::event::{Canceled, ClassBinding, ClassFired, Completed, Fired, Started};
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
+    pub use crate::join::is_claimed;
     pub use crate::mapping::{
         Capacity, Follower, Mapping, MappingKey, Rebinding, Scheme, mappings,
     };
