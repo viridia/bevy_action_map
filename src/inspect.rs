@@ -97,6 +97,10 @@ pub(crate) struct DeclaredContext {
     // The declared rows, never the current ones — `mappings` above answers that. What a reset
     // previews, and what an override is a diff against.
     pub(crate) declared_mappings: fn(&World) -> Vec<crate::mapping::Mapping>,
+    // Tunables, and their declared defaults — the same split as the two `mappings` fields above,
+    // for the same reason.
+    pub(crate) tunables: fn(&World) -> Vec<crate::mapping::Tunable>,
+    pub(crate) declared_tunables: fn(&World) -> Vec<crate::mapping::Tunable>,
     // Rewrites this context's bindings for an override set and swaps the result into every
     // instance. Exclusive because it writes both a resource and the components. The `Option`
     // carries a preset's rows, exempted from the rebindable-only refusal that would otherwise

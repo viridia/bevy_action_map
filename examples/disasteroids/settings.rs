@@ -25,7 +25,9 @@ use bevy::prelude::*;
 use bevy::ui::UiSystems;
 use bevy::ui::auto_directional_navigation::{AutoDirectionalNavigation, AutoDirectionalNavigator};
 use bevy::ui_widgets::{Activate, Button};
-use bevy_action_map::mapping::{declared_mappings, fallback_label};
+use bevy_action_map::mapping::{
+    Tunable, TunableValue, declared_mappings, fallback_label, tunables,
+};
 use bevy_action_map::overrides::{Override, Overrides, apply_overrides_with_preset};
 use bevy_action_map::prelude::*;
 use bevy_action_map::preset::Preset;
@@ -66,9 +68,12 @@ const FOLLOWER_INDENT: f32 = 20.0;
 
 /// Player-adjustable values with nowhere yet to land — the stepper's second sample point,
 /// alongside [`Button`]. `dead_zone` does not reach `Turn`'s own binding, which still reads the
-/// fixed `DeadZone::radial(0.15)` `actions.rs` declares at app-build time: making it live is
-/// chunk 22's own "preference stage" work, not something a resource can do on its own. This proves
-/// the stepper on a second kind of value; it is not a working setting yet.
+/// fixed `DeadZone::radial(0.15)` `actions.rs` declares at app-build time. Chunk 64 built the
+/// mechanism this would need — `tunable_dead_zone`, applied the same way a rebind is — but wiring
+/// `Turn` to it is left for chunk 22's own "preference stage": that is where the floor on how low a
+/// player may push a stick's deadzone comes from, derived from per-device calibration this crate
+/// does not have yet, and a tunable declared without that floor would let a player turn it off
+/// entirely. This proves the stepper on a second kind of value; it is not a working setting yet.
 ///
 /// Named `Prefs` rather than `Settings`, which this file already uses for the screen's own
 /// visibility state.
@@ -355,6 +360,10 @@ fn screen(world: &World) -> impl Scene {
     let pending = world.resource::<PendingOverrides>().rows.clone();
     let selected = selected_preset(&presets, &declared, &all, &pending);
     let dead_zone = world.resource::<Prefs>().dead_zone;
+    let hold_or_toggle = tunables(world)
+        .into_iter()
+        .find(|tunable| tunable.key == HOLD_OR_TOGGLE_KEY)
+        .is_some_and(|tunable| effective_tunable(&tunable, &pending) == TunableValue::Bool(true));
 
     bsn! {
         // Closing the screen is nothing but despawning it, which the state can do on its own — and
@@ -393,6 +402,7 @@ fn screen(world: &World) -> impl Scene {
                             ({table("Gamepad", rows(Scheme::Gamepad))}),
                             ({preset_row(&presets, selected)}),
                             ({dead_zone_row(dead_zone)}),
+                            ({hold_or_toggle_row(hold_or_toggle)}),
                         ]
                     ),
                 ]
@@ -622,6 +632,82 @@ fn redraw_dead_zone(prefs: Res<Prefs>, mut value: Query<&mut Text, With<DeadZone
     }
 }
 
+/// The key `actions.rs` declared `Thrust`'s toggle tunable under. Named once so the row builder,
+/// the press handler and the redraw below all agree with the declaration without repeating the
+/// string in four places.
+const HOLD_OR_TOGGLE_KEY: &str = "disasteroids.thrust.hold_or_toggle";
+
+/// What a tunable reads as with the working copy laid over it — the tunable half of what
+/// [`effective`] already does for a mapping row's controls.
+fn effective_tunable(tunable: &Tunable, pending: &Overrides) -> TunableValue {
+    pending
+        .get_tunable(tunable.scheme, tunable.key)
+        .unwrap_or(tunable.value)
+}
+
+/// A label and a checkbox-shaped button, the same "row names what it is, then draws the control"
+/// shape [`dead_zone_row`] uses — reading `PendingOverrides` rather than a resource of its own,
+/// since unlike the deadzone stepper this one really does apply on Confirm.
+fn hold_or_toggle_row(active: bool) -> impl Scene {
+    bsn! {
+        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(4.0) }
+        Children [
+            (Text::new("Thrust") TextFont { font_size: 14.0_f32 } TextColor(HEADING)),
+            (
+                Button
+                on(hold_or_toggle_pressed)
+                focusable()
+                BorderColor::all(CHANGEABLE)
+                Node {
+                    width: Val::Px(130.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: {UiRect::all(Val::Px(1.0))},
+                    border_radius: {BorderRadius::all(Val::Px(4.0))},
+                    padding: {UiRect::axes(Val::Px(8.0), Val::Px(4.0))},
+                }
+                Children [
+                    (
+                        HoldOrToggleValue
+                        Text::new(hold_or_toggle_label(active))
+                        TextFont { font_size: 15.0_f32 }
+                        TextColor(TITLE)
+                    ),
+                ]
+            ),
+        ]
+    }
+}
+
+fn hold_or_toggle_label(active: bool) -> &'static str {
+    if active { "Toggle" } else { "Hold" }
+}
+
+/// Names the checkbox's own label `Text`, mirroring [`DeadZoneValue`].
+#[derive(Component, Default, Clone, Copy)]
+struct HoldOrToggleValue;
+
+/// Flips the tunable in the working copy — never the running game, same discipline every other
+/// row on this screen keeps. Reads `tunables` fresh rather than trusting a captured value, so two
+/// presses in the same visit agree with each other.
+fn hold_or_toggle_pressed(_: On<Activate>, mut commands: Commands) {
+    commands.queue(|world: &mut World| {
+        let Some(tunable) = tunables(world)
+            .into_iter()
+            .find(|tunable| tunable.key == HOLD_OR_TOGGLE_KEY)
+        else {
+            return;
+        };
+        let mut pending = world.resource_mut::<PendingOverrides>();
+        let TunableValue::Bool(active) = effective_tunable(&tunable, &pending.rows) else {
+            return;
+        };
+        pending
+            .rows
+            .tune(tunable.scheme, tunable.key, TunableValue::Bool(!active));
+    });
+}
+
 /// Names the preset a button selects, so a press can find its rows again — mirrors how
 /// [`RebindCell`] names a row by key rather than carrying the row's own data.
 #[derive(Component, Clone, Copy)]
@@ -716,6 +802,17 @@ fn redraw_pending(world: &mut World) {
         } else {
             Color::NONE
         });
+    }
+
+    if let Some(tunable) = tunables(world)
+        .into_iter()
+        .find(|tunable| tunable.key == HOLD_OR_TOGGLE_KEY)
+        && let TunableValue::Bool(active) = effective_tunable(&tunable, &pending)
+    {
+        let mut checkbox = world.query_filtered::<&mut Text, With<HoldOrToggleValue>>();
+        if let Ok(mut text) = checkbox.single_mut(world) {
+            *text = Text::new(hold_or_toggle_label(active));
+        }
     }
 }
 

@@ -62,6 +62,8 @@ pub(crate) struct InputContextPlan<C> {
     bindings: alloc::vec::Vec<crate::binding::BindingSpec>,
     // The presentation view of the same bindings, empty unless some were declared mappable.
     mappings: alloc::vec::Vec<crate::mapping::Mapping>,
+    // The tunables view of the same bindings, empty unless some were declared tunable.
+    tunables: alloc::vec::Vec<crate::mapping::Tunable>,
     // Whether an instance is live the moment it is spawned. False for a context whose activation
     // follows something else, so that it does not fire for one frame before the something else
     // has had a chance to say otherwise.
@@ -77,6 +79,7 @@ pub(crate) struct InputContextPlan<C> {
 pub(crate) struct AppliedPlan<C> {
     pub(crate) plan: Arc<Plan<C>>,
     pub(crate) mappings: alloc::vec::Vec<crate::mapping::Mapping>,
+    pub(crate) tunables: alloc::vec::Vec<crate::mapping::Tunable>,
 }
 
 /// Both views of one button-shaped control.
@@ -111,6 +114,10 @@ pub struct InputContextState<C> {
     pub(crate) shadowed: bool,
     // Working memory for every modifier and condition in the plan, indexed as the plan says.
     pub(crate) scratch: Vec<Scratch>,
+    // One cell per group of bindings sharing a tunable (`Plan::tunable_scratch_count`), rather than
+    // each binding's own private slot in `scratch` above — the mechanism `hold_or_toggle` needs so
+    // that pressing any control it reaches agrees with every other about the latch.
+    pub(crate) tunable_scratch: Vec<Scratch>,
     // Reused between folds: the longest satisfied chord found on each control. Kept here rather
     // than allocated per fold, since a plan that uses chords uses them every tick (R23.2).
     pub(crate) chord_claims: Vec<(crate::binding::Control, u8)>,
@@ -145,6 +152,7 @@ impl<C: InputContext> InputContextState<C> {
     pub(crate) fn new(plan: Arc<Plan<C>>, read_through: Option<Timestamp>) -> Self {
         let slots = plan.slot_count();
         let scratch_slots = plan.scratch_count();
+        let tunable_scratch_slots = plan.tunable_scratch_count();
         let actions = alloc::vec![ActionState::default(); slots];
 
         Self {
@@ -153,6 +161,7 @@ impl<C: InputContext> InputContextState<C> {
             active: true,
             shadowed: false,
             scratch: alloc::vec![Scratch::default(); scratch_slots],
+            tunable_scratch: alloc::vec![Scratch::default(); tunable_scratch_slots],
             chord_claims: Vec::new(),
             require_reset: alloc::vec![false; slots],
             transitions: Vec::new(),
@@ -414,6 +423,9 @@ impl<C: InputContext> InputContextState<C> {
         self.scratch.clear();
         self.scratch
             .resize(plan.scratch_count(), Scratch::default());
+        self.tunable_scratch.clear();
+        self.tunable_scratch
+            .resize(plan.tunable_scratch_count(), Scratch::default());
         self.chord_claims.clear();
         self.plan = plan;
 
@@ -1050,6 +1062,31 @@ fn read_declared_mappings<C: InputContext + Component>(
         .unwrap_or_default()
 }
 
+/// Reads the tunables of one context back out once its type is no longer known.
+///
+/// The tunable half of [`read_mappings`], for the same reason and the same caller.
+fn read_tunables<C: InputContext + Component>(
+    world: &World,
+) -> alloc::vec::Vec<crate::mapping::Tunable> {
+    if let Some(applied) = world.get_resource::<AppliedPlan<C>>() {
+        return applied.tunables.clone();
+    }
+    world
+        .get_resource::<InputContextPlan<C>>()
+        .map(|declared| declared.tunables.clone())
+        .unwrap_or_default()
+}
+
+/// Reads the tunables this context *declared*, whatever has since been applied over them.
+fn read_declared_tunables<C: InputContext + Component>(
+    world: &World,
+) -> alloc::vec::Vec<crate::mapping::Tunable> {
+    world
+        .get_resource::<InputContextPlan<C>>()
+        .map(|declared| declared.tunables.clone())
+        .unwrap_or_default()
+}
+
 /// Rewrites one context's bindings for an override set, and swaps the result into every instance.
 ///
 /// Registered per context by `add_context`, like the readers above, and for the same reason: this is
@@ -1067,19 +1104,28 @@ fn apply_to_context<C: InputContext + Component>(
     // Read out before anything is written, so the compile below borrows nothing from the world.
     let bindings = declared.bindings.clone();
     let rows = declared.mappings.clone();
+    let tunables = declared.tunables.clone();
     let template = declared.plan.clone();
     let reserved: alloc::vec::Vec<crate::binding::Control> = world
         .get_resource::<crate::capture::ReservedControls>()
         .map(|reserved| reserved.iter().map(|entry| entry.control).collect())
         .unwrap_or_default();
 
-    let (variant, mappings, problems) =
-        crate::overrides::rewrite(&bindings, &rows, overrides, preset, &reserved, C::PATH);
+    let (variant, mappings, tunables, problems) = crate::overrides::rewrite(
+        &bindings,
+        &rows,
+        &tunables,
+        overrides,
+        preset,
+        &reserved,
+        C::PATH,
+    );
     let plan = Arc::new(Plan::variant_of(&template, variant));
 
     world.insert_resource(AppliedPlan::<C> {
         plan: plan.clone(),
         mappings,
+        tunables,
     });
 
     let mut instances = world.query::<&mut InputContextState<C>>();
@@ -1301,6 +1347,7 @@ fn declare_context<C: InputContext + Component>(
 
     let mappings = builder.mappings(C::PATH);
     report_mapping_collisions::<C>(app, &mappings);
+    let tunables = builder.tunables(C::PATH);
 
     // Flat and global, unlike mappings: reserving withholds a control from every capture in its
     // scheme, including captures for mappings declared in other contexts.
@@ -1322,6 +1369,8 @@ fn declare_context<C: InputContext + Component>(
             mappings: read_mappings::<C>,
             bindings: read_bindings::<C>,
             declared_mappings: read_declared_mappings::<C>,
+            tunables: read_tunables::<C>,
+            declared_tunables: read_declared_tunables::<C>,
             apply: apply_to_context::<C>,
         });
 
@@ -1336,6 +1385,7 @@ fn declare_context<C: InputContext + Component>(
         plan,
         bindings,
         mappings,
+        tunables,
         starts_active,
     });
 

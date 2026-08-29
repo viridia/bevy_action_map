@@ -26,6 +26,12 @@
 //! another's bindings, one for one, contributing no row of its own and moving with them when the
 //! player changes them.
 //!
+//! A **tunable** is the other half of the presentation model: a named, typed value — a range or a
+//! switch — that adjusts one binding without ever showing the modifier it drives.
+//! [`tunable_dead_zone`](crate::binding::BindingHandle::tunable_dead_zone) and
+//! [`hold_or_toggle`](crate::binding::BindingHandle::hold_or_toggle) both declare one; a screen
+//! walks them with [`tunables`] the same way it walks mappings with [`mappings`].
+//!
 //! ```ignore
 //! app.add_context::<OnFoot>(|controls| {
 //!     controls.bind::<Move>(DirectionalButtons::wasd()).mappable();  // four mappings…
@@ -38,7 +44,8 @@
 //! });
 //! ```
 //!
-//! Then a screen walks them with [`mappings`], and needs to know nothing else about this crate.
+//! Then a screen walks the mappings with [`mappings`] and the tunables with [`tunables`], and needs
+//! to know nothing else about this crate.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -310,6 +317,84 @@ pub fn mappings(world: &World) -> Vec<Mapping> {
         .collect()
 }
 
+/// A player-adjustable value on a binding, typed so a generic screen can render it without ever
+/// seeing the modifier it drives.
+///
+/// Two shapes cover both tunables this crate declares anywhere in-tree: a deadzone amount, and
+/// hold-vs-toggle. An on/off switch not tied to a toggle and a choice among named presets would
+/// need a third and fourth shape, and stay unbuilt until something in tree actually wants one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TunableValue {
+    /// A number bounded between `min` and `max`, rendered as a slider.
+    Range {
+        /// The value now — the game's own default, or whatever a player set it to.
+        value: f32,
+        /// The lower bound a slider stops at.
+        min: f32,
+        /// The upper bound a slider stops at.
+        max: f32,
+    },
+    /// An on/off switch, rendered as a checkbox.
+    Bool(bool),
+}
+
+/// One player-adjustable value, as a rebinding screen's tunables section reads it.
+///
+/// [`tunable_dead_zone`](crate::binding::BindingHandle::tunable_dead_zone) and
+/// [`hold_or_toggle`](crate::binding::BindingHandle::hold_or_toggle) are what declares one.
+/// [`key`](Self::key) is a localization key rather than text to show, the same courtesy
+/// [`Mapping::key`] gets — render it through [`fallback_label`] for a game with no catalogue.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tunable {
+    /// What this tunable is called, as a key to look up. Chosen by the game rather than derived —
+    /// unlike a mapping's key, nothing about a modifier names itself.
+    pub key: &'static str,
+    /// The action whose binding this tunable adjusts.
+    pub action: ActionId,
+    /// That action's declared path.
+    pub action_path: &'static str,
+    /// What to file it under, if the action said.
+    pub category: Option<&'static str>,
+    /// Which set of devices the binding it adjusts belongs to.
+    pub scheme: Scheme,
+    /// The path of the context the binding lives in.
+    pub context: &'static str,
+    /// The current value — the game's own default, or what a player has set it to.
+    pub value: TunableValue,
+}
+
+/// Every tunable in the game, holding its value **now**.
+///
+/// The list a rebinding screen's tunables section is built from, the same way [`mappings`] is for
+/// its rows. Where a player has adjusted one, this is what they set it to; use
+/// [`declared_tunables`] for what the game shipped, which is what "reset to default" offers.
+pub fn tunables(world: &World) -> Vec<Tunable> {
+    let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
+        return Vec::new();
+    };
+
+    declared
+        .0
+        .iter()
+        .flat_map(|context| (context.tunables)(world))
+        .collect()
+}
+
+/// Every tunable in the game, holding the value the game itself declared.
+///
+/// [`tunables`] with anything the player changed left out — what "reset to default" would produce.
+pub fn declared_tunables(world: &World) -> Vec<Tunable> {
+    let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
+        return Vec::new();
+    };
+
+    declared
+        .0
+        .iter()
+        .flat_map(|context| (context.declared_tunables)(world))
+        .collect()
+}
+
 /// Every mapping in the game, holding the controls the game itself declared.
 ///
 /// [`mappings`] with anything the player changed left out — the same rows, in the same order, with
@@ -402,6 +487,71 @@ mod tests {
         // A part of a composite holds a button whatever the composite reports as a whole.
         assert_eq!(mappings[0].accepts, ChannelShape::Button);
         assert_eq!(mappings[0].scheme, Scheme::KeyboardMouse);
+    }
+
+    /// A tunable is enumerable the same way a mapping is, and starts at the value its own
+    /// declaration gave it.
+    #[test]
+    fn a_declared_tunable_is_enumerable_at_its_default() {
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.hold_or_toggle::<Jump>("mapping_tests.jump.hold_or_toggle");
+        });
+
+        let tunables = tunables(app.world());
+        assert_eq!(tunables.len(), 1);
+        assert_eq!(tunables[0].key, "mapping_tests.jump.hold_or_toggle");
+        assert_eq!(tunables[0].action_path, "mapping_tests.jump");
+        assert_eq!(tunables[0].scheme, Scheme::KeyboardMouse);
+        assert_eq!(tunables[0].value, TunableValue::Bool(false));
+    }
+
+    /// Two bindings sharing a `hold_or_toggle` key are one row to the player, not two — the
+    /// presentation half of the shared-latch mechanism `hold_or_toggle` is built on.
+    #[test]
+    fn two_bindings_sharing_a_tunable_key_are_one_row() {
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.bind::<Jump>(KeyCode::Enter).mappable();
+            controls.hold_or_toggle::<Jump>("mapping_tests.jump.hold_or_toggle");
+        });
+
+        let tunables = tunables(app.world());
+        assert_eq!(tunables.len(), 1, "{tunables:?}");
+    }
+
+    /// Applying a tunable override moves `tunables`' answer and leaves `declared_tunables`' alone —
+    /// the same split [`mappings`] and [`declared_mappings`] draw for a rebound control.
+    #[test]
+    fn applying_a_tunable_override_moves_the_current_value_only() {
+        use crate::overrides::{Overrides, apply_overrides};
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.hold_or_toggle::<Jump>("mapping_tests.jump.hold_or_toggle");
+        });
+
+        let mut overrides = Overrides::new();
+        overrides.tune(
+            Scheme::KeyboardMouse,
+            "mapping_tests.jump.hold_or_toggle",
+            TunableValue::Bool(true),
+        );
+        let problems = apply_overrides(app.world_mut(), &overrides);
+        assert!(problems.is_empty(), "{problems:?}");
+
+        assert_eq!(tunables(app.world())[0].value, TunableValue::Bool(true));
+        assert_eq!(
+            declared_tunables(app.world())[0].value,
+            TunableValue::Bool(false),
+            "what the game shipped, unmoved by the override"
+        );
     }
 
     /// A binding nobody said anything about is *listed and fixed*: the player can read what it does

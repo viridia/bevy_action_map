@@ -694,3 +694,102 @@ any other focus-navigation scheme — `AutoDirectionalNavigation` here, and anyt
 party writes — gets no equivalent bridge and no signal that it needs one; the natural-looking fix
 (reclaim on the widget's own activation event) is the one that leaves the gap open. No issue filed
 yet, unlike [bevy#25592][] — recorded here so the finding survives until one exists.
+
+### Chunk 64: Tunables and hold-vs-toggle
+
+R19.11 and R20.2 landed together: a named, typed value declared on a binding, enumerable the same
+way a mapping is, persisted the same way, and applied by the same variant-plan recompile a rebind
+already uses.
+
+**R20.2 turned out to be an accident worth keeping, not a gap worth closing quietly.** Both it and
+`hold_or_toggle` (R19.11's own worked example) trace to the project's first commit — a
+bulk-drafted requirements pass, not a line-by-line ask — and the author said as much when the
+session surfaced it. Kept anyway: hold-vs-toggle is a well-established accessibility
+accommodation, and the session's own finding was that it costs little beyond the mechanism the
+deadzone tunable needed regardless, because both value shapes reduce to the same operation —
+overwrite one field on one modifier a binding already has, then recompile.
+
+**Two shapes only, not R19.11's five.** `Range` (a deadzone amount) and `Bool` (hold-vs-toggle)
+cover both tunables anything in tree wants. `invert_y` and a curve preset stay unbuilt — the same
+"gated on a real consumer" reasoning the deferred table already used elsewhere, not a limitation of
+the mechanism; a third shape would be an N-way `Choice`, and nothing has asked for one yet.
+
+**Hold-vs-toggle is a modifier, not a condition.** `BindingModifier::Toggle { active: bool }` sits
+beside `DeadZone` — identity when inactive, and when active it reports a latch instead of the raw
+value. Every condition downstream (`Down`, `Press`, `Hold`) reads whatever the chain produced
+without knowing which mode is in effect, which is what lets it ride in under R20.2's own
+description — "a binding-level option, not reimplemented per action" — without touching
+`condition.rs` at all.
+
+**The scope boundary the settings screen had already written down held.** Disasteroids'
+`Prefs.dead_zone` stepper carried a comment saying its wiring into `Turn`'s actual binding was
+chunk 22's job, not something a bare resource could do. That gap is now closed for a different
+reason than a resource's limits — `tunable_dead_zone` reaches the binding just fine — but chunk
+22 still owns it: stage 3's preference clamp needs a floor derived from stage 1's per-device
+calibration, and this chunk has no calibration data to clamp against. Declaring the tunable
+without that floor would let a player turn the deadzone off entirely, so the deadzone tunable
+landed declared and enumerable but disconnected, exactly as the comment already said, and chunk
+22's own roadmap entry now names the mechanism it inherits rather than needing to build one.
+
+**Using the game found what the model of it missed, twice, before the worked example was actually
+right.** The first cut declared `hold_or_toggle` per binding — chained onto `Thrust`'s primary
+keyboard key alone — and playing it exposed the checkbox lying: labelled "Thrust", it governed
+only `KeyW`, and neither the secondary key (`ArrowUp`) nor the gamepad trigger moved with it. Two
+separate findings came out of chasing that down, and both changed the shipped design rather than
+patching the symptom.
+
+**First: hold-vs-toggle is a fact about the action, not about which control drives it, so it is
+now declared once per action.** `InputContextBuilder::hold_or_toggle::<A>(key)` replaces the
+per-binding method chunk 64 first shipped — scanning `A`'s bindings declared so far (the same
+ordering rule `follow` already has) and wiring every eligible one to one key itself, rather than
+asking the caller to repeat the same string on each binding and trust it to stay in sync.
+Eligibility turned out to need the action's own intent, not just the control's shape: a
+`GamepadButton` reads as `Bool` only when the action wants a plain press and as a continuous
+`Axis1` fraction otherwise (`BindingSource::GamepadButton` in `eval.rs`, R2.10's own duality), so
+toggling a trigger feeding an analog action would silently flatten real analog data. `Thrust` being
+`Analog1` overall does not disqualify it from `hold_or_toggle` at all — only a per-binding check
+against the source and the intent together does, which is what `always_reports_bool` is.
+
+**Second: reaching more than one binding needed a real shared latch, not just a shared key — and
+the first attempt at one was actively wrong, not just incomplete.** Sharing a `BindingModifier`'s
+own private `Scratch` slot between bindings (swapped in for the call, swapped back after) reads as
+plausible and is not: two bindings visited in the same tick each do their own edge detection
+against the one cell, so whichever runs second sees a "previous value" the first one just
+overwrote with its *own* raw state — and a binding that is not the one currently pressed keeps
+resetting that shared "previous" back to false every tick, which reads as a fresh press the moment
+the other binding's own state changes and re-flips the latch on ticks nothing the player did
+changed. A test pinning "press key A, release, press key B" caught it: the fold read a stale
+pre-flip value because bindings were resolving the group's edge one at a time rather than once for
+all of them. The fix mirrors `chord_claims`, which already solves the same shape of problem for a
+different reason — resolved once per tick, before any binding's own evaluation, from the OR of
+every sharing binding's raw actuation combined; every member then simply reads the resolved bit
+back out of a plan-level shared scratch table (`Plan::tunable_scratch_count`,
+`CompiledBinding::tunable_shared`) instead of running its own chain at all. `tunables_of` merges
+bindings sharing a key into one presentation row the same way `mappings_of` already merges a
+primary and a secondary, and `diagnose` gained the tunable-key analogues of `DuplicateMappingKey`
+and `RebindingDisagreement` — two different actions sharing a key, or two bindings of one action
+disagreeing about the tunable's shape, are both build-time errors now rather than silent.
+
+**The scope question the "reaches every scheme" framing raised got asked and reversed.** Given a
+real mechanism for sharing one latch across bindings, the natural next question was whether the
+gamepad trigger should join the keyboard's shared latch too, or get an independent one, or stay
+untouched. Shipped-game prior art settled it: hold-vs-toggle is almost always one setting per
+action, not split per device, unlike sensitivity or deadzone (R20.5's own text says "per device";
+R20.2 never does) — and the trigger already has the better answer to the fatigue a toggle exists
+to solve, since it can rest at partial travel instead of being held fully down. `Thrust` lands with
+`hold_or_toggle` reaching `KeyW` and `ArrowUp` only, sharing one latch between them; the trigger is
+untouched, both by the eligibility check (it fails `always_reports_bool` for an `Analog1` action
+regardless) and by choice.
+
+**A test-harness bug cost more time than the actual fix.** The first version of the shared-latch
+test built a fresh `InputFrame::default()` per simulated keypress, which reset the frame's read
+cursor each time and made every event after the first look already-read to `apply_frame` — the
+test saw the *first* key's raw state forever and nothing else, which looked exactly like the
+spurious-reflip bug above until traced through by hand. One frame, reused across calls with
+`.record()` accumulating events on it, is the pattern every other test in `eval.rs` already uses;
+this one just did not follow it at first.
+
+**Doctests remain the one thing this session could not verify by running them** — the pre-existing
+`dynamic_linking` gap chunk 28 owns — and the GUI could be built but not driven headlessly, so the
+controls-screen checkbox is verified by what applies it (`apply_overrides`, exercised in tests) and
+by a clean build, not by a screenshot.

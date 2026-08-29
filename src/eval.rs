@@ -480,6 +480,7 @@ impl<C: InputContext> InputContextState<C> {
             transitions,
             require_reset,
             scratch,
+            tunable_scratch,
             chord_claims,
             #[cfg(feature = "keyboard")]
             held_buttons,
@@ -542,6 +543,22 @@ impl<C: InputContext> InputContextState<C> {
         };
 
         let bindings = plan.bindings();
+
+        // Every group of bindings sharing a `hold_or_toggle` key resolves its latch once per tick,
+        // from the combined actuation of every member — computed here, before any binding's own
+        // evaluation, for the same reason `chord_claims` is: a binding cannot resolve a fact about
+        // the whole group from partway through visiting it. See `resolve_shared_toggle`'s own doc
+        // for what goes wrong resolving this per binding instead. Most plans share none, and this
+        // loop then runs zero times.
+        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+        for (scratch_index, cell) in tunable_scratch.iter_mut().enumerate() {
+            let actuated = bindings.iter().any(|binding| {
+                binding.tunable_shared == Some(scratch_index)
+                    && crate::binding::as_button_control(&binding.source).is_some_and(&is_pressed)
+            });
+            crate::binding::resolve_shared_toggle(actuated, cell);
+        }
+
         let mut index = 0;
         while index < bindings.len() {
             let slot = bindings[index].slot;
@@ -651,7 +668,19 @@ impl<C: InputContext> InputContextState<C> {
                 } else {
                     value
                 };
-                let value = apply_modifiers(value, &binding.modifiers, modifier_scratch, delta);
+                // A binding whose tunable is shared (`hold_or_toggle` reaching a primary and a
+                // secondary key, most often) does not run its own modifier chain at all — the
+                // group-wide pre-pass above has already resolved this tick's latch once, from every
+                // sharing binding's raw actuation combined, and every member simply reads that back.
+                // Running each binding's chain independently here, against its own private scratch,
+                // is exactly what let one binding's evaluation order clobber another's edge
+                // detection before the pre-pass existed.
+                let value = match binding.tunable_shared {
+                    Some(scratch_index) => ActionValue::Bool(crate::binding::toggle_latch(
+                        &tunable_scratch[scratch_index],
+                    )),
+                    None => apply_modifiers(value, &binding.modifiers, modifier_scratch, delta),
+                };
                 // Where a press comes from something that was not already a press, the threshold
                 // has to settle it here. Reading it later cannot: by then the only question a
                 // stored value can answer is whether it is off centre, and a resting stick always
@@ -1531,6 +1560,107 @@ mod tests {
             &mut Vec::new(),
         );
         assert_eq!(state.value::<Counted>(), 2.0);
+    }
+
+    /// Two bindings sharing a `hold_or_toggle` key — a primary and a secondary, the way
+    /// Disasteroids' `Thrust` is — read one latch rather than two. Pressing either one flips it;
+    /// which one pressed last time is not remembered anywhere.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn two_bindings_sharing_a_toggle_share_one_latch() {
+        use bevy_input::keyboard::{Key, KeyCode, KeyboardInput};
+
+        fn key_at(code: KeyCode, state: ButtonState) -> RawEvent {
+            RawEvent::Keyboard(KeyboardInput {
+                key_code: code,
+                logical_key: Key::Space,
+                state,
+                text: None,
+                repeat: false,
+                window: bevy_ecs::entity::Entity::PLACEHOLDER,
+            })
+        }
+
+        fn apply(
+            state: &mut InputContextState<Flying>,
+            frame: &mut InputFrame,
+            threshold: &ButtonThreshold,
+            event: RawEvent,
+        ) {
+            frame.record(event);
+            state.apply_frame(
+                frame,
+                threshold,
+                TICK,
+                &ConsumedControls::default(),
+                &mut Vec::new(),
+            );
+        }
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Jump>(KeyCode::KeyW);
+        builder.bind::<Jump>(KeyCode::ArrowUp);
+        builder.hold_or_toggle::<Jump>("eval_tests.jump.hold_or_toggle");
+        let mut state = InputContextState::<Flying>::new(
+            Arc::new({
+                let (bindings, class_bindings) = builder.finish();
+                Plan::from_bindings(bindings, class_bindings)
+            }),
+            None,
+        );
+        let threshold = ButtonThreshold::default();
+        // One frame for the whole test, its events accumulating over time — the same reason every
+        // other test here does, since `apply_frame` tracks how much of it has been read rather than
+        // each call bringing its own.
+        let mut frame = InputFrame::default();
+
+        apply(
+            &mut state,
+            &mut frame,
+            &threshold,
+            key_at(KeyCode::KeyW, ButtonState::Pressed),
+        );
+        assert!(state.value::<Jump>(), "pressing W turns the latch on");
+
+        apply(
+            &mut state,
+            &mut frame,
+            &threshold,
+            key_at(KeyCode::KeyW, ButtonState::Released),
+        );
+        assert!(
+            state.value::<Jump>(),
+            "letting go of W does not turn a toggle back off"
+        );
+
+        apply(
+            &mut state,
+            &mut frame,
+            &threshold,
+            key_at(KeyCode::ArrowUp, ButtonState::Pressed),
+        );
+        assert!(
+            !state.value::<Jump>(),
+            "the OTHER key flips the same shared latch off — two independent latches would still \
+             read true here"
+        );
+
+        apply(
+            &mut state,
+            &mut frame,
+            &threshold,
+            key_at(KeyCode::ArrowUp, ButtonState::Released),
+        );
+        apply(
+            &mut state,
+            &mut frame,
+            &threshold,
+            key_at(KeyCode::KeyW, ButtonState::Pressed),
+        );
+        assert!(
+            state.value::<Jump>(),
+            "and back on again, from whichever key is pressed next"
+        );
     }
 
     /// A hold, all the way through and then abandoned. The distinction the phases exist for is that

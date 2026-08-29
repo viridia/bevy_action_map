@@ -53,7 +53,9 @@ impl BindingDiagnostic {
             | DiagnosticKind::RebindingDisagreement { .. }
             | DiagnosticKind::ReservedAndMappable
             | DiagnosticKind::FollowsNothing { .. }
-            | DiagnosticKind::FollowsUnlisted { .. } => Severity::Error,
+            | DiagnosticKind::FollowsUnlisted { .. }
+            | DiagnosticKind::DuplicateTunableKey { .. }
+            | DiagnosticKind::TunableShapeDisagreement { .. } => Severity::Error,
             DiagnosticKind::DuplicateBinding { .. }
             | DiagnosticKind::ConsumeDisagreement { .. }
             | DiagnosticKind::DuplicateClassBinding { .. } => Severity::Warning,
@@ -131,6 +133,16 @@ pub enum DiagnosticKind {
     DuplicateClassBinding {
         /// The class they share.
         class: ControlClass,
+    },
+    /// Two different actions declare a tunable under the same name in the same scheme.
+    DuplicateTunableKey {
+        /// The name they share.
+        key: &'static str,
+    },
+    /// Two bindings sharing a tunable disagree about its shape.
+    TunableShapeDisagreement {
+        /// The name they share.
+        key: &'static str,
     },
 }
 
@@ -218,6 +230,19 @@ impl core::fmt::Display for BindingDiagnostic {
                  first one declared claims every matching control; the second can never fire",
                 self.action
             ),
+            DiagnosticKind::DuplicateTunableKey { key } => write!(
+                f,
+                "`{}` declares a tunable named `{key}`, and so does something else. A saved \
+                 change to one would land on the other; give one of them a name of its own",
+                self.action
+            ),
+            DiagnosticKind::TunableShapeDisagreement { key } => write!(
+                f,
+                "`{}` shares the tunable `{key}` with another binding, but they disagree about \
+                 its shape — a switch on one side and a range on the other, or two ranges with \
+                 different bounds. Every binding sharing a tunable must agree",
+                self.action
+            ),
         }
     }
 }
@@ -239,6 +264,30 @@ fn effective_shape(binding: &BindingSpec) -> Result<ChannelShape, DiagnosticKind
     Ok(shape)
 }
 
+/// Whether two bindings sharing a tunable key agree about what it is — a switch on both sides, or
+/// a range on both with identical bounds. The current *value* is not compared: two bindings can
+/// declare the same default honestly and still be mid-diff on file, and only the shape is what a
+/// shared runtime latch actually needs to agree on.
+fn tunable_shapes_agree(a: crate::mapping::TunableValue, b: crate::mapping::TunableValue) -> bool {
+    use crate::mapping::TunableValue::{Bool, Range};
+    match (a, b) {
+        (Bool(_), Bool(_)) => true,
+        (
+            Range {
+                min: min_a,
+                max: max_a,
+                ..
+            },
+            Range {
+                min: min_b,
+                max: max_b,
+                ..
+            },
+        ) => min_a == min_b && max_a == max_b,
+        _ => false,
+    }
+}
+
 /// Everything wrong with a set of authored bindings.
 ///
 /// Pure: it reads the bindings and nothing else, so a rebinding UI can ask about a binding the
@@ -255,6 +304,15 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
     // both. What is left — two *different* actions answering to one name — is the case where a
     // saved rebinding of one would land on the other, and is what R19.15 wants reported.
     let mut keys = alloc::collections::BTreeMap::new();
+    // A tunable's key is unique per scheme for the same reason a mapping's is: two different
+    // actions sharing one name is a saved change to one landing on the other. Two bindings of the
+    // *same* action sharing one name is deliberate — `hold_or_toggle` declares exactly that, so
+    // every eligible binding shares one runtime latch — provided they agree about the tunable's
+    // shape, which is the one thing sharing a name cannot paper over.
+    let mut tunable_keys: alloc::collections::BTreeMap<
+        (crate::mapping::Scheme, &'static str),
+        (ActionId, crate::mapping::TunableValue),
+    > = alloc::collections::BTreeMap::new();
 
     for (index, binding) in bindings.iter().enumerate() {
         let at = |kind| BindingDiagnostic {
@@ -346,6 +404,26 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
             }
         }
 
+        if let Some(decl) = &binding.tunable
+            && let Some(scheme) = crate::binding::binding_scheme(&binding.source)
+        {
+            match tunable_keys.entry((scheme, decl.key)) {
+                alloc::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert((binding.action, decl.default));
+                }
+                alloc::collections::btree_map::Entry::Occupied(entry) => {
+                    let &(claimant, shape) = entry.get();
+                    if claimant != binding.action {
+                        found.push(at(DiagnosticKind::DuplicateTunableKey { key: decl.key }));
+                    } else if !tunable_shapes_agree(shape, decl.default) {
+                        found.push(at(DiagnosticKind::TunableShapeDisagreement {
+                            key: decl.key,
+                        }));
+                    }
+                }
+            }
+        }
+
         // Against the bindings before this one only, so a duplicated pair is reported once.
         for earlier in &bindings[..index] {
             if earlier.action == binding.action && earlier.source == binding.source {
@@ -413,6 +491,14 @@ pub(crate) struct CompiledBinding {
     // Where this binding keeps its working memory: the modifiers first, then the conditions. No
     // two share a slot, even when they are the same kind.
     pub(crate) scratch_base: usize,
+    // Set when this binding's tunable is shared with at least one other binding — `hold_or_toggle`
+    // reaching a primary and a secondary key, most often — to the index of the plan's shared cell
+    // for the group. `None` is the ordinary case: the modifier still has the private slot
+    // `scratch_base` already gives it, and a binding with no sharing partner runs its own chain
+    // exactly as before. A binding with `Some` skips its own chain entirely instead of running it
+    // against a cell other bindings also write — see `resolve_shared_toggle`'s doc for why running
+    // it per binding is unsafe rather than merely redundant.
+    pub(crate) tunable_shared: Option<usize>,
 }
 
 impl CompiledBinding {
@@ -452,6 +538,9 @@ pub struct Plan<C> {
     slot_actions: Vec<ActionId>,
     slot_by_action: BTreeMap<ActionId, usize>,
     scratch_count: usize,
+    // One cell per group of bindings sharing a tunable — see `CompiledBinding::tunable_shared`.
+    // Most plans have none.
+    tunable_scratch_count: usize,
     has_chords: bool,
     // Design §4.1's second structure: consulted only when `indexed_controls` doesn't already claim
     // the control an event arrived on.
@@ -523,7 +612,42 @@ impl<C> Plan<C> {
         let mut compiled = Vec::with_capacity(bindings.len());
         let mut scratch_count = 0;
 
-        for binding in bindings {
+        // Bindings sharing a `Bool`-shaped tunable key, within one scheme, get one shared scratch
+        // cell instead of each keeping its own — see `CompiledBinding::tunable_shared`. Computed up
+        // front, against every binding at once, since a group is only a group once every member is
+        // known; a `Range` tunable never joins one, because `DeadZone`'s modifier holds no runtime
+        // state to share in the first place.
+        let mut tunable_groups: BTreeMap<(crate::mapping::Scheme, &'static str), Vec<usize>> =
+            BTreeMap::new();
+        for (index, binding) in bindings.iter().enumerate() {
+            let Some(decl) = &binding.tunable else {
+                continue;
+            };
+            if !matches!(decl.default, crate::mapping::TunableValue::Bool(_)) {
+                continue;
+            }
+            let Some(scheme) = crate::binding::binding_scheme(&binding.source) else {
+                continue;
+            };
+            tunable_groups
+                .entry((scheme, decl.key))
+                .or_default()
+                .push(index);
+        }
+        let mut tunable_shared: BTreeMap<usize, usize> = BTreeMap::new();
+        let mut tunable_scratch_count = 0;
+        for indices in tunable_groups.values() {
+            if indices.len() < 2 {
+                continue;
+            }
+            let scratch_index = tunable_scratch_count;
+            tunable_scratch_count += 1;
+            for &index in indices {
+                tunable_shared.insert(index, scratch_index);
+            }
+        }
+
+        for (index, binding) in bindings.into_iter().enumerate() {
             let slot = *slot_by_action.entry(binding.action).or_insert_with(|| {
                 slot_intents.push(binding.intent);
                 slot_dispatch.push(binding.dispatch);
@@ -548,6 +672,7 @@ impl<C> Plan<C> {
                 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
                 chord: binding.chord,
                 scratch_base,
+                tunable_shared: tunable_shared.get(&index).copied(),
             });
         }
 
@@ -577,6 +702,7 @@ impl<C> Plan<C> {
             slot_actions,
             slot_by_action,
             scratch_count,
+            tunable_scratch_count,
             class_bindings: Vec::new(),
             indexed_controls,
             has_chords,
@@ -594,6 +720,12 @@ impl<C> Plan<C> {
 
     pub(crate) fn scratch_count(&self) -> usize {
         self.scratch_count
+    }
+
+    /// How many groups of bindings share a tunable with each other — see
+    /// `CompiledBinding::tunable_shared`.
+    pub(crate) fn tunable_scratch_count(&self) -> usize {
+        self.tunable_scratch_count
     }
 
     /// Whether any binding requires a control held alongside its own.
@@ -712,6 +844,61 @@ mod tests {
         builder.bind::<Jump>(KeyCode::Space);
 
         assert_eq!(builder.diagnostics(), &[]);
+    }
+
+    /// Two different actions sharing one tunable name in one scheme is the tunable half of
+    /// `DuplicateMappingKey`: a saved change to one would land on the other.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn two_actions_cannot_share_a_tunable_key() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<Jump>(KeyCode::Space);
+        builder.hold_or_toggle::<Jump>("plan_tests.shared_toggle");
+        builder.bind::<MenuToggle>(KeyCode::Escape);
+        builder.hold_or_toggle::<MenuToggle>("plan_tests.shared_toggle");
+
+        let found = builder.diagnostics();
+        assert!(
+            found.iter().any(|d| matches!(
+                &d.kind,
+                DiagnosticKind::DuplicateTunableKey { key } if *key == "plan_tests.shared_toggle"
+            )),
+            "{found:?}"
+        );
+    }
+
+    /// Two bindings of *one* action may share a tunable key on purpose — that is what
+    /// `hold_or_toggle` reaching a primary and a secondary control declares — but only if they
+    /// agree about what the tunable is. A range on one side and a switch on the other has nothing
+    /// coherent to share.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn sharing_a_tunable_key_with_a_different_shape_is_reported() {
+        use bevy_input::keyboard::KeyCode;
+
+        use crate::binding::{AxisButtons, DeadZone};
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder
+            .bind::<Jump>(AxisButtons::ad())
+            .dead_zone(DeadZone::radial(0.1))
+            .tunable_dead_zone("plan_tests.shared", 0.0..=0.5);
+        // A second, unrelated binding for `hold_or_toggle` to find — the composite above is not
+        // eligible for it (nothing analog to lose is the wrong question for a two-key axis; there
+        // is no single press to toggle either).
+        builder.bind::<Jump>(KeyCode::Space);
+        builder.hold_or_toggle::<Jump>("plan_tests.shared");
+
+        let found = builder.diagnostics();
+        assert!(
+            found.iter().any(|d| matches!(
+                &d.kind,
+                DiagnosticKind::TunableShapeDisagreement { key } if *key == "plan_tests.shared"
+            )),
+            "{found:?}"
+        );
     }
 
     /// The reason this is a list rather than an assertion: three mistakes should cost one run to

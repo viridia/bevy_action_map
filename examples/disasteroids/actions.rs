@@ -159,6 +159,12 @@ pub fn plugin(app: &mut App) {
         // the same thing. Its capacity grows to two because it holds two, with nobody saying so.
         controls.bind::<Thrust>(KeyCode::KeyW).mappable();
         controls.bind::<Thrust>(KeyCode::ArrowUp).mappable();
+        // Declared once for the action, after every binding above: it reaches both keys and shares
+        // one latch between them, and skips the trigger on its own — `Thrust` is analog, so a
+        // `GamepadButton` here reads as a continuous fraction rather than a plain press, and
+        // toggling that would flatten it. The trigger already has the better answer to the fatigue
+        // a toggle exists for: it can rest at partial travel instead of being held down fully.
+        controls.hold_or_toggle::<Thrust>("disasteroids.thrust.hold_or_toggle");
 
         // A stick axis is already signed; two keys need a composite to become one. The deadzone is
         // what stops a worn stick from turning the ship while the player is not touching it.

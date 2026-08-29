@@ -221,6 +221,9 @@ pub(crate) struct BindingSpec {
     pub(crate) mapping: Option<MappingDecl>,
     // Set by `follows`: the mapping this binding rides instead of declaring one.
     pub(crate) follows: Option<FollowsDecl>,
+    // What a player may tune on this binding, if anything. At most one — neither worked example
+    // this shipped with needs a second, and a `Vec` is the change to make if one ever does.
+    pub(crate) tunable: Option<TunableDecl>,
     // Whether the controls this binding reads are withheld from capture across their scheme.
     pub(crate) reserved: bool,
     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
@@ -273,6 +276,24 @@ pub(crate) struct MappingDecl {
     pub(crate) capacity: crate::mapping::Capacity,
     /// Whether the player may change it, or is only being shown what it does.
     pub(crate) rebinding: crate::mapping::Rebinding,
+}
+
+/// What a player may tune on one binding.
+///
+/// [`tunable_dead_zone`](BindingHandle::tunable_dead_zone) and
+/// [`hold_or_toggle`](BindingHandle::hold_or_toggle) both declare one of these: a named, typed
+/// value that overwrites one field of one modifier already on the binding, applied the same way a
+/// rebind is — by rewriting `modifiers[modifier_index]` and recompiling (R19.11).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TunableDecl {
+    /// A localization key (R19.14), chosen by the game rather than derived — unlike a mapping's
+    /// key, nothing about a modifier names itself.
+    pub(crate) key: &'static str,
+    /// Which entry of this binding's `modifiers` the tunable's value rewrites.
+    pub(crate) modifier_index: usize,
+    /// The shape and the game's own declared value — bounds included, since a player adjusts the
+    /// value but never the range it is adjusted within.
+    pub(crate) default: crate::mapping::TunableValue,
 }
 
 /// The action whose mapping a binding rides.
@@ -466,6 +487,125 @@ pub(crate) fn mappings_of(
         });
     }
     mappings
+}
+
+/// The [`Tunable`](crate::mapping::Tunable) list for one binding list: one row per declared tunable.
+///
+/// Called the same way [`mappings_of`] is — on a context's own bindings, and again on the rewritten
+/// bindings a variant plan holds once a tunable override has been applied — so a row built one way
+/// and a row rewritten another never disagree about what value is live. The current value is read
+/// straight off the modifier it targets rather than kept separately, for the same reason: a row and
+/// the binding it describes cannot then drift apart.
+pub(crate) fn tunables_of(
+    bindings: &[BindingSpec],
+    context: &'static str,
+) -> Vec<crate::mapping::Tunable> {
+    let mut tunables: Vec<crate::mapping::Tunable> = Vec::new();
+    for binding in bindings {
+        let Some(decl) = &binding.tunable else {
+            continue;
+        };
+        let scheme = binding_scheme(&binding.source)
+            .expect("a tunable's binding must resolve to at least one control");
+        // Several bindings may declare the same key — `hold_or_toggle` reaching a primary and a
+        // secondary key is the ordinary case — and they are one row to the player, not two. Every
+        // sharer's value is kept in step by `rewrite` (below), so the first one found stands for
+        // the whole group.
+        if tunables
+            .iter()
+            .any(|tunable| tunable.key == decl.key && tunable.scheme == scheme)
+        {
+            continue;
+        }
+        tunables.push(crate::mapping::Tunable {
+            key: decl.key,
+            action: binding.action,
+            action_path: binding.path,
+            category: binding.category,
+            scheme,
+            context,
+            value: current_tunable_value(&binding.modifiers[decl.modifier_index], decl.default),
+        });
+    }
+    tunables
+}
+
+/// The scheme a binding's source belongs to, for a binding that resolves to a single control — a
+/// tunable is only ever declared on one of those, never a composite.
+pub(crate) fn binding_scheme(source: &BindingSource) -> Option<crate::mapping::Scheme> {
+    let mut scheme = None;
+    source.for_each_part(|_, control| scheme = Some(control.scheme()));
+    scheme
+}
+
+/// Whether this binding's raw value is always a plain press — `ActionValue::Bool` every tick,
+/// never a continuous fraction — which is what [`hold_or_toggle`](InputContextBuilder::hold_or_toggle)
+/// needs to be safe: toggling a value that carries real analog information would flatten it.
+///
+/// A key or a mouse button always qualifies — neither has anything but a press to report. A
+/// gamepad button is R2.10's own case: the same control reads as `Bool` when the action wants a
+/// plain press and as a continuous `Axis1` fraction otherwise (see `BindingSource::GamepadButton`
+/// in `eval.rs`), so it qualifies only when `intent` is [`Intent::Button`]. Every composite, axis
+/// or motion source reports something other than `Bool` outright and never qualifies.
+fn always_reports_bool(source: &BindingSource, intent: Intent) -> bool {
+    #[cfg(not(feature = "gamepad"))]
+    let _ = intent;
+    match source {
+        #[cfg(feature = "keyboard")]
+        BindingSource::Button(_) => true,
+        #[cfg(feature = "mouse")]
+        BindingSource::MouseButton(_) => true,
+        #[cfg(feature = "gamepad")]
+        BindingSource::GamepadButton(_) => intent == Intent::Button,
+        _ => false,
+    }
+}
+
+/// Writes a tunable's new value into the modifier it targets — the write counterpart of
+/// [`current_tunable_value`], used when an override is applied. Silently does nothing on a shape
+/// mismatch, for the same reason that function falls back to the default: unreachable through the
+/// crate's own API, and cheap insurance if that ever stops being true.
+pub(crate) fn apply_tunable_value(
+    modifier: &mut BindingModifier,
+    value: crate::mapping::TunableValue,
+) {
+    match (modifier, value) {
+        (
+            BindingModifier::DeadZone(dead_zone),
+            crate::mapping::TunableValue::Range { value, .. },
+        ) => {
+            dead_zone.lower = value;
+        }
+        (BindingModifier::Toggle { active }, crate::mapping::TunableValue::Bool(value)) => {
+            *active = value;
+        }
+        _ => {}
+    }
+}
+
+/// Reads a tunable's live value back off the modifier it targets — the bounds travel from the
+/// declared default, since a player adjusts the value but never the range it moves within.
+fn current_tunable_value(
+    modifier: &BindingModifier,
+    default: crate::mapping::TunableValue,
+) -> crate::mapping::TunableValue {
+    match (modifier, default) {
+        (
+            BindingModifier::DeadZone(dead_zone),
+            crate::mapping::TunableValue::Range { min, max, .. },
+        ) => crate::mapping::TunableValue::Range {
+            value: dead_zone.lower,
+            min,
+            max,
+        },
+        (BindingModifier::Toggle { active }, crate::mapping::TunableValue::Bool(_)) => {
+            crate::mapping::TunableValue::Bool(*active)
+        }
+        // Unreachable through the crate's own API: `declare_tunable` always pairs a modifier with
+        // the value shape that targets it. Falling back to the default rather than panicking is
+        // cheap insurance against a future tunable-declaring method getting that pairing wrong.
+        _ => default,
+    }
 }
 
 impl MappingDecl {
@@ -1139,6 +1279,18 @@ pub enum BindingModifier {
     PerSecond(f32),
     /// Rounds a 2D direction to the nearest of four or eight compass points.
     Compass(CompassPoints),
+    /// Turns a momentary button into a sustained on/off latch.
+    ///
+    /// `active: false` is identity — the raw value passes through unchanged, which is an ordinary
+    /// held control. `active: true` flips the latch on each press edge and reports the latch state
+    /// instead of the raw one, so a condition reading the result sees "on" continuously between two
+    /// presses rather than only while the control is physically down. What
+    /// [`hold_or_toggle`](BindingHandle::hold_or_toggle) declares; `active` is the field a tunable
+    /// adjusts.
+    Toggle {
+        /// Whether the latch is live. Off is a held control; on is a toggle.
+        active: bool,
+    },
     /// Calls an application-defined modifier.
     ///
     /// Shared rather than owned, so that copying a binding set copies the reference and not the
@@ -1158,6 +1310,7 @@ impl BindingModifier {
             Self::Curve(power) => apply_curve(value, *power),
             Self::PerSecond(scale) => apply_scale(value, scale * delta),
             Self::Compass(points) => apply_compass(value, *points),
+            Self::Toggle { active } => apply_toggle(value, scratch, *active),
             Self::Custom(modifier) => modifier.apply(value, scratch, delta),
         }
     }
@@ -1551,6 +1704,56 @@ impl<'a, C> BindingHandle<'a, C> {
         self
     }
 
+    /// Lets the player adjust this binding's deadzone within `range`, as a named tunable rather
+    /// than a rebinding row — the mechanism a stick's deadzone amount uses, since a stick is bound
+    /// whole and has no per-mapping rebinding to offer instead.
+    ///
+    /// ```ignore
+    /// context.bind::<Move>(Stick::Left)
+    ///     .dead_zone(DeadZone::radial(0.15))
+    ///     .tunable_dead_zone("gameplay.move.stick_deadzone", 0.0..=0.5);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If [`dead_zone`](Self::dead_zone) was not declared first on the same binding, or if this
+    /// binding already has a tunable.
+    pub fn tunable_dead_zone(
+        self,
+        key: &'static str,
+        range: core::ops::RangeInclusive<f32>,
+    ) -> Self {
+        let value = match self.builder.bindings[self.index].modifiers.last() {
+            Some(BindingModifier::DeadZone(dead_zone)) => dead_zone.lower,
+            _ => panic!(
+                "`tunable_dead_zone` needs a `dead_zone` declared first on the same binding, so \
+                 there is a deadzone for it to adjust"
+            ),
+        };
+        self.declare_tunable(
+            key,
+            crate::mapping::TunableValue::Range {
+                value,
+                min: *range.start(),
+                max: *range.end(),
+            },
+        )
+    }
+
+    fn declare_tunable(self, key: &'static str, default: crate::mapping::TunableValue) -> Self {
+        assert!(
+            self.builder.bindings[self.index].tunable.is_none(),
+            "a binding may declare at most one tunable"
+        );
+        let modifier_index = self.builder.bindings[self.index].modifiers.len() - 1;
+        self.builder.bindings[self.index].tunable = Some(TunableDecl {
+            key,
+            modifier_index,
+            default,
+        });
+        self
+    }
+
     /// Adds a scale modifier.
     pub fn scale(mut self, factor: f32) -> Self {
         self.push_modifier(BindingModifier::Scale(factor));
@@ -1673,6 +1876,7 @@ impl<C> InputContextBuilder<C> {
             consume: A::CONSUMES,
             mapping: Some(MappingDecl::listed()),
             follows: None,
+            tunable: None,
             reserved: false,
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             chord: Vec::new(),
@@ -1769,6 +1973,76 @@ impl<C> InputContextBuilder<C> {
         }
     }
 
+    /// Lets the player choose, once for `A`, between holding its controls and pressing one to
+    /// toggle it on and off.
+    ///
+    /// Declared once for the whole action rather than chained onto one binding: "does `A` support
+    /// toggling" is a fact about the action, not about which control happens to drive it, and a
+    /// game with several bindings for `A` — a primary key and a secondary, say — almost always
+    /// wants every one of them to answer the same way. This finds them all rather than asking you
+    /// to name each one and trust yourself to repeat the same key correctly on every one.
+    ///
+    /// Only a binding whose control is a genuine press, with nothing analog to lose, is eligible —
+    /// a key or a mouse button always is; a gamepad button is only when `A`'s own intent is
+    /// [`Button`](crate::action::Intent::Button), since the same control reads as a continuous
+    /// fraction for anything else (a trigger driving an analog action), and toggling that would
+    /// flatten it to on/off. A stick, an axis, mouse motion, or a composite are never eligible —
+    /// there is no single press for any of them to toggle. Every eligible binding shares one latch:
+    /// press any of them, release, press another, and the action reads one consistent state
+    /// throughout — never one control turning it on while a different one turns it back off.
+    ///
+    /// Held is the default; nothing changes until a player (or a preset) turns toggle mode on.
+    /// Downstream conditions read whatever the modifier chain produced, so `.down()` on a toggled
+    /// binding reads "is the latch on" rather than "is the control physically held" — no condition
+    /// needs to know which mode is in effect.
+    ///
+    /// ```ignore
+    /// controls.bind::<Thrust>(GamepadButton::RightTrigger2);
+    /// controls.bind::<Thrust>(KeyCode::KeyW).mappable();
+    /// controls.bind::<Thrust>(KeyCode::ArrowUp).mappable();
+    /// controls.hold_or_toggle::<Thrust>("gameplay.thrust.hold_or_toggle");
+    /// ```
+    ///
+    /// # Ordering
+    ///
+    /// Reads `A`'s bindings as declared *so far* — the same rule [`follow`](Self::follow) follows.
+    /// Call it after every binding of `A` you want it to reach, not before.
+    ///
+    /// # Panics
+    ///
+    /// If no binding of `A` declared so far is eligible — nothing yet bound, or every source so far
+    /// is analog.
+    pub fn hold_or_toggle<A: InputAction>(&mut self, key: &'static str) {
+        let mut touched = 0usize;
+        for binding in &mut self.bindings {
+            if binding.action != A::id() || !always_reports_bool(&binding.source, binding.intent) {
+                continue;
+            }
+            binding
+                .modifiers
+                .push(BindingModifier::Toggle { active: false });
+            assert!(
+                binding.tunable.is_none(),
+                "`{}` already has a tunable; a binding may declare at most one",
+                A::PATH
+            );
+            binding.tunable = Some(TunableDecl {
+                key,
+                modifier_index: binding.modifiers.len() - 1,
+                default: crate::mapping::TunableValue::Bool(false),
+            });
+            touched += 1;
+        }
+        assert!(
+            touched > 0,
+            "`hold_or_toggle::<{}>` found no eligible binding — call it after every binding of \
+             `{}` you want it to reach, and check whether any of them are analog (a trigger \
+             feeding a non-`Button` intent has nothing to toggle)",
+            A::PATH,
+            A::PATH
+        );
+    }
+
     /// Binds to every control a [`ControlClass`](crate::capture::ControlClass) names, rather than to
     /// one control.
     ///
@@ -1824,6 +2098,11 @@ impl<C> InputContextBuilder<C> {
     /// The presentation view of these bindings: one mapping per mappable part.
     pub(crate) fn mappings(&self, context: &'static str) -> Vec<crate::mapping::Mapping> {
         mappings_of(&self.bindings, context)
+    }
+
+    /// The presentation view of these bindings: one row per declared tunable.
+    pub(crate) fn tunables(&self, context: &'static str) -> Vec<crate::mapping::Tunable> {
+        tunables_of(&self.bindings, context)
     }
 
     /// The controls this context withholds from capture.
@@ -1942,6 +2221,72 @@ fn compass_direction(value: Vec2, points: CompassPoints) -> Vec2 {
         CompassPoints::Eight => bevy_math::Dir2::from(bevy_math::CompassOctant::from(direction)),
     }
     .as_vec2()
+}
+
+/// Bit position within [`Scratch::flags`](crate::action::Scratch::flags) this modifier's latch
+/// lives at. Its own `Scratch` slot — see `apply_modifiers`' per-modifier split in `eval.rs` — so
+/// nothing else on the binding can collide with it.
+const TOGGLE_LATCH: u8 = 1 << 0;
+
+/// Converts a momentary button into a sustained latch, active only while `active` says so.
+///
+/// Inactive is identity, so declaring [`hold_or_toggle`](InputContextBuilder::hold_or_toggle) and
+/// never turning it on costs nothing beyond the one modifier call — the binding behaves exactly as
+/// if it had not been declared. `scratch.prev` is tracked whether or not the latch is live, so
+/// switching modes mid-press cannot manufacture a spurious edge the tick after the switch.
+///
+/// Used only for a binding whose tunable is *not* shared with another. A shared one is resolved
+/// once per tick for the whole group instead — see `eval.rs`'s `fold`, which reads
+/// [`toggle_latch`] rather than calling this at all, and the doc on `TunableShared` for why:
+/// running this independently per binding, against a scratch cell other bindings in the group also
+/// write, spuriously re-flips the latch on every tick a *different* member of the group is held.
+fn apply_toggle(value: ActionValue, scratch: &mut Scratch, active: bool) -> ActionValue {
+    let actuated = value.to_bool();
+    let was = scratch.prev.to_bool();
+    scratch.prev = value;
+
+    if !active {
+        return value;
+    }
+    if actuated && !was {
+        scratch.flags ^= TOGGLE_LATCH;
+    }
+    ActionValue::Bool(scratch.flags & TOGGLE_LATCH != 0)
+}
+
+/// Whether a shared toggle's latch currently reads on — the bit [`apply_toggle`] uses, read back
+/// out of the plan's shared cell for a binding's group rather than its own private one.
+pub(crate) fn toggle_latch(scratch: &Scratch) -> bool {
+    scratch.flags & TOGGLE_LATCH != 0
+}
+
+/// Resolves one tick of a shared toggle's latch, from every sharing binding's raw actuation
+/// combined — never per binding, which is what [`apply_toggle`]'s own doc explains is unsafe here.
+/// `actuated` is the combined reading; `scratch` is the group's one shared cell, carrying the
+/// combined reading from last tick in `prev` the same way a private toggle carries its own.
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+pub(crate) fn resolve_shared_toggle(actuated: bool, scratch: &mut Scratch) {
+    let was = scratch.prev.to_bool();
+    if actuated && !was {
+        scratch.flags ^= TOGGLE_LATCH;
+    }
+    scratch.prev = ActionValue::Bool(actuated);
+}
+
+/// A binding's source, converted to the control [`is_pressed`](crate::eval)-style raw actuation
+/// checks read — `None` for anything [`always_reports_bool`] would already have refused, which is
+/// every source a shared toggle's pre-pass ever needs to ask about.
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+pub(crate) fn as_button_control(source: &BindingSource) -> Option<ButtonControl> {
+    match source {
+        #[cfg(feature = "keyboard")]
+        BindingSource::Button(key) => Some(ButtonControl::Key(*key)),
+        #[cfg(feature = "mouse")]
+        BindingSource::MouseButton(button) => Some(ButtonControl::MouseButton(*button)),
+        #[cfg(feature = "gamepad")]
+        BindingSource::GamepadButton(button) => Some(ButtonControl::GamepadButton(*button)),
+        _ => None,
+    }
 }
 
 fn apply_scale(value: ActionValue, factor: f32) -> ActionValue {
@@ -2103,6 +2448,71 @@ mod tests {
         }
     }
 
+    /// A toggle stays engaged across a release — that is the whole point of it — and flips off
+    /// again only on the second press, not the second release.
+    #[test]
+    fn toggle_latches_on_a_press_and_survives_a_release() {
+        let modifier = BindingModifier::Toggle { active: true };
+        let mut scratch = Scratch::default();
+
+        assert_eq!(
+            modifier.apply(ActionValue::Bool(false), &mut scratch, 0.0),
+            ActionValue::Bool(false),
+            "nothing pressed yet"
+        );
+        assert_eq!(
+            modifier.apply(ActionValue::Bool(true), &mut scratch, 0.0),
+            ActionValue::Bool(true),
+            "a press flips the latch on"
+        );
+        assert_eq!(
+            modifier.apply(ActionValue::Bool(false), &mut scratch, 0.0),
+            ActionValue::Bool(true),
+            "letting go does not turn a toggle back off"
+        );
+        assert_eq!(
+            modifier.apply(ActionValue::Bool(true), &mut scratch, 0.0),
+            ActionValue::Bool(false),
+            "the second press flips it back off"
+        );
+    }
+
+    /// `active: false` is what `hold_or_toggle` declares before a player turns toggle mode on, and
+    /// it must cost nothing: the raw value passes straight through.
+    #[test]
+    fn an_inactive_toggle_is_identity() {
+        let modifier = BindingModifier::Toggle { active: false };
+        let mut scratch = Scratch::default();
+
+        assert_eq!(
+            modifier.apply(ActionValue::Bool(true), &mut scratch, 0.0),
+            ActionValue::Bool(true)
+        );
+        assert_eq!(
+            modifier.apply(ActionValue::Bool(false), &mut scratch, 0.0),
+            ActionValue::Bool(false)
+        );
+    }
+
+    /// A player turning toggle mode on while the control is already held must not read as a fresh
+    /// press — `scratch.prev` is tracked whether or not the latch is live, precisely so this case
+    /// has nothing to trip on.
+    #[test]
+    fn switching_to_toggle_mode_mid_press_does_not_manufacture_an_edge() {
+        let mut scratch = Scratch::default();
+        BindingModifier::Toggle { active: false }.apply(ActionValue::Bool(true), &mut scratch, 0.0);
+
+        assert_eq!(
+            BindingModifier::Toggle { active: true }.apply(
+                ActionValue::Bool(true),
+                &mut scratch,
+                0.0
+            ),
+            ActionValue::Bool(false),
+            "still held rather than a new press, so the latch has not moved"
+        );
+    }
+
     #[test]
     fn custom_modifiers_fit_into_the_chain() {
         let modifier = BindingModifier::Custom(Arc::new(DoubleAxis));
@@ -2139,6 +2549,138 @@ mod tests {
             bindings[0].modifiers[2],
             BindingModifier::DeadZone(_)
         ));
+    }
+
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn hold_or_toggle_pushes_an_inactive_toggle_and_declares_a_bool_tunable() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<DummyButton>(KeyCode::Space);
+        builder.hold_or_toggle::<DummyButton>("tests.hold_or_toggle");
+
+        let (bindings, _) = builder.finish();
+        assert!(matches!(
+            bindings[0].modifiers[0],
+            BindingModifier::Toggle { active: false }
+        ));
+        let decl = bindings[0].tunable.as_ref().expect("declared a tunable");
+        assert_eq!(decl.key, "tests.hold_or_toggle");
+        assert_eq!(decl.modifier_index, 0);
+        assert_eq!(decl.default, crate::mapping::TunableValue::Bool(false));
+    }
+
+    /// Two bindings of one action share one key, unasked — the whole point of declaring it once on
+    /// the action rather than once per binding.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn hold_or_toggle_shares_one_key_across_every_eligible_binding() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<DummyButton>(KeyCode::Space);
+        builder.bind::<DummyButton>(KeyCode::Enter);
+        builder.hold_or_toggle::<DummyButton>("tests.hold_or_toggle");
+
+        let (bindings, _) = builder.finish();
+        for binding in &bindings {
+            let decl = binding.tunable.as_ref().expect("declared a tunable");
+            assert_eq!(decl.key, "tests.hold_or_toggle");
+        }
+    }
+
+    /// `Thrust` is analog, so its trigger reads as a continuous fraction rather than a plain press
+    /// — toggling that would flatten it — while the key beside it has nothing but a press to give
+    /// either way. `hold_or_toggle` reaches the key and leaves the trigger alone, without being
+    /// told which is which.
+    #[cfg(all(feature = "keyboard", feature = "gamepad"))]
+    #[test]
+    fn hold_or_toggle_skips_an_analog_gamepad_button_but_reaches_the_key() {
+        struct Thrust;
+        impl InputAction for Thrust {
+            type Output = f32;
+            const INTENT: crate::action::Intent = crate::action::Intent::Analog1;
+            const PATH: &'static str = "tests::analog_thrust";
+        }
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<Thrust>(GamepadButton::RightTrigger2);
+        builder.bind::<Thrust>(KeyCode::KeyW);
+        builder.hold_or_toggle::<Thrust>("tests.hold_or_toggle");
+
+        let (bindings, _) = builder.finish();
+        assert!(bindings[0].tunable.is_none(), "the trigger is untouched");
+        assert!(bindings[1].tunable.is_some(), "the key is toggled");
+    }
+
+    /// The one case a `GamepadButton` *is* eligible: the action itself only ever wants a plain
+    /// press, so there is no analog fraction for a toggle to discard.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn hold_or_toggle_reaches_a_gamepad_button_when_the_action_wants_a_plain_press() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<DummyButton>(GamepadButton::South);
+        builder.hold_or_toggle::<DummyButton>("tests.hold_or_toggle");
+
+        let (bindings, _) = builder.finish();
+        assert!(bindings[0].tunable.is_some());
+    }
+
+    /// An action bound only through analog sources has nothing `hold_or_toggle` can toggle, and
+    /// says so rather than silently doing nothing.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    #[should_panic(expected = "found no eligible binding")]
+    fn hold_or_toggle_panics_when_nothing_is_eligible() {
+        struct Thrust;
+        impl InputAction for Thrust {
+            type Output = f32;
+            const INTENT: crate::action::Intent = crate::action::Intent::Analog1;
+            const PATH: &'static str = "tests::analog_thrust_only";
+        }
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<Thrust>(GamepadButton::RightTrigger2);
+        builder.hold_or_toggle::<Thrust>("tests.hold_or_toggle");
+    }
+
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn tunable_dead_zone_reads_its_range_from_the_declared_deadzone() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder
+            .bind::<DummyVec2>(bevy_input::keyboard::KeyCode::Space)
+            .dead_zone(DeadZone::radial(0.2))
+            .tunable_dead_zone("tests.stick_deadzone", 0.0..=0.5);
+
+        let (bindings, _) = builder.finish();
+        let decl = bindings[0].tunable.as_ref().expect("declared a tunable");
+        assert_eq!(decl.key, "tests.stick_deadzone");
+        assert_eq!(
+            decl.default,
+            crate::mapping::TunableValue::Range {
+                value: 0.2,
+                min: 0.0,
+                max: 0.5,
+            }
+        );
+    }
+
+    #[cfg(feature = "keyboard")]
+    #[test]
+    #[should_panic(expected = "needs a `dead_zone` declared first")]
+    fn tunable_dead_zone_without_a_deadzone_is_refused() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder
+            .bind::<DummyButton>(KeyCode::Space)
+            .tunable_dead_zone("tests.stick_deadzone", 0.0..=0.5);
+    }
+
+    #[cfg(feature = "keyboard")]
+    #[test]
+    #[should_panic(expected = "already has a tunable")]
+    fn a_binding_may_declare_at_most_one_tunable() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<DummyButton>(KeyCode::Space);
+        builder.hold_or_toggle::<DummyButton>("tests.first");
+        builder.hold_or_toggle::<DummyButton>("tests.second");
     }
 
     /// Two cases: a trigger that is button-shaped despite carrying a fraction, and a directional
