@@ -42,6 +42,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::action::ChannelShape;
@@ -724,6 +725,81 @@ pub fn apply_overrides_with_preset(
     apply_with(world, overrides, Some(preset))
 }
 
+/// Like [`apply_overrides`], but reaches only one entity's own instance rather than every one.
+///
+/// For a game with more than one occupant sharing a context type — two split-screen players on
+/// identical pads, say — where each keeps its own independently-persisted [`Overrides`] and wants
+/// it to reach only its own entity. The declared baseline and the world-wide default new instances
+/// inherit at spawn are both left untouched, so a freshly spawned third instance still gets the
+/// unmodified default, and the diff this computes is against the same pristine declaration
+/// [`apply_overrides`] diffs against.
+///
+/// A context type this entity does not carry is silently skipped, the same way a row naming a
+/// mapping nothing declares comes back as [`OverrideProblemKind::NoSuchMapping`] rather than
+/// panicking.
+pub fn apply_overrides_for(
+    world: &mut World,
+    entity: Entity,
+    overrides: &Overrides,
+) -> Vec<OverrideProblem> {
+    apply_for_entity_with(world, entity, overrides, None)
+}
+
+/// Like [`apply_overrides_for`], but a preset's rows are exempt from the "not rebindable here"
+/// refusal, on the same terms as [`apply_overrides_with_preset`].
+pub fn apply_overrides_for_with_preset(
+    world: &mut World,
+    entity: Entity,
+    overrides: &Overrides,
+    preset: &Overrides,
+) -> Vec<OverrideProblem> {
+    apply_for_entity_with(world, entity, overrides, Some(preset))
+}
+
+fn apply_for_entity_with(
+    world: &mut World,
+    entity: Entity,
+    overrides: &Overrides,
+    preset: Option<&Overrides>,
+) -> Vec<OverrideProblem> {
+    let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
+        return Vec::new();
+    };
+    // Collected first because each one takes the world exclusively in turn.
+    let appliers: Vec<_> = declared
+        .0
+        .iter()
+        .map(|context| context.apply_for_entity)
+        .collect();
+
+    let mut problems = Vec::new();
+    for apply in appliers {
+        problems.extend(apply(world, entity, overrides, preset));
+    }
+
+    // Same diagnostic `apply_with` reports, for the same reason: from inside any one context every
+    // other context's rows look exactly as missing as a row that is genuinely gone.
+    let declared = crate::mapping::declared_mappings(world);
+    problems.extend(
+        overrides
+            .iter()
+            .filter(|&(scheme, key, _)| {
+                !declared
+                    .iter()
+                    .any(|row| row.key == key && row.scheme == scheme)
+            })
+            .map(|(scheme, mapping, _)| OverrideProblem {
+                scheme,
+                mapping,
+                kind: OverrideProblemKind::NoSuchMapping,
+            }),
+    );
+
+    // The one entity's own prompts may now name a different control.
+    crate::present::PromptGeneration::bump(world);
+    problems
+}
+
 fn apply_with(
     world: &mut World,
     overrides: &Overrides,
@@ -1350,6 +1426,73 @@ mod tests {
         assert_eq!(
             prompts[0].origin.control(),
             Some(Control::Key(KeyCode::KeyK))
+        );
+    }
+
+    /// A per-entity apply reaches only the one entity it names — not every other instance of the
+    /// same context type, and not the world's own declared/current view, which a freshly spawned
+    /// third instance still reads.
+    #[test]
+    fn apply_overrides_for_reaches_only_its_own_entity() {
+        use bevy_input::{ButtonState, keyboard::Key, keyboard::KeyboardInput};
+
+        let mut app = app();
+        let player_a = app.world_mut().spawn(Playing).id();
+        let player_b = app.world_mut().spawn(Playing).id();
+
+        let overrides = bind(&app, "override_tests.jump", &[Control::Key(KeyCode::KeyK)]);
+        let problems = apply_overrides_for(app.world_mut(), player_a, &overrides);
+        assert!(problems.is_empty(), "{problems:?}");
+
+        // Spawned after the apply, so it proves the world-wide default was never touched.
+        let player_c = app.world_mut().spawn(Playing).id();
+
+        // `adopt` re-arms require-reset on every slot (R7.5: a player holding the key they just
+        // rebound must not get a fresh press out of the swap), so the rebound slot needs one tick
+        // observed at rest before a press can register — an ordinary idle frame, since nothing was
+        // held to begin with.
+        app.update();
+
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::KeyK,
+            logical_key: Key::Character("k".into()),
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<InputContextState<Playing>>(player_a)
+                .unwrap()
+                .phase::<Jump>(),
+            Phase::Fired,
+            "the named entity was remapped to K"
+        );
+        assert_eq!(
+            app.world()
+                .get::<InputContextState<Playing>>(player_b)
+                .unwrap()
+                .phase::<Jump>(),
+            Phase::Idle,
+            "a sibling instance never asked for K and is still listening on Space"
+        );
+        assert_eq!(
+            app.world()
+                .get::<InputContextState<Playing>>(player_c)
+                .unwrap()
+                .phase::<Jump>(),
+            Phase::Idle,
+            "spawned after the apply, and still the world's unmodified default"
+        );
+
+        // The world-wide declared/current tables read back unchanged: no other entity, and no
+        // future one, ever sees Jump listed on anything but Space.
+        assert_eq!(
+            slots(&app, "override_tests.jump"),
+            [Control::Key(KeyCode::Space)]
         );
     }
 

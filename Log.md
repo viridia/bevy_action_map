@@ -212,4 +212,35 @@ this one just did not follow it at first.
 controls-screen checkbox is verified by what applies it (`apply_overrides`, exercised in tests) and
 by a clean build, not by a screenshot.
 
+### Chunk 67: Per-entity `apply_overrides`
+
+Split off chunk 26's own inherited question (from chunk 38) rather than left for chunk 26 to answer
+speculatively: a split-screen app persisting two players' `Overrides` independently needs each one
+applied to only its own player's entity, and the existing `apply_overrides` is world-wide by
+construction.
+
+`apply_overrides_for`/`apply_overrides_for_with_preset` are a second entry point onto
+`InputContextState::adopt`, the exact machinery a rebind already uses, not a second implementation.
+`apply_to_entity::<C>` is `apply_to_context::<C>`'s body with the `AppliedPlan<C>` write dropped and
+`adopt` called on one named entity instead of every instance a query finds. Both `InputContextPlan<C>`
+(the pristine declaration every diff is taken against) and `AppliedPlan<C>` (what a freshly spawned
+instance inherits) stay untouched, so two entities diverge independently without either becoming the
+new default, and a third instance spawned afterward still reads the world's unmodified default.
+
+**The one test failure this session produced was not a bug in the new code — it was `adopt`'s own
+require-reset semantics, working exactly as documented, against a test that did not yet know about
+them.** A first draft applied the per-entity override and pressed the newly-bound key on the very
+next frame, expecting it to fire; it read `Idle` instead. `adopt` re-arms require-reset on every slot
+so that a player still holding the key they just rebound cannot get a fresh press out of the swap
+(R7.5), and the fold only clears that flag on a tick where the slot reads at rest — which the press
+itself is not. The fix was an intervening idle `app.update()` between the apply and the press, not a
+change to `adopt` or the new entry point — useful confirmation that per-entity `adopt` runs through
+the exact same activation lifecycle the world-wide path does.
+
+**Left as a stated gap rather than built:** presentation stays world-wide.
+`read_mappings`/`read_bindings`/`PromptScope` are all keyed by context *type*, so once two entities
+of one context diverge, nothing can yet ask "what does *this* one currently show." `present.rs`'s own
+doc comment on `BindingTable` already names the shape of this gap ("a per-player record"); it is
+recorded in Roadmap.md's deferred table rather than answered here, since nothing in tree needs it yet.
+
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592

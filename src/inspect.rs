@@ -110,6 +110,15 @@ pub(crate) struct DeclaredContext {
         &crate::overrides::Overrides,
         Option<&crate::overrides::Overrides>,
     ) -> Vec<crate::overrides::OverrideProblem>,
+    // Like `apply`, but reaches one named entity's own instance rather than every one — the entry
+    // point `apply_overrides_for` walks. A context type the entity does not carry is a no-op here,
+    // the same way a row nothing declares is a no-op for `apply`.
+    pub(crate) apply_for_entity: fn(
+        &mut World,
+        Entity,
+        &crate::overrides::Overrides,
+        Option<&crate::overrides::Overrides>,
+    ) -> Vec<crate::overrides::OverrideProblem>,
 }
 
 /// Every context declared so far, in declaration order.

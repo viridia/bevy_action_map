@@ -1136,6 +1136,52 @@ fn apply_to_context<C: InputContext + Component>(
     problems
 }
 
+/// Like `apply_to_context`, but reaches one named entity's own instance rather than every one.
+///
+/// Deliberately does not touch `AppliedPlan<C>` — that resource is what a freshly spawned instance
+/// inherits at spawn, and a per-entity apply must not change what the *next* new instance gets, only
+/// what this one already-spawned instance has. The diff is still computed against
+/// `InputContextPlan<C>`'s pristine declaration, the same baseline `apply_to_context` diffs against,
+/// so two entities can diverge independently without either becoming the new default.
+fn apply_to_entity<C: InputContext + Component>(
+    world: &mut World,
+    entity: Entity,
+    overrides: &crate::overrides::Overrides,
+    preset: Option<&crate::overrides::Overrides>,
+) -> alloc::vec::Vec<crate::overrides::OverrideProblem> {
+    if world.get::<InputContextState<C>>(entity).is_none() {
+        return alloc::vec::Vec::new();
+    }
+    let Some(declared) = world.get_resource::<InputContextPlan<C>>() else {
+        return alloc::vec::Vec::new();
+    };
+    let bindings = declared.bindings.clone();
+    let rows = declared.mappings.clone();
+    let tunables = declared.tunables.clone();
+    let template = declared.plan.clone();
+    let reserved: alloc::vec::Vec<crate::binding::Control> = world
+        .get_resource::<crate::capture::ReservedControls>()
+        .map(|reserved| reserved.iter().map(|entry| entry.control).collect())
+        .unwrap_or_default();
+
+    let (variant, _mappings, _tunables, problems) = crate::overrides::rewrite(
+        &bindings,
+        &rows,
+        &tunables,
+        overrides,
+        preset,
+        &reserved,
+        C::PATH,
+    );
+    let plan = Arc::new(Plan::variant_of(&template, variant));
+
+    if let Some(mut state) = world.get_mut::<InputContextState<C>>(entity) {
+        state.adopt(plan);
+    }
+
+    problems
+}
+
 /// Reads one context's bindings back out for a reverse lookup, once its type is no longer known.
 ///
 /// Registered beside `read_mappings`, and answering a different question: this one is about what
@@ -1372,6 +1418,7 @@ fn declare_context<C: InputContext + Component>(
             tunables: read_tunables::<C>,
             declared_tunables: read_declared_tunables::<C>,
             apply: apply_to_context::<C>,
+            apply_for_entity: apply_to_entity::<C>,
         });
 
     // A context whose activation follows something else starts inactive and waits to be asked.
