@@ -19,17 +19,15 @@ pub const FLOOR: u8 = 48;
 pub const FLOOR_PEBBLES: u8 = 49;
 pub const FLOOR_STONE: u8 = 42;
 /// The edge piece of a wall's drop shadow on the floor beside it, at `Rotation::R0` (solid to the
-/// north). Rotate for the other three sides.
+/// north). `Rotation::R90` turns it to face a wall to the east instead — the light is modeled as
+/// coming from the northeast, so those are the only two sides that ever cast one.
 pub const FLOOR_SHADOW_EDGE: u8 = 50;
-/// The corner piece of a wall's drop shadow, at `Rotation::R0` (solid to the north and east).
-/// Rotate for the other three corners.
+/// The corner piece of a wall's drop shadow, cast where solid ground is both north and east.
 pub const FLOOR_SHADOW_CORNER: u8 = 52;
 pub const FLOOR_SHADOW_NUB: u8 = 53;
 
 /// A chest — the `Vault` aspect's prop.
 pub const CHEST: u8 = 89;
-/// Scattered rubble — the `Ruins` aspect's prop.
-pub const RUBBLE: u8 = 42;
 /// A standing shrine — the `Shrine` aspect's prop.
 pub const SHRINE: u8 = 41;
 
@@ -41,7 +39,7 @@ pub const WALL_CAP_NEAR_SE: u8 = 16;
 pub const WALL_CAP_NEAR_SW: u8 = 17;
 /// The far wall's own face, one cell nearer the room than its cap.
 pub const WALL_FRONT: u8 = 40;
-/// A dimmer variant of [`WALL_BASE_FAR`], scattered in rarely for texture.
+/// A dimmer variant of [`WALL_FRONT`], scattered in rarely for texture.
 pub const WALL_FRONT_VARIANT: u8 = 14;
 pub const WALL_FRONT_GRATING: u8 = 28;
 pub const WALL_FRONT_BANNER: u8 = 29;
@@ -57,9 +55,6 @@ pub const WALL_CAP_FAR_NE: u8 = 25;
 pub const WALL_SIDE_WEST: u8 = 13;
 /// As [`WALL_SIDE_WEST`], on the east side.
 pub const WALL_SIDE_EAST: u8 = 15;
-/// A wall corner poking into open floor, at `Rotation::R0` (solid to the north and west). Rotate
-/// for the other three corners.
-pub const WALL_NUB: u8 = 59;
 /// Plain solid ground, no cap or side implied — a room or passage's own interior, or any solid cell
 /// too far from floor for a directional piece to make sense.
 pub const WALL_FILL: u8 = 0;

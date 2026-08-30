@@ -1,19 +1,9 @@
-//! A seeded arena layout, and what each cell needs drawn over it.
+//! A seeded room-and-passage layout, resolved cell by cell into an atlas tile and rotation.
 //!
-//! No Bevy here, deliberately: a layout is a pure function of its seed, so it can be checked with
-//! plain unit tests — same seed in, same grid out, every open cell reachable from every other one —
-//! faster and more thoroughly than watching a window across fifty seeds ever could.
-//!
-//! The shape: rooms of varying size, connected by passages wide enough for two characters to stand
-//! side by side ([`PASSAGE_WIDTH`]), grown outward from a single seed room by picking a random point
-//! on the unclaimed perimeter of what exists so far and trying to dig a new room beyond it — the
-//! [`Frontier`] set. A second pass then looks for rooms that ended up facing each other across a
-//! narrow gap and, at random, connects some of them too, so the result has loops rather than being a
-//! single tree.
-//!
-//! [`Dungeon::resolve`] then looks at each cell's neighbors to decide what belongs there — see
-//! [`TileRole`] for the vocabulary that comes out of it, and a plain filled wall for any solid cell
-//! none of it reaches — so every cell draws *something*, and nothing reads as a hole in the world.
+//! Rooms grow from a single seed room via a perimeter [`Frontier`] — pick an unclaimed edge, dig a
+//! room beyond it, repeat — then [`add_loop_connections`] wires up rooms that ended up facing each
+//! other, so the layout has loops instead of being a single tree. Deterministic in the seed, which
+//! is what the tests below check instead of a screenshot.
 
 use bevy_math::Quat;
 
@@ -35,8 +25,8 @@ const BORDER: usize = 1;
 const MAX_LOOP_GAP: usize = 3;
 /// One in this many qualifying facing gaps gets a connecting passage.
 const LOOP_CHANCE_DEN: u32 = 2;
-/// One in this many cells of a themed room's floor gets a prop, so a room reads as a handful of set
-/// dressing rather than either bare or wall-to-wall clutter.
+/// Reserved for scattering standalone props (chests, etc.) once an aspect grows beyond a floor and
+/// wall texture bias — not read anywhere yet.
 const PROP_CHANCE_DEN: u64 = 18;
 /// One in this many rooms gets each non-`Open` aspect (so half of all rooms stay plain).
 const ASPECT_CHANCE_DEN: u64 = 6;
@@ -49,28 +39,25 @@ enum Cell {
     Floor,
 }
 
-/// A room's thematic character — which prop, if any, its floor rarely scatters in.
+/// A room's thematic character, biasing which floor and wall variants it draws.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RegionAspect {
-    /// No prop; the common case.
+    /// The common case — no bias.
     Open,
-    /// A chest sits here.
+    /// Reserved for a chest prop; not wired up yet.
     Vault,
-    /// Rubble litters the floor.
+    /// Stone floor, and a grating on the wall.
     Ruins,
-    /// A shrine stands here.
+    /// A banner on the wall.
     Shrine,
 }
 
-/// A quarter-turn, clockwise. [`TileRole::WallNub`] and the floor-shadow roles each have only one
-/// drawn orientation — Kenney's sheet leaves the other three to be produced by rotating the tile
-/// itself, the way [`main`](../main) already has to for every rendered tile's `Transform`.
+/// A quarter-turn, clockwise. Only floor shadows use `R90` — light is modeled as coming from the
+/// northeast, so a wall to the north or east are the only two cases that cast one.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Rotation {
     R0,
     R90,
-    R180,
-    R270,
 }
 
 impl Rotation {
@@ -78,8 +65,6 @@ impl Rotation {
         let clockwise_turns = match self {
             Rotation::R0 => 0.0,
             Rotation::R90 => 1.0,
-            Rotation::R180 => 2.0,
-            Rotation::R270 => 3.0,
         };
         Quat::from_rotation_z(-clockwise_turns * core::f32::consts::FRAC_PI_2)
     }
@@ -146,7 +131,6 @@ impl Dungeon {
     }
 
     fn resolve_floor(&self, seed: u64, x: isize, y: isize) -> (u8, Rotation) {
-        // Shadows
         let wall_n = !self.floor_at(x, y - 1);
         let wall_e = !self.floor_at(x + 1, y);
         let wall_ne = !self.floor_at(x + 1, y - 1);
@@ -301,17 +285,22 @@ fn choose_weighted(
         seed ^ (x as u64).wrapping_mul(0xBF58476D1CE4E5B9)
             ^ (y as u64).wrapping_mul(0x94D049BB133111EB)
             ^ 0xA24BAED4963EE407,
-    ) as usize;
+    );
+    weighted_pick(h, choices)
+}
 
-    let total = choices.iter().fold(0, |prev, (_, _, w)| prev + w);
-    let mut choice = h.rem_euclid(total);
-    for (tile, rotation, weight) in choices {
-        if choice < *weight {
-            return (*tile, *rotation);
+/// The pick `choose_weighted` makes, split out so it can be tested directly against every possible
+/// roll instead of needing a seed that happens to land on each one.
+fn weighted_pick(roll: u64, choices: &[(u8, Rotation, usize)]) -> (u8, Rotation) {
+    let total: usize = choices.iter().map(|(_, _, w)| w).sum();
+    let mut remaining = roll as usize % total;
+    for &(tile, rotation, weight) in choices {
+        if remaining < weight {
+            return (tile, rotation);
         }
-        choice -= weight;
+        remaining -= weight;
     }
-    unreachable!();
+    unreachable!("remaining < total, and total is the sum of every weight subtracted here")
 }
 
 /// A room's aspect, stable for a given seed and room origin.
@@ -741,6 +730,26 @@ mod tests {
     }
 
     #[test]
+    fn weighted_pick_respects_its_boundaries() {
+        let choices = [
+            (10u8, Rotation::R0, 3),
+            (20, Rotation::R90, 5),
+            (30, Rotation::R0, 2),
+        ];
+        assert_eq!(weighted_pick(0, &choices).0, 10);
+        assert_eq!(weighted_pick(2, &choices).0, 10);
+        assert_eq!(weighted_pick(3, &choices).0, 20);
+        assert_eq!(weighted_pick(7, &choices).0, 20);
+        assert_eq!(weighted_pick(8, &choices).0, 30);
+        assert_eq!(weighted_pick(9, &choices).0, 30);
+        // Every roll, not just the boundaries above, must land on something rather than falling
+        // through to the `unreachable!()`.
+        for roll in 0..10 {
+            weighted_pick(roll, &choices);
+        }
+    }
+
+    #[test]
     #[ignore]
     fn dump_layout() {
         let seed = std::env::var("SEED")
@@ -804,75 +813,32 @@ mod tests {
     }
 
     #[test]
-    fn directional_walls_always_stand_beside_floor() {
-        // Everything except WallFill (the fallback for solid ground with no floor in reach) and the
-        // far-wall caps promises a floor neighbor directly: a far-wall cap sits one cell further out
-        // than that, bordering its own base or a side wall instead.
+    fn floor_and_wall_tiles_never_swap() {
+        // resolve() hands back a raw tile index with no semantic tag attached, so the cheapest
+        // regression guard against a misclassified cell is this: a floor cell always draws one of
+        // the floor tiles, a solid cell never does. It doesn't verify any particular wall piece is
+        // the *right* one — that's what running the example and looking is for.
+        const FLOOR_TILES: [u8; 6] = [
+            FLOOR,
+            FLOOR_PEBBLES,
+            FLOOR_STONE,
+            FLOOR_SHADOW_EDGE,
+            FLOOR_SHADOW_CORNER,
+            FLOOR_SHADOW_NUB,
+        ];
         for seed in [0, 1, 42, 12345, u64::MAX] {
             let dungeon = generate(seed, 64, 64);
             let roles = dungeon.resolve(seed);
             for y in 0..dungeon.height {
                 for x in 0..dungeon.width {
-                    let role = roles[y * dungeon.width + x];
-                    let (x, y) = (x as isize, y as isize);
-                    let touches_floor = || {
-                        [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1)]
-                            .iter()
-                            .any(|&(dx, dy)| dungeon.floor_at(x + dx, y + dy))
-                    };
-                    let touches_base_or_side = || {
-                        matches!(
-                            roles[(y + 1) as usize * dungeon.width + x as usize],
-                            TileRole::WallBaseFar(_)
-                                | TileRole::WallSideWest
-                                | TileRole::WallSideEast
-                        )
-                    };
-                    match role {
-                        TileRole::WallCapNear
-                        | TileRole::WallCapNearWest
-                        | TileRole::WallCapNearEast
-                        | TileRole::WallBaseFar(_)
-                        | TileRole::WallSideWest
-                        | TileRole::WallSideEast
-                        | TileRole::WallNub(_) => assert!(
-                            touches_floor(),
-                            "seed {seed} placed a {role:?} at ({x},{y}) touching no floor"
-                        ),
-                        TileRole::WallCapFar
-                        | TileRole::WallCapFarWest
-                        | TileRole::WallCapFarEast => {
-                            assert!(
-                                touches_base_or_side(),
-                                "seed {seed} placed a {role:?} at ({x},{y}) with no base or side wall beneath it"
-                            );
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn props_only_appear_in_their_own_aspects_rooms() {
-        for seed in [0, 1, 42, 12345, u64::MAX] {
-            let dungeon = generate(seed, 64, 64);
-            let roles = dungeon.resolve(seed);
-            for y in 0..dungeon.height {
-                for x in 0..dungeon.width {
-                    let TileRole::Prop(aspect) = roles[y * dungeon.width + x] else {
-                        continue;
-                    };
-                    assert_ne!(
-                        aspect,
-                        RegionAspect::Open,
-                        "seed {seed} rolled a prop for an open room at ({x},{y})"
-                    );
+                    let (tile, _) = roles[y * dungeon.width + x];
+                    let is_floor_tile = FLOOR_TILES.contains(&tile);
                     assert_eq!(
-                        dungeon.aspect_at(x as isize, y as isize),
-                        Some(aspect),
-                        "seed {seed} placed a prop that disagrees with its own cell's room at ({x},{y})"
+                        is_floor_tile,
+                        dungeon.floor_at(x as isize, y as isize),
+                        "seed {seed} gave cell ({x},{y}) tile {tile}, a {} tile on {} ground",
+                        if is_floor_tile { "floor" } else { "wall" },
+                        if is_floor_tile { "solid" } else { "floor" }
                     );
                 }
             }

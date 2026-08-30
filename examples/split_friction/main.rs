@@ -1,10 +1,7 @@
 //! Split Friction — a split-screen game in the shape of Gauntlet.
 //!
-//! This example grows in stages, each landing on its own. So far it generates a Gauntlet-sized
-//! dungeon from a seed (see [`dungeon`]) and draws it with Kenney's Tiny Dungeon atlas (see
-//! [`tileset`]). Nothing here reads an action yet — the device-selection screen this game exists to
-//! demonstrate, plus players, monsters and missiles, all arrive in later stages, none of which
-//! should have to touch the generator or the tile names this one got right.
+//! So far: a generated dungeon, drawn with Kenney's Tiny Dungeon atlas. Players, monsters, and the
+//! device-selection screen this game exists to demonstrate all arrive in later stages.
 //!
 //! Pass a seed on the command line to see a different layout: `cargo run --example split_friction --
 //! 7`. With none given, the layout is the same every run.
@@ -42,13 +39,7 @@ fn setup(mut commands: Commands, mut layouts: ResMut<Assets<TextureAtlasLayout>>
     commands.spawn_scene(map(layout, seed.0));
 }
 
-/// The generated arena, one sprite per cell — every cell resolves to something, so there is no
-/// "skip this one" case here the way chunk 56's static room never needed either.
-///
-/// Wrong atlas indices would be one kind of failure here, same as chunk 56's hand-placed room; a
-/// generator bug is a different one, and looks like a different thing on screen — an obstacle with
-/// a hole in it, a gap too narrow to walk through, floor that never connects. Both are visible at a
-/// glance.
+/// The generated dungeon, one sprite per cell.
 fn map(layout: Handle<TextureAtlasLayout>, seed: u64) -> impl Scene {
     let dungeon = dungeon::generate(seed, WIDTH, HEIGHT);
     let roles = dungeon.resolve(seed);
@@ -82,37 +73,6 @@ fn map(layout: Handle<TextureAtlasLayout>, seed: u64) -> impl Scene {
         ]
     }
 }
-
-// /// This chunk's only tie between the generator's vocabulary and this atlas's — everywhere else,
-// /// each stays free to change without the other noticing.
-// fn tile_index(role: TileRole) -> usize {
-//     match role {
-//         TileRole::Floor(0) => tileset::FLOOR,
-//         TileRole::Floor(n) => tileset::FLOOR_VARIANTS[n as usize - 1],
-//         TileRole::FloorShadowEdge(_) => tileset::FLOOR_SHADOW_EDGE,
-//         TileRole::FloorShadowCorner(_) => tileset::FLOOR_SHADOW_CORNER,
-//         TileRole::FloorShadowNub(_) => tileset::FLOOR_SHADOW_NUB,
-//         // Open never rolls a Prop (see resolve_cell), but the match stays exhaustive rather than
-//         // leaning on that invariant here too.
-//         TileRole::Prop(RegionAspect::Open) => tileset::FLOOR,
-//         TileRole::Prop(RegionAspect::Vault) => tileset::CHEST,
-//         TileRole::Prop(RegionAspect::Ruins) => tileset::RUBBLE,
-//         TileRole::Prop(RegionAspect::Shrine) => tileset::SHRINE,
-//         TileRole::WallCapFar => tileset::WALL_CAP_FAR,
-//         TileRole::WallCapFarWest => tileset::WALL_CAP_FAR_WEST,
-//         TileRole::WallCapFarEast => tileset::WALL_CAP_FAR_EAST,
-//         TileRole::WallBaseFar(0) => tileset::WALL_BASE_FAR,
-//         TileRole::WallBaseFar(_) => tileset::WALL_BASE_FAR_VARIANT,
-//         TileRole::WallCapNear => tileset::WALL_CAP_NEAR,
-//         TileRole::WallCapNearWest => tileset::WALL_CAP_NEAR_WEST,
-//         TileRole::WallCapNearEast => tileset::WALL_CAP_NEAR_EAST,
-//         TileRole::WallSideWest => tileset::WALL_SIDE_WEST,
-//         TileRole::WallSideEast => tileset::WALL_SIDE_EAST,
-//         TileRole::WallNub(_) => tileset::WALL_NUB,
-//         TileRole::WallFill(0) => tileset::WALL_FILL,
-//         TileRole::WallFill(_) => tileset::WALL_FILL_VARIANT,
-//     }
-// }
 
 fn tile(
     layout: Handle<TextureAtlasLayout>,
