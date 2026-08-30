@@ -320,7 +320,7 @@ remains.
 | 54 | Conflict policy | landed as detection only: `conflicts_pending` against a working copy, resolution left to the app on existing `Overrides` primitives |
 | 25 | Control classes and class bindings | done; `character_producing` measured against a real kana IME and a dead key rather than reasoned from docs — both compose correctly upstream and need nothing extra here; a focused text field actually claiming the class → 49 |
 | 56 | Split Friction's tileset | done; landed ahead of chunk 27 (device selection), which has not — this chunk needed nothing from it |
-| 57 | A generated dungeon | done; landed as an open arena with punched-out obstacles rather than rooms-and-corridors, after review of the first pass found the maze-of-small-rooms shape wrong for what Split Friction wants |
+| 57 | A generated dungeon | done; the punched-obstacle arena this row used to describe was itself replaced — rooms grown from a perimeter frontier, wide loop-forming passages, and a region aspect per room biasing floor and wall texture. Wall and floor tile indices were rebuilt from scratch against Kenney's actual sheet after most of the first pass's assumptions turned out wrong; the wall/shadow resolver landed author-written, not LLM-written — see Log.md. Chest/shrine props and the `Vault` aspect are identified but not wired to anything yet |
 | 58 | `follow` replaces per-binding `follows` | done; found while scoping chunk 31 and landed ahead of it, since 31 inherited the follower-coverage problem this closes |
 | 31 | The settings screen, rebinding | done; steal chosen for R19.3's policy, and every capture patches the exact cells it touched rather than rebuilding — a capture never changes a row's shape |
 | 61 | Exclusive contexts | done; R7.8 landed as priority order alone, no named groups — R7.7's other half stays in the deferred table; the exclusion ceiling's device-blindness stays deferred, chunk 26's own gate now the deferred table's own row rather than a chunk of its own |
@@ -567,10 +567,46 @@ Disasteroids is one player reading one set of bindings. Everything in §15 is in
 because with a single player there is no question of *which* device drove an action — and a model
 that never has to answer that question has not been tested on the thing it was designed for.
 
-### 27. Split Friction
+### 68. Split-screen cameras and protagonists
 
-`examples/split_friction/` — a split-screen game in the shape of Gauntlet: two players, top-down,
-shared world, one viewport each.
+`examples/split_friction/` — two protagonists (Tiny Dungeon sprites 99 and 100, the two that read
+female, in keeping with the game this is a parody of) spawned a short distance apart in the
+generated dungeon's first room, each moved by its own stick-or-arrow-keys input context, each seen
+through its own camera. No pairing or joining yet — which device drives which protagonist is
+hardcoded here, since chunk 27 is where a player picks their own device, and there is nothing to
+pick between yet without two protagonists already existing to pick for.
+
+- **The split-screen mechanism:** an invisible HUD layout — a flexbox with a small column gap,
+  two children — sized and positioned the way any other `bevy_ui` layout would be, with a system
+  reading the two children's computed rects back out and writing them onto each camera's viewport.
+  Worth having this shape rather than hand-computed rects: this game wants a real HUD eventually
+  (health, an indicator for the spawner-shrine chunk 60 adds), and it can reuse the same nodes.
+- **Not doing:** collision (chunk 69), device pairing (chunk 27), anything that isn't "two
+  independently-controlled sprites, each in its own correctly-scrolling viewport."
+- **Verified by:** playing it — move each stick/arrow-key set independently and watch its own
+  camera track its own protagonist without leaking into the other's viewport.
+
+---
+
+### 69. AABB collision
+
+No physics engine — a protagonist's movement vector is clamped against the dungeon's solid cells
+and against the other protagonist, both simple axis-aligned box checks against known rects.
+
+- **Not doing:** anything a real physics engine would do that this doesn't need — resolution
+  against moving obstacles, stacking, friction. A protagonist that stops at a wall instead of
+  walking through it is the whole of this chunk.
+- **Verified by:** playing it — walk into a wall and stop; try to walk into the other protagonist
+  and stop instead of overlapping.
+
+---
+
+### 27. Split Friction's device selection
+
+The device-selection screen originally scoped for this chunk, now landing after chunks 68 and 69
+rather than before them: chunks 56, 57, and 68 all needed *something* controllable to build and
+verify against, and there is nothing to pick a device *for* until two protagonists already exist.
+What's left is exactly the pairing UI itself.
 
 - **Not doing:** rebinding. Disasteroids covers that, and a second UI would make this example about
   something other than the thing it is here to show.
@@ -580,30 +616,31 @@ shared world, one viewport each.
   and it is the one part of §15 a developer cannot get right by reading a doc comment.
 - **Verified by:** playing it, with the pad on one mapping and the keyboard on the other, then
   swapping them.
-- **Visuals:** placeholder shapes only — rects for players, flat color for the world. Tiny Dungeon
-  sprites, a generated map, monsters and missiles are chunks 56–59, layered on once this lands, so
-  the device-selection code they build on stays exactly as reviewed here.
 
 ---
 
-### 60. Split Friction's players and monsters
+### 60. Split Friction's monsters and spawners
 
-Placeholder rects become Tiny Dungeon character sprites, one per split-screen viewport. Monsters
-spawn into the generated dungeon and wander, or chase within a simple radius.
+Monsters spawn into the generated dungeon and wander, or chase within a simple radius, biased by
+their room's `RegionAspect`. Gauntlet's own mechanic: a spawner (a shrine-like object, itself
+reading an aspect) periodically spawns a monster nearby until something destroys it.
 
-- **Not doing:** combat, death, or any interaction between the two. This chunk is "things that move
-  around the map convincingly," not the game Split Friction eventually becomes.
-- **Verified by:** playing it — a monster visibly reacts to a nearby player and does something
-  sensible when none is nearby.
+- **Not doing:** combat, death, or damage of any kind — including against the spawner itself.
+  "Killed like a monster to stop it" needs a missile that can hit something, which chunk 59
+  explicitly declines and this chunk doesn't build either; that's its own later chunk, once
+  chunk 59 has landed for it to build on. This chunk is "things that populate the map
+  convincingly," not the whole game.
+- **Verified by:** playing it — a monster visibly reacts to a nearby protagonist and does
+  something sensible when none is nearby, and a spawner produces monsters at intervals on its own.
 
 ### 59. Missiles as spinning sprites
 
 A fired weapon becomes a sprite that rotates at a fixed rate as it travels, riding whatever
 `Fire`-shaped action Split Friction already binds.
 
-- **Not doing:** collision or damage. A missile that flies to the edge of the map and despawns is a
-  complete acceptance for this chunk; hitting something is Split Friction's own concern later, not
-  this sequence's.
+- **Not doing:** collision or damage. A missile that flies to the edge of the map and despawns is
+  a complete acceptance for this chunk; hitting something — a monster, a spawner — is chunk 60's
+  own follow-on concern, not this one's.
 - **Verified by:** playing it.
 
 ---

@@ -332,3 +332,64 @@ for needing a way to say "read everyone except the claimed ones" that nothing el
 only by rereading R15.4's actual clause against what `arrival()` actually does, and by checking
 whether an existing mechanism (class bindings) already answered the question before writing a new
 one.
+
+### Chunk 57 revisited: rooms, passages, and a wall resolver rebuilt from scratch
+
+The punched-obstacle arena this chunk originally landed as got replaced wholesale, in the same
+session, once a Gauntlet-shaped screenshot made the gap concrete: obstacles floating in open floor
+don't leave anywhere for a wall to have two sides, a cap, or a theme. What replaced it grows rooms
+outward from a single seed room via a perimeter frontier — pull a random unclaimed edge, dig a
+room beyond it, repeat until a target count or the frontier runs dry — then wires up rooms that
+ended up facing each other across a narrow gap, so the result has loops rather than being a single
+tree. Each room gets a `RegionAspect` (`Vault`/`Ruins`/`Shrine`/`Open`), currently read only to
+bias which floor and wall texture variant a cell draws; the chest, the shrine, and `Vault` itself
+aren't wired to anything standalone yet, on purpose — see below.
+
+**Most of chunk 56's tile-index constants turned out to name the wrong thing**, and finding that
+out took most of this session.
+`WALL_TOP_LEFT`/`WALL_TOP`/`WALL_TOP_RIGHT`/`WALL_SIDE_LEFT`/`WALL_SIDE_RIGHT` pointed at nine
+tiles that, cropped and reassembled, form one decorative 3×3 gate — dirt showing through the
+"opening," a banner baked into the bottom edge — not five reusable wall pieces; `FLOOR_SHADOW`
+pointed at a plain brick wall tile, not a floor tile at all. Both were found by an LLM cropping
+tiles from the packed sheet a few at a time and reasoning about what was adjacent to what, which
+is exactly the methodology that produced the wrong answer twice: tiles adjacent in the atlas are
+not necessarily related in use, and a small pixel-art tile viewed in isolation is genuinely
+ambiguous (a stair tile and a wall-shadow tile look alike at 16px; a corner cap and a piece of
+ornamental ironwork can too). What actually worked was generating a fully-labeled overview of all
+132 tiles and having a human — who could cross-reference Kenney's own published preview of the
+sheet — identify them directly. **Chunk 56's own stated methodology** ("checking each index
+against a render of \[Kenney's] sample dungeon, tile by tile") **was the right one; this session's
+shortcuts around it were not**, and its doc comment no longer claims that shortcut.
+
+**The wall/floor resolver itself landed author-written, not LLM-written**, after the LLM's version
+proved hard to get right against the real tileset. That version modeled a far wall (the one a
+player walks toward, floor to its south) as two tiles — a base bordering the room and a cap one
+cell further out — resolved via `TileRole`, an enum naming every case, with a cap's classification
+looking ahead at what its own south neighbor resolved to. That lookahead had no depth limit: a long
+run of plain fill cells with no floor nearby recursed into itself indefinitely, a stack overflow
+caught only by a test that happened to generate a large enough seed. The rewrite that replaced it
+precomputes a third cell state once, during generation — `Cell::SolidFront`, a solid cell with
+floor immediately south of it — so a wall's own classification is a direct 3×3-neighborhood
+pattern match with no lookahead and no recursion at all, and `resolve()` returns the atlas tile
+index and rotation directly rather than through a separate semantic layer. **Precomputing a
+derived fact once, at the point it's cheap to know, beat re-deriving it lazily during
+resolution** — worth remembering the next time a lookahead wants to ask a neighbor "what would you
+resolve to."
+
+**"Near" and "far" were a live source of confusion for most of the session**, on both sides: a wall
+is *far* if it's the one a player walks toward (floor to its south, since the camera is modeled as
+south of everything, looking north) and needs two tiles for height; it's *near* if the room is
+behind the player's own position (floor to its north) and needs only its cap. `tileset.rs`'s doc
+comments briefly named the wrong trio for each after a rename and had to be corrected — a case for
+checking that a renamed constant's own comment was updated with it, not just its call sites.
+
+**Deferred, not forgotten:** a wall exactly one cell thick with floor on both sides has no matching
+Kenney tile (the sheet has no permutation for a wall open on both sides, with one partial exception)
+and falls back to a solid block — accepted as a known cosmetic limitation rather than fixed, since
+eliminating it would mean changing the generator's minimum-clearance rule and living with whatever
+that does to room density. `CHEST`/`SHRINE`/`Vault` are identified tiles with no code path yet;
+`PROP_CHANCE_DEN` is reserved for scattering them as standalone sprites (agreed, mid-session, that
+props belong as sprites layered on top of the map rather than baked into it as tiles) once a chunk
+actually wants that. And **chunk 27 has still not landed** — chunks 56 and 57 both landed ahead of
+it now, twice, out of the order Roadmap.md originally described (visuals were meant to layer onto
+chunk 27's device-selection scaffold, not precede it); chunk 68 is next, and 27 comes after it.
