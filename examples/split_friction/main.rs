@@ -17,8 +17,6 @@ use bevy::prelude::*;
 mod dungeon;
 mod tileset;
 
-use dungeon::TileRole;
-
 const WIDTH: usize = 64;
 const HEIGHT: usize = 64;
 
@@ -62,11 +60,17 @@ fn map(layout: Handle<TextureAtlasLayout>, seed: u64) -> impl Scene {
     let tiles: Vec<_> = roles
         .into_iter()
         .enumerate()
-        .map(|(i, role)| {
+        .map(|(i, (tile_index, rotation))| {
             let (col, row) = (i % WIDTH, i / WIDTH);
             let x = (col as f32 - (width - 1.0) / 2.0) * tile_px;
             let y = ((height - 1.0) / 2.0 - row as f32) * tile_px;
-            tile(layout.clone(), tile_index(role), Vec2::new(x, y), tile_px)
+            tile(
+                layout.clone(),
+                tile_index as usize,
+                Vec2::new(x, y),
+                tile_px,
+                rotation.as_quat(),
+            )
         })
         .collect();
 
@@ -79,30 +83,54 @@ fn map(layout: Handle<TextureAtlasLayout>, seed: u64) -> impl Scene {
     }
 }
 
-/// This chunk's only tie between the generator's vocabulary and this atlas's — everywhere else,
-/// each stays free to change without the other noticing.
-fn tile_index(role: TileRole) -> usize {
-    match role {
-        TileRole::Floor(0) => tileset::FLOOR,
-        TileRole::Floor(n) => tileset::FLOOR_VARIANTS[n as usize - 1],
-        TileRole::FloorShadow => tileset::FLOOR_SHADOW,
-        TileRole::WallTop => tileset::WALL_TOP,
-        TileRole::WallTopLeft => tileset::WALL_TOP_LEFT,
-        TileRole::WallTopRight => tileset::WALL_TOP_RIGHT,
-        TileRole::WallSideLeft => tileset::WALL_SIDE_LEFT,
-        TileRole::WallSideRight => tileset::WALL_SIDE_RIGHT,
-        TileRole::WallFill => tileset::WALL_FILL,
-    }
-}
+// /// This chunk's only tie between the generator's vocabulary and this atlas's — everywhere else,
+// /// each stays free to change without the other noticing.
+// fn tile_index(role: TileRole) -> usize {
+//     match role {
+//         TileRole::Floor(0) => tileset::FLOOR,
+//         TileRole::Floor(n) => tileset::FLOOR_VARIANTS[n as usize - 1],
+//         TileRole::FloorShadowEdge(_) => tileset::FLOOR_SHADOW_EDGE,
+//         TileRole::FloorShadowCorner(_) => tileset::FLOOR_SHADOW_CORNER,
+//         TileRole::FloorShadowNub(_) => tileset::FLOOR_SHADOW_NUB,
+//         // Open never rolls a Prop (see resolve_cell), but the match stays exhaustive rather than
+//         // leaning on that invariant here too.
+//         TileRole::Prop(RegionAspect::Open) => tileset::FLOOR,
+//         TileRole::Prop(RegionAspect::Vault) => tileset::CHEST,
+//         TileRole::Prop(RegionAspect::Ruins) => tileset::RUBBLE,
+//         TileRole::Prop(RegionAspect::Shrine) => tileset::SHRINE,
+//         TileRole::WallCapFar => tileset::WALL_CAP_FAR,
+//         TileRole::WallCapFarWest => tileset::WALL_CAP_FAR_WEST,
+//         TileRole::WallCapFarEast => tileset::WALL_CAP_FAR_EAST,
+//         TileRole::WallBaseFar(0) => tileset::WALL_BASE_FAR,
+//         TileRole::WallBaseFar(_) => tileset::WALL_BASE_FAR_VARIANT,
+//         TileRole::WallCapNear => tileset::WALL_CAP_NEAR,
+//         TileRole::WallCapNearWest => tileset::WALL_CAP_NEAR_WEST,
+//         TileRole::WallCapNearEast => tileset::WALL_CAP_NEAR_EAST,
+//         TileRole::WallSideWest => tileset::WALL_SIDE_WEST,
+//         TileRole::WallSideEast => tileset::WALL_SIDE_EAST,
+//         TileRole::WallNub(_) => tileset::WALL_NUB,
+//         TileRole::WallFill(0) => tileset::WALL_FILL,
+//         TileRole::WallFill(_) => tileset::WALL_FILL_VARIANT,
+//     }
+// }
 
-fn tile(layout: Handle<TextureAtlasLayout>, index: usize, pos: Vec2, tile_px: f32) -> impl Scene {
+fn tile(
+    layout: Handle<TextureAtlasLayout>,
+    index: usize,
+    pos: Vec2,
+    tile_px: f32,
+    rotation: Quat,
+) -> impl Scene {
     bsn! {
         Sprite {
             image: "split_friction/tilemap_packed.png",
             texture_atlas: texture_atlas_template(layout, index),
             custom_size: Vec2::splat(tile_px),
         }
-        Transform::from_translation(pos.extend(0.0))
+        Transform {
+            translation: {pos.extend(0.0)},
+            rotation: {rotation},
+        }
     }
 }
 

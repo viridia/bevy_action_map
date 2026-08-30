@@ -1,13 +1,12 @@
 //! Named indices into `tilemap_packed.png`'s 12×11 grid.
 //!
 //! Kenney's Tiny Dungeon ships its tiles as `tile_0000.png` … `tile_0131.png` — numbered, not named
-//! — so there is nothing to read a tile's purpose from except the pixels. These constants were
-//! found by decoding the sample dungeon Kenney ships alongside the sheet (a Tiled map built from
-//! this same atlas) and checking each index against a render of that map, tile by tile, rather than
-//! read off a preview image by eye. See `assets/split_friction/CREDITS.md` for the license.
+//! — so there is nothing to read a tile's purpose from except the pixels, cross-checked against
+//! Kenney's own preview of the sheet in use. See `assets/split_friction/CREDITS.md` for the license.
 //!
-//! Only floor and wall are named here — enough for a generated layout. Doors, characters, monsters
-//! and weapons get their own names when the chunks that use them need them.
+//! Only floor, wall, and the region-aspect props are named here — enough for a generated layout.
+//! Doors, characters, monsters and weapons get their own names when the chunks that use them need
+//! them.
 
 use bevy::prelude::*;
 
@@ -16,22 +15,59 @@ pub const COLUMNS: u32 = 12;
 pub const ROWS: u32 = 11;
 
 /// Plain floor, no decoration.
-pub const FLOOR: usize = 48;
-/// Floor variants safe to scatter in for visual variety — none reads as a different surface.
-pub const FLOOR_VARIANTS: [usize; 5] = [49, 50, 51, 52, 53];
-/// Floor immediately under a north wall, shaded to sit beneath it.
-pub const FLOOR_SHADOW: usize = 40;
+pub const FLOOR: u8 = 48;
+pub const FLOOR_PEBBLES: u8 = 49;
+pub const FLOOR_STONE: u8 = 42;
+/// The edge piece of a wall's drop shadow on the floor beside it, at `Rotation::R0` (solid to the
+/// north). Rotate for the other three sides.
+pub const FLOOR_SHADOW_EDGE: u8 = 50;
+/// The corner piece of a wall's drop shadow, at `Rotation::R0` (solid to the north and east).
+/// Rotate for the other three corners.
+pub const FLOOR_SHADOW_CORNER: u8 = 52;
+pub const FLOOR_SHADOW_NUB: u8 = 53;
 
-/// Wall cap, north side: the two corners and the piece repeated between them.
-pub const WALL_TOP_LEFT: usize = 1;
-pub const WALL_TOP: usize = 2;
-pub const WALL_TOP_RIGHT: usize = 3;
-/// Wall side, one tile tall, west and east — stacked to make a wall of any height.
-pub const WALL_SIDE_LEFT: usize = 13;
-pub const WALL_SIDE_RIGHT: usize = 15;
-/// Plain brick, no cap or side implied — an obstacle's own interior, or any solid cell too far
-/// from floor for a directional piece to make sense.
-pub const WALL_FILL: usize = 36;
+/// A chest — the `Vault` aspect's prop.
+pub const CHEST: u8 = 89;
+/// Scattered rubble — the `Ruins` aspect's prop.
+pub const RUBBLE: u8 = 42;
+/// A standing shrine — the `Shrine` aspect's prop.
+pub const SHRINE: u8 = 41;
+
+/// The far wall's cap — straight, and at its west and east ends where it meets a side wall.
+pub const WALL_CAP_NEAR: u8 = 2;
+pub const WALL_CAP_NEAR_EAST: u8 = 1;
+pub const WALL_CAP_NEAR_WEST: u8 = 3;
+pub const WALL_CAP_NEAR_SE: u8 = 16;
+pub const WALL_CAP_NEAR_SW: u8 = 17;
+/// The far wall's own face, one cell nearer the room than its cap.
+pub const WALL_FRONT: u8 = 40;
+/// A dimmer variant of [`WALL_BASE_FAR`], scattered in rarely for texture.
+pub const WALL_FRONT_VARIANT: u8 = 14;
+pub const WALL_FRONT_GRATING: u8 = 28;
+pub const WALL_FRONT_BANNER: u8 = 29;
+/// The near wall's cap — the whole wall, since nothing stands between it and the room. Straight,
+/// and at its west and east ends.
+pub const WALL_CAP_FAR: u8 = 26;
+pub const WALL_CAP_FAR_WEST: u8 = 4;
+pub const WALL_CAP_FAR_EAST: u8 = 5;
+pub const WALL_CAP_FAR_NW: u8 = 27;
+pub const WALL_CAP_FAR_NE: u8 = 25;
+/// The wall flanking a room or passage on its west side, one tile tall — stacked to make a wall of
+/// any height.
+pub const WALL_SIDE_WEST: u8 = 13;
+/// As [`WALL_SIDE_WEST`], on the east side.
+pub const WALL_SIDE_EAST: u8 = 15;
+/// A wall corner poking into open floor, at `Rotation::R0` (solid to the north and west). Rotate
+/// for the other three corners.
+pub const WALL_NUB: u8 = 59;
+/// Plain solid ground, no cap or side implied — a room or passage's own interior, or any solid cell
+/// too far from floor for a directional piece to make sense.
+pub const WALL_FILL: u8 = 0;
+/// A pebbled variant of [`WALL_FILL`], scattered in rarely for texture.
+pub const WALL_FILL_VARIANT: u8 = 12;
+pub const WALL_FILL_WEST: u8 = 57;
+pub const WALL_FILL_EAST: u8 = 59;
+pub const WALL_FILL_NARROW: u8 = 58;
 
 /// The atlas layout matching `tilemap_packed.png`'s grid, with no padding between tiles.
 pub fn layout() -> TextureAtlasLayout {
