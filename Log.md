@@ -393,3 +393,57 @@ props belong as sprites layered on top of the map rather than baked into it as t
 actually wants that. And **chunk 27 has still not landed** — chunks 56 and 57 both landed ahead of
 it now, twice, out of the order Roadmap.md originally described (visuals were meant to layer onto
 chunk 27's device-selection scaffold, not precede it); chunk 68 is next, and 27 comes after it.
+
+### Chunk 68: Split-screen cameras and protagonists
+
+Two protagonists (`examples/split_friction/protagonist.rs`, sprites 99 and 100), one `OnFoot`
+context bound to both a stick and arrow keys, and `Paired` (chunk 26) rather than two context types
+is what keeps them independently controlled — the first time `Paired` reaches a real entity in tree
+rather than only a test. Protagonist 1 carries `OnFoot` and `Paired::to(KeyboardMouse)` from the
+moment it spawns; protagonist 2 spawns with neither, deliberately, because an unpaired instance's
+"reads every device" default would let the keyboard drive both sprites for as long as no gamepad is
+connected. `pair_first_gamepad` (a one-shot system gated on a `Local<bool>`) hands protagonist 2 both
+components together, paired to whichever `Gamepad` entity shows up first, the moment one does. Which
+protagonist gets which device is hardcoded, per the roadmap text — chunk 27 is what lets a player
+choose.
+
+**`Paired` needed `#[derive(Default)]`** (`src/player.rs`) that it did not have. `bsn!`'s
+`FromTemplate` machinery requires `Default` of every component type a scene spawns, including one
+reached through an associated-function call (`Paired::to(DeviceHandle::KeyboardMouse)`) rather than
+a literal — the compiler's own suggested fix, and harmless: `DeviceHandleSet`'s existing `Default`
+is the empty set, so `Paired::default()` claims nothing, which is never actually constructed since
+every real spawn site calls `to()`.
+
+**The split-screen mechanism is the invisible `bevy_ui` flexbox the roadmap text described** — two
+`flex_grow: 1` children with a small column gap, read back through `ComputedNode` and
+`UiGlobalTransform` into each camera's `Viewport`. One thing the roadmap text didn't anticipate: the
+layout's own root needs a stable camera to measure its `Val::Percent(100)` against, and that camera
+cannot be either of the two split cameras — the instant `sync_viewports` narrows one of them to half
+the window, a `Val::Percent(100)` layout targeting it would measure against half the window and
+shrink again next frame, a feedback loop with no correction. `hud_camera`, marked
+`IsDefaultUiCamera`, exists solely to give the layout a target `sync_viewports` never touches; it
+draws nothing, but its clear color is what shows through the column gap as the dividing line between
+panes. `UiGlobalTransform`'s translation turned out to already share `Viewport::physical_position`'s
+convention (physical pixels, top-left origin, y down) — confirmed by reading how
+`extract_ui_camera_view` builds the UI camera's own projection, not by trial and error, since a
+mismatch here would have shown up only as viewports offset by exactly half their own size.
+
+**Verified two ways.** The session's own sandbox has no OS input-injection permission (`osascript`
+denied at the Apple Events layer, no `cliclick`, no `Quartz` for Python), so it could only run the
+example and screenshot the result — dungeon, spawn placement, and the split-screen divide all
+correct, but nothing about live input. The author then played it directly, keyboard on one side and
+an Xbox pad on the other, and confirmed both protagonists move independently and each camera scrolls
+with its own. One finding from that pass: the default 1-world-unit-per-pixel scale reads as too
+zoomed out once a camera only owns half the window — `zoom_in` (`split_screen.rs`) sets each
+camera's `OrthographicProjection.scale` to `1.0 / 2.5` once, at startup, after `cameras.spawn()` has
+made the entities queryable. It runs as a plain system rather than inside `cameras`' own `bsn!`
+block: `Projection::Orthographic(...)` parses as a bsn *enum-variant patch* (capitalized variant
+names trigger that path, unlike `Paired::to` or `Transform::from_translation` above, which parse as
+plain associated-function calls) and needs a `default_orthographic()` helper on `Projection`'s own
+generated `Template` that doesn't exist here — inserting the already-built value from a system
+sidesteps the question rather than answering it.
+
+Also from that playtest, next steps the author wants captured rather than built speculatively:
+collision (chunk 69, retargeted below to a sliding response) and a join-based pairing flow with a
+per-pane "waiting to join" prompt (chunk 27, retargeted below) — both updated in `Roadmap.md` so
+neither is a floating decision the next session has to reconstruct from a conversation.

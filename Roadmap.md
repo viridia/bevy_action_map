@@ -239,11 +239,16 @@ step and a real game is a better acceptance test than a synthetic one.
   `Overrides` independently, world-wide `AppliedPlan` and the declared baseline both untouched.
 - **Device routing** — a context entity paired to a device through a sibling `Paired` component
   reads only that device's events, `apply_frame` filtering before anything else touches the frame,
-  with an unpaired instance (today's only kind in tree) reading everything exactly as before.
+  with an unpaired instance reading everything exactly as before.
 - **The join gesture** — no new evaluation path, just a `bind_class`-bound action on a context with
   no `Paired` of its own, so `ClassFired`'s untouched event names the device via
   `RawEvent::device()` the same way `apply_frame`'s own filter does, and `join::is_claimed` checks
   that device against the world's `Paired` set so two waiting slots on one screen never race for it.
+- **Split-screen cameras and protagonists** (`examples/split_friction/`) — the first in-tree use of
+  `Paired` on a real entity rather than a test: two protagonists sharing one `OnFoot` context type,
+  one paired to the keyboard from spawn and one left context-less until a gamepad connects, each
+  seen through its own camera whose viewport comes from an invisible `bevy_ui` flexbox read back
+  every frame.
 
 ### Known wrong today
 
@@ -332,6 +337,7 @@ remains.
 | 67 | Per-entity `apply_overrides` | done; split off chunk 26's own inherited question (from chunk 38) rather than answered speculatively — a split-screen app persisting two players' `Overrides` independently needs each applied to only its own entity, which the world-wide `apply_overrides` cannot do; `apply_overrides_for`/`apply_overrides_for_with_preset` are a second entry point onto `InputContextState::adopt`, the same machinery a rebind already uses, touching neither `InputContextPlan<C>` (the pristine declaration every diff is still taken against) nor `AppliedPlan<C>` (what a freshly spawned instance inherits), so two entities diverge independently and a third spawned afterward still gets the world's unmodified default; presentation (`read_mappings`/prompts) stays world-wide, a stated gap in the deferred table rather than built speculatively |
 | 26 | Device routing (core) | done; `DeviceHandle`/`DeviceHandleSet` (`device.rs`) and a sibling `Paired` component (`player.rs`) reach `InputContextState::apply_frame`, which filters the events it reads by device before anything else touches them — an unpaired instance reads everything, exactly today's behavior; owner-scoping `ConsumedControls`/the exclusion ceiling and per-entity presentation both went to the deferred table rather than being built ahead of a need |
 | 66 | The join gesture | done; landed with far less new code than its own text proposed — `bind_class`'s existing class-binding dispatch already carries the untouched `RawEvent`, and so the device, through `ClassFired`, so a game declares "press anything to join" as an ordinary action on an unpaired context rather than the crate running a second per-device evaluation cycle; `join::is_claimed` is the one new function, checking a device against every `Paired` in the world so two waiting slots never race for the same one |
+| 68 | Split-screen cameras and protagonists | done; one `OnFoot` context bound to both a stick and arrow keys, `Paired` (chunk 26) is what makes the two protagonists independent rather than two context types — protagonist 1 is paired to the keyboard from spawn, protagonist 2 spawns with no context at all until a one-shot system pairs it to the first gamepad that connects, so an unpaired instance's "reads everything" default never lets the keyboard drive both sprites before a pad shows up; `Paired` needed `#[derive(Default)]` added (`src/player.rs`) since `bsn!`'s `FromTemplate` machinery requires it of every component a scene spawns, constructor call or not; the split-screen viewport sync needed a third camera nothing else touches, marked `IsDefaultUiCamera`, so the invisible HUD layout's `Val::Percent(100)` always measures against the full window rather than one of the two cameras `sync_viewports` has already narrowed — without it the layout would shrink itself by half every frame; verified by running the example and screenshotting it for the parts a sandbox with no OS input-injection permission could reach, and by the author playing it directly (keyboard and an Xbox pad) for the rest — both protagonists move independently and each camera tracks its own; that pass also found the default 1:1 world-to-pixel scale too zoomed out once a camera owns half the window, fixed by a `zoom_in` startup system setting `OrthographicProjection.scale` to `0.4` |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -567,37 +573,23 @@ Disasteroids is one player reading one set of bindings. Everything in §15 is in
 because with a single player there is no question of *which* device drove an action — and a model
 that never has to answer that question has not been tested on the thing it was designed for.
 
-### 68. Split-screen cameras and protagonists
-
-`examples/split_friction/` — two protagonists (Tiny Dungeon sprites 99 and 100, the two that read
-female, in keeping with the game this is a parody of) spawned a short distance apart in the
-generated dungeon's first room, each moved by its own stick-or-arrow-keys input context, each seen
-through its own camera. No pairing or joining yet — which device drives which protagonist is
-hardcoded here, since chunk 27 is where a player picks their own device, and there is nothing to
-pick between yet without two protagonists already existing to pick for.
-
-- **The split-screen mechanism:** an invisible HUD layout — a flexbox with a small column gap,
-  two children — sized and positioned the way any other `bevy_ui` layout would be, with a system
-  reading the two children's computed rects back out and writing them onto each camera's viewport.
-  Worth having this shape rather than hand-computed rects: this game wants a real HUD eventually
-  (health, an indicator for the spawner-shrine chunk 60 adds), and it can reuse the same nodes.
-- **Not doing:** collision (chunk 69), device pairing (chunk 27), anything that isn't "two
-  independently-controlled sprites, each in its own correctly-scrolling viewport."
-- **Verified by:** playing it — move each stick/arrow-key set independently and watch its own
-  camera track its own protagonist without leaking into the other's viewport.
-
----
-
 ### 69. AABB collision
 
-No physics engine — a protagonist's movement vector is clamped against the dungeon's solid cells
-and against the other protagonist, both simple axis-aligned box checks against known rects.
+No physics engine — a protagonist slides along whatever it hits rather than stopping dead, which
+needs the per-axis response below rather than a single blocked/clear check.
 
+- **The response:** project the protagonist's own bounding box forward by its full movement vector
+  and test that swept box against the dungeon's solid cells and the other protagonist. A hit on the
+  box's horizontal side clamps the vector's `x` component to the distance actually available; a hit
+  on the vertical side clamps `y` the same way. Re-test the clamped vector and repeat — one wall
+  clamps one axis and can still leave the other's full distance open, which is what makes walking
+  into a wall at an angle slide along it rather than stop.
 - **Not doing:** anything a real physics engine would do that this doesn't need — resolution
-  against moving obstacles, stacking, friction. A protagonist that stops at a wall instead of
-  walking through it is the whole of this chunk.
-- **Verified by:** playing it — walk into a wall and stop; try to walk into the other protagonist
-  and stop instead of overlapping.
+  against moving obstacles, stacking, friction, corner cases needing more than a couple of
+  iterations to settle.
+- **Verified by:** playing it — walk into a wall straight on and stop; walk into one at an angle and
+  slide along it instead of stopping; try to walk into the other protagonist and stop instead of
+  overlapping.
 
 ---
 
@@ -606,16 +598,27 @@ and against the other protagonist, both simple axis-aligned box checks against k
 The device-selection screen originally scoped for this chunk, now landing after chunks 68 and 69
 rather than before them: chunks 56, 57, and 68 all needed *something* controllable to build and
 verify against, and there is nothing to pick a device *for* until two protagonists already exist.
-What's left is exactly the pairing UI itself.
+What's left, once the author played chunk 68, turned out simpler than a separate screen: pairing
+happens live, over the two panes split-screen already draws, using chunk 66's join gesture rather
+than a screen of its own — and chunk 68's own hardcoded pairing (protagonist 1 always keyboard,
+protagonist 2 always the first gamepad) is what this chunk replaces.
 
-- **Not doing:** rebinding. Disasteroids covers that, and a second UI would make this example about
-  something other than the thing it is here to show.
-- **What it is here to show:** the **device selection screen**. Two mappings, each waiting for a
-  device to claim it; press anything on a pad or a key on the keyboard and that mapping is yours.
-  This is the first flow in the crate where the player picks the device rather than the developer,
-  and it is the one part of §15 a developer cannot get right by reading a doc comment.
-- **Verified by:** playing it, with the pad on one mapping and the keyboard on the other, then
-  swapping them.
+- **What it is here to show:** each pane, unpaired, shows a small "waiting to join — press any
+  button" prompt over its protagonist. Any input from a device not yet claimed pairs it to the next
+  unclaimed protagonist in spawn order (protagonist 0 first, then 1), and that pane's prompt
+  disappears; once both are claimed, input from a still-unclaimed device is simply ignored — there
+  is nothing left to pair it to. This is the first flow in the crate where the player picks the
+  device rather than the developer, and it is the one part of §15 a developer cannot get right by
+  reading a doc comment.
+- **A label at the bottom of each pane** names the device its protagonist is paired to, once
+  paired — blank while a pane is still waiting, which is what makes the prompt above read as "this
+  one needs you" rather than a permanent fixture.
+- **Not doing:** rebinding, or letting a player choose *which* protagonist their device claims —
+  spawn order is the whole of the policy. Disasteroids covers rebinding, and a second UI here would
+  make this example about something other than the thing it is here to show.
+- **Verified by:** playing it — launch with neither device having pressed anything and see both
+  prompts up, press a key and watch its pane's prompt clear and the label fill in, then connect a
+  pad and press a button on it and watch the same happen on the other pane.
 
 ---
 

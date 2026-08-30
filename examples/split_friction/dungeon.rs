@@ -78,6 +78,8 @@ pub struct Dungeon {
     /// solid cells.
     room_of: Vec<Option<usize>>,
     aspects: Vec<RegionAspect>,
+    /// The seed room every other room grew from — where a fresh game starts its protagonists.
+    first_room: Rect,
 }
 
 impl Dungeon {
@@ -112,6 +114,14 @@ impl Dungeon {
             return None;
         }
         self.room_of[y as usize * self.width + x as usize].map(|i| self.aspects[i])
+    }
+
+    /// Two cells near the middle of the first room, a step apart, for the two protagonists to start
+    /// on. `ROOM_MIN` (5) keeps both a cell inside the room on either side of center.
+    pub fn spawn_points(&self) -> [(usize, usize); 2] {
+        let cx = self.first_room.x + self.first_room.w / 2;
+        let cy = self.first_room.y + self.first_room.h / 2;
+        [(cx - 1, cy), (cx + 1, cy)]
     }
 
     /// Every cell, resolved to what belongs there — row-major, same order as the grid itself.
@@ -612,23 +622,26 @@ fn add_loop_connections(
 /// facing each other.
 pub fn generate(seed: u64, width: usize, height: usize) -> Dungeon {
     let mut rng = SplitMix64(seed);
-    let mut dungeon = Dungeon {
-        width,
-        height,
-        cells: vec![Cell::Solid; width * height],
-        room_of: vec![None; width * height],
-        aspects: Vec::new(),
-    };
-
-    let mut rooms: Vec<Rect> = Vec::new();
-    let mut passages: Vec<Rect> = Vec::new();
-    let mut frontier: Vec<Frontier> = Vec::new();
 
     let w = ROOM_MIN + (rng.next_u32() as usize) % (ROOM_MAX - ROOM_MIN + 1);
     let h = ROOM_MIN + (rng.next_u32() as usize) % (ROOM_MAX - ROOM_MIN + 1);
     let x = BORDER + (rng.next_u32() as usize) % (width - 2 * BORDER - w);
     let y = BORDER + (rng.next_u32() as usize) % (height - 2 * BORDER - h);
     let first = Rect { x, y, w, h };
+
+    let mut dungeon = Dungeon {
+        width,
+        height,
+        cells: vec![Cell::Solid; width * height],
+        room_of: vec![None; width * height],
+        aspects: Vec::new(),
+        first_room: first,
+    };
+
+    let mut rooms: Vec<Rect> = Vec::new();
+    let mut passages: Vec<Rect> = Vec::new();
+    let mut frontier: Vec<Frontier> = Vec::new();
+
     place_room(&mut dungeon, &mut rooms, &mut frontier, seed, first, None);
 
     while !frontier.is_empty() && rooms.len() < TARGET_ROOMS {

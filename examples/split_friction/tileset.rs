@@ -31,6 +31,12 @@ pub const CHEST: u8 = 89;
 /// A standing shrine — the `Shrine` aspect's prop.
 pub const SHRINE: u8 = 41;
 
+/// One of Split Friction's two protagonists — the two Tiny Dungeon sprites that read female, in
+/// keeping with the game this is a parody of.
+pub const PROTAGONIST_1: u8 = 99;
+/// The other protagonist. See [`PROTAGONIST_1`].
+pub const PROTAGONIST_2: u8 = 100;
+
 /// The far wall's cap — straight, and at its west and east ends where it meets a side wall.
 pub const WALL_CAP_NEAR: u8 = 2;
 pub const WALL_CAP_NEAR_EAST: u8 = 1;

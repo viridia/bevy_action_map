@@ -18,7 +18,7 @@ use crate::device::{DeviceHandle, DeviceHandleSet};
 /// A context entity with no `Paired` reads every device, which is exactly today's single-player
 /// behavior: nothing has to opt in for a game that never mentions this component to keep working
 /// unchanged.
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Paired(DeviceHandleSet);
 
 impl Paired {
