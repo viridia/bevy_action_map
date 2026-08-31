@@ -282,8 +282,7 @@ step and a real game is a better acceptance test than a synthetic one.
 
 ### Upstreaming, if it happens
 
-There is a real possibility this crate is taken upstream into Bevy, displacing the working group
-currently building on BEI. It is **not committed**, and nothing here is built on the assumption that
+There is a possibility this crate is taken upstream into Bevy. It is **not committed**, and nothing here is built on the assumption that
 it will be. The rule is that the possibility may influence the *shape* and the *order* of what gets
 built, but no work happens that a third-party crate would not want anyway.
 
