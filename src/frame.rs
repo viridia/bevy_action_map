@@ -293,6 +293,10 @@ impl InputFrame {
 
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 /// Samples keyboard, mouse, and gamepad messages into the input frame queue.
+// A system's parameter list is how it declares what it touches, and every one of these is a
+// separate message stream or resource. Bundling them into a `SystemParam` would hide that to
+// satisfy a count.
+#[allow(clippy::too_many_arguments)]
 pub fn sample_input(
     mut frame: bevy_ecs::system::ResMut<InputFrame>,
     #[cfg(feature = "keyboard")] mut keyboard_inputs: MessageReader<KeyboardInput>,
@@ -300,6 +304,12 @@ pub fn sample_input(
     #[cfg(feature = "mouse")] mut mouse_button_inputs: MessageReader<MouseButtonInput>,
     #[cfg(feature = "mouse")] mut mouse_motion_inputs: MessageReader<MouseMotion>,
     #[cfg(feature = "gamepad")] mut gamepad_inputs: MessageReader<RawGamepadEvent>,
+    #[cfg(feature = "gamepad")] calibration: bevy_ecs::system::Res<
+        crate::device::GamepadCalibration,
+    >,
+    #[cfg(feature = "gamepad")] mut sampling: Option<
+        bevy_ecs::system::ResMut<crate::device::CalibrationSampling>,
+    >,
 ) {
     frame.begin_sample();
     #[cfg(feature = "keyboard")]
@@ -324,7 +334,19 @@ pub fn sample_input(
 
     #[cfg(feature = "gamepad")]
     for event in gamepad_inputs.read() {
-        frame.record(RawEvent::Gamepad(event.clone()));
+        let mut event = event.clone();
+        // Calibration is corrected here rather than in the evaluator: it is a fact about the
+        // hardware, not about who is reading it, so every context and every capture sees one
+        // answer and it costs one pass instead of one per context. It also lands on the right side
+        // of the injection seam — a backend that supplies values of its own writes into the frame
+        // directly, past this, which is R14.10 met by placement rather than by a check.
+        if let RawGamepadEvent::Axis(axis) = &mut event {
+            if let Some(sampling) = sampling.as_mut() {
+                sampling.observe(axis.gamepad, axis.axis, axis.value);
+            }
+            axis.value = calibration.apply(axis.gamepad, axis.axis, axis.value);
+        }
+        frame.record(RawEvent::Gamepad(event));
     }
 }
 
@@ -371,6 +393,12 @@ impl Plugin for InputFramePlugin {
         #[cfg(feature = "gamepad")]
         {
             app.add_message::<RawGamepadEvent>();
+            app.init_resource::<crate::device::GamepadCalibration>();
+            app.add_systems(
+                PreUpdate,
+                crate::device::warn_on_unread_gamepad_settings
+                    .in_set(crate::ActionMapSystems::Sample),
+            );
         }
     }
 }

@@ -137,6 +137,10 @@ const MENU_REPEAT: f32 = 0.25;
 /// will tolerate, so that reaching for one direction cannot brush past its neighbour on the way.
 const MENU_DEAD_ZONE: f32 = 0.6;
 
+/// The key [`Turn`]'s adjustable deadzone is declared under. Named once so the declaration and the
+/// settings screen agree without repeating the string.
+pub const TURN_DEAD_ZONE_KEY: &str = "disasteroids.turn.stick_deadzone";
+
 /// Declares the control scheme.
 ///
 /// Every action is bound twice, once for each device, and neither knows about the other. Reading
@@ -167,10 +171,15 @@ pub fn plugin(app: &mut App) {
         controls.hold_or_toggle::<Thrust>("disasteroids.thrust.hold_or_toggle");
 
         // A stick axis is already signed; two keys need a composite to become one. The deadzone is
-        // what stops a worn stick from turning the ship while the player is not touching it.
+        // what the mechanic wants, and the player may move it: a smaller one turns more readily, a
+        // larger one asks for a firmer push. The range reaches zero, which is only a sensible thing
+        // to offer once something is removing the hardware's own drift underneath — this game has
+        // no calibration step yet, so a player who takes it to zero gets their stick's drift and
+        // that is the honest answer rather than a floor pretending to be the mechanic's choice.
         controls
             .bind::<Turn>(GamepadAxis::LeftStickX)
-            .dead_zone(DeadZone::radial(0.15));
+            .dead_zone(DeadZone::radial(0.15))
+            .tunable_dead_zone(TURN_DEAD_ZONE_KEY, 0.0..=0.5);
         // Two keys make one axis, so the player sees two rows rather than one — "turn negative"
         // and "turn positive" — which is the same reason a movement composite is four. Each of
         // those two rows then holds two controls, because both composites are mappable and the

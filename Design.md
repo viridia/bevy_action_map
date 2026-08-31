@@ -273,7 +273,7 @@ Two consequences follow, and the second is counter-intuitive enough to be worth 
 
 ```mermaid
 flowchart TD
-    A[Control value from input frame] --> B[Calibration<br/>stage 1 deadzone · per device unit]
+    A[Raw device message] --> B[Calibration<br/>stage 1 · per device unit · at sampling]
     B --> C[Modifier chain<br/>negate · swizzle · scale · deadzone · curve · clamp]
     C --> D{Conditions}
     D -->|explicit: any satisfies| E[Candidate fire]
@@ -545,16 +545,16 @@ steady state (R23.2). Conditions get the identical treatment.
 Note `rescale` on `DeadZone`: D6 permits at most one rescaling stage, and making it explicit per
 modifier is what lets calibration, design, and preference deadzones compose (R5.3).
 
-### 8.1 The deadzone stages, and which one exists
+### 8.1 The deadzone stages
 
 D6 splits the deadzone into three stages because three parties have a claim on it and they are
-answering different questions (Requirements §14). Only the middle one is built:
+answering different questions (Requirements §14). All three are built:
 
-| Stage | Where it runs | Rescales | Status |
+| Stage | Where it runs | Rescales | Built by |
 | --- | --- | --- | --- |
-| **1 · Calibration** — this unit's true centre and rest envelope | L1→L2, before the modifier chain | no | not built |
-| **2 · Design** — what shape and curve the mechanic wants | the binding's modifier chain | **yes**, by default | **built** |
-| **3 · Preference** — the player's comfort adjustment | modulates stage 2 | no | not built |
+| **1 · Calibration** — this unit's true centre and rest envelope | `sample_input`, as the raw message is recorded | no | `GamepadCalibration` (`device.rs`) |
+| **2 · Design** — what shape and curve the mechanic wants | the binding's modifier chain | **yes**, by default | `DeadZone` (`binding.rs`) |
+| **3 · Preference** — the player's comfort adjustment | modulates stage 2 | no | `tunable_dead_zone`, applied as an override |
 
 Stage 2 is the one that rescales, and that assignment is not arbitrary. Rescaling is what makes a
 deadzone feel like nothing was taken away — full deflection still reads 1.0 — and stage 2 is the only
@@ -567,13 +567,41 @@ is rejected when its context is declared, naming the action. `Modifier::rescales
 obligation across to third-party modifiers, defaulting to `false` so that only a modifier that
 deliberately stretches its range has to say so.
 
-**Not yet answered by stage 2 alone.** Calibration is per device *unit* — drift is a wear
-characteristic — so it needs the evaluator to stop merging every pad into one axis map, and
-persistence needs the stable device identity of R11.5. Stage 3 needs the per-player scope of §15.
-Both are the next chunk. Per OQ-4's sub-question, stage 1 will ship with a **manual calibration API
-plus a sampling helper the app drives during an explicit "hold the stick still" step**, not
-background auto-detection: a stick deflected while detection is running would be learned as centre,
-and the misbehaving hardware in the README would poison it outright.
+**Stage 1 runs where the frame is assembled, not where it is read.** Calibration is per device
+*unit* — drift is a wear characteristic — and the raw message names the unit that sent it, so
+the correction is applied once as `sample_input` records it rather than once per context that
+reads it.
+That placement is what makes the per-unit question answerable at all without the evaluator holding
+per-device state: by the time held state exists, the value has already been corrected by the right
+unit's calibration. It also puts stage 1 on the correct side of the injection seam — a backend
+supplying its own values writes into the frame directly, past this, which is R14.10 met by
+placement rather than by a check.
+
+Per OQ-4's sub-question, stage 1 ships with a **manual calibration API plus a sampling helper the
+app drives during an explicit "let go of the sticks" step** (`CalibrationSampling`), not background
+auto-detection: a stick deflected while detection is running would be learned as centre, and the
+misbehaving hardware in the README would poison it outright. The instruction is "move the sticks and
+let go" rather than "hold still" because a pad reports an axis only when it *changes* — a stick
+that settled before the step began reports nothing during it, and that is exactly the drifting
+stick most in need of measuring.
+
+**Stage 3 needs no floor mechanism, but it does need stage 1 to have data.** The worry is that a
+player who drags the preference stage to zero turns their deadzone off entirely and gets a worn
+stick that steers on its own. Where the stick has been calibrated they do not, because stage 1
+removed the drift underneath and what stage 3 abolishes is only ever what the *mechanic* asked for.
+Where it has not, zero means zero. So the floor is not a clamp anywhere in the chain — it is the
+declared range a game gives its tunable, which is where a game says what it is prepared to accept,
+and a game with no calibration step should not offer zero unless it means it.
+
+**A require-reset that waits for rest cannot be applied to an axis.** Removing a stage-2 deadzone
+entirely is what first showed this: applying an override re-arms require-reset (R7.5), which holds
+an action back until it is seen at rest once, and a drifting stick with no deadzone left never
+is — so the action never recovered. The latch is therefore armed for `Button` intents only. What
+R7.5 guards is a *fire* synthesized from a control the player was already holding; an analog action
+has none to synthesize, and its value simply resumes.
+
+**Persistence of calibration** still needs the stable device identity of R11.5, so what is measured
+lives only as long as the process.
 
 ---
 

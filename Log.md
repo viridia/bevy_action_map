@@ -605,3 +605,89 @@ an assertion about slice copies.
 **Noted, not fixed:** `Requirements.md` line 445 cites `OQ-10` for reserved controls, and there is
 no OQ-10 — the numbered list stops at 9. Left alone rather than guessed at; it is either a renamed
 question or a reference to one never written.
+
+### Chunk 22: The deadzone chain, stages 1 and 3
+
+**The chunk's stated prerequisite was not a defect, and checking that is what made it small.** Its
+own roadmap text said calibration "needs the evaluator to stop merging every pad into one axis map,
+which is a defect in its own right." That was sized as a structural change — per-device keying of
+`held_gamepad_buttons`/`held_gamepad_axes`, plus a new rule for what a binding on "any gamepad"
+reads when two are deflected — and started. The author checked it against practice instead: LWIM's
+policy for several pads is last-moved wins, and its maintainer reports never having had a complaint.
+`HashMap::insert` on a shared cell already *is* last-moved. So the premise was withdrawn, the work
+reverted, and the merge now sits in "Known wrong today" as accepted rather than scheduled.
+
+**Calibration never needed the keying, because the raw message names its own sender.**
+`RawGamepadAxisChangedEvent` carries `gamepad: Entity`, so stage 1 is applied in `sample_input` as
+each message is recorded, before it reaches any context. Each pad's reading is corrected by its own
+numbers and only then merged, which answers the per-*unit* question with no per-device state
+anywhere. A test asserts exactly that: a second pad reporting the value the first one's calibration
+silences is not silenced.
+
+**The placement turned out to be worth more than the convenience.** Correcting at the sampling point
+rather than in the evaluator also puts stage 1 on the far side of the injection seam — a backend
+supplying its own values writes into the frame directly, past this — so R14.10 is met by where the
+code sits rather than by a check that can be forgotten. It is also one pass instead of one per
+context.
+
+**R14.9's stated failure mode was impossible given R14.9's own first half.** The requirement asked
+for a warning about `GamepadSettings` "since the result is a silent double deadzone that neither
+party can see." It cannot be: the same requirement's first clause has us reading the raw messages,
+which Bevy emits *before* those settings are applied. The real failure is the opposite one — a
+game that configures `GamepadSettings` and expects a binding to honour it gets silence — and that
+is what `warn_on_unread_gamepad_settings` now says. The requirement's wording was corrected to
+match.
+
+**The sampling helper's instruction is "move the sticks and let go", not "hold still".** A pad
+reports an axis only when it changes, so a stick that settled before the step began reports nothing
+during it — and a stick resting steadily off centre is precisely what drift looks like, so the
+case the obvious instruction misses is the one that most needs measuring. Releasing a stick during
+the step guarantees a reading at wherever it now rests. It is in `CalibrationSampling`'s doc comment
+because it is the difference between the feature working and appearing to.
+
+**Per-axis rather than radial**, decided as a cost question and worth recording as one. Applying at
+the sampling point means seeing one axis per message, so the rest envelope is per axis; a radial one
+would need the pair together, hence a read-time application, hence remembering which unit the merged
+cell came from — the per-device state this chunk had just declined. The square-corner artifact
+that usually argues against an axial deadzone does not bite, because a measured envelope (~0.03)
+sits far inside the binding's own radial one (0.15) and is swallowed by it.
+
+**Stage 3 shipped wrong, and playing it is what found that.** The reasoning offered here first was
+that stage 3 needs no floor because stage 1 is the floor — drag the preference to zero and the
+worn stick still rests, because calibration removed the drift underneath. That is true only where
+calibration *has data*, and this chunk deferred Disasteroids' calibration step to chunk 72, so in
+the shipped game stage 1 is the identity and zero means zero. The author set the deadzone to zero
+and `Turn` stopped working altogether.
+
+**The mechanism was worse than a missing floor, and predates this chunk.** Applying an override
+swaps the plan and re-arms require-reset for every slot (`adopt`, chunk 65); the latch lifts only
+when the folded value reads rest (`eval.rs`); an axis is under no obligation to ever read rest, and
+a drifting stick with no deadzone left never does. So `Turn` was not merely twitchy, it was wedged
+permanently — no push recovered it. Reachable since chunk 64 by any analog action on a noisy axis;
+this chunk handed a player the slider that walks into it.
+
+**Fixed in the crate rather than in the example, because a floored example leaves the footgun
+loaded.** Require-reset is now armed for `Button` intents only. R7.5 guards a *fire* synthesized
+from a control the player was already holding, and an analog action has none to synthesize — its
+value simply resumes — so the narrowing is closer to what R7.5 says than what the code did. R7.5
+gained a sentence stating it. The cost is real and stated: an analog action bound to keys no longer
+waits for the key to be released before resuming, which for a continuous value is arguably the
+better answer anyway.
+
+**What the floor question resolved to.** Not a clamp anywhere in the chain, and not stage 1 either:
+it is the declared range a game gives its tunable, which is where a game says what it will accept.
+Disasteroids still offers zero, deliberately, with the comment saying that a game with no
+calibration step is choosing to hand a player their own drift.
+
+**`Prefs` is gone from Disasteroids.** The stepper had been driving a resource of its own because it
+had nowhere to land; it now writes `PendingOverrides` through `tunable_dead_zone`, exactly like the
+hold-vs-toggle checkbox beside it, and takes its bounds off the tunable's declaration rather than
+constants of the screen's own — a stepper clamping to its own numbers could stop somewhere the
+binding would refuse.
+
+**Left undone, with a destination:** `CalibrationSampling` has no in-tree caller — it is driven by
+tests, not by a screen. That went to chunk 72 rather than being built here, on the argument that a
+calibration the player performs and loses on quit is worth little, so the screen and the persistence
+are one feature. Chunk 72's own "not doing" line, which pointed calibration back at this chunk, was
+rewritten to say so, and the deferred table's gate ("two units of the same kind") is discharged:
+telling two pads apart never needed two pads to test.

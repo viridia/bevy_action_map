@@ -3352,6 +3352,245 @@ mod tests {
         assert_eq!(by_dpad, by_keys);
     }
 
+    /// Stage 1 corrects the hardware; the binding's own deadzone still decides what the mechanic
+    /// wants. The two are separate stages, and this is what that buys: a stick resting off centre
+    /// stops turning the ship, and a player who wants a smaller deadzone than the drift can still
+    /// have one, because the drift was removed underneath rather than clamped over.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn calibration_corrects_a_drifting_axis_before_a_binding_reads_it() {
+        use crate::device::{AxisCalibration, GamepadCalibration};
+
+        let pad = bevy_ecs::entity::Entity::PLACEHOLDER;
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            // No deadzone of its own: this is stage 1 on trial, and a stage-2 deadzone wide enough
+            // to swallow the drift would prove nothing about it.
+            context.bind::<Turn>(GamepadAxis::RightStickX);
+        });
+        app.world_mut().spawn(OnFoot);
+        app.init_resource::<GamepadProbe>();
+        app.add_systems(FixedUpdate, probe_gamepad);
+
+        let push_to =
+            |app: &mut App, value: f32| {
+                app.world_mut().write_message(RawGamepadEvent::Axis(
+                    RawGamepadAxisChangedEvent::new(pad, GamepadAxis::RightStickX, value),
+                ));
+                app.update();
+                run_fixed_tick(app);
+                app.world().resource::<GamepadProbe>().turn
+            };
+
+        // Uncalibrated, a worn stick resting at 0.1 turns the ship on its own.
+        assert!((push_to(&mut app, 0.1) - 0.1).abs() < 1e-6);
+
+        app.world_mut().resource_mut::<GamepadCalibration>().set(
+            pad,
+            GamepadAxis::RightStickX,
+            AxisCalibration {
+                center: 0.1,
+                rest: 0.03,
+            },
+        );
+
+        // Calibrated, the same reading is the stick doing nothing.
+        assert_eq!(push_to(&mut app, 0.1), 0.0);
+        // A real push still arrives, recentred rather than rescaled — 0.5 on the wire is 0.4 of
+        // travel away from where this stick actually rests.
+        assert!((push_to(&mut app, 0.5) - 0.4).abs() < 1e-6);
+        // And the correction is this unit's alone: another pad reporting the same value is not
+        // silenced by what this one needed.
+        let other = bevy_ecs::entity::Entity::from_bits(0xDEAD);
+        app.world_mut()
+            .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
+                other,
+                GamepadAxis::RightStickX,
+                0.1,
+            )));
+        app.update();
+        run_fixed_tick(&mut app);
+        assert!((app.world().resource::<GamepadProbe>().turn - 0.1).abs() < 1e-6);
+    }
+
+    /// A player may turn their own deadzone all the way off, and a worn stick still holds still.
+    ///
+    /// This is the whole reason the two are separate stages. The preference stage adjusts what the
+    /// mechanic asked for, and it is free to ask for nothing, because it is not the thing keeping a
+    /// drifting stick quiet — calibration already removed the drift underneath it. There is no
+    /// clamp anywhere enforcing a floor; the floor is that stage 1 ran first.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_deadzone_turned_all_the_way_down_still_rests_on_calibration() {
+        use crate::device::{AxisCalibration, GamepadCalibration};
+        use crate::mapping::{Scheme, TunableValue};
+        use crate::overrides::{Overrides, apply_overrides};
+
+        let pad = bevy_ecs::entity::Entity::PLACEHOLDER;
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context
+                .bind::<Turn>(GamepadAxis::RightStickX)
+                .dead_zone(DeadZone::radial(0.15))
+                .tunable_dead_zone("tests.turn.stick_deadzone", 0.0..=0.5);
+        });
+        app.world_mut().spawn(OnFoot);
+        app.init_resource::<GamepadProbe>();
+        app.add_systems(FixedUpdate, probe_gamepad);
+
+        app.world_mut().resource_mut::<GamepadCalibration>().set(
+            pad,
+            GamepadAxis::RightStickX,
+            AxisCalibration {
+                center: 0.1,
+                rest: 0.03,
+            },
+        );
+
+        let push_to =
+            |app: &mut App, value: f32| {
+                app.world_mut().write_message(RawGamepadEvent::Axis(
+                    RawGamepadAxisChangedEvent::new(pad, GamepadAxis::RightStickX, value),
+                ));
+                app.update();
+                run_fixed_tick(app);
+                app.world().resource::<GamepadProbe>().turn
+            };
+
+        // The declared 0.15 swallows a small push, which is the mechanic's own choice.
+        assert_eq!(push_to(&mut app, 0.2), 0.0);
+
+        let mut overrides = Overrides::default();
+        overrides.tune(
+            Scheme::Gamepad,
+            "tests.turn.stick_deadzone",
+            TunableValue::Range {
+                value: 0.0,
+                min: 0.0,
+                max: 0.5,
+            },
+        );
+        assert!(apply_overrides(app.world_mut(), &overrides).is_empty());
+
+        // Applying cancels what was in flight and re-arms require-reset, so the stick has to be
+        // seen at rest once before it counts again. It reads as rest at 0.1, which is the point:
+        // with the deadzone now at zero, calibration is the only thing that could be saying so.
+        assert_eq!(push_to(&mut app, 0.1), 0.0);
+        // And that same small push now arrives — the player asked for a stick that answers sooner.
+        assert!(push_to(&mut app, 0.2) > 0.0);
+    }
+
+    /// An analog action cannot be wedged by an axis that never reads rest.
+    ///
+    /// Applying an override re-arms require-reset, which holds an action back until it is seen at
+    /// rest once. An axis is under no obligation to ever be: a stick drifting at 0.05, with a
+    /// player who has taken their own deadzone to zero, reads non-rest forever. Before this was
+    /// restricted to button intents the action never recovered — not on a real push, not ever.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn an_analog_action_survives_an_axis_that_never_rests() {
+        use crate::mapping::{Scheme, TunableValue};
+        use crate::overrides::{Overrides, apply_overrides};
+
+        let pad = bevy_ecs::entity::Entity::PLACEHOLDER;
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context
+                .bind::<Turn>(GamepadAxis::RightStickX)
+                .dead_zone(DeadZone::radial(0.15))
+                .tunable_dead_zone("tests.turn.stick_deadzone", 0.0..=0.5);
+        });
+        app.world_mut().spawn(OnFoot);
+        app.init_resource::<GamepadProbe>();
+        app.add_systems(FixedUpdate, probe_gamepad);
+
+        let push_to =
+            |app: &mut App, value: f32| {
+                app.world_mut().write_message(RawGamepadEvent::Axis(
+                    RawGamepadAxisChangedEvent::new(pad, GamepadAxis::RightStickX, value),
+                ));
+                app.update();
+                run_fixed_tick(app);
+                app.world().resource::<GamepadProbe>().turn
+            };
+
+        // A worn stick, drifting, with no calibration measured — so nothing but the binding's own
+        // deadzone is holding it still, and that is what the player is about to remove.
+        assert_eq!(push_to(&mut app, 0.05), 0.0);
+
+        let mut overrides = Overrides::default();
+        overrides.tune(
+            Scheme::Gamepad,
+            "tests.turn.stick_deadzone",
+            TunableValue::Range {
+                value: 0.0,
+                min: 0.0,
+                max: 0.5,
+            },
+        );
+        assert!(apply_overrides(app.world_mut(), &overrides).is_empty());
+
+        // The drift now leaks through, which is exactly what "no deadzone" means and is the
+        // player's own choice — measuring the stick is what would answer it, not a clamp here.
+        assert!((push_to(&mut app, 0.05) - 0.05).abs() < 1e-6);
+        // The point of the test: the action still works. A require-reset that only lifts at exact
+        // rest would have wedged it here permanently.
+        assert!(
+            push_to(&mut app, 0.9) > 0.5,
+            "an analog action was held back by require-reset it can never satisfy"
+        );
+    }
+
+    /// The sampling step, end to end: the crate feeds the sampler while it exists, and what it
+    /// measured is what silences the stick afterwards.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_calibration_step_measures_the_pad_that_reported_during_it() {
+        use crate::device::{CalibrationSampling, GamepadCalibration};
+
+        let pad = bevy_ecs::entity::Entity::PLACEHOLDER;
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context.bind::<Turn>(GamepadAxis::RightStickX);
+        });
+        app.world_mut().spawn(OnFoot);
+        app.init_resource::<GamepadProbe>();
+        app.add_systems(FixedUpdate, probe_gamepad);
+
+        // The game puts up its "let go of the sticks" screen.
+        app.world_mut().init_resource::<CalibrationSampling>();
+        for value in [0.09, 0.11, 0.10] {
+            app.world_mut()
+                .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
+                    pad,
+                    GamepadAxis::RightStickX,
+                    value,
+                )));
+            app.update();
+            run_fixed_tick(&mut app);
+        }
+
+        let sampling = app.world_mut().remove_resource::<CalibrationSampling>();
+        let sampling = sampling.expect("the sampling resource outlives the step");
+        assert_eq!(sampling.axes_seen(), 1);
+        sampling.finish(&mut app.world_mut().resource_mut::<GamepadCalibration>());
+
+        // What the player was told to hold still now reads as still.
+        app.world_mut()
+            .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
+                pad,
+                GamepadAxis::RightStickX,
+                0.10,
+            )));
+        app.update();
+        run_fixed_tick(&mut app);
+        assert_eq!(app.world().resource::<GamepadProbe>().turn, 0.0);
+    }
+
     #[cfg(feature = "gamepad")]
     #[test]
     fn raw_gamepad_events_drive_sticks_and_buttons() {

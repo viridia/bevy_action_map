@@ -232,8 +232,7 @@ step and a real game is a better acceptance test than a synthetic one.
   sustained one, declared once per action rather than per binding so that every eligible control
   shares one runtime latch instead of drifting independently, switched on from Disasteroids'
   controls screen and reaching both of `Thrust`'s keyboard bindings while deliberately leaving its
-  analog trigger alone, with the stick deadzone declared and enumerable but not yet reaching
-  `Turn`'s own binding, which chunk 22 still owns.
+  analog trigger alone.
 - **Per-entity overrides** — `apply_overrides_for` reaching one entity's own instance through the
   same `adopt` a rebind already uses, so two occupants sharing a context type persist and apply an
   `Overrides` independently, world-wide `AppliedPlan` and the declared baseline both untouched.
@@ -255,6 +254,10 @@ step and a real game is a better acceptance test than a synthetic one.
   device presses anything; the first still-unclaimed device to fire chunk 66's join gesture claims
   the next protagonist in spawn order, with a "waiting to join" prompt and a device-naming label
   drawn over that protagonist's own pane until it does.
+- **All three deadzone stages** — a measured per-unit centre and rest envelope corrected as the
+  frame is sampled, the binding's own shape and curve, and a player's adjustment of the second,
+  which is free to go to zero because the first is what keeps a worn stick still. Calibration is
+  measured by an explicit step the game drives, and lasts as long as the process.
 
 ### Known wrong today
 
@@ -270,7 +273,14 @@ step and a real game is a better acceptance test than a synthetic one.
   screen — the session simply keeps listening, with nothing said about why the press did not take.
 - Held gamepad state is per-device only for a paired instance — Split Friction pairs now (chunk 27),
   but Disasteroids' own context stays unpaired, so a disconnect there still clears every gamepad's
-  readings at once rather than just the one device's.
+  readings at once rather than just the one device's. **Deliberately not fixed**, and no longer
+  scheduled: chunk 22 was going to re-key this on the grounds that per-unit calibration needed it,
+  and it turned out not to — calibration is applied where the message still names its own sender.
+  What is left is the merge itself, where two pads reporting one axis means the one that moved last
+  speaks. That is LWIM's policy too, and its maintainer reports never having had a complaint; a
+  still-held stick on a second pad reading zero until it next moves is the whole observable
+  consequence. Fixing it costs a per-device map in every context instance, which is more than the
+  symptom is worth.
 
 ### Never built
 
@@ -307,7 +317,7 @@ skip the blind alleys this one took. Planning for that belongs here; building it
 
 ## What has landed
 
-Fifty-five chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+Fifty-six chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
 where it fell short of its own description, for the entries the work in flight still reasons from;
 the [archive](./Log-archive.md) holds the rest, phase by phase but not bounded by phase — a phase can
 be partly closed and partly still open. This table is only an index, and the sequence below is what
@@ -362,7 +372,7 @@ remains.
 | 23 | Persistence of overrides | done; landed together with chunk 55, which is its own test — hand-written `Serialize`/`Deserialize` behind the `serialize` feature rather than a derive, since the wire shape (one scheme per table, a scalar for a one-control row) is not `Overrides`' own shape; an unresolved mapping name is dropped on save rather than preserved, decided rather than merely deferred |
 | 55 | A file a person can read | done; the golden TOML round-trip test that validates chunk 23 |
 | 62 | Release on focus loss and disconnect | done; landed as a new `Fold::Interrupted` pass rather than a blanket `deactivate`/`activate`, so a surviving binding on an unaffected device is untouched; R16.3's suspend/resume and R16.4–R16.6 stay untouched, no in-tree pressure behind them yet |
-| 64 | Tunables and hold-vs-toggle | done; a named value overwriting one modifier field, applied by the same variant-plan recompile a rebind uses, enumerated and persisted the same way a mapping is; `hold_or_toggle::<A>` is declared once per action rather than per binding and finds every eligible binding itself, sharing one runtime latch across them (a plan-level shared-scratch table resolved once per tick, ahead of the per-binding fold, the same way `chord_claims` already is); Disasteroids' `Thrust` shares it across `KeyW` and `ArrowUp` and deliberately leaves the analog trigger untouched, both because it fails the Button-shape eligibility check and by choice, following shipped-game precedent that hold-vs-toggle is a player preference rather than a per-device one; the stick deadzone is declared and enumerable but its live wire into `Turn` stays chunk 22's, which needs a calibration floor this chunk has no data for |
+| 64 | Tunables and hold-vs-toggle | done; a named value overwriting one modifier field, applied by the same variant-plan recompile a rebind uses, enumerated and persisted the same way a mapping is; `hold_or_toggle::<A>` is declared once per action rather than per binding and finds every eligible binding itself, sharing one runtime latch across them (a plan-level shared-scratch table resolved once per tick, ahead of the per-binding fold, the same way `chord_claims` already is); Disasteroids' `Thrust` shares it across `KeyW` and `ArrowUp` and deliberately leaves the analog trigger untouched, both because it fails the Button-shape eligibility check and by choice, following shipped-game precedent that hold-vs-toggle is a player preference rather than a per-device one; the stick deadzone is declared and enumerable but its live wire into `Turn` stays chunk 22's |
 | 67 | Per-entity `apply_overrides` | done; split off chunk 26's own inherited question (from chunk 38) rather than answered speculatively — a split-screen app persisting two players' `Overrides` independently needs each applied to only its own entity, which the world-wide `apply_overrides` cannot do; `apply_overrides_for`/`apply_overrides_for_with_preset` are a second entry point onto `InputContextState::adopt`, the same machinery a rebind already uses, touching neither `InputContextPlan<C>` (the pristine declaration every diff is still taken against) nor `AppliedPlan<C>` (what a freshly spawned instance inherits), so two entities diverge independently and a third spawned afterward still gets the world's unmodified default; presentation (`read_mappings`/prompts) stays world-wide, a stated gap in the deferred table rather than built speculatively |
 | 26 | Device routing (core) | done; `DeviceHandle`/`DeviceHandleSet` (`device.rs`) and a sibling `Paired` component (`player.rs`) reach `InputContextState::apply_frame`, which filters the events it reads by device before anything else touches them — an unpaired instance reads everything, exactly today's behavior; owner-scoping `ConsumedControls`/the exclusion ceiling and per-entity presentation both went to the deferred table rather than being built ahead of a need |
 | 66 | The join gesture | done; landed with far less new code than its own text proposed — `bind_class`'s existing class-binding dispatch already carries the untouched `RawEvent`, and so the device, through `ClassFired`, so a game declares "press anything to join" as an ordinary action on an unpaired context rather than the crate running a second per-device evaluation cycle; `join::is_claimed` is the one new function, checking a device against every `Paired` in the world so two waiting slots never race for the same one |
@@ -371,6 +381,7 @@ remains.
 | 27 | Split Friction's device selection | done; `pair_on_join` (`protagonist.rs`) replaces chunk 68's hardcoded pairing — a `Lobby` context, never paired, bound only to chunk 66's join gesture (`bind_class::<Join>(ControlClass::AnyButton)`), claims each device for the next unclaimed protagonist in spawn order; a `Local<Vec<DeviceHandle>>` rather than `join::is_claimed` against a live `Query<&Paired>`, since two protagonists' join presses landing in the same tick both fire before either's `Paired` insert (a deferred command) is applied, and a world query would see both devices as still unclaimed and race for the same slot; each pane's "waiting to join" prompt and device label are `UiTargetCamera`'d directly at that pane's own split camera rather than drawn through a third camera on top, after three `Camera2d`s sharing one window turned out to hit what looks like a Bevy rendering bug (reproduced in isolation, reported upstream) where only the last camera's `ClearColorConfig` is honored and it clears the whole window rather than its own `Viewport`; verified visually — both panes render correctly, prompts positioned and centered — but the sandbox has no OS input-injection permission, so pressing an actual device to watch a prompt clear and a label fill in is still the author's own playtest |
 
 | 10 | The compiled plan, and OQ-3 closed | done; the interim `BTreeMap<ActionId, usize>` is a `Vec<u16>` indexed by the id, sentinel for unbound, sized by the largest id the context binds and held once per plan rather than per instance — an id interned after a plan compiled indexes past the end, which is the same answer the sentinel gives, so the miss needs no case of its own; the dirty bitset is one bit per slot, set by comparing `ActionState` before and after rather than by reading the phase (a held stick reports `Ongoing` every tick while its value moves), and its first consumer is the component's own change tick: evaluation writes through `bypass_change_detection` and re-marks only where a bit was set, so `Changed<InputContextState<C>>` became a subscription instead of a per-frame wake-up, with `dispatch_transitions` and `dispatch_class_fires` bypassed too so evaluation is the only thing that marks it; **OQ-3 is closed as D9** on structural facts rather than a timing run — activation moves no entity between archetypes and creates none, and a three-action context's whole snapshot is 140 bytes of `Copy` data — both asserted as tests, since a wall-clock comparison against a layout we would have had to build first is a number about the machine that ran it; the `Scratch` table's allocation, the chunk's third item, turned out to have landed with chunk 11 and needed nothing; `examples/` unchanged, as the chunk asked |
+| 22 | The deadzone chain, stages 1 and 3 | done, and **smaller than its own description**, because the defect it claimed to need turned out not to be one — see the log; `AxisCalibration`/`GamepadCalibration` (`device.rs`) hold a centre offset and rest envelope per (pad entity, axis), applied in `sample_input` as the raw message is recorded rather than in the evaluator, which is what lets the per-*unit* question be answered without any per-device held state: the message names its own sender, so by the time held state exists the value is already corrected by the right pad's numbers, and the placement also puts stage 1 past the injection seam, meeting R14.10 by where it sits rather than by a check; `CalibrationSampling` is the OQ-4 sampling helper, a resource the app inserts for an explicit step and removes after, whose doc comment carries the finding that the instruction must be "move the sticks and let go" rather than "hold still", since a pad reports an axis only when it changes and a stick that settled beforehand reports nothing during the step; R14.9's warning fires on `GamepadSettings` moved off Bevy's defaults, and the requirement's own stated failure mode was corrected in passing — a double deadzone cannot occur given the first half of the same requirement, and what actually happens is a setting that silently does nothing; stage 3 needed **no floor mechanism at all**, which is the layering paying for itself: Disasteroids' `Turn` now carries `tunable_dead_zone` and the settings stepper writes it through `PendingOverrides` like the hold-vs-toggle checkbox, `Prefs` is deleted, and a player may take it to zero because stage 1 already removed the drift underneath |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -459,21 +470,6 @@ whether a capture is live.
 ## Phase VIII — settling
 
 Nothing here changes what the crate can do.
-
-### 22. The deadzone chain, stages 1 and 3
-
-Calibration and preference, completing D6. Needs the evaluator to stop merging every pad into one
-axis map, which is a defect in its own right. Manual calibration API plus an app-driven sampling
-step per OQ-4; R14.9's pass-through warning; the preference stage modulating the design stage
-without being able to reduce it below what the hardware needs.
-
-- **Now downstream of chunk 26.** Per-device keying is exactly what routing has to introduce, so
-  this chunk should follow it rather than build a second way of telling two pads apart.
-- **Persistence of calibration** stays blocked on R11.5's stable device identity, which needs two
-  units of the same kind to be worth testing.
-- **The preference stage's mechanism already exists.** Chunk 64 built `tunable_dead_zone` and the
-  apply path a stage-3 clamp would ride — Disasteroids' `Turn` binding is what stage 3 wires it
-  to, once calibration gives it a floor to clamp against.
 
 ### 51. The constitution, trimmed
 
@@ -638,11 +634,20 @@ Each protagonist selects its own preset, applied through `apply_overrides_for_wi
 R11.5: stable persistent device identity, distinct from the ephemeral runtime handle, and Split
 Friction putting each player back on the device they had.
 
-- **Splits the deferred row rather than meeting it whole.** That row gates §11 on "two units of the
-  same kind", which is *calibration's* gate — per-device calibration is worth nothing until two
-  identical pads can disagree. Player assignment is testable today with a pad and a keyboard, so the
-  identity half comes here and the calibration half stays deferred.
-- **Not doing:** calibration keyed to identity, which stays chunk 22's and stays gated.
+- **Now carries calibration's persistence too.** That deferred row used to gate §11 on "two units
+  of the same kind", on the theory that per-device calibration was worth nothing until two
+  identical pads could disagree. Chunk 22 falsified the gate by building calibration without
+  either — the raw message names its own sender, so a test writes two entities — and what it
+  left keyed to the
+  runtime handle is exactly what a persistent identity would key instead. So this chunk should carry
+  `GamepadCalibration` across a restart alongside the pairing, or say why the two want different
+  storage.
+- **And the calibration step itself**, which chunk 22 left with no in-tree caller:
+  `CalibrationSampling` is driven end to end by tests but by no screen. It belongs here rather than
+  with chunk 22 because a
+  calibration a player performs and then loses on quit is worth little — the screen and the
+  persistence are one feature, and building the screen first would have shipped the half that
+  frustrates.
 - **Verified by:** playing it, quitting, relaunching — the same protagonist is on the same device
   without anyone pressing anything — and by unplugging a pad and plugging it back in.
 
@@ -891,7 +896,7 @@ rather than merely waiting.
 
 | Area                                              | Gated on                                                                   |
 | ------------------------------------------------- | -------------------------------------------------------------------------- |
-| Per-device **calibration** keyed to identity (§11, R11.7, R14.11) | two units of the *same kind*, which pad-plus-keyboard does not give. Note this row shrank: R11.5's *identity and player assignment* half went to chunk 72, since "put this player back on the device they had" is testable with the hardware on hand and only calibration needs two pads that can disagree |
+| **Persisting** calibration, keyed to identity (§11, R11.7, R14.11) | R11.5's stable device identity, which chunk 72 builds. Note this row shrank twice: first when R11.5's *identity and player assignment* half went to chunk 72, since "put this player back on the device they had" is testable with the hardware on hand; and again with chunk 22, which built the measuring and the applying, keyed to the runtime handle. What is deferred is now only the part that has to survive a restart — measured calibration lasts as long as the process. The old gate on this row, "two units of the *same kind*", is discharged: telling two pads apart never needed two pads to test, because the raw message names its sender and a test can write two entities |
 | Split Friction's monsters, spawners and missiles (was chunks 60 and 59) | a mechanic that would exercise input this crate has not already proven. The example now demonstrates what §15 wanted from it — two players, per-device routing, a live join gesture, and independent per-player state — and monsters would add game code without adding crate coverage. Kept as a row rather than deleted because the sprites, the dungeon's region aspects, and a `Fire`-shaped action to hang a missile on all already exist, so the cost of changing our mind is small |
 | Mouse wheel as a binding source (R13.3)           | nothing in tree wants it. Chunk 41 landed mouse *buttons* and stopped there deliberately: the wheel is a delta on its own channel, needs the `Line`/`Pixel` normalization R13.3 describes, and shares nothing with a button but the device |
 | Glyph ids (R18.4)                                 | asset-pipeline questions this document does not touch — but *the art is no longer one of them*: **Kenney's input prompt set** covers keyboard, mouse and the three pad brands and is CC0, so an example can ship one without a licensing conversation. Confirm the licence and the coverage before relying on either. What stays open is the identifier scheme, and Kenney is the way to falsify it: R18.4 wants a key of (brand, control) with a brand → generic → text fallback, and chunk 37's stored names are already the control half — `pad/South` plus a brand is nearly the whole id. If that mapping does not survive contact with a real atlas's file names, R18.4 is wrong rather than merely unbuilt |

@@ -598,7 +598,9 @@ replacements) — the layer concept is underused elsewhere and is exactly right 
   actions must be _canceled_ (fire the cancel transition), never left stuck as "held forever".
 - **R7.5 (MUST)** Activating a context must not fire actions for controls already physically held
   (require-reset), unless explicitly opted in — this is the "pressing E to close a menu instantly
-  re-triggers Interact" bug class.
+  re-triggers Interact" bug class. This binds actions of `Button` intent. An analog action resumes
+  its value instead: it has no fire to suppress, and an axis need never report rest, so a latch
+  waiting for one may never lift.
 - **R7.6 (SHOULD)** Context activation must be cheap enough to do per-frame (no rebuild of the whole
   binding graph); if a rebuild is needed it must be incremental and change-detection driven (§23).
 - **R7.7 (SHOULD)** A declarative way to express "these contexts are mutually exclusive" (a stack) as
@@ -929,9 +931,9 @@ binding config; neither is removable. This is a further argument for stage 1 bei
 rather than assuming a centered zero.
 
 - **R14.9 (MUST)** _(D6)_ Consume `RawGamepadEvent`/`RawGamepadAxisChangedEvent` at L1, not the
-  filtered values or `Gamepad::analog`. Document that apps using this crate should leave
-  `GamepadSettings` at pass-through, and detect and warn when they have not, since the result is a
-  silent double deadzone that neither party can see.
+  filtered values or `Gamepad::analog`. Detect and warn when an app has moved `GamepadSettings` off
+  Bevy's defaults: because the raw messages are emitted before those settings are applied, a game
+  that configures them and expects a binding to honour it gets silence rather than an error.
 - **R14.10 (MUST)** _(D6, D3)_ When an authority backend supplies action values, stages 1–3 are the
   backend's and must not be applied again on our side (§0.R0.4).
 - **R14.11 (SHOULD)** Stage 1 calibration must be persistable per device identity (§11.R11.5) and

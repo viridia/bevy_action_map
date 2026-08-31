@@ -33,7 +33,7 @@ use bevy_action_map::prelude::*;
 use bevy_action_map::preset::Preset;
 use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
-use crate::actions::{Back, Confirm, Menu, Navigate, ToggleSettings, Turn};
+use crate::actions::{Back, Confirm, Menu, Navigate, TURN_DEAD_ZONE_KEY, ToggleSettings, Turn};
 use crate::common::prompt_ui::{PromptScheme, PromptSpan};
 use crate::common::widget_focus::{
     Adjusted, ButtonFocused, Stepper, decrement_pressed, increment_pressed,
@@ -66,30 +66,8 @@ const CONTROL_WIDTH: f32 = 155.0;
 /// How far a follower's line sits under the row it rides.
 const FOLLOWER_INDENT: f32 = 20.0;
 
-/// Player-adjustable values with nowhere yet to land — the stepper's second sample point,
-/// alongside [`Button`]. `dead_zone` does not reach `Turn`'s own binding, which still reads the
-/// fixed `DeadZone::radial(0.15)` `actions.rs` declares at app-build time. Chunk 64 built the
-/// mechanism this would need — `tunable_dead_zone`, applied the same way a rebind is — but wiring
-/// `Turn` to it is left for chunk 22's own "preference stage": that is where the floor on how low a
-/// player may push a stick's deadzone comes from, derived from per-device calibration this crate
-/// does not have yet, and a tunable declared without that floor would let a player turn it off
-/// entirely. This proves the stepper on a second kind of value; it is not a working setting yet.
-///
-/// Named `Prefs` rather than `Settings`, which this file already uses for the screen's own
-/// visibility state.
-#[derive(Resource, Clone, Copy)]
-struct Prefs {
-    dead_zone: f32,
-}
-
-impl Default for Prefs {
-    fn default() -> Self {
-        Self { dead_zone: 0.15 }
-    }
-}
-
-const DEAD_ZONE_MIN: f32 = 0.0;
-const DEAD_ZONE_MAX: f32 = 0.5;
+/// How far one press of the stepper moves `Turn`'s deadzone. The bounds are the tunable's own,
+/// declared in `actions.rs` and read back off it, so the two cannot drift apart.
 const DEAD_ZONE_STEP: f32 = 0.05;
 
 /// Whether the controls screen is up.
@@ -125,7 +103,6 @@ struct PendingOverrides {
 pub fn plugin(app: &mut App) {
     app.init_state::<Settings>();
     app.init_resource::<PendingOverrides>();
-    app.init_resource::<Prefs>();
     app.add_observer(acquire_focus_directional);
     app.add_systems(OnEnter(Settings::Showing), (reset_pending, show));
     app.add_systems(OnExit(Settings::Showing), release_focus);
@@ -136,10 +113,8 @@ pub fn plugin(app: &mut App) {
     // with, so there is no "just spawned, still stale" case to also catch here.
     app.add_systems(
         PostUpdate,
-        (
-            redraw_pending.run_if(resource_changed::<PendingOverrides>),
-            redraw_dead_zone.run_if(resource_changed::<Prefs>),
-        )
+        redraw_pending
+            .run_if(resource_changed::<PendingOverrides>)
             .before(UiSystems::Prepare),
     );
 
@@ -359,7 +334,7 @@ fn screen(world: &World) -> impl Scene {
     let declared = declared_mappings(world);
     let pending = world.resource::<PendingOverrides>().rows.clone();
     let selected = selected_preset(&presets, &declared, &all, &pending);
-    let dead_zone = world.resource::<Prefs>().dead_zone;
+    let dead_zone = dead_zone_tunable(world, &pending);
     let hold_or_toggle = tunables(world)
         .into_iter()
         .find(|tunable| tunable.key == HOLD_OR_TOGGLE_KEY)
@@ -568,14 +543,23 @@ fn preset_button(preset: &Preset, selected: bool) -> impl Scene + use<> {
 
 /// A label and its stepper, the same "row names what it is, then draws the control" shape the two
 /// tables already use.
-fn dead_zone_row(value: f32) -> impl Scene {
+fn dead_zone_row(value: TunableValue) -> impl Scene {
+    let value = match value {
+        TunableValue::Range { value, .. } => value,
+        TunableValue::Bool(_) => 0.0,
+    };
     bsn! {
         Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(4.0) }
         Children [
-            (Text::new("Dead zone") TextFont { font_size: 14.0_f32 } TextColor(HEADING)),
+            (Text::new("Turn dead zone") TextFont { font_size: 14.0_f32 } TextColor(HEADING)),
             ({stepper(value)}),
         ]
     }
+}
+
+/// One place the value's format is decided, so the spawned row and [`redraw_pending`] agree.
+fn dead_zone_label(value: f32) -> String {
+    format!("{value:.2}")
 }
 
 /// One chevron on either side of the value, `justify_content: SpaceBetween` so the row's own width
@@ -603,7 +587,7 @@ fn stepper(value: f32) -> impl Scene {
             (Button on(decrement_pressed) Text::new("<") TextFont { font_size: 16.0_f32 } TextColor(TITLE)),
             (
                 DeadZoneValue
-                Text::new(format!("{value:.2}"))
+                Text::new(dead_zone_label(value))
                 TextFont { font_size: 15.0_f32 }
                 TextColor(TITLE)
             ),
@@ -617,19 +601,52 @@ fn stepper(value: f32) -> impl Scene {
 #[derive(Component, Default, Clone, Copy)]
 struct DeadZoneValue;
 
-/// Applies one step, clamped. Never touches the view directly — [`redraw_dead_zone`] is the one
-/// place anything reads [`Settings`] back out, the same division [`redraw_pending`] keeps.
-fn apply_dead_zone_delta(adjusted: On<Adjusted>, mut prefs: ResMut<Prefs>) {
-    prefs.dead_zone =
-        (prefs.dead_zone + adjusted.delta * DEAD_ZONE_STEP).clamp(DEAD_ZONE_MIN, DEAD_ZONE_MAX);
+/// `Turn`'s deadzone as the working copy has it, with the bounds the declaration gave it.
+///
+/// Returns the declared bounds alongside the value rather than constants of this file's own: the
+/// range lives on the tunable, so a stepper that clamped to its own numbers could stop somewhere
+/// the binding would not accept.
+fn dead_zone_tunable(world: &World, pending: &Overrides) -> TunableValue {
+    tunables(world)
+        .into_iter()
+        .find(|tunable| tunable.key == TURN_DEAD_ZONE_KEY)
+        .map_or(
+            TunableValue::Range {
+                value: 0.0,
+                min: 0.0,
+                max: 0.0,
+            },
+            |tunable| effective_tunable(&tunable, pending),
+        )
 }
 
-/// Repaints the stepper's value after [`apply_dead_zone_delta`] changes it — run once per change
-/// rather than pushed by the observer that caused it, same as [`redraw_pending`].
-fn redraw_dead_zone(prefs: Res<Prefs>, mut value: Query<&mut Text, With<DeadZoneValue>>) {
-    if let Ok(mut text) = value.single_mut() {
-        *text = Text::new(format!("{:.2}", prefs.dead_zone));
-    }
+/// Applies one step, clamped to the tunable's declared range. Writes into the working copy and
+/// nothing else — the same discipline every other row on this screen keeps, and the reason a
+/// deadzone the player is still deciding about does not move the ship underneath them.
+fn apply_dead_zone_delta(adjusted: On<Adjusted>, mut commands: Commands) {
+    let delta = adjusted.delta;
+    commands.queue(move |world: &mut World| {
+        let Some(tunable) = tunables(world)
+            .into_iter()
+            .find(|tunable| tunable.key == TURN_DEAD_ZONE_KEY)
+        else {
+            return;
+        };
+        let mut pending = world.resource_mut::<PendingOverrides>();
+        let TunableValue::Range { value, min, max } = effective_tunable(&tunable, &pending.rows)
+        else {
+            return;
+        };
+        pending.rows.tune(
+            tunable.scheme,
+            tunable.key,
+            TunableValue::Range {
+                value: (value + delta * DEAD_ZONE_STEP).clamp(min, max),
+                min,
+                max,
+            },
+        );
+    });
 }
 
 /// The key `actions.rs` declared `Thrust`'s toggle tunable under. Named once so the row builder,
@@ -812,6 +829,13 @@ fn redraw_pending(world: &mut World) {
         let mut checkbox = world.query_filtered::<&mut Text, With<HoldOrToggleValue>>();
         if let Ok(mut text) = checkbox.single_mut(world) {
             *text = Text::new(hold_or_toggle_label(active));
+        }
+    }
+
+    if let TunableValue::Range { value, .. } = dead_zone_tunable(world, &pending) {
+        let mut stepper = world.query_filtered::<&mut Text, With<DeadZoneValue>>();
+        if let Ok(mut text) = stepper.single_mut(world) {
+            *text = Text::new(dead_zone_label(value));
         }
     }
 }

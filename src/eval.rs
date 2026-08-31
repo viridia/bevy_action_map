@@ -757,7 +757,13 @@ impl<C: InputContext> InputContextState<C> {
             if let Some(value) = combined {
                 // Held over from before this context activated: report rest until the player lets
                 // go once, then let the action behave normally (R7.5).
-                if require_reset[slot] {
+                //
+                // Button intents only. What R7.5 guards is a *press* synthesized from a control the
+                // player was already holding, and an analog action has no press to synthesize — its
+                // value simply resumes. Holding one back until it reads exactly rest can wedge it
+                // forever, because an axis is not obliged to ever read rest: a drifting stick whose
+                // deadzone the player has taken to zero never does, and the action never recovers.
+                if require_reset[slot] && intent == Intent::Button {
                     if value.to_bool() {
                         continue;
                     }
