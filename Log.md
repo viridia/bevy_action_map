@@ -536,3 +536,72 @@ permission) confirmed both panes render correctly — scrolling gameplay, no bla
 static overlay, each prompt centered over its own protagonist — but pressing an actual device to
 watch a prompt clear and a label fill in with the paired device's name is still the author's own
 playtest, same split chunk 68's own verification had.
+
+### Chunk 10: The compiled plan, and OQ-3 closed
+
+The plan's action→slot lookup is a `Vec<u16>` indexed by `ActionId`, sentinel `u16::MAX` for
+unbound, replacing the interim `BTreeMap`. It is sized by the largest id the context binds rather
+than by the registry, and held once per plan rather than per instance, so the slack costs two bytes
+an id in one allocation. An id interned *after* a plan compiled indexes past the end — which is the
+same answer the sentinel gives, so the miss needs no case of its own, and the test that pins this
+reads an action nothing binds anywhere alongside one bound in a different context.
+
+**The chunk's three items were not three items.** The `Scratch` table's allocation had landed with
+chunk 11 and needed nothing. What was left was the slot map, which is mechanical, and the dirty
+bitset, which was not.
+
+**The dirty bit is a comparison, not a phase read.** The obvious implementation sets the bit where
+`update_action_state` returns a transition — `Fired`, `Completed`, `Canceled` — because those are
+the phases the transition log already filters on. That is wrong for exactly the case a subscriber
+most wants: a stick held off-centre reports `Ongoing` every tick while its *value* moves, and an
+action whose value moved has changed as surely as one that started. `ActionState` is `Copy` and
+derives `PartialEq`, so the bit is set by comparing the whole record before and after, which needs
+no signature change and cannot drift from what the phases mean.
+
+**R23.4's stated motivation had already been solved by something else.** The requirement worries
+that "every prompt wakes whenever any action moves" if state is one component. It turns out prompts
+never subscribed to action state: `PromptGeneration` (`present.rs`, §18) is a resource a binding or
+activation change bumps, and `resource_changed::<PromptGeneration>` is what
+`examples/common/prompt_ui.rs` runs on. So the bitset's per-action granularity has no reader today,
+and the honest thing was to say so rather than invent one — `DirtySet::contains` is `#[cfg(test)]`,
+and the deferred rollback row now owns it, since a snapshot is what reads these bits one at a time.
+
+**What the bitset did buy immediately is the component's own change tick.** Every tick writes
+something into `InputContextState` — the read cursor at minimum — so `Changed<InputContextState<C>>`
+was true for every instance every tick, which is the all-or-nothing wake-up R23.4 asks us not to
+hand anyone. Evaluation now takes the whole pass through `bypass_change_detection` and calls
+`set_changed` only where a bit was set. `dispatch_transitions` and `dispatch_class_fires` are
+bypassed for the same reason from the other direction: draining a log is not the action changing,
+and a class binding writes no action state at all, so evaluation is the only thing that marks this
+component. The rule the doc comment now states is that being marked changed means an action moved —
+keeping up with the devices, advancing the cursor and lifting a shadow are all invisible.
+
+**OQ-3 closed as D9, on structural facts rather than a stopwatch.** The question named rollback
+snapshot cost (R10.3) and activation churn (R23.3) as where option (a), action-as-entity, had to be
+measured. A wall-clock comparison would have meant building (a) first and would have produced a
+number about the machine that ran it; the facts that decide it do not need one and can be asserted
+as tests that keep holding:
+
+- Activating and deactivating a three-action context eight times moves the entity between no
+  archetypes, creates none, and spawns and despawns nothing. Under (a) each activation is an insert
+  or a removal per action, and every one of those is an archetype move.
+- A context instance's entire snapshot is a fixed byte count derived from its plan — 140 bytes for
+  three actions — of types that are `Copy`, asserted by a `fn assert_copy<T: Copy>()`. Under (a) a
+  snapshot is an archetype traversal.
+
+The resolution also corrects the framing rather than picking one of the four offered layouts: the
+answer is (b) applied *twice*, because the half that looked variable-size belongs to bindings rather
+than actions and its parameters live in the immutable plan. Design §6 already said this; what was
+missing was Requirements.md recording it, which is what D9 is.
+
+**Design §6's own numbers were stale.** It claimed action state was 32 B holding "value, phase,
+elapsed, progress, flags". `ActionState` is 20 B holding value and phase — elapsed, progress and
+flags moved to `Scratch` (24 B) when chunk 11 built it, and the table was never updated. Both
+corrected, along with the snapshot total, which is now a measured number in the document rather than
+an assertion about slice copies.
+
+**`examples/` did not change**, which was the chunk's own success criterion.
+
+**Noted, not fixed:** `Requirements.md` line 445 cites `OQ-10` for reserved controls, and there is
+no OQ-10 — the numbered list stops at 9. Left alone rather than guessed at; it is either a renamed
+question or a reference to one never written.

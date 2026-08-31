@@ -100,12 +100,64 @@ pub(crate) struct ButtonReading {
 /// carrying a context type gets one automatically — a player entity, one per local player, or a
 /// bare entity for a context that is not tied to anything in particular.
 ///
+/// One bit per action slot, for the ticks on which that action's state moved.
+///
+/// A bitset rather than a `Vec<bool>` so that "did anything move" is one word test for the context
+/// sizes that occur — a plan with 64 actions or fewer is a single word — and so that a snapshot
+/// carries it for the cost of rounding up.
+#[derive(Clone, Default)]
+pub(crate) struct DirtySet {
+    words: Vec<u64>,
+}
+
+impl DirtySet {
+    fn with_capacity(slots: usize) -> Self {
+        Self {
+            words: alloc::vec![0; slots.div_ceil(u64::BITS as usize)],
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.words.fill(0);
+    }
+
+    pub(crate) fn set(&mut self, slot: usize) {
+        self.words[slot / u64::BITS as usize] |= 1 << (slot % u64::BITS as usize);
+    }
+
+    // The per-slot read has no caller outside the tests yet: what reads these bits one at a time
+    // is a rollback snapshot, and that is still on the deferred table. `any` below is what the
+    // change tick needs, and it is the whole of today's use.
+    #[cfg(test)]
+    pub(crate) fn contains(&self, slot: usize) -> bool {
+        self.words
+            .get(slot / u64::BITS as usize)
+            .is_some_and(|word| word & (1 << (slot % u64::BITS as usize)) != 0)
+    }
+
+    pub(crate) fn any(&self) -> bool {
+        self.words.iter().any(|&word| word != 0)
+    }
+}
+
 /// The struct holds no references into the ECS, so tests and replays can drive one directly
 /// without a `World`.
+///
+/// # Change detection
+///
+/// This component is marked changed on a tick where one of its actions actually moved, and not on
+/// the ticks where evaluation ran and found nothing — so `Changed<InputContextState<C>>` is a
+/// subscription rather than a per-frame wake-up. Keeping up with the devices, advancing the read
+/// cursor, and lifting a shadow are all invisible to it, because none of them is an action
+/// changing.
 #[derive(Component)]
 pub struct InputContextState<C> {
     pub(crate) plan: Arc<Plan<C>>,
     pub(crate) actions: Vec<ActionState>,
+    // Parallel to `actions`: which of them moved since evaluation last cleared this. Per action
+    // rather than per context because the component's own change tick cannot distinguish them
+    // (R23.4), and because a rollback snapshot is the two tables plus these bits (Design §6).
+    pub(crate) dirty: DirtySet,
     pub(crate) active: bool,
     // Set and cleared only by `shadow`/`unshadow` (R7.8), never by `activate`/`deactivate`: `active`
     // is what this context's own condition or lifecycle wants, `shadowed` is what a higher-priority
@@ -158,6 +210,7 @@ impl<C: InputContext> InputContextState<C> {
         Self {
             plan,
             actions,
+            dirty: DirtySet::with_capacity(slots),
             active: true,
             shadowed: false,
             scratch: alloc::vec![Scratch::default(); scratch_slots],
@@ -484,6 +537,7 @@ impl<C: InputContext> InputContextState<C> {
             }
             state.phase = Phase::Canceled;
             state.value = rest_like(state.value);
+            self.dirty.set(slot);
             self.transitions.push(Transition {
                 slot,
                 phase: Phase::Canceled,
@@ -3828,5 +3882,198 @@ mod tests {
         app.update();
 
         assert_eq!(app.world().resource::<MotionProbe>().movement, Vec2::Y);
+    }
+
+    #[derive(InputAction)]
+    #[action(path = "tests.never_bound_anywhere", output = bool, intent = Button)]
+    struct NeverBoundAnywhere;
+
+    #[test]
+    fn an_action_the_context_does_not_bind_reads_as_unbound() {
+        // Both halves of the slot map's miss: `NeverBoundAnywhere` is interned by the read itself,
+        // so its id lands past the end of a map compiled before it existed, while `Jump` is
+        // interned by other tests and lands inside the map holding the sentinel.
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.bind::<Look>(MouseMove);
+        });
+        let entity = app.world_mut().spawn(FreeLook).id();
+
+        let state = app
+            .world()
+            .entity(entity)
+            .get::<InputContextState<FreeLook>>()
+            .unwrap();
+        assert!(state.is_bound::<Look>());
+        assert!(!state.is_bound::<NeverBoundAnywhere>());
+        assert!(!state.is_bound::<Jump>());
+    }
+
+    /// What a subscriber sees: how many instances the `Changed` filter offered on the last tick.
+    #[derive(Resource, Default)]
+    struct Woken(usize);
+
+    fn count_woken(
+        woken: Query<'_, '_, (), bevy_ecs::prelude::Changed<InputContextState<OnFoot>>>,
+        mut probe: bevy_ecs::system::ResMut<'_, Woken>,
+    ) {
+        probe.0 = woken.iter().count();
+    }
+
+    #[test]
+    fn change_detection_follows_the_actions_rather_than_the_tick() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        app.world_mut().spawn(OnFoot);
+        app.init_resource::<Woken>();
+        app.add_systems(FixedUpdate, count_woken);
+
+        // The spawn itself is a change; settle it, then run a tick where nothing happened at all.
+        app.update();
+        run_fixed_tick(&mut app);
+        app.update();
+        run_fixed_tick(&mut app);
+        assert_eq!(
+            app.world().resource::<Woken>().0,
+            0,
+            "an idle tick woke every subscriber"
+        );
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        run_fixed_tick(&mut app);
+        assert_eq!(app.world().resource::<Woken>().0, 1, "a press said nothing");
+
+        // Still held. `Fired` becomes `Ongoing`, which is one more change, and then the action is
+        // quiet for as long as the key stays down.
+        app.update();
+        run_fixed_tick(&mut app);
+        app.update();
+        run_fixed_tick(&mut app);
+        assert_eq!(
+            app.world().resource::<Woken>().0,
+            0,
+            "a key held still was reported as moving"
+        );
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Released));
+        app.update();
+        run_fixed_tick(&mut app);
+        assert_eq!(
+            app.world().resource::<Woken>().0,
+            1,
+            "a release said nothing"
+        );
+    }
+
+    #[test]
+    fn cancelling_on_deactivation_marks_the_action_dirty() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        let entity = app.world_mut().spawn(OnFoot).id();
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        let mut state = app
+            .world_mut()
+            .entity_mut(entity)
+            .into_mut::<InputContextState<OnFoot>>()
+            .unwrap();
+        state.dirty.clear();
+        state.deactivate();
+        assert!(
+            state.dirty.contains(0),
+            "a hold canceled by deactivation left no trace"
+        );
+    }
+
+    // OQ-3's two evaluation criteria, as facts about the layout rather than a wall-clock
+    // comparison: the numbers a timing run would produce follow from these, and these do not
+    // depend on the machine that ran them.
+
+    #[test]
+    fn activation_moves_no_entity_between_archetypes() {
+        // R23.3. Under action-as-entity each of these actions is a component insert or removal per
+        // activation, and every one of them is an archetype move; here activation is a `bool` and
+        // a `fill`, so the entity never leaves the archetype it spawned in and no new archetype is
+        // created to receive it.
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.bind::<Move>(DirectionalButtons::wasd());
+            context.bind::<Look>(MouseMove);
+            context.bind::<Turn>(KeyCode::KeyQ);
+        });
+        let entity = app.world_mut().spawn(FreeLook).id();
+        app.update();
+
+        let archetype = app.world().entity(entity).archetype().id();
+        let archetypes = app.world().archetypes().len();
+        let entities = app.world().entities().len();
+
+        for _ in 0..8 {
+            let mut state = app
+                .world_mut()
+                .entity_mut(entity)
+                .into_mut::<InputContextState<FreeLook>>()
+                .unwrap();
+            state.deactivate();
+            state.activate();
+            app.update();
+        }
+
+        assert_eq!(app.world().entity(entity).archetype().id(), archetype);
+        assert_eq!(app.world().archetypes().len(), archetypes);
+        assert_eq!(app.world().entities().len(), entities);
+    }
+
+    #[test]
+    fn a_snapshot_is_a_fixed_number_of_bytes_of_copy_data() {
+        // R10.3/R23.5. Restoring a context is a memcpy of the two tables and the dirty words —
+        // there is nothing here to traverse, nothing to reflect over, and nothing to allocate,
+        // which is the claim that has to hold for a rollback to afford it once per tick.
+        fn assert_copy<T: Copy>() {}
+        assert_copy::<ActionState>();
+        assert_copy::<Scratch>();
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.bind::<Move>(DirectionalButtons::wasd());
+            context.bind::<Look>(MouseMove);
+            context.bind::<Turn>(KeyCode::KeyQ);
+        });
+        let entity = app.world_mut().spawn(FreeLook).id();
+        app.update();
+
+        let state = app
+            .world()
+            .entity(entity)
+            .get::<InputContextState<FreeLook>>()
+            .unwrap();
+        let bytes = size_of_val(&*state.actions)
+            + size_of_val(&*state.scratch)
+            + size_of_val(&*state.tunable_scratch)
+            + size_of_val(&*state.dirty.words);
+
+        // Three actions and seven bindings' worth of working memory. The bound is generous, and
+        // the point of it is the order of magnitude: a rollback window of sixty ticks over four
+        // players is kilobytes, not megabytes.
+        assert!(
+            bytes < 512,
+            "a three-action context snapshots {bytes} bytes"
+        );
     }
 }

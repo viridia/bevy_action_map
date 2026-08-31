@@ -432,15 +432,15 @@ than solving it twice.
 
 ---
 
-## 6. State and storage — the OQ-3 commitment
+## 6. State and storage — the OQ-3 commitment, ratified as D9
 
 The requirements framed this as a choice between four layouts for one state store. The framing is
 wrong: **the state divides in two, and the halves want different treatment.**
 
 | | Holds | Shape | Belongs to |
 | --- | --- | --- | --- |
-| **Action state** | value, phase, elapsed, progress, flags | **uniform**, 32 B | the action |
-| **Scratch** | hold timers, tap counts, chord progress, filter state | *appears* variable | the **binding's** conditions and modifiers |
+| **Action state** | value, phase | **uniform**, 20 B | the action |
+| **Scratch** | hold timers, tap counts, chord progress, filter state | *appears* variable; is uniform, 24 B | the **binding's** conditions and modifiers |
 
 The second row is the one that made a packed byte buffer look necessary. But once it is attributed to
 bindings rather than actions, and the parameters (durations, thresholds, sequence definitions) are
@@ -473,12 +473,14 @@ Nothing overflows, including the sequences the requirements expected to need an 
 tables are dense arrays of `Copy` types:
 
 - **Snapshot/restore** for rollback (R10.3) is two slice copies plus the dirty bitset — no traversal,
-  no allocation, no reflection.
+  no allocation, no reflection. A three-action context is 140 bytes of it.
 - **Activation** flips `active`; no spawn, despawn, insert, or remove (R23.3).
 - **Layers keep independent in-flight state** because each context instance owns its own tables
   (R23.7) — the failure mode that rules out any store keyed by `ActionId` alone.
 - **Change granularity** is the dirty bitset, avoiding the all-or-nothing change ticks a single
-  component would impose (R23.4).
+  component would impose (R23.4). It also makes the component's *own* tick honest: evaluation writes
+  through a bypassed borrow and re-marks the component only where a bit was set, so keeping up with
+  the devices on a tick nobody touched anything is invisible to a subscriber.
 - **Backends** write into the action table directly (R0.4).
 - **Dynamic actions**, if ever added, get a mapping like any other (R1.3).
 - Public types stay legible (R24.6) — no offsets, no `[u8; N]`, no unsafe.

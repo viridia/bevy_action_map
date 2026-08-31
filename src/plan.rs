@@ -522,6 +522,10 @@ pub(crate) struct CompiledClassBinding {
     pub(crate) dispatch: ClassDispatch,
 }
 
+/// What `Plan::slot_by_action` holds for an action this context does not bind, and therefore also
+/// the ceiling on slots in one context — 65535 actions, which no plan approaches.
+const UNBOUND: u16 = u16::MAX;
+
 /// The plan is the immutable runtime view of a context's authored bindings.
 // One slot per action, not per binding: an action may be bound several times, and all of those
 // bindings write the same state. Bindings are grouped by slot so the evaluator can fold each
@@ -536,7 +540,11 @@ pub struct Plan<C> {
     slot_paths: Vec<&'static str>,
     // And its identity, for the reads that walk a context rather than naming what they want.
     slot_actions: Vec<ActionId>,
-    slot_by_action: BTreeMap<ActionId, usize>,
+    // The reverse direction, as a direct index rather than a search: `ActionId` is dense, so the
+    // id is the subscript and `UNBOUND` means this context does not bind it. Sized by the largest
+    // id the context binds rather than by the registry, and held once per plan rather than per
+    // instance, so the slack costs two bytes an id in one allocation.
+    slot_by_action: Vec<u16>,
     scratch_count: usize,
     // One cell per group of bindings sharing a tunable — see `CompiledBinding::tunable_shared`.
     // Most plans have none.
@@ -601,7 +609,7 @@ impl<C> Plan<C> {
         let mut slot_dispatch: Vec<Dispatch> = Vec::new();
         let mut slot_paths: Vec<&'static str> = Vec::new();
         let mut slot_actions: Vec<ActionId> = Vec::new();
-        let mut slot_by_action = BTreeMap::new();
+        let mut slot_by_action: Vec<u16> = Vec::new();
         if let Some(template) = template {
             slot_intents.clone_from(&template.slot_intents);
             slot_dispatch.clone_from(&template.slot_dispatch);
@@ -648,13 +656,30 @@ impl<C> Plan<C> {
         }
 
         for (index, binding) in bindings.into_iter().enumerate() {
-            let slot = *slot_by_action.entry(binding.action).or_insert_with(|| {
-                slot_intents.push(binding.intent);
-                slot_dispatch.push(binding.dispatch);
-                slot_paths.push(binding.path);
-                slot_actions.push(binding.action);
-                slot_intents.len() - 1
-            });
+            let id = binding.action.index() as usize;
+            if id >= slot_by_action.len() {
+                slot_by_action.resize(id + 1, UNBOUND);
+            }
+            let slot = match slot_by_action[id] {
+                UNBOUND => {
+                    slot_intents.push(binding.intent);
+                    slot_dispatch.push(binding.dispatch);
+                    slot_paths.push(binding.path);
+                    slot_actions.push(binding.action);
+                    let slot = slot_intents.len() - 1;
+                    // The sentinel is not a slot, so the ceiling is one below it rather than
+                    // `u16::MAX` — storing slot 65535 would encode as `UNBOUND` and read back as
+                    // an action this context does not bind. App-build, not runtime (R24.4): a
+                    // context this size is a mistake in the declaration, and there is no shipped
+                    // build in which it happens.
+                    slot_by_action[id] = u16::try_from(slot)
+                        .ok()
+                        .filter(|&slot| slot != UNBOUND)
+                        .unwrap_or_else(|| panic!("a context may bind at most {UNBOUND} actions"));
+                    slot
+                }
+                slot => usize::from(slot),
+            };
 
             let scratch_base = scratch_count;
             scratch_count += binding.modifiers.len() + binding.conditions.len() + 1;
@@ -744,7 +769,12 @@ impl<C> Plan<C> {
     }
 
     pub(crate) fn slot_for_action(&self, action: ActionId) -> Option<usize> {
-        self.slot_by_action.get(&action).copied()
+        // An id interned after this plan compiled indexes past the end, which means what the
+        // sentinel means: not bound here. So the miss needs no separate case.
+        match self.slot_by_action.get(action.index() as usize) {
+            Some(&UNBOUND) | None => None,
+            Some(&slot) => Some(usize::from(slot)),
+        }
     }
 
     /// The declared paths of every action this context binds, in slot order.

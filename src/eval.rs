@@ -4,6 +4,7 @@
 
 use alloc::vec::Vec;
 
+use bevy_ecs::change_detection::DetectChangesMut;
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::{Commands, Query, Res};
@@ -159,6 +160,9 @@ pub fn dispatch_transitions<C: InputContext + Component>(
         if state.transitions.is_empty() {
             continue;
         }
+        // Draining the log is not the action changing — the evaluation that filled it already said
+        // so, and saying it twice would move the change tick a system later than the fact.
+        let state = state.bypass_change_detection();
 
         // Taken rather than borrowed so the plan stays readable while dispatching, and handed back
         // afterwards so the allocation survives to the next tick.
@@ -187,6 +191,9 @@ pub fn dispatch_class_fires<C: InputContext + Component>(
         if state.class_fires.is_empty() {
             continue;
         }
+        // A class binding writes no action state, so a fire is not something a subscriber to this
+        // component asked to hear about.
+        let state = state.bypass_change_detection();
 
         let mut log = core::mem::take(&mut state.class_fires);
         for fire in log.drain(..) {
@@ -218,21 +225,32 @@ pub(crate) fn evaluate_context<
     let shadowed = ceiling.shadows(C::PRIORITY);
     let mut any_active = false;
     for (mut state, pairing) in &mut states {
+        // Bypassed for the whole pass and re-marked at the end only if an action moved. Every tick
+        // writes *something* here — the read cursor at least — so taking the deref at face value
+        // would mark every instance changed every tick, which is the all-or-nothing wake-up R23.4
+        // asks us not to hand a subscriber.
+        let instance = state.bypass_change_detection();
+        instance.dirty.clear();
+
         if shadowed {
-            state.shadow();
+            instance.shadow();
         } else {
-            state.unshadow();
+            instance.unshadow();
         }
-        if state.is_active() {
+        if instance.is_active() {
             any_active = true;
         }
 
         // Every instance of one context sees the same claims and adds to them together, so two
         // players sharing a context cannot take controls from each other.
         let mut claims = Vec::new();
-        state.apply_frame(&frame, &threshold, delta, &consumed, &mut claims, pairing);
+        instance.apply_frame(&frame, &threshold, delta, &consumed, &mut claims, pairing);
+        let moved = instance.dirty.any();
         for control in claims {
             consumed.claim::<S>(control, C::PATH);
+        }
+        if moved {
+            state.set_changed();
         }
     }
 
@@ -484,6 +502,7 @@ impl<C: InputContext> InputContextState<C> {
         let Self {
             plan,
             actions,
+            dirty,
             transitions,
             require_reset,
             scratch,
@@ -745,7 +764,14 @@ impl<C: InputContext> InputContextState<C> {
                     require_reset[slot] = false;
                 }
 
+                // Compared rather than inferred from the phase: a held stick reports `Ongoing`
+                // every tick while its value moves, and an action whose value moved has changed
+                // as surely as one that started or stopped.
+                let before = actions[slot];
                 let phase = update_action_state(&mut actions[slot], value, best, kind);
+                if actions[slot] != before {
+                    dirty.set(slot);
+                }
                 // Only the edges. `Idle` and `Ongoing` say that nothing changed, and an observer
                 // firing every tick for a held button would be noise rather than information.
                 if matches!(phase, Phase::Fired | Phase::Completed | Phase::Canceled) {

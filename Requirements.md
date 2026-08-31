@@ -1492,7 +1492,7 @@ editor, or serialized template gets the same benefit.
 **Problem.** The costs that matter are not the arithmetic of mapping a few dozen bindings per frame.
 They are structural: what happens when a context is activated, how much state a rollback tick must
 copy, and whether a prompt can subscribe to one action without waking on all of them. These are the
-properties that constrain the state layout left open in OQ-3.
+properties that decided the state layout, as **D9**.
 
 - **R23.1 (MUST)** Per-frame cost proportional to _active_ bindings, not to all defined actions ×
   entities.
@@ -1509,11 +1509,12 @@ properties that constrain the state layout left open in OQ-3.
   action values (§18 prompts especially) can subscribe rather than poll; unchanged actions must not
   mark themselves changed every frame. Note that if state is one component, Bevy's change ticks are
   all-or-nothing across it — per-action granularity must then be built in (a dirty set or
-  per-mapping change tick), or every prompt wakes whenever any action moves. This is an evaluation
-  criterion for OQ-3, not a settled cost.
+  per-mapping change tick), or every prompt wakes whenever any action moves. Settled by **D9**: the
+  dirty set is per action, and the component's own change tick is set only on a tick where one
+  moved.
 - **R23.5 (MUST)** Action state must be snapshot-able and restorable cheaply enough to run per
   rollback tick (§10.R10.3), and reachable from an `ActionId` in O(1) without a hash lookup on the hot
-  path. _How_ — see OQ-3.
+  path. _How_ — see **D9**.
 - **R23.6 (SHOULD)** A context instance may live as a component on an entity or standalone; the
   storage model must be identical in both cases, so per-player, global, and test-harness contexts
   share one code path (§0.R0.3).
@@ -1576,10 +1577,10 @@ produce APIs in which the simplest case stops being simple.
 | **D6** | **We own the whole deadzone chain**, consuming Bevy's _raw_ gamepad events, and model it as three separate stages rather than one negotiated number.                       | §5, §11, §14      |
 | **D7** | **The presentation model is separate from the binding model**: players see opt-in _mappings_, _named tunables_, and _presets_; modifiers and composites stay developer-only. | §2, §4, §5, §19, §20 |
 | **D8** | **Serialized identity is a declared path, not the Rust type path**, and the derive requires it — a saved binding must not depend on where a type lives. Namespacing moves to the naming convention (R1.8). | §1, §17, §18 |
+| **D9** | **Action state is two uniform dense tables and a dirty bitset**, held per context instance: an `ActionState` per action, a `Scratch` per condition and per stateful modifier. Actions are not entities. | §10, §23 |
 
-There is deliberately no decision here about how action state is stored, or about whether actions are
-entities. That is a design question for the next phase, not a requirement; §23 states the properties
-any layout must satisfy and OQ-3 maps the options.
+How action state is stored, and whether actions are entities, is settled as **D9** below; §23 states
+the properties any layout must satisfy, and Design §6 how this one does.
 
 ---
 
@@ -1592,37 +1593,23 @@ These are the forks where the choice cascades; everything else is comparatively 
    interned `ActionId` as the runtime representation and the reflected type path as the serialized
    identity. Sub-question also resolved: dynamic declaration is out of scope for v1 (§1), with the
    mapping-action pattern as the answer for modding._
-3. **OQ-3 — State layout** (§23), **open**. The real axis is _when the layout of a context's state
-   record is decided_:
+3. ~~**OQ-3 — State layout**~~ _Resolved as **D9** (§23, Design §6): **two uniform dense tables and
+   a dirty bitset** — an `ActionState` per action, a `Scratch` per condition and per stateful
+   modifier — which is option (b) applied twice rather than any of the four as they were offered.
+   The framing was the error: the half that looked variable-size belongs to **bindings** rather
+   than actions, and its parameters live in the immutable plan, so nothing is left for a packed
+   byte buffer (d) or a typed tuple (c) to size better. Both tables are `Copy`, which makes
+   snapshot and restore slice copies, and `ActionId` being dense makes the action→slot map a
+   `Vec<u16>`._
 
-   |                              | Layout decided                | Sketch                                                       |
-   | ---------------------------- | ----------------------------- | ------------------------------------------------------------ |
-   | **(a)** action-as-entity     | never — ECS archetypes        | BEI's model; one entity per action                           |
-   | **(b)** uniform dense table  | never — one slot size for all | `Vec<ActionState>` indexed by `ActionId`                     |
-   | **(c)** variadic typed tuple | compile time, by rustc        | context `(A, B, C)` → state `(A::State, B::State, C::State)` |
-   | **(d)** compiled plan        | context-build time, by us     | computed offsets into a packed byte buffer                   |
-
-   (a) gets change detection, reflection, and inspector support for free from the ECS; it is the
-   option under most pressure from R23.3 (activation churn) and R10.3 (snapshot cost), so those two are
-   where it has to be measured rather than argued about. Note that (a) was previously credited with a
-   third advantage — being the only layout that gives a per-action observer something to attach to —
-   and that turned out to be false: a *generic* entity event (`Fired<Jump>`) carries the action
-   identity in its type parameter and targets the context entity, so every layout supports per-action
-   observers equally. That removes the one criterion on which (a) was uniquely strong.
-
-   (c) and (d) are closer than they look: (d) is (c) with the layout computed at runtime instead of by
-   the compiler. (c) buys exact-size state, zero lookup, and compile-time-checked reads, at the cost
-   of enormous type signatures that are painful to read and debug — plus monomorphization bloat,
-   tuple arity limits, and no way to admit a dynamic action (R1.3) into a typed context. (d) keeps
-   packed exact-size state and O(1) offset access while admitting dynamic actions, and pairs naturally
-   with the compiled binding plan that §7.R7.6 and §23.R23.1 want anyway; it costs a build step and
-   careful typed-accessor code over a byte buffer.
-
-   Evaluation criteria, all already required elsewhere: rollback snapshot cost (R10.3), no activation
-   churn (R23.3), per-action change granularity (R23.4), independent per-layer state (R23.7), dynamic
-   actions coexisting with typed ones (R1.3), external backends writing state from outside (R0.4),
-   generic enumeration for debug UI and serialization (R22.2, R17.5), error-message quality (R24.6),
-   and `no_std` + no steady-state allocation (R23.2, R24.1).
+   _(a), action-as-entity, is ruled out on the two criteria it was to be measured on. Activation
+   moves no entity between archetypes and creates none, where (a) spends an insert or a removal per
+   action per activation (R23.3); and a context instance's entire snapshot is a fixed byte count
+   derived from its plan — 140 bytes for a three-action context — where (a) must traverse
+   archetypes to gather one (R10.3). Per-action change granularity (R23.4) is the bitset's. The one
+   criterion on which (a) was uniquely strong turned out not to exist: a generic entity event
+   (`Fired<Jump>`) carries the action identity in its type parameter and targets the context
+   entity, so every layout supports per-action observers equally._
 
 4. ~~**OQ-4 — Deadzone ownership**~~ _Resolved as **D6** (§14): consume raw, own all three stages —
    calibration (per unit), design (per binding), preference (per player) — with at most one rescaling
