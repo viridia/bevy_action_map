@@ -418,10 +418,26 @@ state of both.
 **UI focus.** BEI does not integrate `bevy_input_focus`; it offers an `ActionSources` resource so
 you can switch whole input sources off while the UI is being used, with a worked example for
 `Interaction`. LWIM reserves an `InputManagerSystem::Filter` system-set slot for a filter you write.
-This crate has an optional `focus` feature and focus-activated contexts — and a known gap:
-`bevy_ui_widgets` handles its own keyboard through `InputDispatchPlugin`, which asks the mapper
-nothing, so a widget activating on Space does so whether or not a context claimed Space. Roadmap.md
-lists it under "Known wrong today". None of the three has this fully solved.
+This crate has an optional `focus` feature, focus-activated contexts, and a working
+`bevy_ui_widgets` bridge: `examples/common/widget_focus.rs` tags each widget with a *kind* (as a
+required component, so no spawn site has to remember), activates a context while that kind holds
+focus, and answers from the keyboard **and the gamepad** through the same priority and consumption
+the rest of the game uses. Disasteroids disables `InputDispatchPlugin` outright and lets that answer
+for both, rather than splitting the seam between two mechanisms reaching for the same keys. The
+bridge is built from public crate API alone — `add_context`, `active_if`, `bind`, `.consume()` — so
+it needed nothing added for it.
+
+It lives beside the examples rather than in the crate for a layering reason, not a readiness one: an
+input crate that depends on `bevy_ui` cannot be depended on *by* `bevy_ui`, so the integration
+belongs in a crate of its own, and giving it one means splitting this repository into sub-crates.
+Until that happens it is a `#[path]` import shared by the examples, and exercised by Disasteroids
+end to end rather than by a test of its own. The `bevy_ui_widgets` side may not stay this crate's
+problem at all — [bevy#25592](https://github.com/bevyengine/bevy/issues/25592) asks for a
+widget-kind id upstream, which is the half that would move.
+
+What *is* still open here is narrower: making **unmodified** widgets respect consumption
+generically, without declaring a context per widget kind. That is deferred, and the documented
+advice is to reach for the bridge first.
 
 **Diagnostics.** This crate has `why_not::<A>()`, which answers "why didn't this fire?" with a named
 obstacle — inactive context, a higher-priority consumer, a longer chord winning, an unmet condition,

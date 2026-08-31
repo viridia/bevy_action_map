@@ -292,9 +292,14 @@ and is written against whatever surface was there, that surface is load-bearing.
 2. A **structured name for a control**, separable into a localization key plus a fallback string,
    rather than only a `Display` impl.
 
-**This crate does not get to be smug here either.** Its presentation layer currently lives in
-`examples/common/`, not in the crate, precisely because of the same `bevy_ui` layering constraint —
-it has designed the seam and not yet proven it across a crate boundary.
+**This crate does not get to be smug here either**, though the reason is worth stating precisely.
+Its presentation layer and its `bevy_ui_widgets` bridge both live in `examples/common/` rather than
+in the crate, hitting exactly this constraint from the other side. Both are built, and both were
+written against the public API without anything being added to the crate for them — which is the
+evidence that the seam holds. What has not happened is *packaging*: giving them a crate of their own
+means splitting this repository into sub-crates, and until that happens they are a `#[path]` import.
+"Exercised but not packaged" is a weaker claim than "shipped", and the distinction is the whole
+reason to design the query surface before there is a crate that needs it.
 
 ---
 
