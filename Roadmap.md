@@ -818,14 +818,21 @@ of things that would quietly never happen.
     look at the module pages the way a stranger would.
 - **The README rewrite** — a user-facing introduction, feature list, and quickstart, with its
   examples lifted from a real game rather than invented.
-- **Comparison with LWIM and `bevy_enhanced_input`** (R22.6) — the migration path the ecosystem will
-  ask for. The useful question to ask of each BEI difference is not "is this more ECS-shaped" — it
-  reliably is — but "does the ECS-ness earn its keep here". State activation is a case where it
-  does; the comparison should say which cases do not, and why.
-- **Why last:** the first item can be done at any time and the other two document a moving target.
-  The README wants chunk 19, after which the feature list stops growing in the presentation
-  direction; the comparison wants chunks 11 and 14, since conditions and arbitration are where the
-  three crates genuinely differ rather than differ in spelling.
+- ~~**Comparison with LWIM and `bevy_enhanced_input`** (R22.6)~~ — landed early, out of sequence, as
+  [docs/comparison.md](./docs/comparison.md), read against BEI 0.26.0 and LWIM 0.21.0 source rather
+  than against their documentation. It came out of the sequence because `Requirements.md`'s
+  orientation table was asserting things their source contradicts — "neither addresses
+  fixed timestep" most flatly, when BEI has `add_input_context_to` and LWIM swaps a second
+  `ActionState` around `FixedMain`. Those rows are corrected in `Requirements.md` and the doc now
+  carries the substantiation. **The remaining obligation is upkeep**: both crates move, and a
+  comparison read against 0.26/0.21 is a claim with a date on it.
+  - A second document came with it, for a different audience:
+    [docs/one-way-doors.md](./docs/one-way-doors.md), which asks of BEI's upstreaming what stops
+    being revisable once it is the engine's answer. Two of its seven doors — globally scoped
+    consumption, and a query surface for the player-facing half — are ones this crate has not got
+    through either, and it says so where they stand.
+- **Why last:** the first item can be done at any time and the README documents a moving target — it
+  wants chunk 19, after which the feature list stops growing in the presentation direction.
 
 ---
 

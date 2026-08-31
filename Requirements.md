@@ -78,18 +78,20 @@ what does not:
 
 | | |
 | --- | --- |
-| Actions as types with a derive | As in BEI. Unlike LWIM's one-enum-per-map, which cannot be extended by another crate (§1). |
+| Actions as types with a derive | As in BEI, and unlike LWIM's one-enum-per-map, which no other crate can add to (§1). Note the asymmetry the other way: BEI's actions are entities, so a third-party crate can add one to a context it does not own; bindings compiled at app build cannot. |
 | A richer state machine than pressed/just_pressed | `Ongoing` / `Fired` / `Canceled`, as in BEI and Unreal — needed for holds, chords, and hold-to-confirm UI (§3). |
 | Contexts with priority | As in BEI, plus Steam's _additive layers_, which override part of a context rather than replacing it (§7). |
-| Deadzones owned end to end | **Differs from both.** LWIM and BEI consume Bevy's already-deadzoned gamepad values; this crate consumes raw events and owns all three deadzone stages, because a clamp applied below you cannot be undone above you (§14). |
-| Fixed vs. render timing | **Neither addresses this.** Reading `just_pressed` in `FixedUpdate` can miss or duplicate presses; §9 treats that as a requirement rather than a caveat. |
-| Determinism and rollback | **Neither addresses this.** §10 requires mapping to be a pure, snapshot-able function so past ticks can be re-derived. |
-| Local multiplayer | **Neither handles the general case.** Device-to-player assignment is many-to-many, not an index (§15). |
-| Prompts, glyphs, rebinding UI | **Neither has a real answer.** §18 and §19 treat "what is bound to Jump right now, for this player, on this device" as a first-class query. |
-| External binding backends | **Neither supports this.** Steam Input owns bindings entirely; §0 and §18 make that a supported configuration rather than an incompatibility. |
+| Deadzones owned end to end | **Differs from both.** Both read the `Gamepad` component, downstream of `GamepadSettings`, and apply their own deadzone above it; this crate consumes raw events and owns all three stages, because a clamp applied below you cannot be undone above you (§14). |
+| Fixed vs. render timing | **All three address it; the difference is what survives the gaps.** BEI names a schedule per context and keys consumption by it; LWIM keeps a second `ActionState` swapped in around `FixedMain`. Both sample `ButtonInput`, a level, so a press and release inside one frame is invisible to either. §9 asks for edges preserved and drained by window. |
+| Determinism and rollback | **Both have an action-level seam**, LWIM's `ActionDiff` most maturely; §10 puts the seam at L1 instead, so a replay re-derives through the bindings rather than past them. |
+| Local multiplayer | **Both route gamepads per instance**, neither routes keyboard and mouse; §15 treats device-to-player assignment as many-to-many rather than an index. |
+| Prompts, rebinding UI | **Both expose bindings for iteration and mutation**, which is a workable basis; what neither has is a presentation model distinct from the binding model, capture with conflict detection, or overrides as a diff against a retained declaration (§18, §19). Glyphs: none of the three. |
+| External binding backends | **BEI has `ExternallyMocked`**, per action, which is most of the authority case; §0 and §18 add the source half, device suppression at L0, and a reverse lookup the backend can answer. |
 
 The sections most worth reading closely, because they contain requirements that are easy to discover
-too late, are §9 (timing), §14 (deadzones), §15 (pairing), and §17 (persistence).
+too late, are §9 (timing), §14 (deadzones), §15 (pairing), and §17 (persistence). The claims in the
+table above are substantiated against both crates' source, version by version, in
+[docs/comparison.md](./docs/comparison.md).
 
 ## 0. Purpose and layering
 
@@ -1702,7 +1704,7 @@ Prior art and primary sources for the claims made above. Bevy source links are p
 
 [lwim]: https://github.com/Leafwing-Studios/leafwing-input-manager
 [lwim-clash]: https://docs.rs/leafwing-input-manager/latest/leafwing_input_manager/clashing_inputs/enum.ClashStrategy.html
-[bei]: https://github.com/projectharmonia/bevy_enhanced_input
+[bei]: https://github.com/simgine/bevy_enhanced_input
 [bei-docs]: https://docs.rs/bevy_enhanced_input/latest/bevy_enhanced_input/
 [unreal-ei]: https://dev.epicgames.com/documentation/en-us/unreal-engine/enhanced-input-in-unreal-engine
 [unity-bindings]: https://docs.unity3d.com/Packages/com.unity.inputsystem@1.14/manual/ActionBindings.html

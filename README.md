@@ -307,6 +307,13 @@ rather than in an issue tracker, in the order a reviewer would want to read them
 | [Roadmap.md](./Roadmap.md)                              | What's built, in what order, and what's left — **start here to see current status**                                           |
 | [Log.md](./Log.md) / [Log-archive.md](./Log-archive.md) | What each increment of work delivered and learned                                                                             |
 
+Two shorter documents, for readers who want the comparison rather than the specification:
+
+| Document | What it is |
+| --- | --- |
+| [docs/comparison.md](./docs/comparison.md) | How this crate differs from `bevy_enhanced_input` and `leafwing-input-manager`, claim by claim, checked against both crates' source — including which of the two you should probably use instead |
+| [docs/one-way-doors.md](./docs/one-way-doors.md) | For the `bevy_enhanced_input` upstreaming discussion: which of its design decisions stop being revisable once it is the engine's answer, what each buys, and what each forecloses |
+
 ## License
 
 Dual-licensed under MIT or Apache-2.0, at your option, as declared in [Cargo.toml](./Cargo.toml).
