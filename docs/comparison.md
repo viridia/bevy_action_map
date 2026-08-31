@@ -65,8 +65,13 @@ shapes this crate's: because bindings are compiled once into an immutable plan, 
 array walk with no allocation, the declared bindings survive a rebind as a separate baseline, and
 the whole state of a context is a couple of `Copy` slices.
 
-Neither of those is straightforwardly better. They buy different things, and sections 8 and 10 below
-are where the difference stops being aesthetic.
+Neither of those is straightforwardly better. They buy different things, and sections 8, 9 and 10
+below are where the difference stops being aesthetic.
+
+One row is missing from that table on purpose, because it is the one nobody thinks about until a
+refactor: **what identifies an action in a player's saved settings**. LWIM's answer is the enum
+variant, BEI's is the Rust type, and this crate's is a declared string that is deliberately neither.
+Section 9 has it.
 
 ---
 
@@ -339,8 +344,33 @@ going to write it.
   saved mapping name against what the game currently declares and *reports* an unresolved name or an
   unrecognized control rather than dropping it silently.
 
-The structural difference is the one from section 8: serializing a diff against a declared baseline
-behaves differently across a game update than serializing the map.
+Two structural differences sit underneath those, and both are invisible until the game changes.
+
+**The first is the one from section 8**: serializing a diff against a declared baseline behaves
+differently across a game update than serializing the map.
+
+**The second is what a saved row is keyed on.** A settings file has to name the action a binding
+belongs to, and the three crates name it differently:
+
+| | The name in saved data | A Rust rename | A module move |
+| --- | --- | --- | --- |
+| LWIM | the enum variant, via serde on `HashMap<A, _>` | orphans that action's bindings | harmless to serde; breaks a reflect-based save |
+| BEI | the Rust type — actions carry `Name::new(any::type_name::<A>())`, and reflect/scene serialization keys on `TypePath` | orphans them | orphans them |
+| this crate | the action's declared `PATH`, a string separate from the type | harmless | harmless |
+
+`#[action(path = "gameplay.jump")]` exists for exactly this. The path is a name that lives outside
+your code, so `Move` can become `MoveOnFoot` and relocate to another module without a player losing
+what they bound to it. The convention is `<namespace>.<name>`, and the discipline is that the path
+does **not** follow the type — changing a path is a save-data migration, not a refactor. It does a
+second job as the localization key a controls screen renders the row's label from, which is why it
+is a required declaration rather than an optional one.
+
+Loading also *reports* a path it cannot resolve rather than dropping it, so a rename that did happen
+is visible instead of silent.
+
+The cost is a third thing to declare per action, and a convention to hold to — nothing stops you
+renaming the path alongside the type and getting exactly LWIM's behaviour. What it buys is that the
+default is right: a refactor is free, and breaking a player's settings takes a deliberate act.
 
 **All three leave writing the bytes to a file to the app.** None of them is a settings-file crate.
 
@@ -455,6 +485,12 @@ The three places it is not mechanical: an action must declare an **intent**, a c
 in **one** tick domain so an action needed at both rates is declared twice, and bindings are
 declared at app build rather than spawned — so anything that manipulated binding entities at runtime
 becomes an override instead.
+
+One thing worth doing deliberately rather than mechanically: **choose the paths, do not derive
+them.** The obvious move when porting is `path = "jump"` for `struct Jump`, which reproduces BEI's
+identity exactly and throws away the reason the field exists (section 9). Pick the namespace and the
+name you would want in a settings file five years from now, because that is what they are, and they
+are cheapest to get right before anyone has saved one.
 
 LWIM → either is a rewrite, because an enum of actions becomes one type per action.
 

@@ -828,9 +828,11 @@ of things that would quietly never happen.
   comparison read against 0.26/0.21 is a claim with a date on it.
   - A second document came with it, for a different audience:
     [docs/one-way-doors.md](./docs/one-way-doors.md), which asks of BEI's upstreaming what stops
-    being revisable once it is the engine's answer. Two of its seven doors — globally scoped
+    being revisable once it is the engine's answer. Two of its eight doors — globally scoped
     consumption, and a query surface for the player-facing half — are ones this crate has not got
-    through either, and it says so where they stand.
+    through either, and it says so where they stand. The cheapest of the eight is the one D8 already
+    answers: an action identified by a declared path rather than by its Rust type, which is why a
+    refactor here does not orphan a player's bindings.
 - **Why last:** the first item can be done at any time and the README documents a moving target — it
   wants chunk 19, after which the feature list stops growing in the presentation direction.
 

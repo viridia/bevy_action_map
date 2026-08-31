@@ -10,7 +10,7 @@ For each one: what it commits to, what that buys, what it forecloses, and whethe
 hedge that keeps the option open without paying for it now.
 
 Written against `bevy_enhanced_input` 0.26.0 (Bevy 0.19), read from source on 2026-08-31. Written by
-the author of a different input crate, so read it as an interested party's list. Doors 3 and 6 are
+the author of a different input crate, so read it as an interested party's list. Doors 4 and 7 are
 ones **this crate has not got through either**, and say so where they stand — a list that only found
 faults in someone else's design would not be worth reading.
 
@@ -110,7 +110,56 @@ to add before there is an ecosystem of saved configurations than after.
 
 ---
 
-### 3. Context priority and consumption are globally scoped
+### 3. An action's identity is its Rust type
+
+**The commitment.** There is no name for an action other than the type. `Action<A>` requires
+`Name::new(any::type_name::<A>())`, and because the action↔binding association is an ECS
+relationship, persisting an input configuration means reflect or scene serialization, which keys on
+`TypePath`. So the string that ends up in a player's settings file is `my_game::actions::Jump`.
+
+**What it buys.** Nothing to declare, nothing to keep in sync, and no second name that can disagree
+with the first. `#[derive(InputAction)] #[action_output(bool)] struct Jump;` is the whole
+declaration, which is genuinely nice.
+
+**What it forecloses.** A refactor that is free. Renaming `Jump` to `Leap`, or moving it from
+`actions.rs` into `actions/movement.rs`, orphans every binding every player has saved against it —
+and the second of those is not even a rename, it is tidying. LWIM has a milder version of the same
+problem: serde keys on the enum variant name, so a module move is harmless but a variant rename is
+not.
+
+The consequence is that the safest thing a game can do is never reorganise its action types, which
+is a strange constraint for a refactor-friendly language to impose. In practice games discover it
+the first time a player reports lost keybindings after an update, and the fix by then is a migration
+table keyed on old type names.
+
+**Why it is one-way.** Once an ecosystem of saved settings files exists keyed on type paths, adding
+a declared name later means either migrating everything or carrying two identities forever. It also
+compounds with door 2: with no retained declaration *and* no stable name, a saved configuration is a
+full replacement keyed on something a refactor can change, which is the worst of both.
+
+**The cheap hedge, and this is the cheapest one on the list.** An optional attribute defaulting to
+today's behaviour:
+
+```rust
+#[derive(InputAction)]
+#[action_output(bool)]
+#[action_path = "gameplay.jump"]   // optional; falls back to type_name::<A>()
+struct Jump;
+```
+
+Nothing changes for anyone who does not use it, and a game that does gets a name a refactor cannot
+touch. It is worth noting that the string wants to do a second job — a controls screen needs a
+localization key for the row's label, and the same declared name serves — which is an argument for
+making it a real declaration rather than a serialization-only annotation.
+
+*(This crate requires it rather than offering it: `#[action(path = "gameplay.jump")]`, with a
+`<namespace>.<name>` convention and the rule that a path does not follow the type. Requiring it is a
+defensible cost — one more line per action — but it is not the only workable answer, and defaulting
+to the type name is clearly the right migration path for a crate that already has users.)*
+
+---
+
+### 4. Context priority and consumption are globally scoped
 
 **The commitment.** `ContextPriority<C>` sorts a single world-wide `Vec<ContextInstance>` per
 schedule; `ConsumedInputs` is a world-wide set keyed by schedule. Neither records *whose* context
@@ -137,7 +186,7 @@ asymmetric: cheap before a public API exists, expensive after.
 
 ---
 
-### 4. An action's type says its output shape and nothing else
+### 5. An action's type says its output shape and nothing else
 
 **The commitment.** `InputAction` has exactly one associated item, `type Output: ActionOutput`, one
 of `bool` / `f32` / `Vec2` / `Vec3`. How several bindings feeding one action combine is a *separate*
@@ -181,7 +230,7 @@ Even leaving it unused, it reserves the space.
 
 ---
 
-### 5. Specificity is spelled through consumption, and only over modifier keys
+### 6. Specificity is spelled through consumption, and only over modifier keys
 
 **The commitment.** Actions within a context are sorted by the maximum `ModKeys` count across their
 bindings, so `Ctrl+S` is evaluated before `S` (`src/context.rs:485`). But order alone decides only
@@ -210,7 +259,7 @@ implements the other. That alone keeps a later pre-pass from being a behavioural
 
 ---
 
-### 6. There is no query surface designed for the player-facing half
+### 7. There is no query surface designed for the player-facing half
 
 **The commitment.** Not an active decision so much as an absence: rebinding UIs are expected to
 query `Binding` entities and mutate them. Rendering is `impl Display for Binding`, which formats
@@ -249,7 +298,7 @@ it has designed the seam and not yet proven it across a crate boundary.
 
 ---
 
-### 7. Where the gamepad dead zone is owned
+### 8. Where the gamepad dead zone is owned
 
 **The commitment.** `InputReader` reads the `Gamepad` component, which is downstream of Bevy's own
 `GamepadSettings` filter. The mapper therefore inherits a filtering policy rather than setting one,
@@ -295,16 +344,20 @@ Worth stating, because a list of concerns is only useful if it excludes the ordi
 
 Ranked by (cost of reversing later) ÷ (cost of hedging now):
 
-1. **Retain the declaration** so overrides can be a diff (door 2). It is the one with a
-   player-visible consequence — a patch's revised defaults reaching players who have saved settings
-   — and it is separable from everything else entities buy.
-2. **Put an owner on a consumption claim** (door 3). One field, and the alternative is local
+1. **Make a saved configuration survive the game changing** — doors 2 and 3, which are one concern
+   wearing two hats and compound badly together. Today a saved input map is a full replacement
+   (nothing retained to diff against) keyed on a name a refactor can change (the Rust type path). So
+   a patch's revised defaults reach nobody who has ever opened the controls screen, *and* tidying
+   `actions.rs` into a module orphans everyone's keybindings. Two hedges, both additive: a retained
+   declaration for the bindings, and an optional `#[action_path = "…"]` defaulting to today's
+   behaviour. The second is the cheapest item on this whole list.
+2. **Put an owner on a consumption claim** (door 4). One field, and the alternative is local
    multiplayer that quietly cross-talks. This crate should do it too.
 3. **Make the input reader a public, substitutable seam** (door 1), by widening `CustomInputs`
    rather than inventing anything. It does not commit to event-based input; it just stops
    foreclosing it.
 
-Doors 4 and 6 both have hedges that cost roughly one line and one trait respectively — a defaulted
+Doors 5 and 7 both have hedges that cost roughly one line and one trait respectively — a defaulted
 associated const, and a reverse lookup behind a trait — and are worth the line.
 
 ---
