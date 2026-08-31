@@ -26,11 +26,6 @@ pub const FLOOR_SHADOW_EDGE: u8 = 50;
 pub const FLOOR_SHADOW_CORNER: u8 = 52;
 pub const FLOOR_SHADOW_NUB: u8 = 53;
 
-/// A chest — the `Vault` aspect's prop.
-pub const CHEST: u8 = 89;
-/// A standing shrine — the `Shrine` aspect's prop.
-pub const SHRINE: u8 = 41;
-
 /// One of Split Friction's two protagonists — the two Tiny Dungeon sprites that read female, in
 /// keeping with the game this is a parody of.
 pub const PROTAGONIST_1: u8 = 99;

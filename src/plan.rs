@@ -549,6 +549,12 @@ pub struct Plan<C> {
     // One cell per group of bindings sharing a tunable — see `CompiledBinding::tunable_shared`.
     // Most plans have none.
     tunable_scratch_count: usize,
+    // Read only by the clash pass, which no build without device features has: no controls means
+    // no binding can carry a chord. Computed unconditionally so the builder needs no `cfg`.
+    #[cfg_attr(
+        not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")),
+        allow(dead_code)
+    )]
     has_chords: bool,
     // Design §4.1's second structure: consulted only when `indexed_controls` doesn't already claim
     // the control an event arrived on.
@@ -756,6 +762,7 @@ impl<C> Plan<C> {
     /// Whether any binding requires a control held alongside its own.
     ///
     /// A plan with none skips the clash pass entirely, which is most plans.
+    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
     pub(crate) fn has_chords(&self) -> bool {
         self.has_chords
     }

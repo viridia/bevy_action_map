@@ -59,7 +59,8 @@ done
 ```
 
 **Known, not regressions:** doctests compile but fail to *run* (`dynamic_linking` on the `bevy`
-dev-dependency — chunk 28 owns the fix); the `--features libm` build emits 4 pre-existing warnings.
+dev-dependency — chunk 28 owns the fix). Everything else is warning-free in every configuration
+above, so a warning is a regression — treat one as such rather than assuming it was already there.
 
 ## House style
 

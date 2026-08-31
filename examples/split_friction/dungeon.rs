@@ -25,9 +25,6 @@ const BORDER: usize = 1;
 const MAX_LOOP_GAP: usize = 3;
 /// One in this many qualifying facing gaps gets a connecting passage.
 const LOOP_CHANCE_DEN: u32 = 2;
-/// Reserved for scattering standalone props (chests, etc.) once an aspect grows beyond a floor and
-/// wall texture bias — not read anywhere yet.
-const PROP_CHANCE_DEN: u64 = 18;
 /// One in this many rooms gets each non-`Open` aspect (so half of all rooms stay plain).
 const ASPECT_CHANCE_DEN: u64 = 6;
 

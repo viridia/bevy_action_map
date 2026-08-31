@@ -337,6 +337,12 @@ impl<C: InputContext> InputContextState<C> {
         // once is what made a press and release inside a single window vanish: the two cancel in
         // the held state, and the fold sees nothing happen (R9.3).
         for event in unread.iter().filter(|e| owns(e)) {
+            // `MouseMotion` is the one variant `RawEvent` keeps with every device feature off, so
+            // there this is the only arm there is.
+            #[cfg_attr(
+                not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")),
+                allow(irrefutable_let_patterns)
+            )]
             if let RawEvent::MouseMotion(delta) = &event.event {
                 mouse_delta += *delta;
                 continue;
@@ -558,6 +564,7 @@ impl<C: InputContext> InputContextState<C> {
                 });
             }
         }
+        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         let out_ranked = |binding: &crate::plan::CompiledBinding| {
             let mut lost = false;
             binding.source.for_each_control(|control| {

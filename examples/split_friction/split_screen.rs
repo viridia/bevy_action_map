@@ -85,7 +85,7 @@ pub fn plugin(app: &mut App) {
 fn hud_camera() -> impl Scene {
     bsn! {
         Camera2d
-        Camera { order: -1 }
+        Camera { order: 0 }
         IsDefaultUiCamera
     }
 }
@@ -172,8 +172,8 @@ fn cameras() -> impl Scene {
         Transform::default()
         Visibility::default()
         Children [
-            (PlayerCamera(0) Camera2d Camera { order: 0 }),
-            (PlayerCamera(1) Camera2d Camera { order: 1 }),
+            (PlayerCamera(0) Camera2d Camera { order: 1 }),
+            (PlayerCamera(1) Camera2d Camera { order: 2 }),
         ]
     }
 }
