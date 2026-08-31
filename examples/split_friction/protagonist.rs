@@ -1,19 +1,18 @@
-//! The two protagonists: sprites, movement, and — for now — which device drives which.
+//! The two protagonists: sprites, movement, and how each one is claimed.
 //!
 //! Both read the same [`OnFoot`] context, bound to a stick and to arrow keys alike; what makes them
 //! independently controlled is [`Paired`], not two different contexts (chunk 26's device routing).
-//! Protagonist 1 is paired to the keyboard from the moment it spawns. Protagonist 2 spawns with no
-//! context at all, and [`pair_first_gamepad`] hands it one — paired to whichever gamepad connects
-//! first — the moment one does; until then it stands still. Which device goes to which protagonist
-//! is hardcoded here: chunk 27 is where a player picks their own device, and there is nothing to
-//! pick between yet without two protagonists already existing to pick for.
+//! Neither carries [`OnFoot`] or [`Paired`] at spawn. [`Lobby`] — a third context, bound only to the
+//! join gesture (chunk 66), never paired, so it reads every device — is what [`pair_on_join`]
+//! listens to: the first still-unclaimed device to press anything claims the next protagonist in
+//! spawn order, 0 then 1. This replaces chunk 68's hardcoded pairing (protagonist 1 always the
+//! keyboard, protagonist 2 always the first gamepad).
 
 use bevy::image::TextureAtlasTemplate;
 use bevy::prelude::*;
 use bevy_action_map::device::DeviceHandle;
 use bevy_action_map::player::Paired;
 use bevy_action_map::prelude::*;
-use bevy_input::gamepad::Gamepad;
 
 use crate::tileset;
 
@@ -29,7 +28,21 @@ pub struct Move;
 #[context(path = "split_friction.on_foot", tick = Fixed)]
 pub struct OnFoot;
 
-/// Which protagonist a sprite is — `0` for the keyboard-paired one, `1` for the gamepad-paired one.
+/// One context, never paired, that reads every device until [`pair_on_join`] claims it for a
+/// protagonist.
+#[derive(InputContext)]
+#[context(path = "split_friction.lobby", tick = Render)]
+pub struct Lobby;
+
+/// "Any button, on any device" — the join gesture (chunk 66). [`Lobby`]'s only binding.
+struct Join;
+
+impl ClassBinding for Join {
+    const PATH: &'static str = "split_friction.join";
+}
+
+/// Which protagonist a sprite is — `0` or `1`, spawn order, and the order [`pair_on_join`] claims
+/// them in.
 #[derive(Component, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Protagonist(pub u8);
 
@@ -42,50 +55,38 @@ pub fn plugin(app: &mut App) {
             .dead_zone(DeadZone::radial(0.2));
         controls.bind::<Move>(DirectionalButtons::arrow_keys());
     });
+    app.add_context::<Lobby>(|controls| {
+        controls.bind_class::<Join>(ControlClass::AnyButton);
+    });
 
     app.add_systems(FixedUpdate, walk);
-    app.add_systems(Update, pair_first_gamepad);
+    app.add_observer(pair_on_join);
 }
 
-/// Both protagonists, as one scene — spawned at `spawn[0]` and `spawn[1]` respectively.
-pub fn pair(layout: Handle<TextureAtlasLayout>, spawn: [Vec2; 2]) -> impl Scene {
+/// Both protagonists, as one scene, plus the [`Lobby`] context that pairs them — spawned at
+/// `spawn[0]` and `spawn[1]` respectively, neither claimed yet.
+pub fn spawn(layout: Handle<TextureAtlasLayout>, spawn: [Vec2; 2]) -> impl Scene {
     bsn! {
         Transform::default()
         Visibility::default()
+        Lobby
         Children [
-            ({keyboard_protagonist(layout.clone(), spawn[0])}),
-            ({pending_protagonist(layout, spawn[1])}),
+            ({protagonist(layout.clone(), 0, tileset::PROTAGONIST_1, spawn[0])}),
+            ({protagonist(layout, 1, tileset::PROTAGONIST_2, spawn[1])}),
         ]
     }
 }
 
-/// Protagonist 1 — paired to the keyboard from the moment it spawns.
-fn keyboard_protagonist(layout: Handle<TextureAtlasLayout>, pos: Vec2) -> impl Scene {
+/// One protagonist, unclaimed — [`pair_on_join`] adds [`OnFoot`] and [`Paired`] once a device
+/// claims it.
+fn protagonist(layout: Handle<TextureAtlasLayout>, index: u8, tile: u8, pos: Vec2) -> impl Scene {
     bsn! {
-        Protagonist(0)
-        OnFoot
-        Paired::to(DeviceHandle::KeyboardMouse)
+        Protagonist(index)
         Sprite {
             image: "split_friction/tilemap_packed.png",
             texture_atlas: {TextureAtlasTemplate {
                 layout: layout.into(),
-                index: tileset::PROTAGONIST_1 as usize,
-            }},
-            custom_size: Vec2::splat(tileset::TILE_SIZE as f32),
-        }
-        Transform::from_translation(pos.extend(1.0))
-    }
-}
-
-/// Protagonist 2 — no context yet. [`pair_first_gamepad`] adds one once a gamepad connects.
-fn pending_protagonist(layout: Handle<TextureAtlasLayout>, pos: Vec2) -> impl Scene {
-    bsn! {
-        Protagonist(1)
-        Sprite {
-            image: "split_friction/tilemap_packed.png",
-            texture_atlas: {TextureAtlasTemplate {
-                layout: layout.into(),
-                index: tileset::PROTAGONIST_2 as usize,
+                index: tile as usize,
             }},
             custom_size: Vec2::splat(tileset::TILE_SIZE as f32),
         }
@@ -124,25 +125,28 @@ fn walk(
     }
 }
 
-/// Hands protagonist 2 an [`OnFoot`] context paired to whichever gamepad connects first — runs
-/// until that happens, then never again.
-fn pair_first_gamepad(
+/// Claims one device for one protagonist the moment its "any button" press arrives, in spawn
+/// order — protagonist 0 first, then 1.
+///
+/// A `Local` list of already-claimed devices rather than `join::is_claimed` against a
+/// `Query<&Paired>`: two protagonists' join presses landing in the same tick both fire before
+/// either `Paired` insert (a deferred command) is actually applied, so a query would see both
+/// devices as still unclaimed and race for the same slot. The `Local` is updated synchronously
+/// inside the observer itself, so the second press to arrive already sees the first's claim.
+fn pair_on_join(
+    fired: On<ClassFired<Join>>,
+    mut claimed: Local<Vec<DeviceHandle>>,
+    protagonists: Query<(Entity, &Protagonist)>,
     mut commands: Commands,
-    mut claimed: Local<bool>,
-    gamepads: Query<Entity, With<Gamepad>>,
-    unpaired: Query<(Entity, &Protagonist), Without<OnFoot>>,
 ) {
-    if *claimed {
+    let device = fired.event.device();
+    if claimed.contains(&device) || claimed.len() >= 2 {
         return;
     }
-    let Some(pad) = gamepads.iter().next() else {
+    let slot = claimed.len() as u8;
+    let Some((entity, _)) = protagonists.iter().find(|(_, p)| p.0 == slot) else {
         return;
     };
-    let Some((entity, _)) = unpaired.iter().find(|(_, p)| p.0 == 1) else {
-        return;
-    };
-    commands
-        .entity(entity)
-        .insert((OnFoot, Paired::to(DeviceHandle::Gamepad(pad))));
-    *claimed = true;
+    commands.entity(entity).insert((OnFoot, Paired::to(device)));
+    claimed.push(device);
 }

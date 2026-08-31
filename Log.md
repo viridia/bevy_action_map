@@ -447,3 +447,92 @@ Also from that playtest, next steps the author wants captured rather than built 
 collision (chunk 69, retargeted below to a sliding response) and a join-based pairing flow with a
 per-pane "waiting to join" prompt (chunk 27, retargeted below) — both updated in `Roadmap.md` so
 neither is a floating decision the next session has to reconstruct from a conversation.
+
+### Chunk 69: AABB collision
+
+A protagonist's own movement is a swept box (`HALF_EXTENT` = 6px, smaller than the sprite itself so
+a slight overlap with a wall never reads as snagging on nothing) clamped one axis at a time against
+the dungeon's solid cells and the other protagonist's own box (`collision.rs`) — `resolve` clamps
+`x` first, then `y` against the position `x` already moved to, which is what turns a wall met at an
+angle into a slide along it rather than a dead stop, matching the roadmap text's own worked example.
+`clamp_axis` finds the longest safe prefix of a one-axis step by bisection (eight halvings, well
+under a pixel at protagonist speed) rather than an analytic sweep against the grid — cheap enough at
+one call per axis per protagonist per tick, and it needed nothing dungeon-specific beyond `is_solid`
+(`dungeon.rs`), unlike a real segment-vs-grid intersection would have. `SKIN` (half a pixel) backs
+every clamped move off from the exact contact distance, since landing flush leaves the box one
+rounding error from reading as already overlapping the tick after.
+
+`world_to_cell` (`main.rs`) is `cell_to_world`'s missing inverse — `blocked` walks a box's
+three-by-three neighborhood of cells and needed one. `cell_to_world`'s own signature had to move
+from `usize` to `isize` for it: `blocked` walks off the grid's own edge at a boundary cell, and a
+`usize` neighbor index there wraps instead of going negative.
+
+**Found along the way, not scoped by the chunk text, but part of the same playtest that found the
+need for collision:** the split-screen camera's zoom was a fixed `1 / 2.5` scale (chunk 68), which
+crops the wrong axis once a window's aspect ratio drifts from what that constant assumed;
+`ScalingMode::AutoMin` (`split_screen.rs`) replaces it, guaranteeing at least 20×15 tiles on-screen
+on whichever axis has room to spare rather than a fixed zoom either axis could crop. Panning a
+camera at a fractional-pixel position produced a faint per-frame seam between tiles even with
+nearest filtering — `follow` now snaps each camera's translation to whichever world distance one
+screen pixel currently covers, read back from the camera's own resolved `OrthographicProjection`
+rather than assumed, since `AutoMin` means that distance depends on the pane's own current size. The
+divider between the two panes was pure clear-color showing through the gap `sync_viewports` left
+uncovered — read as outright garbage on at least one machine tested on, so it's a real
+`BackgroundColor` node (`Divider`) now, and each camera's viewport is clamped to the divider's own
+edge rather than the pane's, which the flex layout can round to a different pixel than the divider's
+edge lands on. Kenney's tileset was sampling a neighbor's edge pixel at some tile boundaries under
+nearest filtering; `tileset::layout()` insets every atlas rect by one pixel on every side to keep
+every sample clear of the boundary.
+
+### Chunk 27: Split Friction's device selection
+
+Chunk 68's hardcoded pairing (protagonist 0 always the keyboard, protagonist 1 always the first
+gamepad) is replaced by chunk 66's join gesture, live: `Lobby` (`protagonist.rs`), an ordinary
+`InputContext` bound only to `bind_class::<Join>(ControlClass::AnyButton)` and never paired, so it
+reads every device the same way any other unpaired context does. `pair_on_join`, an observer on
+`ClassFired<Join>`, claims the next unclaimed protagonist (by `Protagonist(u8)`, spawn order) for
+whichever device fires it first. Both protagonists now spawn identically — no `OnFoot`, no
+`Paired` — through one `protagonist()` function parameterized by index and tile rather than the two
+near-duplicate `keyboard_protagonist`/`pending_protagonist` chunk 68 had.
+
+**The same-tick race a world query can't see.** Two protagonists' join presses landing in the same
+tick both fire `ClassFired<Join>` before either's `Paired` insert — a deferred `Commands` op — is
+actually applied, so `join::is_claimed` against a `Query<&Paired>` (the pattern `join.rs`'s own doc
+comment demonstrates) would see both devices as still unclaimed and race for the same slot: exactly
+the case two humans pressing "join" within the same fixed tick produces, which is the primary way
+this flow is meant to be used, not an edge case to shrug off. `pair_on_join` tracks claimed devices
+in a `Local<Vec<DeviceHandle>>` instead — updated synchronously inside the observer itself, so the
+second press to arrive in the same flush already sees the first's claim, no query staleness
+possible.
+
+**The prompt/label overlay found a Bevy rendering bug.** The first design — one more `Camera2d`
+(`hud_camera`) drawing last, on top of both split cameras, carrying a "waiting to join" prompt and a
+device-naming label per pane inside the same invisible flexbox that already measured the divider —
+turned out to hit what looks like a genuine Bevy bug rather than anything wrong in this crate: with
+three `Camera2d`s sharing one window, whichever camera has the *lowest* render order renders
+nothing. Confirmed by swapping which of three cameras got which `order` value three different ways
+(using Bevy's own `Screenshot`/`save_to_disk` API for a screenshot the session's sandboxed terminal
+could still capture, since it needed no OS-level screen-recording permission) — the blank one always
+followed the order value, never a particular entity or screen side. `ClearColorConfig::None` on the
+overlay camera didn't fix it; forcing a different `Msaa` on it to force a separate texture allocation
+crashed with a wgpu validation error instead. A minimal three-camera repro (two colored, viewport-
+split cameras plus a third un-viewported one on top) narrowed it further and was handed to the
+author to file upstream: with the overlay camera present, only the *last* camera's
+`ClearColorConfig` is honored, and it clears the *entire* window rather than being confined to its
+own `Viewport`, erasing the earlier cameras' output outright.
+
+The fix drops the third camera for this purpose entirely: each pane's prompt/label got its own root
+UI node, `UiTargetCamera`'d directly at that pane's own split camera (`split_screen.rs`), riding
+inside a render pass that already draws on top of that camera's own world content. `hud_camera`
+reverts to exactly chunk 68/69's original role — divider only, lowest order, nothing added.
+`UiTargetCamera`'d UI measures against the whole window regardless of which camera it targets, not
+that camera's own `Viewport` rect, so `sync_viewports` keeps each root positioned with `Val::Percent`
+(not `Val::Px`) of the window — a ratio, so no conversion through the window's own scale factor is
+needed, unlike an absolute pixel value would.
+
+**Verified visually, not by playing it.** The session's sandbox has no OS input-injection
+permission, so `Screenshot`/`save_to_disk` (not a system screen capture, so it needed no such
+permission) confirmed both panes render correctly — scrolling gameplay, no blank pane, no leaked
+static overlay, each prompt centered over its own protagonist — but pressing an actual device to
+watch a prompt clear and a label fill in with the paired device's name is still the author's own
+playtest, same split chunk 68's own verification had.

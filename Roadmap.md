@@ -246,9 +246,15 @@ step and a real game is a better acceptance test than a synthetic one.
   that device against the world's `Paired` set so two waiting slots on one screen never race for it.
 - **Split-screen cameras and protagonists** (`examples/split_friction/`) — the first in-tree use of
   `Paired` on a real entity rather than a test: two protagonists sharing one `OnFoot` context type,
-  one paired to the keyboard from spawn and one left context-less until a gamepad connects, each
-  seen through its own camera whose viewport comes from an invisible `bevy_ui` flexbox read back
-  every frame.
+  each seen through its own camera whose viewport comes from an invisible `bevy_ui` flexbox read
+  back every frame.
+- **Collision** (`examples/split_friction/collision.rs`) — a protagonist's own movement clamped one
+  axis at a time against the dungeon's solid cells and the other protagonist, so a wall met at an
+  angle is slid along rather than stopped dead.
+- **Live device pairing** (`examples/split_friction/`) — neither protagonist is playable until a
+  device presses anything; the first still-unclaimed device to fire chunk 66's join gesture claims
+  the next protagonist in spawn order, with a "waiting to join" prompt and a device-naming label
+  drawn over that protagonist's own pane until it does.
 
 ### Known wrong today
 
@@ -262,9 +268,9 @@ step and a real game is a better acceptance test than a synthetic one.
   Bevy's own (chunk 48).
 - A control capture refuses (wrong shape, wrong scheme, reserved) is silent on Disasteroids'
   screen — the session simply keeps listening, with nothing said about why the press did not take.
-- Held gamepad state is per-device only for a paired instance — nothing in tree pairs yet, Split
-  Friction (chunk 27) being the first, so a disconnect today still clears every gamepad's readings
-  at once for the single unpaired instance Disasteroids has.
+- Held gamepad state is per-device only for a paired instance — Split Friction pairs now (chunk 27),
+  but Disasteroids' own context stays unpaired, so a disconnect there still clears every gamepad's
+  readings at once rather than just the one device's.
 
 ### Never built
 
@@ -324,7 +330,7 @@ remains.
 | 38 | Applying a rebind | done; the conflict policies it also carried → 54, the file → 23, a follower riding only some of a row's slots → 58 |
 | 54 | Conflict policy | landed as detection only: `conflicts_pending` against a working copy, resolution left to the app on existing `Overrides` primitives |
 | 25 | Control classes and class bindings | done; `character_producing` measured against a real kana IME and a dead key rather than reasoned from docs — both compose correctly upstream and need nothing extra here; a focused text field actually claiming the class → 49 |
-| 56 | Split Friction's tileset | done; landed ahead of chunk 27 (device selection), which has not — this chunk needed nothing from it |
+| 56 | Split Friction's tileset | done; landed ahead of chunk 27 (device selection) — this chunk needed nothing from it |
 | 57 | A generated dungeon | done; the punched-obstacle arena this row used to describe was itself replaced — rooms grown from a perimeter frontier, wide loop-forming passages, and a region aspect per room biasing floor and wall texture. Wall and floor tile indices were rebuilt from scratch against Kenney's actual sheet after most of the first pass's assumptions turned out wrong; the wall/shadow resolver landed author-written, not LLM-written — see Log.md. Chest/shrine props and the `Vault` aspect are identified but not wired to anything yet |
 | 58 | `follow` replaces per-binding `follows` | done; found while scoping chunk 31 and landed ahead of it, since 31 inherited the follower-coverage problem this closes |
 | 31 | The settings screen, rebinding | done; steal chosen for R19.3's policy, and every capture patches the exact cells it touched rather than rebuilding — a capture never changes a row's shape |
@@ -338,6 +344,8 @@ remains.
 | 26 | Device routing (core) | done; `DeviceHandle`/`DeviceHandleSet` (`device.rs`) and a sibling `Paired` component (`player.rs`) reach `InputContextState::apply_frame`, which filters the events it reads by device before anything else touches them — an unpaired instance reads everything, exactly today's behavior; owner-scoping `ConsumedControls`/the exclusion ceiling and per-entity presentation both went to the deferred table rather than being built ahead of a need |
 | 66 | The join gesture | done; landed with far less new code than its own text proposed — `bind_class`'s existing class-binding dispatch already carries the untouched `RawEvent`, and so the device, through `ClassFired`, so a game declares "press anything to join" as an ordinary action on an unpaired context rather than the crate running a second per-device evaluation cycle; `join::is_claimed` is the one new function, checking a device against every `Paired` in the world so two waiting slots never race for the same one |
 | 68 | Split-screen cameras and protagonists | done; one `OnFoot` context bound to both a stick and arrow keys, `Paired` (chunk 26) is what makes the two protagonists independent rather than two context types — protagonist 1 is paired to the keyboard from spawn, protagonist 2 spawns with no context at all until a one-shot system pairs it to the first gamepad that connects, so an unpaired instance's "reads everything" default never lets the keyboard drive both sprites before a pad shows up; `Paired` needed `#[derive(Default)]` added (`src/player.rs`) since `bsn!`'s `FromTemplate` machinery requires it of every component a scene spawns, constructor call or not; the split-screen viewport sync needed a third camera nothing else touches, marked `IsDefaultUiCamera`, so the invisible HUD layout's `Val::Percent(100)` always measures against the full window rather than one of the two cameras `sync_viewports` has already narrowed — without it the layout would shrink itself by half every frame; verified by running the example and screenshotting it for the parts a sandbox with no OS input-injection permission could reach, and by the author playing it directly (keyboard and an Xbox pad) for the rest — both protagonists move independently and each camera tracks its own; that pass also found the default 1:1 world-to-pixel scale too zoomed out once a camera owns half the window, fixed by a `zoom_in` startup system setting `OrthographicProjection.scale` to `0.4` |
+| 69 | AABB collision | done; `collision::resolve` clamps a protagonist's swept box one axis at a time against the dungeon's solid cells and the other protagonist — an eight-step bisection search for the longest safe prefix of each axis's step, rather than an analytic sweep — so a wall met at an angle slides rather than stops dead; the same playtest that called for it also replaced chunk 68's fixed camera zoom with `ScalingMode::AutoMin` (crops neither axis regardless of window aspect), added per-pixel camera snapping to kill a tile-seam jitter, gave the pane divider a real `BackgroundColor` node instead of relying on clear-color showing through the gap, and inset the tileset's atlas rects by a pixel to stop nearest-filtering from sampling a neighboring tile at a shared edge |
+| 27 | Split Friction's device selection | done; `pair_on_join` (`protagonist.rs`) replaces chunk 68's hardcoded pairing — a `Lobby` context, never paired, bound only to chunk 66's join gesture (`bind_class::<Join>(ControlClass::AnyButton)`), claims each device for the next unclaimed protagonist in spawn order; a `Local<Vec<DeviceHandle>>` rather than `join::is_claimed` against a live `Query<&Paired>`, since two protagonists' join presses landing in the same tick both fire before either's `Paired` insert (a deferred command) is applied, and a world query would see both devices as still unclaimed and race for the same slot; each pane's "waiting to join" prompt and device label are `UiTargetCamera`'d directly at that pane's own split camera rather than drawn through a third camera on top, after three `Camera2d`s sharing one window turned out to hit what looks like a Bevy rendering bug (reproduced in isolation, reported upstream) where only the last camera's `ClearColorConfig` is honored and it clears the whole window rather than its own `Viewport`; verified visually — both panes render correctly, prompts positioned and centered — but the sandbox has no OS input-injection permission, so pressing an actual device to watch a prompt clear and a label fill in is still the author's own playtest |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -572,55 +580,6 @@ feature chunk.
 Disasteroids is one player reading one set of bindings. Everything in §15 is invisible to it,
 because with a single player there is no question of *which* device drove an action — and a model
 that never has to answer that question has not been tested on the thing it was designed for.
-
-### 69. AABB collision
-
-No physics engine — a protagonist slides along whatever it hits rather than stopping dead, which
-needs the per-axis response below rather than a single blocked/clear check.
-
-- **The response:** project the protagonist's own bounding box forward by its full movement vector
-  and test that swept box against the dungeon's solid cells and the other protagonist. A hit on the
-  box's horizontal side clamps the vector's `x` component to the distance actually available; a hit
-  on the vertical side clamps `y` the same way. Re-test the clamped vector and repeat — one wall
-  clamps one axis and can still leave the other's full distance open, which is what makes walking
-  into a wall at an angle slide along it rather than stop.
-- **Not doing:** anything a real physics engine would do that this doesn't need — resolution
-  against moving obstacles, stacking, friction, corner cases needing more than a couple of
-  iterations to settle.
-- **Verified by:** playing it — walk into a wall straight on and stop; walk into one at an angle and
-  slide along it instead of stopping; try to walk into the other protagonist and stop instead of
-  overlapping.
-
----
-
-### 27. Split Friction's device selection
-
-The device-selection screen originally scoped for this chunk, now landing after chunks 68 and 69
-rather than before them: chunks 56, 57, and 68 all needed *something* controllable to build and
-verify against, and there is nothing to pick a device *for* until two protagonists already exist.
-What's left, once the author played chunk 68, turned out simpler than a separate screen: pairing
-happens live, over the two panes split-screen already draws, using chunk 66's join gesture rather
-than a screen of its own — and chunk 68's own hardcoded pairing (protagonist 1 always keyboard,
-protagonist 2 always the first gamepad) is what this chunk replaces.
-
-- **What it is here to show:** each pane, unpaired, shows a small "waiting to join — press any
-  button" prompt over its protagonist. Any input from a device not yet claimed pairs it to the next
-  unclaimed protagonist in spawn order (protagonist 0 first, then 1), and that pane's prompt
-  disappears; once both are claimed, input from a still-unclaimed device is simply ignored — there
-  is nothing left to pair it to. This is the first flow in the crate where the player picks the
-  device rather than the developer, and it is the one part of §15 a developer cannot get right by
-  reading a doc comment.
-- **A label at the bottom of each pane** names the device its protagonist is paired to, once
-  paired — blank while a pane is still waiting, which is what makes the prompt above read as "this
-  one needs you" rather than a permanent fixture.
-- **Not doing:** rebinding, or letting a player choose *which* protagonist their device claims —
-  spawn order is the whole of the policy. Disasteroids covers rebinding, and a second UI here would
-  make this example about something other than the thing it is here to show.
-- **Verified by:** playing it — launch with neither device having pressed anything and see both
-  prompts up, press a key and watch its pane's prompt clear and the label fill in, then connect a
-  pad and press a button on it and watch the same happen on the other pane.
-
----
 
 ### 60. Split Friction's monsters and spawners
 
@@ -862,8 +821,9 @@ Owner-scoping `ConsumedControls` and the exclusion ceiling would answer R15.3's 
 one player's own, correctly device-scoped, consumption or exclusion decision cross-contaminating
 another player's bookkeeping in those two shared resources — but only a co-op game that *also* uses
 a per-player exclusive context or a binding consumed across two players' devices ever observes it,
-and Split Friction (chunk 27) declines rebinding UI and pairs through chunk 66's `JoinSession`
-rather than an `InputContext`, so nothing in tree does either yet. Per-entity presentation
+and Split Friction (chunk 27) declines rebinding UI and pairs through chunk 66's join gesture on an
+ordinary `InputContext` (`Lobby`, bound only to `bind_class`) rather than a per-player exclusive
+one, so nothing in tree does either yet. Per-entity presentation
 (`read_mappings`/`read_bindings`/`PromptScope`, all keyed by context *type* today) has the same
 shape of gap — `present.rs`'s own doc comment on `BindingTable` already names it, wanting "a
 per-player record" — but nothing before chunk 27 reads bindings per player either.

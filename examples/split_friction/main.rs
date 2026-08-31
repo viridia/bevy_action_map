@@ -1,11 +1,11 @@
 //! Split Friction — a split-screen game in the shape of Gauntlet.
 //!
-//! So far: a generated dungeon, drawn with Kenney's Tiny Dungeon atlas, and two protagonists —
-//! sprites 99 and 100, the two that read female, in keeping with the game this parodies — spawned a
-//! short distance apart in the dungeon's first room, each seen through its own camera. Player 1
-//! moves with the arrow keys; player 2 moves with a gamepad stick once one is connected — which
-//! device drives which protagonist is hardcoded for now, see [`protagonist`]. Monsters and the
-//! device-selection screen this game exists to demonstrate arrive in later stages.
+//! So far: a generated dungeon, drawn with Kenney's Tiny Dungeon atlas, two protagonists — sprites
+//! 99 and 100, the two that read female, in keeping with the game this parodies — spawned a short
+//! distance apart in the dungeon's first room, each seen through its own camera, colliding with the
+//! dungeon and each other. Neither is playable until a device presses something: whichever device
+//! presses first claims protagonist 0, the next distinct device claims protagonist 1 — see
+//! [`protagonist`]. Monsters arrive in later stages.
 //!
 //! Pass a seed on the command line to see a different layout: `cargo run --example split_friction --
 //! 7`. With none given, the layout is the same every run.
@@ -52,7 +52,7 @@ fn setup(mut commands: Commands, mut layouts: ResMut<Assets<TextureAtlasLayout>>
         .map(|(col, row)| cell_to_world(col as isize, row as isize));
 
     commands.spawn_scene(map(layout.clone(), &dungeon, seed.0));
-    commands.spawn_scene(protagonist::pair(layout, spawn));
+    commands.spawn_scene(protagonist::spawn(layout, spawn));
     // Moved in after `map` is done reading it — collision needs it live for the rest of the game.
     commands.insert_resource(Map(dungeon));
 }
