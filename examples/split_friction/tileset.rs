@@ -71,6 +71,18 @@ pub const WALL_FILL_EAST: u8 = 59;
 pub const WALL_FILL_NARROW: u8 = 58;
 
 /// The atlas layout matching `tilemap_packed.png`'s grid, with no padding between tiles.
+///
+/// Each rect is shrunk by a pixel on every side: with tiles packed edge to edge, a nearest-sampled
+/// texel right at a shared boundary is one floating-point rounding error away from landing in the
+/// neighboring tile instead, which reads as a thin seam of the wrong tile's edge color. A pixel of
+/// margin puts every sample safely clear of that boundary; on Kenney's own plain, blocky tiles,
+/// losing the outermost ring of source pixels reads as nothing at the sizes this game draws them.
 pub fn layout() -> TextureAtlasLayout {
-    TextureAtlasLayout::from_grid(UVec2::splat(TILE_SIZE), COLUMNS, ROWS, None, None)
+    let mut layout =
+        TextureAtlasLayout::from_grid(UVec2::splat(TILE_SIZE), COLUMNS, ROWS, None, None);
+    for rect in &mut layout.textures {
+        rect.min += UVec2::ONE;
+        rect.max -= UVec2::ONE;
+    }
+    layout
 }

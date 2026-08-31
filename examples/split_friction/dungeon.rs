@@ -124,6 +124,12 @@ impl Dungeon {
         [(cx - 1, cy), (cx + 1, cy)]
     }
 
+    /// Whether this cell blocks movement — every [`Cell`] but `Floor`, including anything off the
+    /// grid.
+    pub fn is_solid(&self, x: isize, y: isize) -> bool {
+        !matches!(self.cell_at(x, y), Cell::Floor)
+    }
+
     /// Every cell, resolved to what belongs there — row-major, same order as the grid itself.
     pub fn resolve(&self, seed: u64) -> Vec<(u8, Rotation)> {
         (0..self.height)

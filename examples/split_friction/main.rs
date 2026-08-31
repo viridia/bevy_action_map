@@ -15,6 +15,7 @@
 use bevy::image::TextureAtlasTemplate;
 use bevy::prelude::*;
 
+mod collision;
 mod dungeon;
 mod protagonist;
 mod split_screen;
@@ -48,11 +49,18 @@ fn setup(mut commands: Commands, mut layouts: ResMut<Assets<TextureAtlasLayout>>
     let dungeon = dungeon::generate(seed.0, WIDTH, HEIGHT);
     let spawn = dungeon
         .spawn_points()
-        .map(|(col, row)| cell_to_world(col, row));
+        .map(|(col, row)| cell_to_world(col as isize, row as isize));
 
     commands.spawn_scene(map(layout.clone(), &dungeon, seed.0));
     commands.spawn_scene(protagonist::pair(layout, spawn));
+    // Moved in after `map` is done reading it — collision needs it live for the rest of the game.
+    commands.insert_resource(Map(dungeon));
 }
+
+/// The generated dungeon, kept around after spawning so [`collision`](crate::collision) has
+/// something to test a protagonist's movement against.
+#[derive(Resource)]
+pub struct Map(pub dungeon::Dungeon);
 
 /// The generated dungeon, one sprite per cell.
 fn map(layout: Handle<TextureAtlasLayout>, dungeon: &dungeon::Dungeon, seed: u64) -> impl Scene {
@@ -67,7 +75,7 @@ fn map(layout: Handle<TextureAtlasLayout>, dungeon: &dungeon::Dungeon, seed: u64
             tile(
                 layout.clone(),
                 tile_index as usize,
-                cell_to_world(col, row),
+                cell_to_world(col as isize, row as isize),
                 tile_px,
                 rotation.as_quat(),
             )
@@ -84,14 +92,26 @@ fn map(layout: Handle<TextureAtlasLayout>, dungeon: &dungeon::Dungeon, seed: u64
 }
 
 /// A cell's center, in world units — column and row grow right and down, the grid centered on the
-/// origin.
-fn cell_to_world(col: usize, row: usize) -> Vec2 {
+/// origin. `isize` rather than `usize`: [`collision`] walks a cell's neighbors, which run off the
+/// grid at its own edges.
+fn cell_to_world(col: isize, row: isize) -> Vec2 {
     let tile_px = tileset::TILE_SIZE as f32;
     let width = WIDTH as f32;
     let height = HEIGHT as f32;
     Vec2::new(
         (col as f32 - (width - 1.0) / 2.0) * tile_px,
         ((height - 1.0) / 2.0 - row as f32) * tile_px,
+    )
+}
+
+/// The cell a world point falls inside — the inverse of [`cell_to_world`].
+fn world_to_cell(pos: Vec2) -> (isize, isize) {
+    let tile_px = tileset::TILE_SIZE as f32;
+    let width = WIDTH as f32;
+    let height = HEIGHT as f32;
+    (
+        (pos.x / tile_px + (width - 1.0) / 2.0).round() as isize,
+        ((height - 1.0) / 2.0 - pos.y / tile_px).round() as isize,
     )
 }
 

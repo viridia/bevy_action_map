@@ -95,16 +95,32 @@ fn pending_protagonist(layout: Handle<TextureAtlasLayout>, pos: Vec2) -> impl Sc
 
 fn walk(
     time: Res<Time>,
+    map: Res<crate::Map>,
     input: ActionsQuery<OnFoot>,
-    mut protagonists: Query<&mut Transform, With<Protagonist>>,
+    mut protagonists: Query<(&Protagonist, &mut Transform)>,
 ) {
     let delta = time.delta_secs();
+
+    // Snapshotted before either protagonist might move, so each one's collision test sees where
+    // the other actually was this tick rather than a position this same pass already updated.
+    let positions: Vec<(u8, Vec2)> = protagonists
+        .iter()
+        .map(|(protagonist, transform)| (protagonist.0, transform.translation.truncate()))
+        .collect();
+
     for (entity, state) in input.iter() {
-        let Ok(mut transform) = protagonists.get_mut(entity) else {
+        let Ok((protagonist, mut transform)) = protagonists.get_mut(entity) else {
             continue;
         };
-        let dir = state.value::<Move>();
-        transform.translation += (dir * SPEED * delta).extend(0.0);
+        let other = positions
+            .iter()
+            .find(|(index, _)| *index != protagonist.0)
+            .map_or(Vec2::splat(f32::INFINITY), |(_, pos)| *pos);
+
+        let wanted = state.value::<Move>() * SPEED * delta;
+        let pos = transform.translation.truncate();
+        let moved = crate::collision::resolve(&map.0, pos, other, wanted);
+        transform.translation += moved.extend(0.0);
     }
 }
 
