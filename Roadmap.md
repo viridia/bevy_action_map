@@ -280,11 +280,36 @@ step and a real game is a better acceptance test than a synthetic one.
 - The class binding mechanism has no caller yet: nothing in-tree is a focused text field, so
   `ControlClass::CharacterProducing` has never been bound outside its own tests (deferred table).
 
+### Upstreaming, if it happens
+
+There is a real possibility this crate is taken upstream into Bevy, displacing the working group
+currently building on BEI. It is **not committed**, and nothing here is built on the assumption that
+it will be. The rule is that the possibility may influence the *shape* and the *order* of what gets
+built, but no work happens that a third-party crate would not want anyway.
+
+What it changes, today:
+
+- **Chunk 10 moved to the front of the sequence.** OQ-3 has to be closed before more is built on the
+  interim layout, and it is the first thing an outside reader asks about. It earns its place as a
+  third-party chunk regardless; upstreaming only settled the ordering.
+- **OQ-5 and chunk 48 are public API** — the extensibility mechanism, and the names the prelude
+  drops into a glob import. Both are cheap now and breaking later, upstream or not.
+- **Chunk 46 gained a second audience.** Its short "the argument, not the spec" document is what a
+  reviewer coming cold reads, and it is also what makes the reasoning defensible by a person rather
+  than merely recorded.
+- **The presentation-layer row already names this as its own gate**, so if it happens, that split is
+  decided as part of the plan rather than discovered in the middle of it.
+
+What it does **not** change: there is no upstream repository, no PR sequence, and no
+re-implementation. If it goes ahead, it would be a fresh implementation staged as reviewable PRs —
+the first around 1,000–2,000 lines, keyboard only — written against this crate as a model so it can
+skip the blind alleys this one took. Planning for that belongs here; building it does not, yet.
+
 ---
 
 ## What has landed
 
-Forty-eight chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+Fifty-four chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
 where it fell short of its own description, for the entries the work in flight still reasons from;
 the [archive](./Log-archive.md) holds the rest, phase by phase but not bounded by phase — a phase can
 be partly closed and partly still open. This table is only an index, and the sequence below is what
@@ -450,14 +475,23 @@ without being able to reduce it below what the hardware needs.
   apply path a stage-3 clamp would ride — Disasteroids' `Turn` binding is what stage 3 wires it
   to, once calibration gives it a floor to clamp against.
 
-### 10. The compiled plan and slot allocation
+### 10. The compiled plan, and OQ-3 closed
 
 Replace the plan's `BTreeMap` with the `Vec<u16>` action→slot map, the dirty bitset, and the
 `Scratch` table's allocation.
 
+- **It stopped being last.** This was filed as an optimization of a shape we already understood, and
+  on its own terms it still is. What moved it is that it is also the only chunk that closes
+  **OQ-3**: four candidate state layouts are still formally open while the plan runs on the interim
+  `BTreeMap` (`plan.rs`), so everything built before it is built on a representation this design
+  says is not the final one.
+- **OQ-3 wants a measurement rather than an argument.** Its own criteria name rollback snapshot cost
+  (R10.3) and activation churn (R23.3) as where option (a), action-as-entity, has to be measured.
+  (a) is BEI's model, which also makes it the first question an outside reader asks — so the answer
+  wants to be a number, written down where someone else can find it.
 - **Success criterion: `examples/` does not change.** A diff there means the abstraction leaked.
-- **Why last:** it is an optimization of a shape we now understand, and it is the only chunk that
-  adds nothing a player or a developer can see.
+- **Closing OQ-3 is part of the chunk**, not a follow-on: `Requirements.md` gets the resolution and
+  the reasoning, the way OQ-4 and OQ-6 record theirs.
 
 ### 51. The constitution, trimmed
 
@@ -581,29 +615,72 @@ Disasteroids is one player reading one set of bindings. Everything in §15 is in
 because with a single player there is no question of *which* device drove an action — and a model
 that never has to answer that question has not been tested on the thing it was designed for.
 
-### 60. Split Friction's monsters and spawners
+Chunks 59 and 60 — missiles, monsters and spawners — left this phase for the deferred table. The
+example already demonstrates what §15 wanted from it, and more game code would not add crate
+coverage.
 
-Monsters spawn into the generated dungeon and wander, or chase within a simple radius, biased by
-their room's `RegionAspect`. Gauntlet's own mechanic: a spawner (a shrine-like object, itself
-reading an aspect) periodically spawns a monster nearby until something destroys it.
+### 70. Device brand and class
 
-- **Not doing:** combat, death, or damage of any kind — including against the spawner itself.
-  "Killed like a monster to stop it" needs a missile that can hit something, which chunk 59
-  explicitly declines and this chunk doesn't build either; that's its own later chunk, once
-  chunk 59 has landed for it to build on. This chunk is "things that populate the map
-  convincingly," not the whole game.
-- **Verified by:** playing it — a monster visibly reacts to a nearby protagonist and does
-  something sensible when none is nearby, and a spawner produces monsters at intervals on its own.
+R11.6: brand and class resolution (Xbox / PlayStation / Nintendo / generic), app-overridable, seeded
+from a database such as SDL_GameControllerDB. Written down as a chunk because until now it had **no
+destination anywhere in this document** — not a chunk, not a deferred row — which is the ground
+rule 5 case, and it was found by re-reading §11 rather than from any diff.
 
-### 59. Missiles as spinning sprites
+- **Unknown is an ordinary answer.** R11.6 admits `vendor_id`/`product_id` are `Option` and often
+  absent — wasm, some Linux setups — so the generic fallback is a common path, not an error.
+- **Not shipping SDL's database.** "A database such as" is what the requirement says: a small table
+  of known ids plus the app-override hook proves the seam, and the full database is data an app
+  supplies.
+- **It is the missing half of the glyph row**, not a separate errand. R18.4 keys a glyph identifier
+  on (brand, control) and chunk 37 already stores the control half, so this is what makes R18.4's
+  scheme testable at all.
+- **Verified by:** Split Friction's device label naming the pad actually being held rather than
+  "Gamepad".
 
-A fired weapon becomes a sprite that rotates at a fixed rate as it travels, riding whatever
-`Fire`-shaped action Split Friction already binds.
+### 71. Per-player presets
 
-- **Not doing:** collision or damage. A missile that flies to the edge of the map and despawns is
-  a complete acceptance for this chunk; hitting something — a monster, a spawner — is chunk 60's
-  own follow-on concern, not this one's.
-- **Verified by:** playing it.
+Each protagonist selects its own preset, applied through `apply_overrides_for_with_preset`.
+
+- **What it proves.** Chunk 67 built the per-entity apply path ahead of a need and nothing in tree
+  has called it since — this is that caller. A preset is the cheapest override to select, being a
+  named set rather than a captured control, so the general per-entity override case is validated
+  without a second rebinding UI.
+- **It trips a deferred row on purpose.** "Per-entity presentation and prompts" is gated on an
+  actual per-player settings display existing, and a per-pane preset selector is one. Expect it to
+  validate that row's sketch or falsify it, and say which.
+- **Verified by:** playing it — each pane selects independently, and the other pane's bindings do
+  not move.
+
+### 72. Device identity, and a pairing that survives a restart
+
+R11.5: stable persistent device identity, distinct from the ephemeral runtime handle, and Split
+Friction putting each player back on the device they had.
+
+- **Splits the deferred row rather than meeting it whole.** That row gates §11 on "two units of the
+  same kind", which is *calibration's* gate — per-device calibration is worth nothing until two
+  identical pads can disagree. Player assignment is testable today with a pad and a keyboard, so the
+  identity half comes here and the calibration half stays deferred.
+- **Not doing:** calibration keyed to identity, which stays chunk 22's and stays gated.
+- **Verified by:** playing it, quitting, relaunching — the same protagonist is on the same device
+  without anyone pressing anything — and by unplugging a pad and plugging it back in.
+
+### 73. A key rendered through a catalogue
+
+Every `fallback_label` call in tree is unconditional: nineteen sites across `examples/`, not one of
+them going through a catalogue. R19.14 makes rendering the app's business and the crate's half of
+that is done — but the claim those names are *keys a localized game looks up* has never once been
+exercised, so the convention R19.14 calls derivable is unfalsified.
+
+- **In an example, not the crate.** R19.14 puts rendering on the app, and chunk 47's own layering
+  note is why the presentation half lives out there already.
+- **What it is:** one example's renderer reading a catalogue file, a second locale to prove it
+  switches, and the fallback kept for the key the catalogue misses.
+- **Not fluent.** `bevy_fluent` is pinned to an older Bevy, and fluent's own value — plurals,
+  gender, bidi, per-locale numbers — is orthogonal to whether our keys resolve, since they resolve
+  to nouns. The one thing fluent would genuinely test is whether our key syntax collides with its
+  identifier grammar, and that is a reading of the spec rather than a dependency.
+- **Review surface:** whether the key R19.14 says SHOULD be derivable is the key an author would
+  actually want to type in a catalogue file.
 
 ---
 
@@ -824,13 +901,16 @@ a per-player exclusive context or a binding consumed across two players' devices
 and Split Friction (chunk 27) declines rebinding UI and pairs through chunk 66's join gesture on an
 ordinary `InputContext` (`Lobby`, bound only to `bind_class`) rather than a per-player exclusive
 one, so nothing in tree does either yet. Per-entity presentation
-(`read_mappings`/`read_bindings`/`PromptScope`, all keyed by context *type* today) has the same
+(`read_mappings`/`read_bindings`/`PromptScope`, all keyed by context *type* today) had the same
 shape of gap — `present.rs`'s own doc comment on `BindingTable` already names it, wanting "a
-per-player record" — but nothing before chunk 27 reads bindings per player either.
+per-player record" — and **chunk 71 is the thing that gate was waiting for**: a per-pane preset
+selector is a per-player settings display, so that row is now scheduled to be met or falsified
+rather than merely waiting.
 
 | Area                                              | Gated on                                                                   |
 | ------------------------------------------------- | -------------------------------------------------------------------------- |
-| Persistent device identity and calibration (§11)  | two units of the *same kind*, which pad-plus-keyboard does not give         |
+| Per-device **calibration** keyed to identity (§11, R11.7, R14.11) | two units of the *same kind*, which pad-plus-keyboard does not give. Note this row shrank: R11.5's *identity and player assignment* half went to chunk 72, since "put this player back on the device they had" is testable with the hardware on hand and only calibration needs two pads that can disagree |
+| Split Friction's monsters, spawners and missiles (was chunks 60 and 59) | a mechanic that would exercise input this crate has not already proven. The example now demonstrates what §15 wanted from it — two players, per-device routing, a live join gesture, and independent per-player state — and monsters would add game code without adding crate coverage. Kept as a row rather than deleted because the sprites, the dungeon's region aspects, and a `Fire`-shaped action to hang a missile on all already exist, so the cost of changing our mind is small |
 | Mouse wheel as a binding source (R13.3)           | nothing in tree wants it. Chunk 41 landed mouse *buttons* and stopped there deliberately: the wheel is a delta on its own channel, needs the `Line`/`Pixel` normalization R13.3 describes, and shares nothing with a button but the device |
 | Glyph ids (R18.4)                                 | asset-pipeline questions this document does not touch — but *the art is no longer one of them*: **Kenney's input prompt set** covers keyboard, mouse and the three pad brands and is CC0, so an example can ship one without a licensing conversation. Confirm the licence and the coverage before relying on either. What stays open is the identifier scheme, and Kenney is the way to falsify it: R18.4 wants a key of (brand, control) with a brand → generic → text fallback, and chunk 37's stored names are already the control half — `pad/South` plus a brand is nearly the whole id. If that mapping does not survive contact with a real atlas's file names, R18.4 is wrong rather than merely unbuilt |
 | Glyphs from a backend (R18.9) | the same asset-pipeline questions as the R18.4 row, arriving from the other side. The *origin* half of this row is closed: chunk 40's `ControlOrigin` has a variant for a control that is not one of ours, carrying the same stored name and fallback label everything else renders from, so what is deferred is the image rather than room for it. Chunk 47 widened that variant with the class its reporter claims, so a foreign control can be narrowed to like one of ours |
