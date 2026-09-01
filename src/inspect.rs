@@ -79,6 +79,15 @@ pub struct ActionDump {
     pub obstacle: Obstacle,
 }
 
+/// Which side of an override a reader wants: the rows in force, or the rows the game shipped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OverrideStage {
+    /// The declaration, whatever has since been applied over it.
+    Declared,
+    /// What is actually in force: whatever has been applied, or the declaration where nothing has.
+    Effective,
+}
+
 /// How to read the instances of one context whose type is no longer known.
 ///
 /// Recorded when the context is declared, which is the last moment its type is available.
@@ -88,19 +97,16 @@ pub(crate) struct DeclaredContext {
     pub(crate) priority: i32,
     pub(crate) read: fn(&mut World) -> Vec<InstanceDump>,
     // Mappings come from the context's compiled bindings rather than from anything an entity
-    // so unlike `read` this one needs no query and no exclusive access.
-    pub(crate) mappings: fn(&World) -> Vec<crate::mapping::Mapping>,
-    // The same bindings the other way round, for a prompt asking what fires an action. Separate
-    // from `mappings` because it answers about bindings rather than about rows a player edits:
+    // so unlike `read` this one needs no query and no exclusive access. `OverrideStage` picks
+    // between the rows in force and the rows the game declared — the latter being what a reset
+    // previews, and what an override is a diff against.
+    pub(crate) mappings: fn(&World, OverrideStage) -> Vec<crate::mapping::Mapping>,
+    // Tunables, on the same terms.
+    pub(crate) tunables: fn(&World, OverrideStage) -> Vec<crate::mapping::Tunable>,
+    // The same bindings as `mappings` the other way round, for a prompt asking what fires an
+    // action. Separate because it answers about bindings rather than about rows a player edits:
     // a `private` binding is missing from one and present in the other.
     pub(crate) bindings: fn(&World) -> crate::present::ContextBindings,
-    // The declared rows, never the current ones — `mappings` above answers that. What a reset
-    // previews, and what an override is a diff against.
-    pub(crate) declared_mappings: fn(&World) -> Vec<crate::mapping::Mapping>,
-    // Tunables, and their declared defaults — the same split as the two `mappings` fields above,
-    // for the same reason.
-    pub(crate) tunables: fn(&World) -> Vec<crate::mapping::Tunable>,
-    pub(crate) declared_tunables: fn(&World) -> Vec<crate::mapping::Tunable>,
     // Rewrites this context's bindings for an override set and swaps the result into every
     // instance. Exclusive because it writes both a resource and the components. The `Option`
     // carries a preset's rows, exempted from the rebindable-only refusal that would otherwise

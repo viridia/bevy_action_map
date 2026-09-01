@@ -340,7 +340,8 @@ pub mod prelude {
     pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
     pub use crate::join::is_claimed;
     pub use crate::mapping::{
-        Capacity, Follower, Mapping, MappingKey, Rebinding, Scheme, mappings,
+        Capacity, Follower, Mapping, MappingKey, Rebinding, Scheme, Tunable, TunableValue,
+        declared_mappings, declared_tunables, mappings, tunables,
     };
     pub use crate::present::{
         BindingTable, ControlOrigin, Prompt, PromptDevice, PromptGeneration, PromptScope, Prompts,

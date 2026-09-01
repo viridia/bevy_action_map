@@ -55,6 +55,7 @@ use bevy_ecs::world::World;
 use crate::action::{ActionId, ChannelShape};
 use crate::binding::{Control, Part};
 use crate::condition::ConditionDescriptor;
+use crate::inspect::OverrideStage;
 
 /// The set of devices a player is using, and the scope a rebinding is made in.
 ///
@@ -308,15 +309,7 @@ impl Follower {
 /// [`context`](Mapping::context) for a screen that covers part of the game rather than all of it —
 /// a vehicle's controls on their own, or everything except a debug context.
 pub fn mappings(world: &World) -> Vec<Mapping> {
-    let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
-        return Vec::new();
-    };
-
-    declared
-        .0
-        .iter()
-        .flat_map(|context| (context.mappings)(world))
-        .collect()
+    gather_mappings(world, OverrideStage::Effective)
 }
 
 /// A player-adjustable value on a binding, typed so a generic screen can render it without ever
@@ -371,30 +364,14 @@ pub struct Tunable {
 /// its rows. Where a player has adjusted one, this is what they set it to; use
 /// [`declared_tunables`] for what the game shipped, which is what "reset to default" offers.
 pub fn tunables(world: &World) -> Vec<Tunable> {
-    let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
-        return Vec::new();
-    };
-
-    declared
-        .0
-        .iter()
-        .flat_map(|context| (context.tunables)(world))
-        .collect()
+    gather_tunables(world, OverrideStage::Effective)
 }
 
 /// Every tunable in the game, holding the value the game itself declared.
 ///
 /// [`tunables`] with anything the player changed left out — what "reset to default" would produce.
 pub fn declared_tunables(world: &World) -> Vec<Tunable> {
-    let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
-        return Vec::new();
-    };
-
-    declared
-        .0
-        .iter()
-        .flat_map(|context| (context.declared_tunables)(world))
-        .collect()
+    gather_tunables(world, OverrideStage::Declared)
 }
 
 /// Every mapping in the game, holding the controls the game itself declared.
@@ -403,6 +380,15 @@ pub fn declared_tunables(world: &World) -> Vec<Tunable> {
 /// the shipped controls in their slots. What "reset to default" would produce, and what a screen
 /// compares against to show which rows have been changed.
 pub fn declared_mappings(world: &World) -> Vec<Mapping> {
+    gather_mappings(world, OverrideStage::Declared)
+}
+
+/// The body the four public readers above share, once per output type.
+///
+/// Four names rather than one name and a flag, because two names read better at a call site than
+/// `mappings(world, OverrideStage::Declared)` does — but the four questions are two, and walking
+/// every declared context is the same walk regardless of which was asked.
+fn gather_mappings(world: &World, stage: OverrideStage) -> Vec<Mapping> {
     let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
         return Vec::new();
     };
@@ -410,7 +396,20 @@ pub fn declared_mappings(world: &World) -> Vec<Mapping> {
     declared
         .0
         .iter()
-        .flat_map(|context| (context.declared_mappings)(world))
+        .flat_map(|context| (context.mappings)(world, stage))
+        .collect()
+}
+
+/// [`gather_mappings`] for the tunables half.
+fn gather_tunables(world: &World, stage: OverrideStage) -> Vec<Tunable> {
+    let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
+        return Vec::new();
+    };
+
+    declared
+        .0
+        .iter()
+        .flat_map(|context| (context.tunables)(world, stage))
         .collect()
 }
 

@@ -39,6 +39,7 @@ use crate::action::{
 use crate::binding::InputContextBuilder;
 use crate::eval::{Transition, dispatch_class_fires, dispatch_transitions, evaluate_context};
 use crate::frame::{InputFrame, Timestamp};
+use crate::inspect::OverrideStage;
 use crate::plan::Plan;
 use crate::{ActionMapPlugin, ActionMapSystems};
 #[cfg(feature = "gamepad")]
@@ -1088,13 +1089,18 @@ fn order_by_priority(
 
 /// Reads the mappings of one context back out once its type is no longer known.
 ///
-/// Registered per context by `add_context`, which is the last place `C` is available.
+/// Registered per context by `add_context`, which is the last place `C` is available. `Effective`
+/// answers with what is bound now, so a settings screen and a conflict check both read the controls
+/// the player is actually using; `Declared` answers with the defaults, whatever has since been
+/// applied over them. A context nothing has been applied to gives the same list either way, which
+/// is the fallback below rather than a case of its own.
 fn read_mappings<C: InputContext + Component>(
     world: &World,
+    stage: OverrideStage,
 ) -> alloc::vec::Vec<crate::mapping::Mapping> {
-    // What is bound now, so a settings screen and a conflict check both read the controls the
-    // player is actually using. `read_declared_mappings` is the one that answers about defaults.
-    if let Some(applied) = world.get_resource::<AppliedPlan<C>>() {
+    if stage == OverrideStage::Effective
+        && let Some(applied) = world.get_resource::<AppliedPlan<C>>()
+    {
         return applied.mappings.clone();
     }
     world
@@ -1103,38 +1109,16 @@ fn read_mappings<C: InputContext + Component>(
         .unwrap_or_default()
 }
 
-/// Reads the mappings this context *declared*, whatever has since been applied over them.
-///
-/// The other half of `read_mappings`, which answers about current values. Registered separately
-/// rather than taking a flag, because the two are asked by different callers for different reasons.
-fn read_declared_mappings<C: InputContext + Component>(
-    world: &World,
-) -> alloc::vec::Vec<crate::mapping::Mapping> {
-    world
-        .get_resource::<InputContextPlan<C>>()
-        .map(|declared| declared.mappings.clone())
-        .unwrap_or_default()
-}
-
-/// Reads the tunables of one context back out once its type is no longer known.
-///
-/// The tunable half of [`read_mappings`], for the same reason and the same caller.
+/// Reads the tunables of one context back out, on the same terms as [`read_mappings`].
 fn read_tunables<C: InputContext + Component>(
     world: &World,
+    stage: OverrideStage,
 ) -> alloc::vec::Vec<crate::mapping::Tunable> {
-    if let Some(applied) = world.get_resource::<AppliedPlan<C>>() {
+    if stage == OverrideStage::Effective
+        && let Some(applied) = world.get_resource::<AppliedPlan<C>>()
+    {
         return applied.tunables.clone();
     }
-    world
-        .get_resource::<InputContextPlan<C>>()
-        .map(|declared| declared.tunables.clone())
-        .unwrap_or_default()
-}
-
-/// Reads the tunables this context *declared*, whatever has since been applied over them.
-fn read_declared_tunables<C: InputContext + Component>(
-    world: &World,
-) -> alloc::vec::Vec<crate::mapping::Tunable> {
     world
         .get_resource::<InputContextPlan<C>>()
         .map(|declared| declared.tunables.clone())
@@ -1379,7 +1363,7 @@ fn report_mapping_collisions<C: InputContext + Component>(
     };
 
     for context in &declared.0 {
-        for taken in (context.mappings)(app.world()) {
+        for taken in (context.mappings)(app.world(), OverrideStage::Declared) {
             // Per scheme, like the within-a-context check: one action mappable on both the keyboard
             // and the pad is two rows in two tables, not a collision.
             //
@@ -1467,10 +1451,8 @@ fn declare_context<C: InputContext + Component>(
             priority: C::PRIORITY,
             read: read_instances::<C>,
             mappings: read_mappings::<C>,
-            bindings: read_bindings::<C>,
-            declared_mappings: read_declared_mappings::<C>,
             tunables: read_tunables::<C>,
-            declared_tunables: read_declared_tunables::<C>,
+            bindings: read_bindings::<C>,
             apply: apply_to_context::<C>,
             apply_for_entity: apply_to_entity::<C>,
         });

@@ -329,7 +329,7 @@ skip the blind alleys this one took. Planning for that belongs here; building it
 
 ## What has landed
 
-Fifty-eight chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+Fifty-nine chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
 where it fell short of its own description, for the entries the work in flight still reasons from;
 the [archive](./Log-archive.md) holds the rest, phase by phase but not bounded by phase — a phase can
 be partly closed and partly still open. This table is only an index, and the sequence below is what
@@ -397,6 +397,7 @@ remains.
 
 | 52 | What the crate has accreted | done as a survey, landing only the `mappings()` doc sentence it also owed; six collapses scheduled as chunks 74–79, three declined with the reason recorded so they are not re-proposed. Its own two headline premises were wrong and the survey's first job was correcting them: `ControlClass` is not `ChannelShape` minus a variant (it gained `CharacterProducing`, a predicate on an *event*, and `Axis2` is a shape no control has), and `context.rs` is not "a quarter of the crate and two and a half times the next largest" — that counted a 2,759-line test module, and `binding.rs` is half again larger by code. The strongest finding was not on the candidate list at all: capture and overrides implement one validation twice and disagree about the order. The settings-screen scope question is closed — `Mapping::context` now appears in `mappings()`'s filtering sentence, and a convenience filter waits for a second caller |
 | 74 | One admissibility rule, not two | done; `capture::admissible` is the one predicate both sides ask — `Result<(), RefusedReason>`, with overrides lifting each reason into its own `OverrideProblemKind` at the call site, since that enum carries four variants only a file can earn and is not `Copy`; the order it settles on is capture's (reserved before shape, so pressing the settings key is answered with the reason it cannot be bound rather than with a complaint about its channel), which changed the override side's answer for a control that is refusable twice over, and a test now pins that order on the predicate itself rather than through either caller; `CaptureSession::verdict` and the private `enum Verdict` are gone rather than renamed — the excluded check that was tangled into it is a guard at the top of `run_captures`' loop, which is the honest shape, since ignoring is not a refusal reason and the crate no longer has two types called `Verdict`; the sentence owed to `ControlClass`'s doc says why it is not `ChannelShape` under another name |
+| 75 | Four names for a 2×2, twelve times over | done; twelve items become eight — four public names kept, over two `gather_*` helpers in `mapping.rs`, two `read_*` in `context.rs` and two fn-pointer fields on `DeclaredContext`, all discriminated by a `pub(crate) enum OverrideStage { Declared, Effective }` that never reaches the public surface, exactly as `apply_overrides`' four names sit over two `Option<&Overrides>` helpers next door; the collapse also stated a thing the four copies left implicit — `Effective` falls back to the declaration where nothing has been applied, which was three separate copies of the same fallback rather than one rule; `report_mapping_collisions` now says `OverrideStage::Declared` where it used to take whatever `mappings` gave it, a distinction with no difference today (an override moves slots, and that check reads keys) but the honest one for a plan-build check; the prelude gained `Tunable`, `TunableValue`, `declared_mappings`, `declared_tunables` and `tunables`, and the two new type names were checked against chunk 48's criterion rather than waved through |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -508,24 +509,6 @@ Design.md alone. This is the pass that clears what accumulated under the old rul
   Text moved out of the constitution and into a section nobody opens has been deleted with extra
   steps.
 
-### 75. Four names for a 2×2, twelve times over
-
-`mappings` / `declared_mappings` / `tunables` / `declared_tunables` is one 2×2 written out as four
-public functions, four `read_*` in `context.rs`, and four fn-pointer fields on `DeclaredContext`.
-The four `read_*` differ only in a field name and in whether `AppliedPlan` is consulted.
-
-- **The crate already has the answer next door.** `apply_overrides` and its three variants are the
-  same 2×2 done right: four public names over two internal helpers taking `Option<&Overrides>`. The
-  read side follows the apply side — four public names kept, the eight items behind them collapsed.
-- **What the code says in its own defence is true of the public half only.** "Registered separately
-  rather than taking a flag, because the two are asked by different callers for different reasons"
-  argues for the names. It does not argue for four copies of a two-line body.
-- **Also here:** the prelude exports `mappings` but not `declared_mappings`, `tunables`,
-  `declared_tunables`, `Tunable` or `TunableValue`. A screen showing which rows a player has changed
-  needs the second of those, so the omission is arbitrary rather than considered.
-- **Not doing:** a `Which::{Current, Declared}` parameter on the public functions. Two names read
-  better at a call site than one name and a flag, which is the half the defence above gets right.
-
 ### 76. `Unresolved`, once
 
 `UnresolvedMapping` and `UnresolvedTunable` are the same struct — `{ scheme: Scheme, name: String }`
@@ -617,6 +600,10 @@ feature chunk.
   shared where the two views genuinely coincide. Depends on 79, which is what claims `Firing` for
   `Phase`. The objection, recorded rather than resolved: `ActionState` and `InputContextState` are
   storage, and a condition's storage is `Scratch`.
+- **Chunk 75 added `Tunable` and `TunableValue`**, checked against the criterion below rather than
+  waved through: Bevy exports neither name and neither is a word a reader would expect to mean
+  something else, so both pass. Its three new function exports (`declared_mappings`,
+  `declared_tunables`, `tunables`) are outside this chunk's scope, which is types.
 - **Chunk 30 added a seventeenth export and it is not on the list**, deliberately: `CompassPoints`
   is named after `bevy_math`'s own `CompassOctant` and `CompassQuadrant`, so a reader who knows Bevy
   guesses right, which is exactly the criterion below. Recorded because a prelude that grows between

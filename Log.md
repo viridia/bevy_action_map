@@ -806,3 +806,50 @@ now a guard at the top of `run_captures`' loop and the rest is the predicate, wh
 the loop body: the `Take` arm was the whole rest of the iteration indented inside a `match`, and
 reads better as the fall-through. The private `enum Verdict` is gone with it, so chunk 48 renames a
 name the crate now has only one of.
+
+### Chunk 75: Four names for a 2×2, twelve times over
+
+**Twelve items became eight, and the shape came from next door rather than from invention.**
+`apply_overrides` and its three variants were already four public names over two helpers taking
+`Option<&Overrides>`; the read side now matches — four public names over two `gather_*` helpers in
+`mapping.rs`, two `read_*` in `context.rs`, and two fn-pointer fields on `DeclaredContext`, all
+discriminated by a `pub(crate) enum OverrideStage { Declared, Effective }`. The chunk's "not doing"
+holds: `OverrideStage` never reaches the public surface, because `mappings(world)` and
+`declared_mappings(world)` read better at a call site than one name and a flag.
+
+**The flag's name went through three, and the two rejections are the useful part.** `Which` was
+first and said nothing. `OverrideLayer` was proposed and declined on a documented ground: applying
+always starts from the pristine declaration and never stacks, which `apply_overrides_with_preset`'s
+own doc states, so a type named `Layer` would put a word the design explicitly disclaims into the
+type system — the enum's doc now says so, since the diff-against-a-base shape will suggest
+"layer" again to the next reader. `Nominal` was declined as a second word for a concept the crate
+already names *declared* in a public function, a struct, a resource and a Design section; that is
+the habit chunk 52 existed to find. `Effective` survived over the `Current` it replaced because it
+stays true in the case that matters — where nothing has been applied, the declared rows *are* the
+effective ones, whereas "current" invites the question "as of when".
+
+**The collapse said out loud something the four copies left implicit.** `read_mappings` consulted
+`AppliedPlan` and fell back to `InputContextPlan`; `read_declared_mappings` read only the latter;
+the tunable pair did the same twice more. Written once, that fallback is visible as a rule — a
+context nothing has been applied to answers the same list either way — where before it was three
+copies of a fallback and a reader had to compare four bodies to notice they agreed.
+
+**One call site had been taking whatever it was given.** `report_mapping_collisions` walked
+`(context.mappings)(world)` at plan-build time and now says `OverrideStage::Declared`. No behaviour
+changes — an override moves a row's slots and that check reads keys, schemes and rebindability — but a
+plan-build diagnostic whose message begins "context `X` declares a mapping named" should be asking
+about declarations, and with a flag in hand it can say so rather than relying on nothing having
+been applied yet.
+
+**The prelude omission was arbitrary, as chunk 52 suspected.** `mappings` was exported and
+`declared_mappings`, `tunables`, `declared_tunables`, `Tunable` and `TunableValue` were not, so a
+screen showing which rows a player has changed — the ordinary second thing a settings screen does —
+had to reach past the prelude for half of what it needed. All five added, and the two new *type*
+names went through chunk 48's criterion rather than being waved through: Bevy exports neither, and
+neither is a word a reader would expect to mean something else.
+
+**Nothing here needed a new test, and that is the right answer rather than a gap.** The four public
+functions kept their names, signatures and results, and the `declared_*` half is already exercised
+across a dozen assertions in `overrides.rs`'s suite — a collapse that changes no behaviour is
+verified by the tests that already pin the behaviour, and a test written against the new internal
+shape would pin the shape rather than the promise.
