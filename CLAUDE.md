@@ -23,7 +23,7 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 | `docs/design.md` | how the crate works, `§1`–`§11` | you need the shape of a thing before changing it |
 | `docs/decisions.md` | why it is that way, `D1`–`D57` | a decision looks arbitrary, or you are about to reverse one |
 | `Roadmap.md` | what is left, what is broken, the chunk sequence | **start here for any chunk** |
-| `Requirements.md` | ~220 numbered requirements, `R<section>.<n>`, open questions `OQ-n` | you need to know what must be true, or a chunk cites an R-number |
+| `Requirements.md` | 221 numbered requirements, `R<section>.<n>` | you need to know what must be true, or a chunk cites an R-number |
 | `docs/comparison.md` | how this crate differs from BEI and LWIM | someone asks why this exists |
 | `docs/one-way-doors.md` | what stops being revisable if an input crate goes upstream | upstreaming comes up |
 | `docs/plan.md` | the document refactor, phase by phase | you are working on the documents themselves |
@@ -33,9 +33,8 @@ from them** — they describe the crate as it was, two of them are longer than a
 and their content has been extracted into `docs/design.md` and `docs/decisions.md`. Do not orient
 from them.
 
-**`Requirements.md`'s `D1`–`D9` are its own numbering**, defined in its "Resolved decisions" table,
-and are *not* the same identities as `docs/decisions.md`'s. Reconciling the two is phase 5's job;
-see `docs/plan.md`. Until then, read a `D`-number against the document it appears in.
+There is **one `D`-numbering** in the project, defined in `docs/decisions.md`. `Requirements.md`
+tags requirements with it; it used to carry a rival `D1`–`D9` of its own, and does not any more.
 
 ## Workflow
 

@@ -159,7 +159,7 @@ Two things land here that have no other home:
 | 2 | `docs/decisions.md` D27–D53 — presentation and persistence | `Design.md` §9.7, §9.8, §10; the OQ-9 closure | **done** |
 | 3 | `Roadmap.md`, plus the archive sweep below | its 18 remaining chunk sections, the deferred table, the landed index, "Known wrong today" | **done** |
 | 4 | `CLAUDE.md`; move three documents to `archive/`; repoint 22 citations | Roadmap's ground rules, house style, commit format | **done** |
-| 5 | `Requirements.md` — **optional**, and it now has an obligation | itself, section by section; the `D`-number reconciliation below | 3+ |
+| 5 | `Requirements.md` | itself, section by section; the `D`-number reconciliation below | **done**, in 1 |
 | 6 | Implementation scan — what is overbuilt, underbuilt or wrongly built | the non-archived documents, and the code | 3 |
 | 7 | Comment scan — the prose in the code, against the same documents | the same | 3 |
 
@@ -271,7 +271,33 @@ local — which is the cheaper answer and may be the right one.
 
 Until then, `CLAUDE.md` tells a reader to interpret a `D`-number against the document it appears in.
 
-### Phase 5 — why `Requirements.md` ranks last
+### Phase 5 — what it turned out to be
+
+Estimated at 3+ sessions and it took one, because phases 1–2 had drained more than the estimate
+assumed. What was actually left:
+
+- **86 lines of pure duplication** — the `D1`–`D9` table and the resolved-`OQ` list, both fully
+  carried by `decisions.md`. Deleted, replaced by a pointer.
+- **53 `D`-references remapped** through unique placeholders, so the two collisions could not
+  double-map. Verified by checking every remapped tag lands on a decision whose title matches the
+  requirement's subject.
+- **Only ~14 of the 24 italic asides were argument**; the rest were `_(D8)_`-style tags. Eight were
+  trimmed or deleted, six kept — the enumerated-state explanation under R3.1 because structure *is*
+  the requirement, the withdrawn half of R3.6 because a withdrawn requirement's argument is what
+  stops re-proposal, and four one-clause reasons that make their requirement intelligible.
+- **The wrap**, reflowed to 100 columns and verified by asserting the word sequence byte-identical
+  before and after.
+
+Two staleness finds the pass turned up rather than the diff: `OQ-5` was still listed **open** when
+`D19` had resolved it, and `OQ-10` was referenced at R4.7 and never defined anywhere.
+
+**One regression caught in verification, worth recording.** The first reflow wrapped the 39 link
+definitions as if they were prose, merging them into one paragraph and breaking every reference link
+in the document. The word-sequence check passed — the words were all still there, in order — so
+*content* verification alone did not catch it. What caught it was counting structural line types
+before and after. Any future reflow needs both checks.
+
+### Phase 5 — why it had ranked last
 
 It is the largest document, the **least** duplicative, and the only one with live code citations —
 52 of them. Its slop is real, but it has the worst ratio of risk to relief in the set, and phases

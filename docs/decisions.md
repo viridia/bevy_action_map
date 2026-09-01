@@ -13,10 +13,9 @@ reader to discover.
 
 Numbers are identities, and an entry is never renumbered — a withdrawn one is struck and kept.
 
-`Requirements.md` has a `D1`–`D9` of its own, defined in its "Resolved decisions" table and
-predating these. **The two schemes are not the same identities**: that document's `D8` is this one's
-`D6`, and its `D9` is this one's `D8`. Read a `D`-number against the document it appears in.
-Reconciling them is phase 5 of [`plan.md`](./plan.md), which carries the mapping.
+`Requirements.md` tags requirements with these numbers, and is the only other document that cites
+them. It once carried a `D1`–`D9` of its own; that table is gone and its references were remapped
+here, so there is one `D`-numbering in the project.
 
 ---
 

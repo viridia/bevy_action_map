@@ -4236,7 +4236,8 @@ mod tests {
         );
     }
 
-    // OQ-3's two evaluation criteria, as facts about the layout rather than a wall-clock
+    // docs/decisions.md D8's two evaluation criteria, as facts about the layout rather than a
+    // wall-clock
     // comparison: the numbers a timing run would produce follow from these, and these do not
     // depend on the machine that ran them.
 

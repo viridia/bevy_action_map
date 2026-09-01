@@ -143,7 +143,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 68  | Split-screen cameras and protagonists             |
 | 69  | AABB collision                                    |
 | 27  | Split Friction's device selection                 |
-| 10  | The compiled plan, and OQ-3 closed                |
+| 10  | The compiled plan, and the state layout settled   |
 | 22  | The deadzone chain, stages 1 and 3                |
 | 52  | What the crate has accreted                       |
 | 74  | One admissibility rule, not two                   |
