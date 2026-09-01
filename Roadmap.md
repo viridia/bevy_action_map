@@ -1,485 +1,182 @@
-# Incremental build plan: `bevy_action_map`
+# Build plan: `bevy_action_map`
 
-> This document orders the work described in [Design.md](./Design.md) into chunks small enough to
-> review individually. It is a _sequence_, not a schedule — there are no dates, and any chunk may be
-> revised or reordered once the one before it has been read.
+The work that is left, and the gaps that are known. It orders that work into chunks small enough to
+review individually — a *sequence*, not a schedule, and any chunk may be reordered once the one
+before it has been read.
 
-## Ground rules
+**What this document admits.** Work not done, and gaps. The test is whether an entry names something
+that will change; if it describes the present, it belongs in [docs/design.md](./docs/design.md), and
+if it explains why the present is as it is, it belongs in
+[docs/decisions.md](./docs/decisions.md). What has been built is described in exactly one place, and
+this is not it. The landed index below names chunks; it does not describe the crate.
 
-1. **One chunk, one reviewable change.** Each chunk below is meant to be a single branch: code, its
-   tests, and any doc changes it forces. If a chunk turns out to be more than roughly a day's reading,
-   it gets split before it gets written.
-2. **Every chunk is verifiable on its own.** Pure-data chunks get unit tests; chunks that touch ECS
-   get either a headless `App` test or a runnable example. No chunk lands whose only justification is
-   "the next one needs it".
-3. **The examples are the acceptance test.** From chunk 4 onward there is always something to run.
-   When a later chunk is an internal change, the criterion is that _the examples do not change_ —
-   a diff in `examples/` during a refactor chunk is a signal the abstraction leaked.
-4. **Deliberate omissions are stated.** Each chunk lists what it does _not_ do, so review can tell
-   "not yet" from "overlooked".
-5. **Nothing outstanding is left without a destination.** A chunk that lands short of its own
-   description says so in the [work log](./Log.md), and the obligation is written onto the chunk
-   that finishes the job — so what a chunk owes is stated where someone will read it, rather than
-   having to be gathered from the chunks that incurred it. "Its own decision" and "later" are not
-   destinations: an item with no chunk number is an item that will be dropped.
-
----
-
-## Commit Messages
-
-To be compatible with Bevy's AI policy (not just the policy but the discussions that preceded it):
-
-Commit messages should not say "Co-authored by" an LLM. Rather, it should
-have a section "LLM Usage Disclosure", which briefly explains the role the
-LLM played in crafting the commit.
-
-Effectively all of the code here is LLM-authored to a human's direction, so the disclosure is a
-standing fact rather than a per-commit judgement. Unless a commit was unusual, one line does it:
-
-```
-LLM Usage Disclosure: implementation, tests and documentation written by
-Claude Opus 5; design decisions, review and acceptance by the author.
-```
-
-Say more only where a commit departs from that — where the model chose something the author would
-otherwise have decided, or where the author wrote the code and the model reviewed it.
-
----
-
-## House style
-
-This crate is a candidate for eventual upstream inclusion, and game developers as a class are
-sensitive to text that reads as machine-authored — a contribution that reads that way invites
-controversy independently of whether the code is correct. So the standard is: **the code should read
-as though a maintainer of the surrounding codebase wrote it.**
-
-**Comments.** Internal comments are terse. Don't explain what a maintainer already knows — ECS
-semantics, borrow rules, standard Bevy behavior. Comment the non-obvious decision: the thing that
-would break if someone changed it. One or two lines, not a block explaining the mechanism.
-
-**Doc comments are the exception.** Verbosity is welcome on `pub` items. This is a library whose
-public documentation is part of the deliverable (R24.6), so doc comments can be full and
-explanatory in a way internal comments must not be.
-
-**Analysis belongs in the review conversation, not the source file.** The reasoning that produced a
-design — why an alternative was rejected, what the tradeoff was — goes in the chunk's discussion.
-When it genuinely needs to persist, it goes in [Design.md](./Design.md), which is built for it.
-What it must not do is accumulate as prose in the code — or in the requirements, which is the next
-rule.
-
-**`Requirements.md` is the constitution, not the Federalist Papers.** A requirement states what must
-be true, and stops. It may carry whatever *structure* it takes to say that precisely — an enumerated
-set of states, a table of cases, a worked example of what does and does not qualify — because that
-structure is the requirement rather than commentary on it. What it may not carry is the argument:
-which alternative was considered, what the trade-off was, why the obvious reading is wrong. That is
-Design.md's job, or `Log.md`'s where a chunk learned it.
-
-Two habits keep it honest. Where a requirement needs a reason to be intelligible, one clause is
-almost always enough — "…because absence already means the default" earns its place; a paragraph
-defending the choice does not. And a **withdrawn** requirement is the exception that proves the
-rule: it keeps enough to stop the idea being re-proposed, and that is the only argument in the
-document with a job to do.
-
-**Avoid the tells:** restating what the code says, hedging, enumerating the obvious, unusual
-punctuation or phrasing in comments.
-
-**Prefer sketches over applied refactors.** Small, staged, individually reviewable edits — which is
-the same principle as Ground rule 1, applied within a chunk rather than across chunks.
-
-**Comments should be addressed to the right audience**. _Doc comments_ are meant for public-facing documentation, targeted at game developers who want to use the
-crate. These needs to explain basic concepts, usage examples, and in some cases,
-educate the user as to why a function or type is important. They should not explain how the implementation works. It should not reference roadmap stages, design decisions, or numbered requirements, or in general discuss the development status of the project - users don't care about this.
-
-_Internal comments_ are meant for people working on the crate, the author, maintainers, and agents who need to understand the code. This can explain
-theories of operation and call out subtleties; if necessary it can go into
-detail about an algorithm or data structure. However, it should avoid explaining
-basic information that any bevy maintainer or rust programmer would already know.
-
-**User-facing prose tone.** Doc comments and the README are the actual user manual — the internal
-docs' voice (reasoning-heavy, decision-by-decision, comfortable with a metaphor) belongs to a
-different audience and does not transfer. Watch for:
-
-- **Retired metaphors.** "Load-bearing", "seam", "fold", "reach for" instead of "use" — each was
-  novel once and is a tic now, and some ask the reader to learn what the word means in this codebase
-  before the sentence parses. A metaphor earns its place by being clearer than the plain word; once
-  it isn't, it's jargon.
-- **Defend nothing.** State what a thing does and how to use it. The argument for why it works that
-  way, or what alternative was rejected, belongs in Design.md or the review conversation — never in
-  a doc comment, for the same reason it's kept out of `Requirements.md` above.
-- **No manufactured significance.** "The honest answer is…", "Crucially,", "It's worth noting that"
-  ask for attention a plain sentence already has. Save emphasis (bold, a warning admonition) for what
-  is actually surprising; spent on everything, it stops working on anything.
-- **No project history.** Written for someone who has never seen a roadmap chunk, a requirement
-  number, or a design section, and shouldn't need to.
-- **Say it once.** A hedge ("generally", "in most cases", "typically") that isn't gating a real
-  exception is filler — either the exception is real and worth a sentence, or the qualifier goes.
-- **Vary the connectors.** A constant diet of em-dash asides and "not X, but Y" reads as a
-  fingerprint once a reader notices it; a plain period is usually clearer anyway.
-- **Concise, not thin.** Comprehensive still means every parameter, every panic, every non-obvious
-  edge case — cut the padding around that content, not the content itself.
-
----
-
-## Cross-cutting: the timestamp shim
-
-§2 of the design drains a timestamped event queue by time window. Bevy's input events carry no
-timestamps ([bevy#9087][] is the upstream fix, still open), so we need a stand-in — and the whole
-point of naming it here is to keep it in **exactly one place**.
-
-Chunk 3 introduces a `Timestamp` newtype and one function that produces it. Until #9087 lands, that
-function returns a monotonically increasing sequence number tagged with the frame it arrived in.
-Consequences, which should be documented in the module and not papered over:
-
-| Property                                  | Under the shim                    | Requirement |
-| ----------------------------------------- | --------------------------------- | ----------- |
-| Ordering within a frame                   | exact                             | R9.7        |
-| No lost edges across a 0-tick frame       | holds                             | R9.3        |
-| No duplicated edges across a 3-tick frame | holds                             | R9.4        |
-| Delta magnitude conserved across windows  | holds                             | R9.5        |
-| Sub-frame timing accuracy                 | **degraded to frame granularity** | R9.8        |
-
-Everything downstream reads `Timestamp` and never `Instant`, so #9087 lands as a change to one
-function plus the removal of a caveat. Gamepad stays frame-quantized regardless until gilrs polling
-is rewritten (§11), so mixed fidelity across sources is permanent for now, not an artifact of the shim.
+Ground rules, house style and the commit-message convention are in [CLAUDE.md](./CLAUDE.md);
+they are about the work rather than about the crate. Ground rule 5 is the one this document is
+built around: nothing outstanding may be left without a destination, and a row here with no gate
+is an item that will be dropped.
 
 ---
 
 ## Where this stands
 
-Chunk numbers are **stable identities, not positions**. Ground rule 1 lets a chunk be reordered once
-the one before it has been read, and several have been; the phase headings below carry the sequence
-so that "chunk 8" still means what it meant in the discussion that produced it.
+[docs/design.md](./docs/design.md) is what the crate does today. What follows is only the delta:
+what is wrong, what was never built, and what is left to do.
 
-The target the remaining sequence aims at is **Disasteroids** — an asteroids-like game in primitive
-shapes, playable on keyboard or gamepad, eventually with a rebinding screen built on
-`bevy_ui_widgets` and operable from the controller. It is not a phase of its own. It arrives early,
-badly, and grows a capability per chunk, because ground rule 3 wants something runnable at every
-step and a real game is a better acceptance test than a synthetic one.
+The target the remaining sequence aims at is **Disasteroids** — an asteroids-like game playable on
+keyboard or gamepad, with a rebinding screen built on `bevy_ui_widgets` and operable from the
+controller. It is not a phase of its own; it arrives early, badly, and grows a capability per chunk,
+because ground rule 3 wants something runnable at every step and a real game is a better acceptance
+test than a synthetic one.
 
-### Works today
+### Known wrong
 
-- Actions and contexts as types.
-- Keyboard, mouse buttons and motion, and raw gamepad into an input frame.
-- Per-entity context state.
-- N bindings per action folded by intent.
-- The design-stage deadzone.
-- Render/fixed evaluation ordered ahead of its readers.
-- Each context draining the frame from its own cursor.
-- The three-property model — a source's channel shape checked against the action's intent, with
-  the conversions between shapes settled.
-- Mappings and the names to render them with, each holding an ordered list of controls with a
-  capacity, which is what a primary-and-secondary table is, every binding listed for the player to
-  read and only the declared ones rebindable.
-- Interactive capture per slot, with reserved and excluded controls and read-only conflict
-  detection.
-- The first screen a player sees — Disasteroids' controls list, two tables drawn from the mapping
-  list alone, one per device, whose column count comes out of the data rather than the layout.
-- The lookup that runs the other way, from an action to the controls that would fire it now, behind
-  a trait an external authority can answer for.
-- That lookup as a **text span** a template can write, which fills in its own string and is told
-  when the answer moves.
-- A screen that can be *operated* — a stick or a D-pad rounded to a compass point and narrowed to
-  the ticks it moved on, which is a selection moving one step per direction entered, over a game
-  that keeps running and never hears the controls the screen has taken.
-- Two actions that deliberately share one control declared as sharing it, so that a rebind moves
-  both.
-- A prompt or a mapping row that says when a binding wants more than a bare press — held, or tapped
-  twice — as structure a localization layer can render for itself, with a fallback formula ("Hold
-  W", "W ×2") for a game that ships no catalogue, and a mapping's followers drawn as a subordinate
-  line under the row they ride rather than a row of their own.
-- **A rebind that takes effect** — a diff against the declared bindings, applied to every live
-  context by compiling a variant plan and swapping it in, which cancels what was in flight and
-  re-arms require-reset, moves every follower riding a row that changed, leaves the declaration
-  intact so the next patch's revised defaults still reach anyone who never touched that row, and
-  tells every prompt on screen to catch up.
-- Conflict detection that can be asked against a working copy of overrides rather than only what is
-  applied, which is what lets a screen with unconfirmed choices tell whether two of them clash
-  before either is committed.
-- A **class binding** — a plan's second list, consulted only for a control no plain binding in the
-  context already indexes, dispatching the original raw event (not a folded value, since there is
-  no lifecycle to fold it into) to whatever declared it, which is the mechanism a focused text field
-  will claim character-producing keys through without the app enumerating them.
-- **The settings screen finished** — pressing a boxed cell listens for a control and writes it into
-  a working copy rather than the running game, a clash steals the control from whatever else
-  already held it, Confirm applies the working copy in one call and Cancel discards it, B cancels a
-  capture in progress before it cancels the screen, and every cell a capture or a steal touches is
-  patched in place — `Text` on the exact entities named at spawn, nothing despawned or rebuilt,
-  because a capture never changes a row's shape.
-- **Exclusive contexts** — a context that treats every lower-priority one as inactive for as long as
-  it is, canceling in-flight actions and re-arming require-reset exactly as an ordinary deactivation
-  would, so a modal screen owns the whole input surface without enumerating the actions it takes it
-  from.
-- **Presets** — a named `Overrides` a game keeps its own list of, applied through the same path a
-  rebind is via `apply_overrides_with_preset`, which exempts exactly the rows a preset names from
-  the "not rebindable here" refusal that still stands for a capture, so a preset moves a `Fixed` row
-  (every gamepad binding, sticks included) that a capture screen never offers a button for.
-- **Persistence** — `Overrides` serializes through `serde` behind the `serialize` feature,
-  hand-written rather than derived so a row holding one control writes as a bare scalar and the
-  three per-mapping states spell as words no control name could ever collide with, one table per
-  scheme, pinned by a golden TOML document; loading resolves a saved mapping name against what the
-  game currently declares, since a `MappingKey` can only ever be one already declared, reporting an
-  unresolved name or an unrecognized control rather than dropping either in silence, while a renamed
-  action's row is simply dropped on the next save rather than preserved unresolved.
-- **Release on interruption** — a window losing focus or a gamepad disconnecting cancels whatever
-  was in flight on that source rather than leaving it stuck, `Canceled` rather than the `Completed`
-  an ordinary release produces, while a binding on an unaffected device is untouched.
-- **Tunables** — a named, typed value declared on a binding that overwrites one field of one
-  modifier already there, enumerated the same way a mapping is (`mapping::tunables`), persisted in
-  the same file under its own `[tunables.<scheme>]` table, and applied by the same variant-plan
-  recompile a rebind already uses, so a player-adjustable range or switch costs a game nothing
-  beyond declaring one.
-- **Hold-vs-toggle**, the mechanism's worked example — a latch that turns a momentary press into a
-  sustained one, declared once per action rather than per binding so that every eligible control
-  shares one runtime latch instead of drifting independently, switched on from Disasteroids'
-  controls screen and reaching both of `Thrust`'s keyboard bindings while deliberately leaving its
-  analog trigger alone.
-- **Per-entity overrides** — `apply_overrides_for` reaching one entity's own instance through the
-  same `adopt` a rebind already uses, so two occupants sharing a context type persist and apply an
-  `Overrides` independently, world-wide `AppliedPlan` and the declared baseline both untouched.
-- **Device routing** — a context entity paired to a device through a sibling `Paired` component
-  reads only that device's events, `apply_frame` filtering before anything else touches the frame,
-  with an unpaired instance reading everything exactly as before.
-- **The join gesture** — no new evaluation path, just a `bind_class`-bound action on a context with
-  no `Paired` of its own, so `ClassFired`'s untouched event names the device via
-  `RawEvent::device()` the same way `apply_frame`'s own filter does, and `join::is_claimed` checks
-  that device against the world's `Paired` set so two waiting slots on one screen never race for it.
-- **Split-screen cameras and protagonists** (`examples/split_friction/`) — the first in-tree use of
-  `Paired` on a real entity rather than a test: two protagonists sharing one `OnFoot` context type,
-  each seen through its own camera whose viewport comes from an invisible `bevy_ui` flexbox read
-  back every frame.
-- **Collision** (`examples/split_friction/collision.rs`) — a protagonist's own movement clamped one
-  axis at a time against the dungeon's solid cells and the other protagonist, so a wall met at an
-  angle is slid along rather than stopped dead.
-- **Live device pairing** (`examples/split_friction/`) — neither protagonist is playable until a
-  device presses anything; the first still-unclaimed device to fire chunk 66's join gesture claims
-  the next protagonist in spawn order, with a "waiting to join" prompt and a device-naming label
-  drawn over that protagonist's own pane until it does.
-- **All three deadzone stages** — a measured per-unit centre and rest envelope corrected as the
-  frame is sampled, the binding's own shape and curve, and a player's adjustment of the second,
-  which is free to go to zero because the first is what keeps a worn stick still. Calibration is
-  measured by an explicit step the game drives, and lasts as long as the process.
-- **A focused widget answering through the mapper** (`examples/common/widget_focus.rs`) — a widget's
-  *kind* as a required component, a context activated while that kind holds focus, and the pad
-  answering alongside the keyboard that `InputDispatchPlugin` only ever covered half of. General
-  over widget kind rather than written per widget, and built from public API with nothing added to
-  the crate for it — which is the evidence that the seam holds. It lives beside the examples because
-  an input crate that pulls `bevy_ui` cannot be pulled *by* `bevy_ui`; it shares the
-  presentation-crate row's gate, below.
-
-### Known wrong today
+Defects, as distinct from limitations that were accepted deliberately — those are decisions and live
+in `docs/decisions.md`, where each says what reversing it would cost.
 
 - **`InputDispatchPlugin`, left enabled, bypasses consumption.** `bevy_ui_widgets::Button` activates
   on `Space` from a `FocusedInput<KeyboardInput>` that asks the mapper nothing, so a focused button
   answers a control a context has claimed (R8.2a). What is wrong is the *default*, not the
-  capability: the focused-widget entry above answers it, and Disasteroids ships that way, disabling
-  the plugin outright. What is wrong is that `DefaultPlugins` brings the collision and nothing tells
-  a game to opt out. The generic form, filtering `FocusedInput` for widgets nobody has written a
-  context for, is deferred rather than chunked; the deferred table carries why it is the second
-  thing to reach for rather than the first.
-- The prelude exports sixteen bare English nouns that a glob import drops into a template beside
-  Bevy's own (chunk 48).
+  capability: a context per widget kind answers it, and Disasteroids ships that way, disabling the
+  plugin outright. What is wrong is that `DefaultPlugins` brings the collision and nothing tells a
+  game to opt out. The generic form is in the deferred table.
+- **The prelude exports sixteen bare English nouns** that a glob import drops into a template beside
+  Bevy's own — chunk 48.
 - **`Phase::Ongoing` means two things**, told apart by reading the action's value: still firing, and
   still building toward firing. Every consumer in tree either does that value test or wants both
-  halves, Disasteroids included (chunk 79).
-- A control capture refuses (wrong shape, wrong scheme, reserved) is silent on Disasteroids'
-  screen — the session simply keeps listening, with nothing said about why the press did not take.
-- Held gamepad state is per-device only for a paired instance — Split Friction pairs now (chunk 27),
-  but Disasteroids' own context stays unpaired, so a disconnect there still clears every gamepad's
-  readings at once rather than just the one device's. **Deliberately not fixed**, and no longer
-  scheduled: chunk 22 was going to re-key this on the grounds that per-unit calibration needed it,
-  and it turned out not to — calibration is applied where the message still names its own sender.
-  What is left is the merge itself, where two pads reporting one axis means the one that moved last
-  speaks. That is LWIM's policy too, and its maintainer reports never having had a complaint; a
-  still-held stick on a second pad reading zero until it next moves is the whole observable
-  consequence. Fixing it costs a per-device map in every context instance, which is more than the
-  symptom is worth.
+  halves — chunk 79.
+- **A refused capture is silent on Disasteroids' screen.** Wrong shape, wrong scheme, or reserved,
+  and the session simply keeps listening with nothing said about why the press did not take.
+- **`cancel_in_flight` may leave an action `Started` rather than `Canceled`.** It matches
+  `Fired | Ongoing` and omits `Started`, so deactivating on the tick a hold began appears to
+  contradict R7.4. Not traced to a reachable case; chunk 79 is where it gets an answer either way.
+- **`R23.2` is unenforced.** No allocation and no synchronization on the per-tick path is a rule
+  with no tooling behind it. Two violations have reached that path and both were caught by reading.
 
 ### Never built
 
-- Glyphs.
-- Writing a saved override set to an actual file — the crate now serializes and deserializes one,
-  but where the bytes go was always the app's own decision, never this crate's.
-- The class binding mechanism has no caller yet: nothing in-tree is a focused text field, so
-  `ControlClass::CharacterProducing` has never been bound outside its own tests (deferred table).
+- **Glyphs.** Identifiers are defined; no image is resolved.
+- **Writing a saved override set to a file.** The crate serializes and deserializes one; where the
+  bytes go was always the app's decision.
+- **A caller for the class-binding mechanism.** Nothing in tree is a focused text field, so
+  `ControlClass::CharacterProducing` has never been bound outside its own tests.
+- **A window on the input frame.** `RawEvent` carries no source window, so nothing can scope a
+  binding to one — chunk 63.
 
 ### Upstreaming, if it happens
 
-There is a possibility this crate is taken upstream into Bevy. It is **not committed**, and nothing here is built on the assumption that
-it will be. The rule is that the possibility may influence the *shape* and the *order* of what gets
-built, but no work happens that a third-party crate would not want anyway.
+There is a possibility this crate is taken upstream into Bevy. It is **not committed**, and nothing
+here is built on the assumption that it will be. The rule is that the possibility may influence the
+*shape* and the *order* of what gets built, but no work happens that a third-party crate would not
+want anyway. What that changes today:
 
-What it changes, today:
-
-- ~~**Chunk 10 moved to the front of the sequence.**~~ Landed. OQ-3 is closed as **D9**, so the
-  layout an outside reader asks about first is settled and written down.
-- **OQ-5 and chunk 48 are public API** — the extensibility mechanism, and the names the prelude
-  drops into a glob import. Both are cheap now and breaking later, upstream or not.
-- **Chunk 46 gained a second audience.** Its short "the argument, not the spec" document is what a
-  reviewer coming cold reads, and it is also what makes the reasoning defensible by a person rather
-  than merely recorded.
-- **The presentation-layer row already names this as its own gate**, so if it happens, that split is
-  decided as part of the plan rather than discovered in the middle of it.
+- **The extensibility mechanism and the prelude names are public API**, cheap now and breaking
+  later, upstream or not — chunk 48.
+- **The presentation-crate row names this as its own gate**, so if it happens, that split is decided
+  as part of the plan rather than discovered in the middle of it.
 
 What it does **not** change: there is no upstream repository, no PR sequence, and no
-re-implementation. If it goes ahead, it would be a fresh implementation staged as reviewable PRs —
+re-implementation. If it goes ahead it would be a fresh implementation staged as reviewable PRs —
 the first around 1,000–2,000 lines, keyboard only — written against this crate as a model so it can
-skip the blind alleys this one took. Planning for that belongs here; building it does not, yet.
+skip the blind alleys this one took. The commitments that follow from the possibility are recorded
+as decisions rather than here.
 
 ---
 
 ## What has landed
 
-Fifty-nine chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
-where it fell short of its own description, for the entries the work in flight still reasons from;
-the [archive](./Log-archive.md) holds the rest, phase by phase but not bounded by phase — a phase can
-be partly closed and partly still open. This table is only an index, and the sequence below is what
-remains.
+An index, not a description. Chunk numbers are stable identities cited in commit messages and in
+code comments, so the sequence stays recoverable; what each chunk delivered is in git.
 
-| # | Chunk | State |
-| --- | --- | --- |
-| 1 | Workspace and module skeleton | done |
-| 2 | Action identity, value, and intent | done |
-| 3 | Derive macros | done |
-| 4 | Input frame, keyboard only | done |
-| 5 | First end-to-end slice | done, after repair |
-| 6 | Axis sources and composites | done, completed by 15 |
-| 7 | Modifiers | done; stateful modifiers → 11, `Reflect` → 17 |
-| 8 | Gamepad and the design-stage deadzone | done; stages 1 and 3 → 22 |
-| 24 | Housekeeping | done; doctests still deferred |
-| 9 | Tick domains and the windowed drain | done; the L2 half of R9.3 → 12 |
-| 15 | Source channel shape | done |
-| 16 | Disasteroids, first playable | playable; no death, which is polish |
-| 12 | Transition log and observers | done |
-| 13 | Context activation lifecycle | done |
-| 11 | Conditions and the scratch table | done; forgiveness windows withdrawn (R6.5), sequences → 34 |
-| 14 | Arbitration and consumption | done; chords on *actions* → 33 |
-| 32 | Activation by run condition | done, out of order |
-| 17a | Runtime failures (R24.4) | done; the silence it creates → 17b |
-| 17b | Plan-build diagnostics | done; unknown controls → 23, observers → 36 |
-| 36 | Type-erased inspection and the overlay | done |
-| 18 | Derive completion | done |
-| 19 | Mappings and localization keys | done; presets → 45, tunables → deferred table |
-| 37 | Naming a control | done; composite structure → §18 |
-| 20 | Interactive capture, conflicts, reserved controls | done; the mutation half → 38 |
-| 39 | A mapping holds a list of slots | done; reverse lookup → 40, mouse buttons → 41 |
-| 41 | Mouse buttons | done; scroll wheel → deferred table |
-| 43 | Listed by default | done; the gap it found → 44 |
-| 21 | The settings screen, read-only | done; the caption's reverse lookup → 40, taking the controls → 30 |
-| 40 | Reverse lookup | done; invalidation and device ranking → 47, glyphs still deferred |
-| 47 | A binding as a text span | done; the presentation layer lives in `examples/common/` until the deferred table's promotion gate trips, and the prelude's other bare nouns → 48 |
-| 29 | Directional navigation | done, folded into 30; bubbling dispatch (R22.7) declined, later withdrawn — see the deferred table's R22.8 row and Log-archive.md; an independent repeat delay → deferred table |
-| 30 | The settings screen, interactive | done; the widget layer's own keyboard path → 49 |
-| 44 | Bindings that travel together | done; the subordinate row it earns, and the descriptor that row needs → 50 |
-| 50 | What a held control says | done; the context-level filter the settings screen also needs → 53 |
-| 53 | A context the player never sees | closed with no crate change: `Mapping::context` already carried the data |
-| 38 | Applying a rebind | done; the conflict policies it also carried → 54, the file → 23, a follower riding only some of a row's slots → 58 |
-| 54 | Conflict policy | landed as detection only: `conflicts_pending` against a working copy, resolution left to the app on existing `Overrides` primitives |
-| 25 | Control classes and class bindings | done; `character_producing` measured against a real kana IME and a dead key rather than reasoned from docs — both compose correctly upstream and need nothing extra here; a focused text field actually claiming the class → 49 |
-| 56 | Split Friction's tileset | done; landed ahead of chunk 27 (device selection) — this chunk needed nothing from it |
-| 57 | A generated dungeon | done; the punched-obstacle arena this row used to describe was itself replaced — rooms grown from a perimeter frontier, wide loop-forming passages, and a region aspect per room biasing floor and wall texture. Wall and floor tile indices were rebuilt from scratch against Kenney's actual sheet after most of the first pass's assumptions turned out wrong; the wall/shadow resolver landed author-written, not LLM-written — see Log.md. Chest/shrine props and the `Vault` aspect are identified but not wired to anything yet |
-| 58 | `follow` replaces per-binding `follows` | done; found while scoping chunk 31 and landed ahead of it, since 31 inherited the follower-coverage problem this closes |
-| 31 | The settings screen, rebinding | done; steal chosen for R19.3's policy, and every capture patches the exact cells it touched rather than rebuilding — a capture never changes a row's shape |
-| 61 | Exclusive contexts | done; R7.8 landed as priority order alone, no named groups — R7.7's other half stays in the deferred table; the exclusion ceiling's device-blindness stays deferred, chunk 26's own gate now the deferred table's own row rather than a chunk of its own |
-| 45 | Presets | done; landed as a starting point, not a layer — no persisted "which preset" identity, so chunk 23 inherits the `Overrides` shape it already had; tunables stay out of scope, format left open for them |
-| 23 | Persistence of overrides | done; landed together with chunk 55, which is its own test — hand-written `Serialize`/`Deserialize` behind the `serialize` feature rather than a derive, since the wire shape (one scheme per table, a scalar for a one-control row) is not `Overrides`' own shape; an unresolved mapping name is dropped on save rather than preserved, decided rather than merely deferred |
-| 55 | A file a person can read | done; the golden TOML round-trip test that validates chunk 23 |
-| 62 | Release on focus loss and disconnect | done; landed as a new `Fold::Interrupted` pass rather than a blanket `deactivate`/`activate`, so a surviving binding on an unaffected device is untouched; R16.3's suspend/resume and R16.4–R16.6 stay untouched, no in-tree pressure behind them yet |
-| 64 | Tunables and hold-vs-toggle | done; a named value overwriting one modifier field, applied by the same variant-plan recompile a rebind uses, enumerated and persisted the same way a mapping is; `hold_or_toggle::<A>` is declared once per action rather than per binding and finds every eligible binding itself, sharing one runtime latch across them (a plan-level shared-scratch table resolved once per tick, ahead of the per-binding fold, the same way `chord_claims` already is); Disasteroids' `Thrust` shares it across `KeyW` and `ArrowUp` and deliberately leaves the analog trigger untouched, both because it fails the Button-shape eligibility check and by choice, following shipped-game precedent that hold-vs-toggle is a player preference rather than a per-device one; the stick deadzone is declared and enumerable but its live wire into `Turn` stays chunk 22's |
-| 67 | Per-entity `apply_overrides` | done; split off chunk 26's own inherited question (from chunk 38) rather than answered speculatively — a split-screen app persisting two players' `Overrides` independently needs each applied to only its own entity, which the world-wide `apply_overrides` cannot do; `apply_overrides_for`/`apply_overrides_for_with_preset` are a second entry point onto `InputContextState::adopt`, the same machinery a rebind already uses, touching neither `InputContextPlan<C>` (the pristine declaration every diff is still taken against) nor `AppliedPlan<C>` (what a freshly spawned instance inherits), so two entities diverge independently and a third spawned afterward still gets the world's unmodified default; presentation (`read_mappings`/prompts) stays world-wide, a stated gap in the deferred table rather than built speculatively |
-| 26 | Device routing (core) | done; `DeviceHandle`/`DeviceHandleSet` (`device.rs`) and a sibling `Paired` component (`player.rs`) reach `InputContextState::apply_frame`, which filters the events it reads by device before anything else touches them — an unpaired instance reads everything, exactly today's behavior; owner-scoping `ConsumedControls`/the exclusion ceiling and per-entity presentation both went to the deferred table rather than being built ahead of a need |
-| 66 | The join gesture | done; landed with far less new code than its own text proposed — `bind_class`'s existing class-binding dispatch already carries the untouched `RawEvent`, and so the device, through `ClassFired`, so a game declares "press anything to join" as an ordinary action on an unpaired context rather than the crate running a second per-device evaluation cycle; `join::is_claimed` is the one new function, checking a device against every `Paired` in the world so two waiting slots never race for the same one |
-| 68 | Split-screen cameras and protagonists | done; one `OnFoot` context bound to both a stick and arrow keys, `Paired` (chunk 26) is what makes the two protagonists independent rather than two context types — protagonist 1 is paired to the keyboard from spawn, protagonist 2 spawns with no context at all until a one-shot system pairs it to the first gamepad that connects, so an unpaired instance's "reads everything" default never lets the keyboard drive both sprites before a pad shows up; `Paired` needed `#[derive(Default)]` added (`src/player.rs`) since `bsn!`'s `FromTemplate` machinery requires it of every component a scene spawns, constructor call or not; the split-screen viewport sync needed a third camera nothing else touches, marked `IsDefaultUiCamera`, so the invisible HUD layout's `Val::Percent(100)` always measures against the full window rather than one of the two cameras `sync_viewports` has already narrowed — without it the layout would shrink itself by half every frame; verified by running the example and screenshotting it for the parts a sandbox with no OS input-injection permission could reach, and by the author playing it directly (keyboard and an Xbox pad) for the rest — both protagonists move independently and each camera tracks its own; that pass also found the default 1:1 world-to-pixel scale too zoomed out once a camera owns half the window, fixed by a `zoom_in` startup system setting `OrthographicProjection.scale` to `0.4` |
-| 69 | AABB collision | done; `collision::resolve` clamps a protagonist's swept box one axis at a time against the dungeon's solid cells and the other protagonist — an eight-step bisection search for the longest safe prefix of each axis's step, rather than an analytic sweep — so a wall met at an angle slides rather than stops dead; the same playtest that called for it also replaced chunk 68's fixed camera zoom with `ScalingMode::AutoMin` (crops neither axis regardless of window aspect), added per-pixel camera snapping to kill a tile-seam jitter, gave the pane divider a real `BackgroundColor` node instead of relying on clear-color showing through the gap, and inset the tileset's atlas rects by a pixel to stop nearest-filtering from sampling a neighboring tile at a shared edge |
-| 27 | Split Friction's device selection | done; `pair_on_join` (`protagonist.rs`) replaces chunk 68's hardcoded pairing — a `Lobby` context, never paired, bound only to chunk 66's join gesture (`bind_class::<Join>(ControlClass::AnyButton)`), claims each device for the next unclaimed protagonist in spawn order; a `Local<Vec<DeviceHandle>>` rather than `join::is_claimed` against a live `Query<&Paired>`, since two protagonists' join presses landing in the same tick both fire before either's `Paired` insert (a deferred command) is applied, and a world query would see both devices as still unclaimed and race for the same slot; each pane's "waiting to join" prompt and device label are `UiTargetCamera`'d directly at that pane's own split camera rather than drawn through a third camera on top, after three `Camera2d`s sharing one window turned out to hit what looks like a Bevy rendering bug (reproduced in isolation, reported upstream) where only the last camera's `ClearColorConfig` is honored and it clears the whole window rather than its own `Viewport`; verified visually — both panes render correctly, prompts positioned and centered — but the sandbox has no OS input-injection permission, so pressing an actual device to watch a prompt clear and a label fill in is still the author's own playtest |
-
-| 10 | The compiled plan, and OQ-3 closed | done; the interim `BTreeMap<ActionId, usize>` is a `Vec<u16>` indexed by the id, sentinel for unbound, sized by the largest id the context binds and held once per plan rather than per instance — an id interned after a plan compiled indexes past the end, which is the same answer the sentinel gives, so the miss needs no case of its own; the dirty bitset is one bit per slot, set by comparing `ActionState` before and after rather than by reading the phase (a held stick reports `Ongoing` every tick while its value moves), and its first consumer is the component's own change tick: evaluation writes through `bypass_change_detection` and re-marks only where a bit was set, so `Changed<InputContextState<C>>` became a subscription instead of a per-frame wake-up, with `dispatch_transitions` and `dispatch_class_fires` bypassed too so evaluation is the only thing that marks it; **OQ-3 is closed as D9** on structural facts rather than a timing run — activation moves no entity between archetypes and creates none, and a three-action context's whole snapshot is 140 bytes of `Copy` data — both asserted as tests, since a wall-clock comparison against a layout we would have had to build first is a number about the machine that ran it; the `Scratch` table's allocation, the chunk's third item, turned out to have landed with chunk 11 and needed nothing; `examples/` unchanged, as the chunk asked |
-| 22 | The deadzone chain, stages 1 and 3 | done, and **smaller than its own description**, because the defect it claimed to need turned out not to be one — see the log; `AxisCalibration`/`GamepadCalibration` (`device.rs`) hold a centre offset and rest envelope per (pad entity, axis), applied in `sample_input` as the raw message is recorded rather than in the evaluator, which is what lets the per-*unit* question be answered without any per-device held state: the message names its own sender, so by the time held state exists the value is already corrected by the right pad's numbers, and the placement also puts stage 1 past the injection seam, meeting R14.10 by where it sits rather than by a check; `CalibrationSampling` is the OQ-4 sampling helper, a resource the app inserts for an explicit step and removes after, whose doc comment carries the finding that the instruction must be "move the sticks and let go" rather than "hold still", since a pad reports an axis only when it changes and a stick that settled beforehand reports nothing during the step; R14.9's warning fires on `GamepadSettings` moved off Bevy's defaults, and the requirement's own stated failure mode was corrected in passing — a double deadzone cannot occur given the first half of the same requirement, and what actually happens is a setting that silently does nothing; stage 3 needed **no floor mechanism at all**, which is the layering paying for itself: Disasteroids' `Turn` now carries `tunable_dead_zone` and the settings stepper writes it through `PendingOverrides` like the hold-vs-toggle checkbox, `Prefs` is deleted, and a player may take it to zero because stage 1 already removed the drift underneath |
-
-| 52 | What the crate has accreted | done as a survey, landing only the `mappings()` doc sentence it also owed; six collapses scheduled as chunks 74–79, three declined with the reason recorded so they are not re-proposed. Its own two headline premises were wrong and the survey's first job was correcting them: `ControlClass` is not `ChannelShape` minus a variant (it gained `CharacterProducing`, a predicate on an *event*, and `Axis2` is a shape no control has), and `context.rs` is not "a quarter of the crate and two and a half times the next largest" — that counted a 2,759-line test module, and `binding.rs` is half again larger by code. The strongest finding was not on the candidate list at all: capture and overrides implement one validation twice and disagree about the order. The settings-screen scope question is closed — `Mapping::context` now appears in `mappings()`'s filtering sentence, and a convenience filter waits for a second caller |
-| 74 | One admissibility rule, not two | done; `capture::admissible` is the one predicate both sides ask — `Result<(), RefusedReason>`, with overrides lifting each reason into its own `OverrideProblemKind` at the call site, since that enum carries four variants only a file can earn and is not `Copy`; the order it settles on is capture's (reserved before shape, so pressing the settings key is answered with the reason it cannot be bound rather than with a complaint about its channel), which changed the override side's answer for a control that is refusable twice over, and a test now pins that order on the predicate itself rather than through either caller; `CaptureSession::verdict` and the private `enum Verdict` are gone rather than renamed — the excluded check that was tangled into it is a guard at the top of `run_captures`' loop, which is the honest shape, since ignoring is not a refusal reason and the crate no longer has two types called `Verdict`; the sentence owed to `ControlClass`'s doc says why it is not `ChannelShape` under another name |
-| 75 | Four names for a 2×2, twelve times over | done; twelve items become eight — four public names kept, over two `gather_*` helpers in `mapping.rs`, two `read_*` in `context.rs` and two fn-pointer fields on `DeclaredContext`, all discriminated by a `pub(crate) enum OverrideStage { Declared, Effective }` that never reaches the public surface, exactly as `apply_overrides`' four names sit over two `Option<&Overrides>` helpers next door; the collapse also stated a thing the four copies left implicit — `Effective` falls back to the declaration where nothing has been applied, which was three separate copies of the same fallback rather than one rule; `report_mapping_collisions` now says `OverrideStage::Declared` where it used to take whatever `mappings` gave it, a distinction with no difference today (an override moves slots, and that check reads keys) but the honest one for a plan-build check; the prelude gained `Tunable`, `TunableValue`, `declared_mappings`, `declared_tunables` and `tunables`, and the two new type names were checked against chunk 48's criterion rather than waved through |
-
-Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
-than by the chunk that incurred it — so what a chunk must do is stated in one place.
+| #   | Chunk                                             |
+| --- | ------------------------------------------------- |
+| 1   | Workspace and module skeleton                     |
+| 2   | Action identity, value, and intent                |
+| 3   | Derive macros                                     |
+| 4   | Input frame, keyboard only                        |
+| 5   | First end-to-end slice                            |
+| 6   | Axis sources and composites                       |
+| 7   | Modifiers                                         |
+| 8   | Gamepad and the design-stage deadzone             |
+| 24  | Housekeeping                                      |
+| 9   | Tick domains and the windowed drain               |
+| 15  | Source channel shape                              |
+| 16  | Disasteroids, first playable                      |
+| 12  | Transition log and observers                      |
+| 13  | Context activation lifecycle                      |
+| 11  | Conditions and the scratch table                  |
+| 14  | Arbitration and consumption                       |
+| 32  | Activation by run condition                       |
+| 17a | Runtime failures (R24.4)                          |
+| 17b | Plan-build diagnostics                            |
+| 36  | Type-erased inspection and the overlay            |
+| 18  | Derive completion                                 |
+| 19  | Mappings and localization keys                    |
+| 37  | Naming a control                                  |
+| 20  | Interactive capture, conflicts, reserved controls |
+| 39  | A mapping holds a list of slots                   |
+| 41  | Mouse buttons                                     |
+| 43  | Listed by default                                 |
+| 21  | The settings screen, read-only                    |
+| 40  | Reverse lookup                                    |
+| 47  | A binding as a text span                          |
+| 29  | Directional navigation                            |
+| 30  | The settings screen, interactive                  |
+| 44  | Bindings that travel together                     |
+| 50  | What a held control says                          |
+| 53  | A context the player never sees                   |
+| 38  | Applying a rebind                                 |
+| 54  | Conflict policy                                   |
+| 25  | Control classes and class bindings                |
+| 56  | Split Friction's tileset                          |
+| 57  | A generated dungeon                               |
+| 58  | `follow` replaces per-binding `follows`           |
+| 31  | The settings screen, rebinding                    |
+| 61  | Exclusive contexts                                |
+| 45  | Presets                                           |
+| 23  | Persistence of overrides                          |
+| 55  | A file a person can read                          |
+| 62  | Release on focus loss and disconnect              |
+| 64  | Tunables and hold-vs-toggle                       |
+| 67  | Per-entity `apply_overrides`                      |
+| 26  | Device routing (core)                             |
+| 66  | The join gesture                                  |
+| 68  | Split-screen cameras and protagonists             |
+| 69  | AABB collision                                    |
+| 27  | Split Friction's device selection                 |
+| 10  | The compiled plan, and OQ-3 closed                |
+| 22  | The deadzone chain, stages 1 and 3                |
+| 52  | What the crate has accreted                       |
+| 74  | One admissibility rule, not two                   |
+| 75  | Four names for a 2×2, twelve times over           |
 
 ---
 
 ## Phase VI — the parts a solo developer trips over
 
-What R24.8 turned from polish into obligation: the long tail cannot verify what it does not own, so
-mistakes have to be caught rather than discovered in QA that nobody is running.
+The long tail cannot verify what it does not own, so mistakes have to be caught rather than
+discovered in QA that nobody is running.
 
 ### 17c. Reflect, and the two normalizes
 
-`Reflect` on modifiers and conditions so third-party ones round-trip (R5.6, R17.5). Plus R5.9's two
-`normalize` operations, now named: `clamp_magnitude` scales a vector down if it exceeds magnitude 1,
-and `rescale` maps a range onto 0..1 and therefore falls under D6's one-rescaling-stage rule.
-`rescale` is the word the crate already uses for that stage — `without_rescale`, `rescales()` — so
-this chunk builds the modifier under a name the plan-build check already counts by.
+`Reflect` on modifiers and conditions (R5.6, R17.5), plus R5.9's two `normalize` operations, now
+named: `clamp_magnitude` scales a vector down if it exceeds magnitude 1, and `rescale` maps a range
+onto 0..1 and therefore falls under the one-rescaling-stage rule. `rescale` is the word the crate
+already uses for that stage, so this builds the modifier under a name the plan-build check counts
+by.
 
-- **Why separate:** neither is a diagnostic, and both were riding in 17 because it was the open
-  chunk when they were found.
 - **Smaller than when it was written.** R17.5 wanted `Reflect` so third-party modifiers round-trip
-  through persistence — but the design that settled in §10.1 stores *controls*, so a custom modifier
-  never reaches a saved override file. What still wants it is serializing whole binding
-  *definitions* (R17.6, R22.16), which is deferred, so this is no longer on the path to anything
-  scheduled.
+  through persistence, but an override stores *controls*, so a custom modifier never reaches a saved
+  file. What still wants it is serializing whole binding *definitions* (R17.6, R22.16), which is
+  deferred — so this is no longer on the path to anything scheduled.
+- **Not doing:** anything that would make `Modifier` or `Condition` require `Reflect`.
 
 ### 63. Multi-window
 
 R13.5: an input frame carries no source window, so nothing can scope a binding to one — a MUST with
-zero code behind it (`RawEvent` has no window field to filter on).
+zero code behind it.
 
-- **Why it waits:** nothing in tree has a second window. Disasteroids and Split Friction are both
-  single-window; of everything the sweep found, this is the one with no in-tree pressure behind it
-  at all.
-- **Carried from the first grooming sweep**, not from an earlier chunk.
-
----
-
-## Phase VII — the presentation model
-
-D7 made real. This is the half of the crate a player ever sees, and per the audience commitment it
-must stay additive: a game that declares none of it keeps working exactly as before (R19.13, R24.7).
-
-**The screen arrives in three passes**, because each one is separately capable of being wrong and
-mixing them would make it unclear which half was at fault: first a read-only list, then something
-navigable, then something that rebinds. Navigation sits between the first two, since a screen you
-cannot move around is a help screen rather than a settings screen — which is exactly why the first
-pass was worth having on its own. All three have landed.
-
-**The screen Disasteroids is building, stated once.** These are the acceptance criteria for 21, 29,
-30 and 31 together, written down here so that each pass can be judged against the finished thing
-rather than against its own description:
-
-- **Two tables**, one keyboard and one gamepad, because a rebind is scoped to a scheme (R19.7) and
-  device tabs are near-universal in shipped games.
-- **The keyboard table has three columns**: description, **primary**, **secondary**. Both cells are
-  buttons that initiate a capture. This is also what makes the screen demonstrate horizontal *and*
-  vertical navigation, which one column would not.
-- **The gamepad table is read-only**, and has two columns: description and control. Neither fork of
-  the audience rebinds a pad row from here. A game shipping on Steam or a console has the platform's
-  own remapper and should link to it; a game with neither gets **presets** instead — Default and
-  Southpaw as buttons under the table, which chunk 45 built. That is the whole gamepad story, and it
-  is why the pad rows are listed-and-fixed rather than absent (R19.10): without chunk 43 there would
-  be no table here at all.
-- **Confirm and Cancel at the bottom**, activatable three ways: mouse click; directional navigation
-  then A; and a shortcut, B for cancel and X for confirm. **The button caption includes the
-  shortcut**, which is R18.1's reverse lookup showing up as a UI requirement rather than a nicety —
-  chunk 40 answered it and chunk 47 built the caption: a `PromptSpan` inside the button's `Text`,
-  with a `PromptScheme(Gamepad)` beside it where the caption names a pad control regardless of what
-  the game's prompts otherwise speak for.
-- **Two-stage cancel.** B *during a capture* cancels only the capture. B again, with no capture
-  live, leaves the screen **without committing**.
-- **Working-copy semantics**, which follow from having a Confirm at all: the screen renders
-  `pending.get(key)` falling back to the mapping's defaults, and `conflicts()` must be able to
-  consult the pending set rather than only what is committed. Chunk 38 owns making it able to.
-
-Chunk 39 built the model half of the three-column table — a mapping holds an ordered list with a
-capacity, and a capture names the slot it fills — 43 put the fixed rows on it, 21 drew both tables
-from that model alone, 30 made the cells reachable, and 31 made pressing one do something: capture,
-steal, Confirm and Cancel each meaning what they say, and B meaning one of two things depending on
-whether a capture is live.
+- **Why it waits:** nothing in tree has a second window. Of everything the grooming sweeps found,
+  this is the one with no in-tree pressure behind it at all.
 
 ---
 
@@ -489,90 +186,70 @@ Nothing here changes what the crate can do.
 
 ### 51. The constitution, trimmed
 
-`Requirements.md` accreted argument because the house style pointed it there — the rule said
-persisting analysis goes in "Design.md or the requirements", which has since been narrowed to
-Design.md alone. This is the pass that clears what accumulated under the old rule.
+`Requirements.md` accreted argument because the house style used to point it there. This is the pass
+that clears what accumulated under the old rule.
 
 - **The target is 23 italic `_(...)_` asides**, not the long requirements. Measurement first,
   because the instinct is wrong: 220 requirements, 962 lines of body, median 3 lines, only 14 over
   twelve — and most of those are long because they carry a table of cases or an enumerated set of
   states, which *is* the requirement. Trimming by length would remove constitutional content.
 - **The test, per requirement:** does this sentence say what must be true, or defend it? Defence
-  moves to `Design.md`, or to `Log.md` where a chunk learned it. It is moved rather than deleted —
-  the reasoning is worth keeping, in the document built for it.
-- **Withdrawn requirements are exempt.** What they keep is the argument that stops the idea being
-  re-proposed, which is the one argument in the document with a job to do.
+  moves to `docs/decisions.md`. It is moved rather than deleted.
+- **Withdrawn requirements are exempt.**
 - **Why it is a chunk rather than an afternoon.** Twenty-three judgement calls in the document every
-  other document defers to, where dropping a load-bearing clause is invisible in a diff — the clause
-  reads as commentary right up until the moment someone needs it.
-- **Review surface:** whether anything moved to `Design.md` landed somewhere a reader would find it.
-  Text moved out of the constitution and into a section nobody opens has been deleted with extra
-  steps.
+  other document defers to, where dropping a load-bearing clause is invisible in a diff.
+- **Overlaps phase 5 of [docs/plan.md](./docs/plan.md)**, which is the same job reached from the
+  other direction. Whichever runs first discharges the other.
+- **Review surface:** whether anything moved landed somewhere a reader would find it. Text moved out
+  of the constitution and into a section nobody opens has been deleted with extra steps.
 
 ### 76. `Unresolved`, once
 
-`UnresolvedMapping` and `UnresolvedTunable` are the same struct — `{ scheme: Scheme, name: String }`
-— for the same reason, each documented as being for the same reason as the other. One type with a
-field saying which kind of row it was, and `OverridesLoader::deserialize`'s four-tuple becomes a
-struct with three fields.
+`UnresolvedMapping` and `UnresolvedTunable` are the same struct — `{ scheme, name }` — each
+documented as being for the same reason as the other. One type with a field saying which kind of row
+it was, and `OverridesLoader::deserialize`'s four-tuple becomes a struct with three fields.
 
-- **Not doing:** anything to `OverrideProblem`. That is a different report at a different time, and
-  74 covers the part the two genuinely share.
+- **Not doing:** anything to `OverrideProblem`. That is a different report at a different time.
 
 ### 77. A test fixture the crate shares
 
 8,672 of the crate's 20,124 lines are tests, and they repeat themselves: `struct Jump` is declared
 nine times, `Move` six, `OnFoot` five; `capture.rs` and `overrides.rs` build near-identical fixture
-contexts independently; three private `fn app()` share nothing; `context.rs` alone holds 53
-`App::new()`.
+contexts independently; `context.rs` alone holds 53 `App::new()`.
 
-- **A `#[cfg(test)] mod test_support`** with the fixture actions, the fixture contexts, and the
-  press-and-step helpers. Uncontroversial, and it shrinks `context.rs` further than 78 does.
+- **A `#[cfg(test)] mod test_support`** with the fixture actions, contexts, and press-and-step
+  helpers. It shrinks `context.rs` further than 78 does.
 - **Watch the action registry.** It is a process-global intern table keyed by declared path, so
-  fixture actions shared across modules share one `ActionId` for the whole test binary. That is
-  already true of any two modules that pick the same path; what changes is that it becomes
-  deliberate.
+  fixture actions shared across modules share one `ActionId` for the whole test binary. Already true
+  of any two modules picking the same path; what changes is that it becomes deliberate.
 - **Review surface:** whether a test still reads on its own. A fixture that has to be looked up in
   another module to understand a failure costs more than the duplication did.
 
 ### 78. Two files doing several jobs each
 
-- **`context.rs` is three:** the live state (`InputContextState`, `DirtySet`, `ActionReading`,
-  `Obstacle`, `Actions`, `ActionsQuery`); declaration and app wiring (`ActionMapAppExt`, the builder
-  impl, `declare_context`, diagnostics, priority ordering); and the monomorphization seam — the
-  eight `read_*`/`apply_to_*` functions that are the only reason the file depends on `overrides`,
-  `present`, `mapping` and `inspect`. After 75 that seam is half the size, which is why this follows
-  rather than leads.
-- **`binding.rs` is four**, and is the larger of the two by code: the control vocabulary, the
-  declaration structs plus the queries over them, the modifiers, and the builder API.
+- **`context.rs` is three:** the live state; declaration and app wiring; and the monomorphization
+  seam — the eight `read_*`/`apply_to_*` functions that are the only reason the file depends on
+  `overrides`, `present`, `mapping` and `inspect`. After 75 that seam is half the size, which is why
+  this follows rather than leads.
+- **`binding.rs` is four**, and is the larger by code: the control vocabulary, the declaration
+  structs and the queries over them, the modifiers, and the builder API.
 - **The measurement chunk 52 corrected.** `context.rs` is 4,318 lines of which 1,559 are code;
-  `binding.rs` is 2,361 lines of code. The "quarter of the crate, two and a half times the next
-  largest" this chunk used to justify itself was counting a 2,759-line test module, which is 77's
-  problem rather than this one's.
+  `binding.rs` is 2,361 lines of code. The "quarter of the crate" this chunk used to cite was
+  counting a 2,759-line test module, which is 77's problem.
 - **Ground rule 3 applies literally:** `examples/` must not change.
 
 ### 79. `Phase` tells building from firing
 
-`Phase::Ongoing` covers two states and leaves the value to tell them apart — a held action still
-firing, and a condition still building toward firing. Split it into `Firing` and `Building`.
+Split `Phase::Ongoing` into `Firing` and `Building`.
 
-- **Nobody wants the union.** Every consumer either re-reads the value immediately (`why_not`,
-  `was_firing`/`was_building`, and Disasteroids' own afterburner charge test) or deliberately wants
-  both halves. `update_action_state`'s two guards stop inspecting the value at all, and
-  `dispatch_for` becomes the plain statement that the levels produce no event and the edges produce
-  theirs.
-- **It completes the rule R3.1 already states** — "**started**, which is an edge where `ongoing` is
-  a level". A gerund or adjective is a level (`Idle`, `Building`, `Firing`), a past participle is an
-  edge (`Started`, `Fired`, `Completed`, `Canceled`), and `Ongoing` is the one variant carrying
-  both.
-- **R3.1 goes from six states to seven**, and its parenthetical extends rather than changes: the
-  second addition splits Unreal's `Ongoing` by whether the action is actually happening.
+- **Nobody wants the union.** Every consumer either re-reads the value immediately or deliberately
+  wants both halves. `update_action_state`'s two guards stop inspecting the value at all.
+- **It completes the rule R3.1 already states.** A gerund or adjective is a level (`Idle`,
+  `Building`, `Firing`); a past participle is an edge (`Started`, `Fired`, `Completed`, `Canceled`).
+  `Ongoing` is the one variant carrying both.
 - **`Phase` is not `#[non_exhaustive]`**, so this breaks any exhaustive match — the same shelf life
   as 48, which is why the two are last in this phase.
-- **A question this chunk settles on the way:** `cancel_in_flight` matches `Fired | Ongoing` and
-  omits `Started`, while `was_building` includes it, so deactivating on the tick a hold started
-  appears to leave the action `Started` rather than `Canceled`, against R7.4. Not traced to a
-  reachable case, and the rewrite is where it gets an answer either way.
+- **It owns the `cancel_in_flight` defect** in "Known wrong" above.
 - **Not doing:** `Active` for the firing half. It collides with context activation, and "an `Active`
   action in an inactive context" is a sentence this crate can produce.
 
@@ -581,41 +258,24 @@ firing, and a condition still building toward firing. Split it into `Firing` and
 The prelude exports sixteen bare English nouns — `Scheme`, `Mapping`, `Capacity`, `Conflict`,
 `Overlap`, `Captured`, `Refused`, `Condition`, `Verdict`, `Part`, `Intent`, `Phase`, `Obstacle`,
 `Timestamp`, `Rebinding`, `Actions` — plus the four transition events, and a game glob-imports it
-beside Bevy's own. Found in chunk 47, which renamed the two it touched (`Scope` → `PromptScope`,
-`Origin` → `ControlOrigin`) and left the rest rather than smuggling a crate-wide rename into a
-feature chunk.
+beside Bevy's own.
 
-- **Four of those were missed when this chunk was written**, and turned up by re-reading the prelude
-  rather than the list: `Obstacle`, `Timestamp`, `Rebinding` and `Actions`. `Timestamp` is the one
-  another crate is most likely to export as well; `Obstacle` is the one no reader would guess. The
-  other two are here to be judged rather than assumed — `Actions` probably does earn its bareness in
-  a crate called `bevy_action_map`.
-
-- **`Verdict` needs the rename most, and chunk 52 settled what to.** It becomes `ConditionState`,
-  which reads as one thing rather than as a prefix bolted on and joins the family already there
-  (`Condition`, `ConditionKind`, `ConditionDescriptor`). Its variants go with it:
-  `Idle`/`Ongoing`/`Fired` becomes `Idle`/`Building`/`Satisfied`, which is level-shaped throughout —
-  a `Down` condition answers on every tick the control is held, so a past participle was reading as
-  an edge. That leaves `Idle` and `Building` as the only names shared with `Phase`, and they are
-  shared where the two views genuinely coincide. Depends on 79, which is what claims `Firing` for
-  `Phase`. The objection, recorded rather than resolved: `ActionState` and `InputContextState` are
-  storage, and a condition's storage is `Scratch`.
-- **Chunk 75 added `Tunable` and `TunableValue`**, checked against the criterion below rather than
-  waved through: Bevy exports neither name and neither is a word a reader would expect to mean
-  something else, so both pass. Its three new function exports (`declared_mappings`,
-  `declared_tunables`, `tunables`) are outside this chunk's scope, which is types.
-- **Chunk 30 added a seventeenth export and it is not on the list**, deliberately: `CompassPoints`
-  is named after `bevy_math`'s own `CompassOctant` and `CompassQuadrant`, so a reader who knows Bevy
-  guesses right, which is exactly the criterion below. Recorded because a prelude that grows between
-  now and this chunk needs checking as it grows rather than re-enumerating at the end.
-- **Why it is not cosmetic.** BSN templates are where it bites: a scene lists components from
-  several preludes with nothing saying which crate each came from, so a name that does not carry its
-  domain reads as whatever the reader assumes. `Scope` was the worst of them and is done.
 - **The criterion, so the pass is not taste.** A name earns its bareness if a reader who knows Bevy
   but not this crate would guess right. `Control` and `Prompt` pass. `Phase` and `Part` do not.
+  `CompassPoints` passes, being named after `bevy_math`'s own `CompassOctant`.
+- **`Verdict` needs it most**, and becomes `ConditionState`, joining the family already there. Its
+  variants go with it: `Idle`/`Ongoing`/`Fired` becomes `Idle`/`Building`/`Satisfied`, which is
+  level-shaped throughout — a `Down` condition answers on every tick the control is held, so a past
+  participle read as an edge. Depends on 79, which claims `Firing` for `Phase`. The objection,
+  recorded rather than resolved: `ActionState` and `InputContextState` are storage, and a
+  condition's storage is `Scratch`.
+- **Why it is not cosmetic.** BSN templates are where it bites: a scene lists components from
+  several preludes with nothing saying which crate each came from.
+- **A prelude that grows before this lands needs checking as it grows**, rather than re-enumerating
+  at the end.
 - **Not doing:** deprecation shims. Nothing outside this repository depends on the crate yet, and
-  the moment that stops being true this chunk gets more expensive than it is worth — which makes
-  this a chunk with a shelf life rather than one that can wait indefinitely.
+  the moment that stops being true this chunk gets more expensive than it is worth — a shelf life
+  rather than a chunk that can wait indefinitely.
 - **Review surface:** whether the renames read as prefixes bolted on. `PromptScope` reads as one
   thing; `InputActionPhase` would not, and where that happens the answer is a better word rather
   than a longer one.
@@ -624,29 +284,26 @@ feature chunk.
 
 ## Phase IX — the second example
 
-Disasteroids is one player reading one set of bindings. Everything in §15 is invisible to it,
-because with a single player there is no question of *which* device drove an action — and a model
-that never has to answer that question has not been tested on the thing it was designed for.
-
-Chunks 59 and 60 — missiles, monsters and spawners — left this phase for the deferred table. The
-example already demonstrates what §15 wanted from it, and more game code would not add crate
-coverage.
+Disasteroids is one player reading one set of bindings, so everything about device pairing is
+invisible to it. Split Friction is the example that has to answer *which* device drove an action.
 
 ### 70. Device brand and class
 
 R11.6: brand and class resolution (Xbox / PlayStation / Nintendo / generic), app-overridable, seeded
-from a database such as SDL_GameControllerDB. Written down as a chunk because until now it had **no
-destination anywhere in this document** — not a chunk, not a deferred row — which is the ground
-rule 5 case, and it was found by re-reading §11 rather than from any diff.
+from a database such as SDL_GameControllerDB.
 
-- **Unknown is an ordinary answer.** R11.6 admits `vendor_id`/`product_id` are `Option` and often
-  absent — wasm, some Linux setups — so the generic fallback is a common path, not an error.
-- **Not shipping SDL's database.** "A database such as" is what the requirement says: a small table
-  of known ids plus the app-override hook proves the seam, and the full database is data an app
-  supplies.
-- **It is the missing half of the glyph row**, not a separate errand. R18.4 keys a glyph identifier
-  on (brand, control) and chunk 37 already stores the control half, so this is what makes R18.4's
-  scheme testable at all.
+- **Unknown is an ordinary answer.** `vendor_id`/`product_id` are `Option` and often absent — wasm,
+  some Linux setups — so the generic fallback is a common path, not an error.
+- **It has to decide what "generic" contains**, which has never been designed. Xbox and
+  PlayStation share close enough conventions for one tier to serve both; Nintendo is not a peer,
+  since its face buttons sit mirrored, so a generic tier built on the other two names the wrong
+  button rather than a merely-generic one for an unidentified Switch-family pad. Whether
+  `fallback_label` gains the same brand → generic → text tiering, or stays positional and leaves
+  brand-specific text to an app's catalogue, is open and this chunk closes it.
+- **Not shipping SDL's database.** A small table of known ids plus the app-override hook proves the
+  seam; the full database is data an app supplies.
+- **It is the missing half of the glyph row**, not a separate errand. R18.4 keys a glyph
+  identifier on (brand, control) and chunk 37 already stores the control half.
 - **Verified by:** Split Friction's device label naming the pad actually being held rather than
   "Gamepad".
 
@@ -655,311 +312,167 @@ rule 5 case, and it was found by re-reading §11 rather than from any diff.
 Each protagonist selects its own preset, applied through `apply_overrides_for_with_preset`.
 
 - **What it proves.** Chunk 67 built the per-entity apply path ahead of a need and nothing in tree
-  has called it since — this is that caller. A preset is the cheapest override to select, being a
-  named set rather than a captured control, so the general per-entity override case is validated
-  without a second rebinding UI.
-- **It trips a deferred row on purpose.** "Per-entity presentation and prompts" is gated on an
-  actual per-player settings display existing, and a per-pane preset selector is one. Expect it to
-  validate that row's sketch or falsify it, and say which.
+  has called it since — this is that caller. A preset is the cheapest override to select, so the
+  general per-entity case is validated without a second rebinding UI.
+- **It trips a deferred row on purpose.** "Per-entity presentation and prompts" is gated on a
+  per-player settings display existing, and a per-pane preset selector is one. Expect it to validate
+  that row's sketch or falsify it, and say which.
 - **Verified by:** playing it — each pane selects independently, and the other pane's bindings do
   not move.
 
 ### 72. Device identity, and a pairing that survives a restart
 
-R11.5: stable persistent device identity, distinct from the ephemeral runtime handle, and Split
-Friction putting each player back on the device they had.
+R11.5: stable persistent device identity, distinct from the runtime handle, and Split Friction
+putting each player back on the device they had.
 
-- **Now carries calibration's persistence too.** That deferred row used to gate §11 on "two units
-  of the same kind", on the theory that per-device calibration was worth nothing until two
-  identical pads could disagree. Chunk 22 falsified the gate by building calibration without
-  either — the raw message names its own sender, so a test writes two entities — and what it
-  left keyed to the
-  runtime handle is exactly what a persistent identity would key instead. So this chunk should carry
-  `GamepadCalibration` across a restart alongside the pairing, or say why the two want different
-  storage.
-- **And the calibration step itself**, which chunk 22 left with no in-tree caller:
-  `CalibrationSampling` is driven end to end by tests but by no screen. It belongs here rather than
-  with chunk 22 because a
-  calibration a player performs and then loses on quit is worth little — the screen and the
-  persistence are one feature, and building the screen first would have shipped the half that
-  frustrates.
-- **Verified by:** playing it, quitting, relaunching — the same protagonist is on the same device
+- **Now carries calibration's persistence too.** Chunk 22 built the measuring and the applying keyed
+  to the runtime handle, which is exactly what a persistent identity would key instead. This chunk
+  carries `GamepadCalibration` across a restart alongside the pairing, or says why the two want
+  different storage.
+- **And the calibration step itself**, which has no in-tree caller: `CalibrationSampling` is driven
+  end to end by tests but by no screen. A calibration a player performs and then loses on quit is
+  worth little, so the screen and the persistence are one feature.
+- **Verified by:** playing it, quitting, relaunching — the same protagonist on the same device
   without anyone pressing anything — and by unplugging a pad and plugging it back in.
 
 ### 73. A key rendered through a catalogue
 
-Every `fallback_label` call in tree is unconditional: nineteen sites across `examples/`, not one of
-them going through a catalogue. R19.14 makes rendering the app's business and the crate's half of
-that is done — but the claim those names are *keys a localized game looks up* has never once been
-exercised, so the convention R19.14 calls derivable is unfalsified.
+Every `fallback_label` call in tree is unconditional: nineteen sites across `examples/`, not one
+going through a catalogue. The crate's half of R19.14 is done, but the claim that those names are
+*keys a localized game looks up* has never been exercised.
 
-- **In an example, not the crate.** R19.14 puts rendering on the app, and chunk 47's own layering
-  note is why the presentation half lives out there already.
+- **In an example, not the crate.** Rendering is the app's business.
 - **What it is:** one example's renderer reading a catalogue file, a second locale to prove it
   switches, and the fallback kept for the key the catalogue misses.
 - **Not fluent.** `bevy_fluent` is pinned to an older Bevy, and fluent's own value — plurals,
-  gender, bidi, per-locale numbers — is orthogonal to whether our keys resolve, since they resolve
-  to nouns. The one thing fluent would genuinely test is whether our key syntax collides with its
-  identifier grammar, and that is a reading of the spec rather than a dependency.
-- **Review surface:** whether the key R19.14 says SHOULD be derivable is the key an author would
-  actually want to type in a catalogue file.
+  gender, bidi — is orthogonal to whether our keys resolve, since they resolve to nouns. The one
+  thing it would genuinely test is whether our key syntax collides with its identifier grammar, and
+  that is a reading of the spec rather than a dependency.
+- **Review surface:** whether the key is the one an author would actually want to type.
 
 ---
 
+## Unscheduled by phase
+
 ### 33. Conditions that read other actions
 
-A chord may require another *control* — `with()` — but not another *action*, and `BlockedBy` does
-not exist. Both read a neighbouring slot rather than their own value, which needs the operand
-evaluated first: slots ordered topologically, and a cycle rejected at plan build with a
-diagnostic naming the loop.
+A chord may require another *control* but not another *action*, and `BlockedBy` does not exist. Both
+read a neighbouring slot rather than their own value, which needs the operand evaluated first: slots
+ordered topologically, and a cycle rejected at plan build with a diagnostic naming the loop.
 
-- **Why it waits:** self-contained, and nothing in tree wants it. It carried two motivating cases;
-  the settings screen turned up and claimed the first — a modal that blocks an action while it is
-  open turned out to be chunk 61's exclusive contexts, not a condition, because the block is
-  per-context ("this screen owns everything beneath it") rather than per-action. What is left is a
-  chord on an action rather than a key, which is not worth guessing at on its own.
-- **Carried from chunks 11 and 14.**
-- **Inherited from chunk 44: whether this subsumes `follows`.** Afterburner is genuinely "Thrust,
-  still held", and a game that could say that in a condition would need no link at all — the second
-  binding would not exist. 44 built the link anyway, because the two answer different questions:
-  `follows` says the mapping is shared, and a condition says the *value* is derived. Worth checking
-  when this lands whether the overlap is large enough that one of them should go, since carrying
-  both when either would do is the sort of thing an outside reader notices first.
+- **Why it waits:** self-contained, and nothing in tree wants it. It carried two motivating cases
+  and the settings screen claimed the first — a modal that blocks an action while it is open turned
+  out to be exclusive contexts, because the block is per-context rather than per-action. What is
+  left is a chord on an action rather than a key.
+- **Inherited from chunk 44: whether this subsumes `follow`.** An afterburner is genuinely "thrust,
+  still held", and a game that could say that in a condition would need no link at all. The two
+  answer different questions — `follow` says the mapping is shared, a condition says the value is
+  derived — but check when this lands whether the overlap is large enough that one should go, since
+  carrying both when either would do is what an outside reader notices first.
 
 ### 34. Sequences
 
-R6.4's ordered sequences (double-tap-dash, motion inputs, cheat codes) — inputs that must arrive in
-order within a time window.
+R6.4's ordered sequences — double-tap-dash, motion inputs, cheat codes — arriving in order within a
+time window.
 
-- **R6.5's forgiveness windows (buffering, coyote time) do not carry here.** Withdrawn instead — see
-  Requirements.md. The crossing point in both directions is app-domain state (landing, leaving the
-  ground) the crate cannot see, and R3.2's events plus R3.4's elapsed time already give the app what
-  it needs to compose the pattern itself.
-- **Fits the scratch record** as Design §6 predicted, so this is a condition, not a redesign.
-- **Carried from chunk 11.**
+- **Fits the scratch record**, so this is a condition, not a redesign.
+- **R6.5's forgiveness windows do not carry here** and are withdrawn. The crossing point in both
+  directions is app-domain state the crate cannot see, and events plus elapsed time already give an
+  app what it needs to compose the pattern itself.
 
 ### 35. Disabling an action
 
 R3.7: an action switched off without being unbound, and switched back on without firing for a
-control the player was already holding — the same require-reset the context lifecycle already has,
-one level down.
+control the player was already holding.
 
-- **Why it exists as its own chunk.** The second grooming recorded it as homed in chunk 17, but
-  chunk 17's description never mentioned it, so splitting that chunk would have dropped it. A
-  `MUST` whose only record of a destination was in the log is exactly what ground rule 5 forbids.
-- **Not a diagnostic**, which is why it does not belong in what 17 became.
 - **The mechanism is probably already there.** `require_reset` is per slot and `StateFlags` has
   room; what is missing is the public verb and what it means for a disabled action's in-flight
-  state — cancel, on the same terms as deactivating a context, is the answer to beat.
+  state. Cancel, on the same terms as deactivating a context, is the answer to beat.
+- **Why it exists as its own chunk.** A `MUST` whose only record of a destination was in the log is
+  exactly what ground rule 5 forbids.
 
 ### 42. The authority backend, faked
 
-D3 made real against something that is not Steam, because the seam is only proven by a second
-implementer and the real one cannot live here. **Depends on Design §10.5**, which records what Steam
-Input actually is and settles the three places its model disagrees with ours.
+The backend seam made real against something that is not Steam, because the seam is only proven by a
+second implementer and the real one cannot live here.
 
 - **The traits land in `src/backend.rs`**, which has been a doc comment and no code since chunk 1.
   An authority backend supplies an `ActionValue` per owned action, substituted for the fold's output
-  inside the evaluator so our state machine still synthesizes the edges (§10.5). A source backend
-  needs nothing new — `InputFrame::record` is already public and already the door.
-- **The mock lives entirely in `examples/`**, not in `src/` behind a feature. The traits are public
-  API and carry a maintenance promise; the fake is a test fixture and gets deleted when a real
-  backend exists. Ground rule 3 already makes the examples the acceptance test.
+  inside the evaluator so the state machine still synthesizes the edges. A source backend needs
+  nothing new — `InputFrame::record` is already the door.
+- **The mock lives entirely in `examples/`.** The traits are public API and carry a maintenance
+  promise; the fake is a test fixture and gets deleted when a real backend exists.
 - **It must fake the API, not the concept.** Level-only reads with no timestamps, an "is this bound"
-  flag distinct from a zero value, origins as a type that is deliberately not `Control`, a glyph as
-  a path, and a binding panel that is ugly on purpose. A mock nicer than Steam proves nothing, and
-  every one of those is a place §10.5 guessed.
-- **The acceptance criterion is a non-diff, and it is no longer Disasteroids' pad.** The original
-  had Disasteroids' pad become backend-owned with every other file in the example untouched. The
-  preset fork rules that out: Disasteroids' pad is where presets get taught (chunk 45), and a pad
-  the backend owns has no presets of ours to show. The proof still has to be a non-diff — screen
-  code running unchanged against a backend-owned context — but it needs a vehicle that is not
-  already spoken for. Choosing one is part of this chunk, and the awkward part is that sharing the
-  settings screen between two examples is a `#[path]` trick rather than a module.
+  flag distinct from a zero value, origins as a type deliberately not `Control`, a glyph as a
+  filesystem path, and a binding panel that is ugly on purpose. A mock nicer than Steam proves
+  nothing.
+- **The acceptance criterion is a non-diff**, and it is no longer Disasteroids' pad: that is where
+  presets get taught, and a pad the backend owns has no presets of ours to show. The proof still has
+  to be screen code running unchanged against a backend-owned context, but it needs a vehicle that
+  is not already spoken for. Choosing one is part of this chunk.
 - **R0.6, the half that is not about Steam.** A backend suppresses its devices at L0 so their raw
-  events never reach the frame. This is what makes the demo usable at all — without it Disasteroids
-  reads the pad twice — and it is why this chunk sits after 26 rather than after 38: the filter's
-  key is the device identity chunk 26 puts on the frame, and the runtime entity is a stopgap that is
-  wrong across a reconnect.
-- **Blocked on 40 and 38** for the other two halves. Reverse lookup has to be a trait before a
-  backend can answer it (R18.8) and rebinding has to be able to say "not ours" (R19.8); both are
-  written onto those chunks. The authority-write half needs neither and could be split out early if
-  something starts wanting it sooner.
-- **Review surface:** whether §10.5's three decisions survive contact. Each was written to be
-  falsifiable by this chunk — a backend-owned action that accepts a `.hold()` without a diagnostic,
-  two modal contexts that must be live on one pad at once, or an input observed twice — and a
-  decision this chunk cannot break is a decision that was not made.
-
-### 46. Documents an outsider will read
-
-`Requirements.md` and `Design.md` are 30,000 words between them, and the point of writing them was
-to get them critiqued by people who know Bevy — who owe this project nothing and will not read
-30,000 words to do us a favour. Length is the barrier, and it has to come down before the ask, not
-after. Numbered here rather than left as an intention, because a documentation pass with no chunk
-number is the thing ground rule 5 says will be dropped.
-
-Two questions it has to **answer rather than assume**, since the obvious framing — "remove the
-redundancy" — may be the wrong job:
-
-- **Which document does an outsider actually read?** A reviewer needs one entry point, not two, and
-  neither of these is it: one is a specification and the other is an architecture. What the ask
-  probably wants is a *third*, much shorter document — the argument, not the spec — that says what
-  problem this crate solves, which decisions are load-bearing, and where a reader who disagrees
-  should aim. The other two become the appendix it cites. That is a different job from shortening,
-  and a cheaper one; if it is the right job, most of the rest of this chunk evaporates.
-- **Is the problem redundancy, or is it staleness?** Some duplication is deliberate and should
-  survive: R19.10 is normative and §9.7 is explanatory, they overlap on purpose, and collapsing them
-  costs more than it saves. What is worth hunting is the copy that *did not follow* when a decision
-  moved — chunk 43 found two of those in prose the chunk 39 rename had missed, and neither was
-  visible from the diff. That sweep is worth doing on its own terms whatever happens to the length.
-
-- **The sweep is a reading, not a grep.** This is chunk 39's lesson arriving again: a protect-list
-  keyed on identifiers does not cover prose, and both regressions were found by reading around the
-  change rather than by searching for it.
-- **Not doing: shortening for its own sake.** The rationale given in place is why these documents
-  are worth reading at all, and a requirement stripped to its `MUST` clause is one nobody can argue
-  with — which is the opposite of what the ask is for.
-- **Why this late.** The documents are still moving. Phase VII rewrites the presentation half of
-  both, and a redundancy pass run before it lands gets redone.
-- **Review surface:** hand it to someone who has read none of it and watch where they stop. That is
-  the only measurement of this chunk that means anything, and it is available cheaply — the same
-  people who would eventually give the critique will give the *first ten minutes* of one for free.
+  events never reach the frame. Without it the demo reads the pad twice.
+- **Review surface, and it is the point of the chunk.** Three decisions were written to be
+  falsifiable here: a backend-owned action that accepts a `.hold()` without a plan-build diagnostic,
+  two modal contexts that must be live on one pad at once, or an input observed twice. A decision
+  this chunk cannot break is a decision that was not made.
 
 ### 28. Docs that run
 
-The documentation half of R24.6, gathered into a chunk because ground rule 5 is right: the
-"documents that follow the code" list this replaced was explicitly not a chunk, which made it a list
-of things that would quietly never happen.
-
 - **Make the doctests execute.** `dynamic_linking` on the `bevy` dev-dependency breaks the merged
-  doctest binary, so every `///` example compiles but none runs, and the public documentation is
-  part of the deliverable. Fixing it means making `dynamic_linking` opt-in, at the cost of slower
-  example builds — a tradeoff to make deliberately rather than inherit. Carried from chunk 24.
-- **Get the requirement and design references out of the public docs.** Found in chunk 39's review:
-  around forty doc comments cite an `R`-number, a `§`, an `OQ`, or a `D`-decision, concentrated in
-  `capture.rs` (18) and `context.rs` (10). Those render on docs.rs, where the documents they point
-  at do not exist — a game developer reading the landing page for `capture` is told that something
-  satisfies R19.5 and has no way to find out what R19.5 is. The house style already says this: doc
-  comments address users, and roadmap stages, design decisions and numbered requirements are not
-  their business.
-  - **Module-level `//!` blocks first.** They are the landing pages, and they are the worst of it.
-  - **The reasoning usually survives the edit** — "because a rebind is scoped to one control scheme
-    (R19.7)" loses nothing by dropping the parenthesis. What must not happen is deleting the
-    sentence along with the citation: the *why* is what makes these docs worth reading, and it is
-    already written.
-  - **`pub(crate)` and internal comments keep their references**, which is where they belong and
-    where a maintainer wants them.
-  - **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open` and
-    look at the module pages the way a stranger would.
-- **The README rewrite** — a user-facing introduction, feature list, and quickstart, with its
-  examples lifted from a real game rather than invented.
-- ~~**Comparison with LWIM and `bevy_enhanced_input`** (R22.6)~~ — landed early, out of sequence, as
-  [docs/comparison.md](./docs/comparison.md), read against BEI 0.26.0 and LWIM 0.21.0 source rather
-  than against their documentation. It came out of the sequence because `Requirements.md`'s
-  orientation table was asserting things their source contradicts — "neither addresses
-  fixed timestep" most flatly, when BEI has `add_input_context_to` and LWIM swaps a second
-  `ActionState` around `FixedMain`. Those rows are corrected in `Requirements.md` and the doc now
-  carries the substantiation. **The remaining obligation is upkeep**: both crates move, and a
-  comparison read against 0.26/0.21 is a claim with a date on it.
-  - A second document came with it, for a different audience:
-    [docs/one-way-doors.md](./docs/one-way-doors.md), which asks of BEI's upstreaming what stops
-    being revisable once it is the engine's answer. Two of its eight doors — globally scoped
-    consumption, and a query surface for the player-facing half — are ones this crate has not got
-    through either, and it says so where they stand. The cheapest of the eight is the one D8 already
-    answers: an action identified by a declared path rather than by its Rust type, which is why a
-    refactor here does not orphan a player's bindings.
-- **Why last:** the first item can be done at any time and the README documents a moving target — it
-  wants chunk 19, after which the feature list stops growing in the presentation direction.
+  doctest binary, so every `///` example compiles but none runs. Fixing it means making
+  `dynamic_linking` opt-in, at the cost of slower example builds — a trade-off to make deliberately
+  rather than inherit.
+- **Get the requirement and design references out of the public docs.** Around forty doc comments
+  cite an `R`-number, a `§`, an `OQ` or a decision, concentrated in `capture.rs` (18) and
+  `context.rs` (10). Module-level `//!` blocks first; they are the landing pages and the worst of
+  it. The reasoning usually survives the edit — dropping the parenthesis loses nothing — and what
+  must not happen is deleting the sentence along with the citation. **This is phase 7 of
+  [docs/plan.md](./docs/plan.md)**, and whichever runs first discharges the other.
+- **The README rewrite** — a user-facing introduction, feature list and quickstart, with examples
+  lifted from a real game rather than invented.
+- **Comparison upkeep.** [docs/comparison.md](./docs/comparison.md) is read against BEI 0.26.0 and
+  LWIM 0.21.0, which is a claim with a date on it. Both crates move.
+- **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
+  look at the module pages the way a stranger would.
+
+### 46. Documents an outsider will read
+
+**Superseded by [docs/plan.md](./docs/plan.md)**, which answered the two questions this chunk was
+written to ask. An outsider reads a third document rather than the specification or the
+architecture; and the problem was structural duplication rather than length. `docs/design.md`,
+`docs/decisions.md`, `docs/comparison.md` and `docs/one-way-doors.md` are the result. What remains
+of this chunk is phases 3 to 5 of that plan, and the doc-comment half is chunk 28's.
 
 ---
 
 ## Deliberately deferred
 
-Still out of scope for the sequence above. Rebinding, persistence and presentation have left this
-table because Disasteroids needs them; device routing and local multiplayer have left it because
-Split Friction does, and because the gate turned out to be met already. Reverse lookup (R18.1) left
-it in chunk 39's grooming, which is also when the §18 row was found to be claiming an asset gate for
-two requirements that have nothing to do with assets. Tunables (R19.11) left it in the first
-grooming sweep, when the row's own text was found arguing against its own gate → chunk 64.
+Every row states its gate. A row with no gate is an item that will be dropped, which is ground rule
+5.
 
-Those two — live prompt invalidation (R18.5) and most-recently-used device (R18.6) — left it as
-well, and only one of them survived the trip. R18.5's gate is a good example of one a chunk meets by
-existing: it waited on something displaying a prompt whose staleness could be observed, and chunk 47
-is that thing, so it is written onto 47. R18.6 is **withdrawn** instead of scheduled — which device
-a prompt speaks for is a parameter the app supplies, not a thing the crate infers from what was
-pressed last, and inferring it is scope this crate does not need to carry. Glyphs (R18.4) stay,
-because theirs is an asset-pipeline gate and 47 renders text.
-
-Chunk 47 then added a row of its own, for a reason it went looking for and found: the component that
-draws a prompt needs `bevy_text` and `bevy_ui`, and `bevy_ui` already depends on `bevy_input` and
-`bevy_input_focus`. So the presentation layer lives in `examples/common/prompt_ui.rs` — imported by
-path, tested by `tests/prompt_ui.rs`, and shared with Split Friction when it arrives — rather than
-inverting the layering this crate is arranged to keep. The gate on promoting it is below, and it is
-worth saying what is *not* gating it: the code is finished, and moving it is a `git mv` plus a
-manifest.
-
-Backends (D3) left it in the Steam grooming, and the gate is worth restating because the row used to
-read as though any second implementer would do. It named "one working in-tree path to generalize
-_from_", which is true and was doing no work: what the seam actually waits on is chunks 40 and 38,
-because R18.8 and R19.8 are surfaces those two either build as substitutable or foreclose. That is
-now written onto both, the seam is designed in Design §10.5, and the implementer is chunk 42. Chunk
-40 has since discharged its half: reverse lookup is a trait, and its return type admits an origin
-that is not one of our `Control`s, which is R18.9's demand met at the only price it was ever going
-to be cheap at.
-
-Chunk 30 added two rows, and one of them was a **MUST arriving here rather than being met**, which
-this table had not held before. R22.7's bubbling dispatch was chunk 29's stated deliverable and was
-declined on the grounds that bubbling exists so something can intercept and nothing yet wants to —
-recorded as a real gate rather than filed away, on the theory that a MUST sitting in a deferred table
-is worth noticing. The next widget that reached the gate, `ButtonFocused`
-(`examples/common/widget_focus.rs`), answered without bubbling at all — see Log-archive.md's
-"Focus-driven dispatch, and R22.7 withdrawn" — so the row is gone rather than met, and R22.7 is
-withdrawn in Requirements.md. The other row Chunk 30 added is R22.5's separate repeat delay, which is a SHOULD and
-ordinary and stays below. Note what did *not* come here: the widget-side gap chunk 30 found looked
-like an upstream row and is not one, because `DefaultPlugins` is a group whose members can be
-swapped — so it became R8.2a's own row above rather than a gate.
-
-Chunk 62 left R16.3's own MUST here rather than meeting it. R16.1 and R16.2 (desktop focus loss) are
-built; R16.3 asks for the same treatment on a mobile or console suspend, which nothing in this
-crate's supported platforms triggers today, and a device re-enumeration step this crate has no
-concept of yet. There is genuinely nothing to build against until a target exists that needs it.
-
-Chunk 26's own grooming left two rows rather than building ahead of a need neither has yet.
-Owner-scoping `ConsumedControls` and the exclusion ceiling would answer R15.3's cross-context half —
-one player's own, correctly device-scoped, consumption or exclusion decision cross-contaminating
-another player's bookkeeping in those two shared resources — but only a co-op game that *also* uses
-a per-player exclusive context or a binding consumed across two players' devices ever observes it,
-and Split Friction (chunk 27) declines rebinding UI and pairs through chunk 66's join gesture on an
-ordinary `InputContext` (`Lobby`, bound only to `bind_class`) rather than a per-player exclusive
-one, so nothing in tree does either yet. Per-entity presentation
-(`read_mappings`/`read_bindings`/`PromptScope`, all keyed by context *type* today) had the same
-shape of gap — `present.rs`'s own doc comment on `BindingTable` already names it, wanting "a
-per-player record" — and **chunk 71 is the thing that gate was waiting for**: a per-pane preset
-selector is a per-player settings display, so that row is now scheduled to be met or falsified
-rather than merely waiting.
-
-| Area                                              | Gated on                                                                   |
-| ------------------------------------------------- | -------------------------------------------------------------------------- |
-| **Persisting** calibration, keyed to identity (§11, R11.7, R14.11) | R11.5's stable device identity, which chunk 72 builds. Note this row shrank twice: first when R11.5's *identity and player assignment* half went to chunk 72, since "put this player back on the device they had" is testable with the hardware on hand; and again with chunk 22, which built the measuring and the applying, keyed to the runtime handle. What is deferred is now only the part that has to survive a restart — measured calibration lasts as long as the process. The old gate on this row, "two units of the *same kind*", is discharged: telling two pads apart never needed two pads to test, because the raw message names its sender and a test can write two entities |
-| Split Friction's monsters, spawners and missiles (was chunks 60 and 59) | a mechanic that would exercise input this crate has not already proven. The example now demonstrates what §15 wanted from it — two players, per-device routing, a live join gesture, and independent per-player state — and monsters would add game code without adding crate coverage. Kept as a row rather than deleted because the sprites, the dungeon's region aspects, and a `Fire`-shaped action to hang a missile on all already exist, so the cost of changing our mind is small. **Room props** (scattered chests and shrines, the `Vault`/`Shrine` aspects' own sprites) join this row rather than keeping a home of their own: chunk 57 left `CHEST`/`SHRINE`/`PROP_CHANCE_DEN` in tree as identified-but-unread constants against "once a chunk actually wants that", which is not a destination, and they have now been deleted rather than left warning. The tile ids are recoverable from the Kenney sheet, and the `RegionAspect` enum they would hang off is still live and still read |
-| Mouse wheel as a binding source (R13.3)           | nothing in tree wants it. Chunk 41 landed mouse *buttons* and stopped there deliberately: the wheel is a delta on its own channel, needs the `Line`/`Pixel` normalization R13.3 describes, and shares nothing with a button but the device |
-| Glyph ids (R18.4)                                 | asset-pipeline questions this document does not touch — but *the art is no longer one of them*: **Kenney's input prompt set** covers keyboard, mouse and the three pad brands and is CC0, so an example can ship one without a licensing conversation. Confirm the licence and the coverage before relying on either. What stays open is the identifier scheme, and Kenney is the way to falsify it: R18.4 wants a key of (brand, control) with a brand → generic → text fallback, and chunk 37's stored names are already the control half — `pad/South` plus a brand is nearly the whole id. If that mapping does not survive contact with a real atlas's file names, R18.4 is wrong rather than merely unbuilt |
-| Glyphs from a backend (R18.9) | the same asset-pipeline questions as the R18.4 row, arriving from the other side. The *origin* half of this row is closed: chunk 40's `ControlOrigin` has a variant for a control that is not one of ours, carrying the same stored name and fallback label everything else renders from, so what is deferred is the image rather than room for it. Chunk 47 widened that variant with the class its reporter claims, so a foreign control can be narrowed to like one of ours |
-| **A presentation crate** (`bevy_action_map_ui`, or wherever it lands) | **Bevy deciding to take this crate upstream.** That is the point at which the workspace has to be arranged properly regardless, and it is also when the layering matters to someone other than us: an input crate that pulls `bevy_ui` cannot go upstream, and `bevy_ui` could not then use action maps. Until then the layer is `examples/common/` — `prompt_ui.rs`, which every example shares and an integration test covers, and `widget_focus.rs`, which Disasteroids exercises end to end — and the cost of waiting is a `#[path]` import. Both are built and both were written against the public API with nothing added to the crate for them, so what is deferred is packaging, not work |
-| Netcode injection and rollback (§10)              | a testbed that actually rolls back; also wants held device state made snapshot-able (R10.3), which chunk 9 left as `BTreeSet`/`HashMap`. Chunk 10 established what the copy costs — 140 bytes of `Copy` data for a three-action context, asserted as a test — and built the dirty bits the snapshot carries; **this row owns their per-slot read**, which is the only caller for one that is not a test, and is why `DirtySet::contains` is `#[cfg(test)]` today |
-| Focus-driven context activation (R22.8) and text input | chunks 14 and 25 built the primitives — priority, arbitration, and class bindings are what *claiming* a control means. R22.8 itself is now proven rather than merely enabled: `ButtonFocused` (`examples/common/widget_focus.rs`) is a focus-kind-activated context built from nothing but what already ships (`active_if` taking an ordinary condition), and R22.9's own mechanism question got the same answer — a plain `WidgetKind` tag, registered as a required component of `Button` rather than attached by hand at every spawn site. What's left is whether either is worth promoting into the crate itself, and that waits on [bevy#25592][]: if `bevy_ui_widgets` grows its own widget-kind id, this crate's version should follow its shape rather than commit to one first. Text input is still nothing in tree, so `ControlClass::CharacterProducing` stays unexercised beyond its own tests |
-| **Consumption-aware `FocusedInput` dispatch (R8.2a)** | **a game that wants `bevy_ui_widgets`' own widgets working generically, unmodified, without writing a `*Focused` context per widget kind.** Chunk 49's own blocker — a public `bevy_input_focus::FocusedInput` constructor — landed upstream, but the chunk is deferred anyway: chunk 61's exclusivity already closed the one collision Disasteroids exposed (`Fire` vs. a focused `Button` on `Space`), and Disasteroids has since gone further still — `widget_focus::ButtonFocused` disables `InputDispatchPlugin` outright and answers `Button` directly, sidestepping `FocusedInput` (and R8.2a) entirely rather than filtering it. That is the path to reach for first. A design for the filter was sketched and set aside rather than committed to, in case a future game wants the generic form instead: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline (`class_dispatch` already checks `ConsumedControls` and per-context indexing at exactly the right point in `apply_frame`, for free) rather than a second raw-message read — keyboard only, since every keyboard-driven `bevy_ui_widgets` observer at the pinned commit (`Button`, `Checkbox`, `Radio`, `List`, `Menu`, `Slider`, `TextInput`) gates on `ButtonState::Pressed` and none reacts to a release, which is also the edge `class_dispatch` fires on |
-| An initial delay distinct from the repeat rate (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both: the change fires on the crossing and the pulse's clock starts on that tick, so the first repeat is one interval later and every one after is evenly spaced. Two numbers means a `delay` field on `Pulse`, which is small — what is missing is a case where equal is wrong, and a two-table settings screen is not it |
-| Free-form mutually-exclusive context sets (R7.7 remainder) | nothing in tree needs two independently-exclusive contexts to coexist rather than one dominating the other by priority. Chunk 61 meets R7.7's stack case with priority order alone; a named-grouping mechanism beyond that is the harder half, and no game here has asked for it yet |
-| Owner-scoped `ConsumedControls`/exclusion ceiling (R15.3 remainder) | a real in-tree case with a per-player exclusive context or a binding consumed across two players' own devices — Split Friction (chunk 27) as scoped has neither. Design if built: a claim visible only if made globally (an unpaired claimant) or by the viewer's own paired device; an exclusive context's shadow implicit in its own pairing rather than a separate flag, unpaired keeping today's global shadow — which is also Split Fiction's own precedent for a deliberate mutual lockout |
-| Per-entity presentation and prompts (`read_mappings`/`read_bindings`/`PromptScope`, chunk 26's own review surface) | an actual per-player settings or prompt display being built — chunk 27 declines rebinding UI, and nothing else in tree reads bindings per player yet. `DeviceHandleSet`, chunk 26's own pairing payload, is a plain value type with no component derive specifically so a filter like this can take one by value later without needing `Option<&Paired>` threaded through a query |
-| R16.3's suspend/resume (mobile, console)          | a platform target that needs it. `KeyboardFocusLost` covers the desktop alt-tab case (R16.1/R16.2, chunk 62); nothing in this crate's supported platforms yet emits a suspend/resume signal or has a device re-enumeration step to hook, so there is nothing to build against |
-| **Guardian migration**                            | porting guardian from bevy 0.16.1 to 0.20-dev — four versions, its own job |
-
-Guardian is worth restating: it is on **bevy 0.16.1** with `bevy_enhanced_input 0.12`, and we target
-main. The migration is a genuine goal, but it is a port plus a rewrite, and doing both at once would
-confuse "action_map is wrong" with "0.20 moved this". Disasteroids first; guardian when there is
-something worth migrating _to_.
+| Area | Gated on |
+| --- | --- |
+| **Persisting calibration**, keyed to identity (R11.7, R14.11) | R11.5's stable device identity, which chunk 72 builds. Measured calibration lasts as long as the process |
+| **Glyph ids** (R18.4) | asset-pipeline questions, though *the art is not one of them*: Kenney's input prompt set covers keyboard, mouse and three pad brands and is CC0. What stays open is the identifier scheme, and Kenney is the way to falsify it — R18.4 wants a key of (brand, control), and chunk 37's stored names are already the control half. If that does not survive contact with a real atlas's file names, R18.4 is wrong rather than merely unbuilt |
+| **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it |
+| **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import |
+| **Netcode injection and rollback** | a testbed that actually rolls back; also wants held device state made snapshot-able, which is `BTreeSet`/`HashMap` today. This row owns `DirtySet::contains`' per-slot read, which is why that method is `#[cfg(test)]` |
+| **Consumption-aware `FocusedInput` dispatch** (R8.2a) | **a game wanting `bevy_ui_widgets`' own widgets working generically, unmodified, without a context per widget kind.** A context per kind is the path to reach for first, and Disasteroids ships that way. A design for the filter was built and set aside: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline rather than a second raw-message read — keyboard only, since every keyboard-driven widget observer at the pinned commit gates on `ButtonState::Pressed` and none reacts to a release |
+| **Promoting `WidgetKind` and the per-kind context into the crate** | [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native widget-kind id. Promoting a shape this crate invented first, ahead of that conversation, risks committing to the wrong one |
+| **Text input** | nothing in tree is a focused text field, so `ControlClass::CharacterProducing` stays unexercised beyond its own tests |
+| **A context-level exclusion from the mapping list** | a second screen needing the same filter and duplicating it. `Mapping::context` already carries the data, and one call site filtering on it costs one line — at two, the crate is the one paying for the repetition |
+| **An initial delay distinct from the repeat rate** (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both. Two numbers is a small change; what is missing is a case where equal is wrong, and a two-table settings screen is not it |
+| **Free-form mutually-exclusive context sets** (R7.7 remainder) | nothing in tree needs two independently-exclusive contexts to coexist rather than one dominating the other by priority |
+| **Owner-scoped `ConsumedControls`/exclusion ceiling** (R15.3 remainder, and D13's own remainder) | a real in-tree case with a per-player exclusive context, or a binding consumed across two players' devices. Design if built: a claim visible only if made globally or by the viewer's own paired device; an exclusive context's shadow implicit in its own pairing rather than a separate flag |
+| **Per-entity presentation and prompts** (D52's remainder) | an actual per-player settings or prompt display — **chunk 71 is what this was waiting for**, so expect it met or falsified there rather than merely waiting |
+| **An authority backend's actions in rollback** (D22's remainder) | chunk 42 having a backend to ask. The available answer is recording the backend's output into the frame at sample time, at the cost of a larger frame |
+| **Sub-frame event timing** (D4's remainder) | [bevy#9087][] upstream. Gamepad stays frame-quantized regardless until gilrs polling is rewritten, so mixed fidelity across sources is permanent for now rather than an artifact |
+| **Schedule enforcement for tick domains** (D9's remainder) | Bevy giving a `SystemParam` a way to know its own schedule. A plugin-time validation pass and a debug assertion stand in |
+| **Mouse wheel as a binding source** (R13.3) | nothing in tree wants it. The wheel is a delta on its own channel, needs `Line`/`Pixel` normalization, and shares nothing with a button but the device |
+| **R16.3's suspend/resume** (mobile, console) | a platform target that needs it. Nothing in this crate's supported platforms emits a suspend signal or has a device re-enumeration step to hook |
+| **Split Friction's monsters, spawners and missiles** | a mechanic that would exercise input this crate has not already proven. Kept as a row rather than deleted because the sprites, the dungeon's region aspects and a `Fire`-shaped action all exist, so changing our mind is cheap |
+| **Guardian migration** | porting it from Bevy 0.16.1 with `bevy_enhanced_input` 0.12 to 0.20-dev — four versions, and a port plus a rewrite. Doing both at once would confuse "action_map is wrong" with "0.20 moved this" |
 
 ---
 

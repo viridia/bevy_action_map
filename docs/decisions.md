@@ -11,8 +11,12 @@ Each entry says what was decided, what it rules out, and what reversing it would
 decision has an accepted price or an unresolved remainder, that is stated rather than left for a
 reader to discover.
 
-Numbers are identities. Nothing outside this document depends on them, but they are cited from it
-and from `Requirements.md`, so an entry is never renumbered — a withdrawn one is struck and kept.
+Numbers are identities, and an entry is never renumbered — a withdrawn one is struck and kept.
+
+`Requirements.md` has a `D1`–`D9` of its own, defined in its "Resolved decisions" table and
+predating these. **The two schemes are not the same identities**: that document's `D8` is this one's
+`D6`, and its `D9` is this one's `D8`. Read a `D`-number against the document it appears in.
+Reconciling them is phase 5 of [`plan.md`](./plan.md), which carries the mapping.
 
 ---
 
@@ -71,6 +75,10 @@ and from `Requirements.md`, so an entry is never renumbered — a withdrawn one 
 | **D51** | An authority backend writes a value, not a state                              | —               |
 | **D52** | Pairing is a runtime handle; the join gesture reuses class bindings           | design §7.4     |
 | **D53** | The crate detects and reports; the app decides                                | —               |
+| **D54** | There is no pass-through action                                               | design §5.5     |
+| **D55** | State-driven activation runs inside `StateTransition`                         | design §7.2     |
+| **D56** | Activation answers per context type, and is declared on the builder           | design §7.2     |
+| **D57** | Where two pads report one axis, the one that moved last speaks                | design §7.4     |
 
 ---
 
@@ -505,6 +513,27 @@ time whether to let an input fall through.
 **Reversal.** A mapper that already has priority and consumption does not need a second arbitration,
 and adding one would give two mechanisms answering the same question differently. Dynamic
 interception would break the single deterministic pass D11 establishes.
+
+**The same rule one level down.** Consuming stops lower-priority contexts; it deliberately does not
+stop the same action's other observers. An observer electing at handling time to suppress its peers
+makes the outcome depend on which ran first — the same objection, and no more defensible for
+observers than for contexts. The motivating case is answered better by the half that was kept: the
+UI's context claims the control, so the gameplay action never fires at all, and `why_not` can name
+the context that took it.
+
+**Why bubbling was never the requirement.** `FocusedInput` bubbles because focus is the only
+arbitration `bevy_input_focus` has of its own — a widget that declines a key lets it fall through to
+whatever is listening further up the entity chain. A mapper with priority and consumption already
+answers that question earlier: whether something else claims a control is decided by evaluation
+order before a focus-activated context ever runs. A drop-in replacement for `InputDispatchPlugin`
+was designed and built and then set aside, because building it with no widget in tree that needed it
+was the thing to avoid; what replaced it needed no crate change at all, and is a context per widget
+kind activated by an ordinary run condition.
+
+**Accepted cost.** A widget kind with no context of its own gets no keyboard or gamepad input at
+all, since the game disables the default dispatch plugin outright. That is the same additive bet the
+presentation surface makes elsewhere, and it is a real cost of being explicit rather than a free
+lunch.
 
 ### D24 — One crate, feature-gated by source
 
@@ -1081,3 +1110,92 @@ mappings hold a control, which control would fire an action now, whether a row i
 the crate's. A decision that depends on what the game is — what to do about a clash, which device a
 prompt speaks for, how two controls read on one row — is the app's, and the crate's job is to make
 it cheap to answer rather than to answer it.
+
+---
+
+## Late entries
+
+Found by reading the archived work log rather than the design document, and appended rather than
+renumbered.
+
+### D54 — There is no pass-through action
+
+**Decided.** An action holds one value. There is no second kind that reports every contributing
+control separately.
+
+**Rules out.** Unity's model, where an action's bound controls are normally disambiguated to the one
+with the greatest magnitude and `PassThrough` is the opt-out.
+
+**Reversal.** It is a second storage shape — N live values per action rather than one — carried on
+every action so that a few could use it, which is a change to D8's layout and to D15's fold.
+
+**Why the motivating cases did not need it.** All three turned out to be device-shaped rather than
+value-shaped: telling which of four pads pressed Start is device scoping, seeing every contributor
+in a debug overlay is the type-erased inspection dump reading the plan, and a value that remembers
+where it came from is its own smaller question. Each is answered by a mechanism that has to exist
+anyway. If a case appears that genuinely needs the distinction, it should arrive with that case
+attached rather than be reinstated on the strength of the original three.
+
+### D55 — State-driven activation runs inside `StateTransition`
+
+**Decided.** A context whose activation follows a game state is synchronised inside Bevy's
+`StateTransition`, not in `PreUpdate` with the general run-condition path. The state resource is
+read as an `Option`, because a substate or a computed state may have none.
+
+**Rules out.** One placement for both activation paths.
+
+**Reversal.** Bevy applies transitions *after* `PreUpdate`, so a condition polled there reads the
+state before that frame's transition has been applied. The difference is invisible for render
+contexts and real for the other two cases:
+
+| | in `StateTransition` | in `PreUpdate` |
+| --- | --- | --- |
+| a render context's next evaluation | frame N+1 | frame N+1 — no difference |
+| a fixed context's next evaluation | frame N | frame N+1 |
+| what an `OnEnter` system sees | already in step | still the old answer |
+
+Reading the state resource unconditionally would panic the first time anyone declared a context in a
+nested state — and a pause menu as a substate of playing is the obvious way to write the example
+this crate ships.
+
+**One mechanism, two installers.** A general run condition has no transition to sit behind, so it is
+polled in `PreUpdate` before evaluation. A state keeps the placement its simulation half needs. The
+difference is a table rather than a caveat.
+
+### D56 — Activation answers per context type, and is declared on the builder
+
+**Decided.** A run condition decides whether a context is live, answering once for the whole context
+type. It is declared on the builder beside the bindings it governs, not by a variant of the call
+that declares the context. Per-instance activation stays a method on the instance.
+
+**Rules out.** A method per activation policy on the app extension trait, and binding activation to
+the entity so that two instances of one context can follow different conditions.
+
+**Reversal.** The extension trait would have grown a method per policy, and focus-driven activation
+is already a fourth; on the builder each policy is one method on the type that is already where a
+context says what it is. The per-entity decomposition — which `bevy_enhanced_input` chose, letting
+two instances follow different states and one context be live in several — is more capable at the
+cost of two places to get right, where this one cannot be half-declared.
+
+**Accepted cost.** Mixing a condition with per-instance activation means the condition wins every
+frame. That is documented rather than prevented, since preventing it would mean tracking which door
+an activation came through.
+
+### D57 — Where two pads report one axis, the one that moved last speaks
+
+**Decided.** A context instance keys its held gamepad state by control rather than by device. Where
+two pads drive one context and both report the same axis, the most recent reading is the one that
+stands.
+
+**Rules out.** A per-device map of held state in every context instance.
+
+**Reversal.** Per-device state was once scheduled, on the grounds that per-unit calibration needed
+it. It did not — calibration is applied where the raw message still names its own sender, before
+held state exists — so what was left was the merge alone, and a per-device map in every instance
+costs more than the symptom is worth.
+
+**The whole observable consequence.** On an *unpaired* context driven by two pads, a still-held
+stick on the second pad reads zero until it next moves, and a disconnect clears every pad's readings
+rather than only that one's. A paired instance never sees this, because it reads one device by
+construction. `leafwing-input-manager` takes the same position, and its maintainer reports never
+having had a complaint.

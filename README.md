@@ -298,21 +298,24 @@ Default features are `std`, `bevy_reflect`, `keyboard`, `mouse`, `gamepad`, and 
 ## Project documents
 
 This crate is being built from a written requirements and design process, kept in the repository
-rather than in an issue tracker, in the order a reviewer would want to read them:
+rather than in an issue tracker. Each document answers one question:
 
-| Document                                                | What it is                                                                                                                    |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| [Requirements.md](./Requirements.md)                    | ~204 numbered requirements, with prior art surveyed from LWIM, `bevy_enhanced_input`, Unreal, Unity, Steam Input, and Godot   |
-| [Design.md](./Design.md)                                | How the requirements are satisfied — architecture, data flow, object model, evaluation pipeline, developer-experience surface |
-| [Roadmap.md](./Roadmap.md)                              | What's built, in what order, and what's left — **start here to see current status**                                           |
-| [Log.md](./Log.md) / [Log-archive.md](./Log-archive.md) | What each increment of work delivered and learned                                                                             |
+| Document | What it is |
+| --- | --- |
+| [docs/design.md](./docs/design.md) | How the crate works — architecture, the input frame, evaluation, state, the presentation surface, persistence |
+| [docs/decisions.md](./docs/decisions.md) | Why it works that way: the decisions expensive to reverse, each with what it rules out and what reversing it would cost |
+| [Roadmap.md](./Roadmap.md) | What's left and what's broken — **start here to see current status** |
+| [Requirements.md](./Requirements.md) | ~220 numbered requirements, with prior art surveyed from LWIM, `bevy_enhanced_input`, Unreal, Unity, Steam Input, and Godot |
 
-Two shorter documents, for readers who want the comparison rather than the specification:
+Two more, for readers who want the comparison rather than the specification:
 
 | Document | What it is |
 | --- | --- |
 | [docs/comparison.md](./docs/comparison.md) | How this crate differs from `bevy_enhanced_input` and `leafwing-input-manager`, claim by claim, checked against both crates' source — including which of the two you should probably use instead |
 | [docs/one-way-doors.md](./docs/one-way-doors.md) | For the `bevy_enhanced_input` upstreaming discussion: which of its design decisions stop being revisable once it is the engine's answer, what each buys, and what each forecloses |
+
+`archive/` holds the superseded `Design.md` and the work logs. They describe the crate as it was;
+`docs/design.md` and `docs/decisions.md` are what replaced them.
 
 ## License
 

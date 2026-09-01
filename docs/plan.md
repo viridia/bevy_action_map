@@ -157,9 +157,11 @@ Two things land here that have no other home:
 | 0 | `docs/design.md` | old `Design.md`, the code | **done** |
 | 1 | `docs/decisions.md` D1–D26 — pipeline and model | `Design.md` §1–§8, §9.3, §9.5, §9.6, §11, §12; `Requirements.md` D1–D9 and the OQ closures | **done** |
 | 2 | `docs/decisions.md` D27–D53 — presentation and persistence | `Design.md` §9.7, §9.8, §10; the OQ-9 closure | **done** |
-| 3 | `Roadmap.md`, plus the archive sweep below | its 18 remaining chunk sections, the deferred table, the landed index, "Known wrong today" | 1 |
-| 4 | `CLAUDE.md`; move three documents to `archive/`; repoint 23 citations | Roadmap's ground rules, house style, commit format | 1 |
-| 5 | `Requirements.md` — **optional** | itself, section by section | 3+ |
+| 3 | `Roadmap.md`, plus the archive sweep below | its 18 remaining chunk sections, the deferred table, the landed index, "Known wrong today" | **done** |
+| 4 | `CLAUDE.md`; move three documents to `archive/`; repoint 22 citations | Roadmap's ground rules, house style, commit format | **done** |
+| 5 | `Requirements.md` — **optional**, and it now has an obligation | itself, section by section; the `D`-number reconciliation below | 3+ |
+| 6 | Implementation scan — what is overbuilt, underbuilt or wrongly built | the non-archived documents, and the code | 3 |
+| 7 | Comment scan — the prose in the code, against the same documents | the same | 3 |
 
 Phase 1's sources ran wider than this table originally said: §9.3, §9.5, §9.6 and §11 are model and
 pipeline rather than presentation, so they were taken there rather than left for phase 2.
@@ -239,6 +241,36 @@ after `decisions.md` exists, so the extraction can be checked against it first.
 point: the always-loaded document should carry the rules that apply to every session, not a pointer
 to them.
 
+### What phase 4 handed to phase 5
+
+**Two `D`-numbering schemes now coexist, and phase 4 deliberately did not merge them.**
+`Requirements.md` carries 48 references to its own `D1`–`D9`, defined in its "Resolved decisions"
+table. `docs/decisions.md` assigned its numbers afresh, on the stated grounds that nothing outside
+the documents cited a `D`-number. That was true of the *code* and false of `Requirements.md`, which
+phase 1's count did not separate.
+
+Nothing dangles — every `D`-reference in `Requirements.md` resolves against that document's own
+table — so this is duplication, not breakage, and it is phase 5's to resolve. It was not done in
+phase 4 because a mechanical remap is exactly the kind that fails silently:
+
+| `Requirements.md` | `docs/decisions.md` | |
+| --- | --- | --- |
+| D1 actions are types | **D5** | |
+| D3 external backends | **D22**, extended by **D51** | |
+| D4 focus by activation | **D23** | D4 and D5 both land here — |
+| D5 interception is static | **D23** | the merge loses which half was cited |
+| D6 dead-zone chain | **D20**, with **D21** | |
+| D7 presentation separate | **D27** | |
+| D8 declared path | **D6** | collides with the old D6 |
+| D9 state layout | **D8** | collides with the old D8 |
+
+Two collisions and one merge. A sequential find-and-replace maps old D8 to new D6 and then that new
+D6 onward again; the D4/D5 merge needs a reading of each site to know which half it meant. Do this
+by reading, or leave `Requirements.md`'s numbering alone and say in its own preamble that it is
+local — which is the cheaper answer and may be the right one.
+
+Until then, `CLAUDE.md` tells a reader to interpret a `D`-number against the document it appears in.
+
 ### Phase 5 — why `Requirements.md` ranks last
 
 It is the largest document, the **least** duplicative, and the only one with live code citations —
@@ -248,6 +280,49 @@ much is left.
 
 Its numbering is load-bearing either way: an `R`-number is an identity, and a rewrite that renumbers
 breaks 52 comments in the code.
+
+### Phases 6 and 7 — the scans
+
+The reason the refactor is worth doing, and the test of whether it worked. The documents are the
+**only** source of truth: `README.md`, `docs/`, `Requirements.md`, `Roadmap.md`, `CLAUDE.md`.
+Nothing in `archive/` is consulted, and neither is git history — if a fact is not in the surviving
+set, it does not exist for the purpose of the scan.
+
+Two passes, deliberately separate, because judging prose and judging behaviour want undivided
+attention and running them together produces a worse job of both.
+
+**Phase 6 — the implementation.** Three categories, each with its own method, because they are not
+found the same way:
+
+| | What it is | How it is found |
+| --- | --- | --- |
+| **Overbuilt** | public surface no document asks for | enumerate every `pub` item, check each against `design.md` and `Requirements.md` |
+| **Underbuilt** | a normative statement with no implementation behind it | walk `Requirements.md` section by section against the code |
+| **Wrongly built** | code that contradicts a document | read `design.md`'s claims against what the code does |
+
+**Excluded, and this is the load-bearing part.** Anything already recorded in `Roadmap.md`'s defect
+register or deferred table, or marked `Still open` in `decisions.md`, is not a finding. Phase 3
+therefore decides what phase 6 is able to report: a defect missing from the register arrives as
+news, and a stale entry silently suppresses a real finding.
+
+**Temper the expectation on "wrongly built".** Phase 0 reconciled every disagreement it found
+between `Design.md` and the code *in favour of the code* — `ActionState`'s fields, the module tree,
+the persistence table names. So that category starts from documents already trued against the
+implementation, and the yield will be in what phase 0 did not look at: the code against
+`Requirements.md`, which no phase has checked in either direction.
+
+**Phase 7 — the comments.** Doc comments are user-facing and render on docs.rs where our documents
+do not exist, so the rule they are checked against is that none may cite an `R`-number, a `§`, an
+`OQ` or a chunk. Internal comments keep their references and are checked for being *true* — which is
+why this runs after phase 4, when the 23 `Design §` citations have been repointed.
+
+**Both need scoping; neither fits one window.** `src/` is 20,000 lines and the surviving documents
+are 3,000. The split that falls out of the layering is three sessions each: `device` and `frame`;
+then `action`, `binding`, `condition`, `context`, `plan`, `eval` and `event`; then `mapping`,
+`overrides`, `preset`, `capture`, `present`, `inspect`, `player` and `join`.
+
+**If phase 5 is skipped**, phase 6 runs against `Requirements.md` as it stands, which is already
+normative. The scans depend on phase 4, not on phase 5.
 
 ---
 

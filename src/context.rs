@@ -157,7 +157,8 @@ pub struct InputContextState<C> {
     pub(crate) actions: Vec<ActionState>,
     // Parallel to `actions`: which of them moved since evaluation last cleared this. Per action
     // rather than per context because the component's own change tick cannot distinguish them
-    // (R23.4), and because a rollback snapshot is the two tables plus these bits (Design §6).
+    // (R23.4), and because a rollback snapshot is the two tables plus these bits
+    // (docs/design.md §6).
     pub(crate) dirty: DirtySet,
     pub(crate) active: bool,
     // Set and cleared only by `shadow`/`unshadow` (R7.8), never by `activate`/`deactivate`: `active`
@@ -889,13 +890,28 @@ impl<C: InputContext + Component> InputContextBuilder<C> {
     /// Activation ignores controls the player is already holding, exactly as
     /// [`activate`](InputContextState::activate) describes.
     ///
-    /// Use [`active_in_state`](Self::active_in_state) for a context that follows a game state:
-    /// `in_state` would work here, but it is worth a frame to a fixed-tick context.
-    ///
     /// Leave both off for a context you drive yourself, per instance, with
     /// [`activate`](InputContextState::activate) and
     /// [`deactivate`](InputContextState::deactivate) — a condition answers for every instance at
     /// once, so the two do not mix.
+    ///
+    /// # Following a game state
+    ///
+    /// Use [`active_in_state`](Self::active_in_state) instead. `in_state` works here and the
+    /// context does follow the state, but a frame later than it needs to: Bevy applies state
+    /// transitions *after* `PreUpdate`, so a condition polled here reads the state as it was
+    /// before this frame's transition.
+    ///
+    /// |                                       | `active_in_state` | `active_if(in_state(..))` |
+    /// | ------------------------------------- | ----------------- | ------------------------- |
+    /// | A render-tick context next evaluates  | next frame        | next frame — no difference |
+    /// | A fixed-tick context next evaluates   | this frame        | next frame                |
+    /// | What a system in `OnEnter` sees       | already in step   | still the old answer      |
+    ///
+    /// Two ways that shows up. A gameplay context on the fixed tick keeps driving the simulation
+    /// for one more tick after the state has changed, so a pause that should have stopped the ship
+    /// lets it thrust once more. And a system running in `OnEnter` finds the context it is about
+    /// to set up still in its previous state.
     ///
     /// # Panics
     ///

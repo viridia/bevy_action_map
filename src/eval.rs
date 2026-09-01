@@ -220,8 +220,9 @@ pub(crate) fn evaluate_context<
 ) {
     let delta = time.delta_secs();
     // Read once, before this context's own instances can raise it further — evaluation order is
-    // priority order (§5, Design §5.3), so whatever a higher-priority exclusive context already did
-    // this frame is visible here, and nothing this context does can affect its own shadowing.
+    // priority order (docs/design.md §5.1, §5.3), so whatever a higher-priority exclusive context
+    // already did this frame is visible here, and nothing this context does can affect its own
+    // shadowing.
     let shadowed = ceiling.shadows(C::PRIORITY);
     let mut any_active = false;
     for (mut state, pairing) in &mut states {
@@ -356,9 +357,9 @@ impl<C: InputContext> InputContextState<C> {
                 consumed,
                 claims,
             );
-            // After the fold, not before: Design §4.1's ordering. A class binding never competes on
-            // specificity, so it only ever gets a look at a control the fold's own bindings did not
-            // already index — checked once here rather than woven into the fold itself.
+            // After the fold, not before: docs/design.md §5.4's ordering. A class binding never
+            // competes on specificity, so it only ever gets a look at a control the fold's own
+            // bindings did not already index — checked once here rather than woven into the fold.
             self.class_dispatch(&event.event, consumed, claims);
             level_changes += 1;
         }

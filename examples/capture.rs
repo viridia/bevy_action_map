@@ -193,7 +193,7 @@ fn next(world: &mut World) {
 
     let Some(session) = CaptureSession::for_slot(&mapping, slot) else {
         // A stick or a mouse bound whole: no single control can fill it, so there is nothing to
-        // capture. Design §9.7 gives those a tunable rather than a rebinding row.
+        // capture. docs/design.md §9.1 gives those a tunable rather than a rebinding row.
         println!(
             "\n{} — no single control can fill this; skipping",
             mapping.key

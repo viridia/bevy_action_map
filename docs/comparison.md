@@ -125,7 +125,7 @@ Its consumed-input set is keyed by schedule `TypeId` and cleared when that sched
 `FixedPreUpdate` schedule running several times in one frame gets an independent consumption
 decision each time, while still seeing what `PreUpdate` consumed. Events fire once per schedule run
 (`src/context.rs`, `src/context/input_reader.rs`). This crate reached the same arrangement
-independently and for the same reason; Design.md §5.2 credits BEI for it.
+independently and for the same reason; [decisions.md](./decisions.md) D12 credits BEI for it.
 
 **LWIM** keeps *two* `ActionState`s per entity and swaps between them: `swap_to_fixed_update` runs
 in `RunFixedMainLoop::BeforeFixedMainLoop`, the fixed state is updated once per frame there, and
@@ -145,7 +145,8 @@ The remaining difference is not "has a story" but **what happens to the input in
 | BEI | lost (level sampling) | held state carries to the next tick that runs | every tick reads the same frame's state; consumption is per-run |
 | this crate | preserved, as two transitions | its events wait in the queue for the next tick's window | each tick drains its own window; no event seen twice, none skipped |
 
-The cost of the last row is stated in Design.md §7 and is real: an action needed at both rates must
+The cost of the last row is stated in [decisions.md](./decisions.md) D9 and is real: an action
+needed at both rates must
 be declared in two contexts, because a context is evaluated in exactly one domain.
 
 ## 3. Arbitration: chords, priority, and consumption
@@ -253,7 +254,7 @@ LWIM read a value someone else has already decided the filtering policy for, and
 one nobody has.)*
 
 What the crate does with that is three stages, because three parties have a claim on the number and
-they are answering different questions (Design.md §8.1):
+they are answering different questions ([design.md](./design.md) §8.4):
 
 1. **Calibration** — this physical unit's true centre and rest envelope, measured by an explicit
    "move the sticks and let go" step the game drives, applied as the event is recorded. Per device
@@ -407,7 +408,7 @@ action, you write its state. This crate designs the same seam more explicitly (a
 backend writing action state directly, plus a *source* backend supplying the input frame, plus a
 reverse lookup behind a trait so prompts do not assume our binding tables exist, plus device
 suppression at L0 so Steam's emulated pad is not also sampled directly). Only the reverse-lookup
-trait is built; the rest is Design.md §10.5 and an unbuilt chunk.
+trait is built; the rest is [decisions.md](./decisions.md) D51 and an unbuilt chunk.
 
 So: **BEI has the more useful thing today**, and this crate has the more complete design. Do not
 choose on this axis unless you are actually shipping on Steam Input, in which case check the current
@@ -518,8 +519,9 @@ fixed-timestep timing, which was false of both — section 2 is the correction. 
 the author.
 
 Deeper reasoning for this crate's side of each difference is in
-[Requirements.md](../Requirements.md) (what must be true) and [Design.md](../Design.md) (how), with
-the current built/unbuilt line in [Roadmap.md](../Roadmap.md).
+[Requirements.md](../Requirements.md) (what must be true), [design.md](./design.md) (how it works)
+and [decisions.md](./decisions.md) (why), with the current built/unbuilt line in
+[Roadmap.md](../Roadmap.md).
 
 [bei]: https://github.com/simgine/bevy_enhanced_input
 [lwim]: https://github.com/Leafwing-Studios/leafwing-input-manager

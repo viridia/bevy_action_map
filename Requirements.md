@@ -123,8 +123,8 @@ must be delegable to the backend's own UI.
 
 - **R0.1 (MUST)** Each layer is usable without the layers above it. L1 alone must be a usable
   normalized input API; L2 must be drivable from a hand-constructed L1 frame. _(L1 is a timestamped
-  queue drained by window (Design §2) and not a snapshot: §9's timing requirements are unsatisfiable
-  by a snapshot, in which a press and release inside one frame collapse to nothing.)_
+  queue read by cursor (docs/design.md §2) and not a snapshot: §9's timing requirements are
+  unsatisfiable by a snapshot, in which a press and release inside one frame collapse to nothing.)_
 - **R0.2 (MUST)** L2 must not read `ButtonInput`/`Axis`/raw `Message`s directly; it consumes only L1.
   This is the single most important structural rule — determinism (§10), testing (§21), replay, and
   external binding backends all depend on it.
@@ -313,7 +313,7 @@ sources of different kinds feed one action (R2.9, §13.R13.2).
   value that remembers its origin by R2.6. What was left was a second storage shape on every action
   so that a few could use it. A case that genuinely needs different _arbitration_ should arrive as
   its own requirement with that case attached.
-  ([Log](./Log-archive.md#the-review-and-the-requirements-amendments-it-produced))
+  (docs/decisions.md D54)
 
 - **R2.5 (SHOULD)** Values must not be normalized/clamped implicitly; clamping is an explicit modifier
   so that e.g. mouse deltas and analog sticks can share a pipeline (§5).
@@ -676,7 +676,8 @@ same problem for events in [bevy#7691][bevy-7691].
   `bevy_input::InputSystems`) that produces the L1 input frame.
 - **R9.2 (MUST)** Render-rate and fixed-rate action state must both be available, and reading the
   wrong one must not be an easy mistake. _(Stated as a guarantee rather than a layout. The design
-  gives each context one state and a declared tick domain (Design §7), so an action needed at both
+  gives each context one state and a declared tick domain (docs/decisions.md D9), so an action
+  needed at both
   rates is declared in two contexts. What matters is that the rates stay distinct and are not
   silently interchangeable, which that satisfies by a route a
   original wording forbids. The requirement is about the guarantee, not the layout.)_
@@ -1585,7 +1586,7 @@ produce APIs in which the simplest case stops being simple.
 | **D9** | **Action state is two uniform dense tables and a dirty bitset**, held per context instance: an `ActionState` per action, a `Scratch` per condition and per stateful modifier. Actions are not entities. | §10, §23 |
 
 How action state is stored, and whether actions are entities, is settled as **D9** below; §23 states
-the properties any layout must satisfy, and Design §6 how this one does.
+the properties any layout must satisfy, and docs/design.md §6 how this one does.
 
 ---
 
@@ -1598,7 +1599,8 @@ These are the forks where the choice cascades; everything else is comparatively 
    interned `ActionId` as the runtime representation and the reflected type path as the serialized
    identity. Sub-question also resolved: dynamic declaration is out of scope for v1 (§1), with the
    mapping-action pattern as the answer for modding._
-3. ~~**OQ-3 — State layout**~~ _Resolved as **D9** (§23, Design §6): **two uniform dense tables and
+3. ~~**OQ-3 — State layout**~~ _Resolved as **D9** (§23, docs/design.md §6): **two uniform dense
+   tables and
    a dirty bitset** — an `ActionState` per action, a `Scratch` per condition and per stateful
    modifier — which is option (b) applied twice rather than any of the four as they were offered.
    The framing was the error: the half that looked variable-size belongs to **bindings** rather
@@ -1622,15 +1624,17 @@ These are the forks where the choice cascades; everything else is comparatively 
    helper the app drives during an explicit calibration step**, not background auto-detection —
    detection running while a stick is deflected would learn that position as centre, and hardware
    that misreports (see the README) would poison it silently. Stage 2 is the stage that rescales
-   (Design §8.1)._
+   (docs/design.md §8.4)._
 5. **OQ-5 — Modifier/condition extensibility mechanism** (§5.R5.6/§6.R6.6): trait objects vs. reflected
    registry — trades ergonomics against serializability and determinism.
-6. ~~**OQ-6 — Fixed/render dual state**~~ _Resolved as **tick domains** (Design §7): neither of the
+6. ~~**OQ-6 — Fixed/render dual state**~~ _Resolved as **tick domains** (docs/decisions.md D9):
+   neither of the
    two options offered. A context declares its domain and is evaluated exactly once, in that domain,
    so there is one state per context rather than two per context or one with per-tick accounting.
    The cost is that an action wanted at both rates is declared in two contexts. R9.2 has been
    reworded accordingly. Remaining sub-question: enforcement is not
-   airtight, because Bevy gives a `SystemParam` no way to know its own schedule (Design §12)._
+   airtight, because Bevy gives a `SystemParam` no way to know its own schedule (docs/decisions.md
+   D9)._
 7. ~~**OQ-7 — Where UI suppression lives**~~ _Resolved as **D4** (§22): neither — there is no
    suppression mechanism. Dispatch-to-focus becomes an action effect, and focus type activates
    contexts, so interception falls out of ordinary context priority. Sub-question also resolved as
@@ -1650,7 +1654,7 @@ These are the forks where the choice cascades; everything else is comparatively 
    **localization keys**, because R18.3 already requires the control half of a rebinding row to be
    localizable and leaving the action half as a baked literal would half-localize one screen. This
    also relieves R1.6 — the derive is back to five fields, three of them required, which is no
-   longer the "configuration language" Design §12 warned about._
+   longer the "configuration language" it was in danger of becoming._
 
 ---
 

@@ -369,7 +369,8 @@ associated const, and a reverse lookup behind a trait — and are worth the line
 
 For this crate's own reasoning behind each position: [Requirements.md](../Requirements.md) (§0 for
 the layer seams, §9 for timing, §14 for dead zones, §15 for pairing, §18–19 for presentation),
-[Design.md](../Design.md) (§1, §5, §6, §8.1, §10.5), and [Roadmap.md](../Roadmap.md)'s deferred
+[design.md](./design.md) (§1, §5, §6, §8.4), [decisions.md](./decisions.md) (D1, D20, D51), and
+[Roadmap.md](../Roadmap.md)'s deferred
 table for what it has not built. A user-facing comparison of the three crates is in
 [comparison.md](./comparison.md).
 

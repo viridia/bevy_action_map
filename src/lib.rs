@@ -272,10 +272,10 @@ impl bevy_app::Plugin for ActionMapPlugin {
             capture::run_captures.in_set(ActionMapSystems::Capture),
         );
 
-        // Two clearing points, per Design §5.2. The frame's starts everything from nothing; the
-        // fixed one lets a schedule that runs several times decide afresh each run while what
-        // `PreUpdate` claimed still stands. The exclusion ceiling (Design §5.3) clears at the same
-        // point as the frame's consumption release and nowhere else — see `ExclusionCeiling`.
+        // Two clearing points, per docs/design.md §5.2. The frame's starts everything from
+        // nothing; the fixed one lets a schedule that runs several times decide afresh each run
+        // while what `PreUpdate` claimed still stands. The exclusion ceiling (§5.3) clears at the
+        // same point as the frame's consumption release and nowhere else — see `ExclusionCeiling`.
         app.add_systems(
             bevy_app::PreUpdate,
             (
