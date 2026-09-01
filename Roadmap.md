@@ -278,6 +278,9 @@ step and a real game is a better acceptance test than a synthetic one.
   thing to reach for rather than the first.
 - The prelude exports sixteen bare English nouns that a glob import drops into a template beside
   Bevy's own (chunk 48).
+- **`Phase::Ongoing` means two things**, told apart by reading the action's value: still firing, and
+  still building toward firing. Every consumer in tree either does that value test or wants both
+  halves, Disasteroids included (chunk 79).
 - A control capture refuses (wrong shape, wrong scheme, reserved) is silent on Disasteroids'
   screen — the session simply keeps listening, with nothing said about why the press did not take.
 - Held gamepad state is per-device only for a paired instance — Split Friction pairs now (chunk 27),
@@ -326,7 +329,7 @@ skip the blind alleys this one took. Planning for that belongs here; building it
 
 ## What has landed
 
-Fifty-six chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
+Fifty-eight chunks are done. The [work log](./Log.md) says what each delivered, what it found, and
 where it fell short of its own description, for the entries the work in flight still reasons from;
 the [archive](./Log-archive.md) holds the rest, phase by phase but not bounded by phase — a phase can
 be partly closed and partly still open. This table is only an index, and the sequence below is what
@@ -391,6 +394,9 @@ remains.
 
 | 10 | The compiled plan, and OQ-3 closed | done; the interim `BTreeMap<ActionId, usize>` is a `Vec<u16>` indexed by the id, sentinel for unbound, sized by the largest id the context binds and held once per plan rather than per instance — an id interned after a plan compiled indexes past the end, which is the same answer the sentinel gives, so the miss needs no case of its own; the dirty bitset is one bit per slot, set by comparing `ActionState` before and after rather than by reading the phase (a held stick reports `Ongoing` every tick while its value moves), and its first consumer is the component's own change tick: evaluation writes through `bypass_change_detection` and re-marks only where a bit was set, so `Changed<InputContextState<C>>` became a subscription instead of a per-frame wake-up, with `dispatch_transitions` and `dispatch_class_fires` bypassed too so evaluation is the only thing that marks it; **OQ-3 is closed as D9** on structural facts rather than a timing run — activation moves no entity between archetypes and creates none, and a three-action context's whole snapshot is 140 bytes of `Copy` data — both asserted as tests, since a wall-clock comparison against a layout we would have had to build first is a number about the machine that ran it; the `Scratch` table's allocation, the chunk's third item, turned out to have landed with chunk 11 and needed nothing; `examples/` unchanged, as the chunk asked |
 | 22 | The deadzone chain, stages 1 and 3 | done, and **smaller than its own description**, because the defect it claimed to need turned out not to be one — see the log; `AxisCalibration`/`GamepadCalibration` (`device.rs`) hold a centre offset and rest envelope per (pad entity, axis), applied in `sample_input` as the raw message is recorded rather than in the evaluator, which is what lets the per-*unit* question be answered without any per-device held state: the message names its own sender, so by the time held state exists the value is already corrected by the right pad's numbers, and the placement also puts stage 1 past the injection seam, meeting R14.10 by where it sits rather than by a check; `CalibrationSampling` is the OQ-4 sampling helper, a resource the app inserts for an explicit step and removes after, whose doc comment carries the finding that the instruction must be "move the sticks and let go" rather than "hold still", since a pad reports an axis only when it changes and a stick that settled beforehand reports nothing during the step; R14.9's warning fires on `GamepadSettings` moved off Bevy's defaults, and the requirement's own stated failure mode was corrected in passing — a double deadzone cannot occur given the first half of the same requirement, and what actually happens is a setting that silently does nothing; stage 3 needed **no floor mechanism at all**, which is the layering paying for itself: Disasteroids' `Turn` now carries `tunable_dead_zone` and the settings stepper writes it through `PendingOverrides` like the hold-vs-toggle checkbox, `Prefs` is deleted, and a player may take it to zero because stage 1 already removed the drift underneath |
+
+| 52 | What the crate has accreted | done as a survey, landing only the `mappings()` doc sentence it also owed; six collapses scheduled as chunks 74–79, three declined with the reason recorded so they are not re-proposed. Its own two headline premises were wrong and the survey's first job was correcting them: `ControlClass` is not `ChannelShape` minus a variant (it gained `CharacterProducing`, a predicate on an *event*, and `Axis2` is a shape no control has), and `context.rs` is not "a quarter of the crate and two and a half times the next largest" — that counted a 2,759-line test module, and `binding.rs` is half again larger by code. The strongest finding was not on the candidate list at all: capture and overrides implement one validation twice and disagree about the order. The settings-screen scope question is closed — `Mapping::context` now appears in `mappings()`'s filtering sentence, and a convenience filter waits for a second caller |
+| 74 | One admissibility rule, not two | done; `capture::admissible` is the one predicate both sides ask — `Result<(), RefusedReason>`, with overrides lifting each reason into its own `OverrideProblemKind` at the call site, since that enum carries four variants only a file can earn and is not `Copy`; the order it settles on is capture's (reserved before shape, so pressing the settings key is answered with the reason it cannot be bound rather than with a complaint about its channel), which changed the override side's answer for a control that is refusable twice over, and a test now pins that order on the predicate itself rather than through either caller; `CaptureSession::verdict` and the private `enum Verdict` are gone rather than renamed — the excluded check that was tangled into it is a guard at the top of `run_captures`' loop, which is the honest shape, since ignoring is not a refusal reason and the crate no longer has two types called `Verdict`; the sentence owed to `ControlClass`'s doc says why it is not `ChannelShape` under another name |
 
 Every obligation those chunks left is carried by the chunk that has to discharge it, below, rather
 than by the chunk that incurred it — so what a chunk must do is stated in one place.
@@ -496,72 +502,96 @@ Design.md alone. This is the pass that clears what accumulated under the old rul
 - **Withdrawn requirements are exempt.** What they keep is the argument that stops the idea being
   re-proposed, which is the one argument in the document with a job to do.
 - **Why it is a chunk rather than an afternoon.** Twenty-three judgement calls in the document every
-  other document defers to, where dropping a load-bearing clause is invisible in a diff — the
-  clause reads as commentary right up until the moment someone needs it.
+  other document defers to, where dropping a load-bearing clause is invisible in a diff — the clause
+  reads as commentary right up until the moment someone needs it.
 - **Review surface:** whether anything moved to `Design.md` landed somewhere a reader would find it.
   Text moved out of the constitution and into a section nobody opens has been deleted with extra
   steps.
 
-### 52. What the crate has accreted
+### 75. Four names for a 2×2, twelve times over
 
-Thirteen thousand lines arrived a chunk at a time, and nothing has yet read them as a whole asking
-what could be fewer things. This is that read: a **survey producing a list of proposed collapses**,
-each with the argument for and against, from which the author picks. It deliberately does not land
-the refactors — a chunk that both decides and executes gives review nothing to disagree with before
-the diff exists.
+`mappings` / `declared_mappings` / `tunables` / `declared_tunables` is one 2×2 written out as four
+public functions, four `read_*` in `context.rs`, and four fn-pointer fields on `DeclaredContext`.
+The four `read_*` differ only in a field name and in whether `AppliedPlan` is consulted.
 
-**Before 48**, which renames prelude types. Renaming a type this chunk proposes to delete is work
-done twice, and two of 48's sixteen nouns — `Verdict`, `Rebinding` — are on the candidate list
-below.
+- **The crate already has the answer next door.** `apply_overrides` and its three variants are the
+  same 2×2 done right: four public names over two internal helpers taking `Option<&Overrides>`. The
+  read side follows the apply side — four public names kept, the eight items behind them collapsed.
+- **What the code says in its own defence is true of the public half only.** "Registered separately
+  rather than taking a flag, because the two are asked by different callers for different reasons"
+  argues for the names. It does not argue for four copies of a two-line body.
+- **Also here:** the prelude exports `mappings` but not `declared_mappings`, `tunables`,
+  `declared_tunables`, `Tunable` or `TunableValue`. A screen showing which rows a player has changed
+  needs the second of those, so the omission is arbitrary rather than considered.
+- **Not doing:** a `Which::{Current, Declared}` parameter on the public functions. Two names read
+  better at a call site than one name and a flag, which is the half the defence above gets right.
 
-Three candidates found while answering an unrelated question, so the survey starts with something
-rather than from nothing:
+### 76. `Unresolved`, once
 
-- **`ControlClass` is `ChannelShape` minus one variant.** `AnyButton`/`AnyAxis`/`AnyDelta` against
-  `Button`/`Axis1`/`Axis2`/`Delta2` — the same partition of the same space under two names, and the
-  variant that differs is the one §10.4 already explains away. The question to answer is whether "a
-  class a binding may target" and "a channel a control reports on" are two ideas or one idea named
-  twice. Strongest candidate in the crate.
-- **`Verdict` is a strict subset of `Phase`'s variant names** — `Idle`/`Ongoing`/`Fired` against
-  `Idle`/`Started`/`Ongoing`/`Fired`/`Completed`/`Canceled`. Probably right to keep separate, since
-  one is per-condition and the other per-action and the extra states are derived from transitions
-  between the first. But two enums sharing variant names in one pipeline is a standing confusion,
-  and if they stay separate one place should say why.
-- **`context.rs` is 3,325 lines**, a quarter of the crate and two and a half times the next largest.
-  Whatever else this finds, that file is doing more than one job, and splitting it is the one item
-  here that is a certainty rather than a question.
+`UnresolvedMapping` and `UnresolvedTunable` are the same struct — `{ scheme: Scheme, name: String }`
+— for the same reason, each documented as being for the same reason as the other. One type with a
+field saying which kind of row it was, and `OverridesLoader::deserialize`'s four-tuple becomes a
+struct with three fields.
 
-Two things to be careful of, because a survey like this fails in predictable ways:
+- **Not doing:** anything to `OverrideProblem`. That is a different report at a different time, and
+  74 covers the part the two genuinely share.
 
-- **The three-property model must survive it.** `Intent`, `ChannelShape` and the action's output
-  shape look collapsible from a distance and are three properties on purpose (R2.10, and chunk 15
-  separated them against exactly this instinct). A pass optimizing for fewer types would delete the
-  distinction that the crate's hardest bug reports came from. Treat R2.10 as a fixed point.
-- **Similar shape is not shared meaning.** The test for a collapse is whether the two things must
-  change together, not whether they currently look alike.
+### 77. A test fixture the crate shares
 
-**Also here, from the settings-screen scope question** (chunk 53 is the other half of it), since it
-is a doc fix on the same surface this chunk is reviewing: `mappings()`'s doc offers filtering by
-scheme and grouping by category and never mentions `Mapping::context`, which is the field that
-answers "show only these contexts on this screen". One sentence.
+8,672 of the crate's 20,124 lines are tests, and they repeat themselves: `struct Jump` is declared
+nine times, `Move` six, `OnFoot` five; `capture.rs` and `overrides.rs` build near-identical fixture
+contexts independently; three private `fn app()` share nothing; `context.rs` alone holds 53
+`App::new()`.
 
-**The scope question itself, recorded so it is not re-proposed.** Feedback suggested the app should
-decide which controls appear on a settings screen rather than the crate deriving them from the
-registry. The middle form of it — the app names the contexts, the crate builds the rows — needs no
-change at all, because `Mapping::context` is public and filtering is already the caller's. The full
-form costs the persistence story: `MappingKey` is the save-file row key (§10.1, R17.9), so an app
-that owns the rows owns the keys, and R17.1, R17.2, R17.7 and R19.14 stop being things the crate can
-provide; `conflicts()` goes with them, since it is a query over the mapping list. Declined on that
-basis. If this chunk finds the doc sentence insufficient, the next step is a convenience filter, not
-a smaller model.
+- **A `#[cfg(test)] mod test_support`** with the fixture actions, the fixture contexts, and the
+  press-and-step helpers. Uncontroversial, and it shrinks `context.rs` further than 78 does.
+- **Watch the action registry.** It is a process-global intern table keyed by declared path, so
+  fixture actions shared across modules share one `ActionId` for the whole test binary. That is
+  already true of any two modules that pick the same path; what changes is that it becomes
+  deliberate.
+- **Review surface:** whether a test still reads on its own. A fixture that has to be looked up in
+  another module to understand a failure costs more than the duplication did.
 
-**A second scope question, resolved ahead of this chunk rather than saved for it.** Feedback that
-the crate does too much also named disabling an action (R3.7) and forgiveness windows (R6.5). Only
-the second gave, since it turns out fully answerable from primitives §3 already ships rather than a
-crate feature at all — Log.md's "The forgiveness grooming, before chunk 34" has the argument, and
-Requirements.md marks R6.5 withdrawn. R3.7 stays, and cheaply, for the reason recorded there. Kept
-here as the same kind of finding this chunk is a survey for, in case the collapse candidates below
-suggest others like it.
+### 78. Two files doing several jobs each
+
+- **`context.rs` is three:** the live state (`InputContextState`, `DirtySet`, `ActionReading`,
+  `Obstacle`, `Actions`, `ActionsQuery`); declaration and app wiring (`ActionMapAppExt`, the builder
+  impl, `declare_context`, diagnostics, priority ordering); and the monomorphization seam — the
+  eight `read_*`/`apply_to_*` functions that are the only reason the file depends on `overrides`,
+  `present`, `mapping` and `inspect`. After 75 that seam is half the size, which is why this follows
+  rather than leads.
+- **`binding.rs` is four**, and is the larger of the two by code: the control vocabulary, the
+  declaration structs plus the queries over them, the modifiers, and the builder API.
+- **The measurement chunk 52 corrected.** `context.rs` is 4,318 lines of which 1,559 are code;
+  `binding.rs` is 2,361 lines of code. The "quarter of the crate, two and a half times the next
+  largest" this chunk used to justify itself was counting a 2,759-line test module, which is 77's
+  problem rather than this one's.
+- **Ground rule 3 applies literally:** `examples/` must not change.
+
+### 79. `Phase` tells building from firing
+
+`Phase::Ongoing` covers two states and leaves the value to tell them apart — a held action still
+firing, and a condition still building toward firing. Split it into `Firing` and `Building`.
+
+- **Nobody wants the union.** Every consumer either re-reads the value immediately (`why_not`,
+  `was_firing`/`was_building`, and Disasteroids' own afterburner charge test) or deliberately wants
+  both halves. `update_action_state`'s two guards stop inspecting the value at all, and
+  `dispatch_for` becomes the plain statement that the levels produce no event and the edges produce
+  theirs.
+- **It completes the rule R3.1 already states** — "**started**, which is an edge where `ongoing` is
+  a level". A gerund or adjective is a level (`Idle`, `Building`, `Firing`), a past participle is an
+  edge (`Started`, `Fired`, `Completed`, `Canceled`), and `Ongoing` is the one variant carrying
+  both.
+- **R3.1 goes from six states to seven**, and its parenthetical extends rather than changes: the
+  second addition splits Unreal's `Ongoing` by whether the action is actually happening.
+- **`Phase` is not `#[non_exhaustive]`**, so this breaks any exhaustive match — the same shelf life
+  as 48, which is why the two are last in this phase.
+- **A question this chunk settles on the way:** `cancel_in_flight` matches `Fired | Ongoing` and
+  omits `Started`, while `was_building` includes it, so deactivating on the tick a hold started
+  appears to leave the action `Started` rather than `Canceled`, against R7.4. Not traced to a
+  reachable case, and the rewrite is where it gets an answer either way.
+- **Not doing:** `Active` for the firing half. It collides with context activation, and "an `Active`
+  action in an inactive context" is a sentence this crate can produce.
 
 ### 48. Names that survive a glob import
 
@@ -578,6 +608,15 @@ feature chunk.
   other two are here to be judged rather than assumed — `Actions` probably does earn its bareness in
   a crate called `bevy_action_map`.
 
+- **`Verdict` needs the rename most, and chunk 52 settled what to.** It becomes `ConditionState`,
+  which reads as one thing rather than as a prefix bolted on and joins the family already there
+  (`Condition`, `ConditionKind`, `ConditionDescriptor`). Its variants go with it:
+  `Idle`/`Ongoing`/`Fired` becomes `Idle`/`Building`/`Satisfied`, which is level-shaped throughout —
+  a `Down` condition answers on every tick the control is held, so a past participle was reading as
+  an edge. That leaves `Idle` and `Building` as the only names shared with `Phase`, and they are
+  shared where the two views genuinely coincide. Depends on 79, which is what claims `Firing` for
+  `Phase`. The objection, recorded rather than resolved: `ActionState` and `InputContextState` are
+  storage, and a condition's storage is `Scratch`.
 - **Chunk 30 added a seventeenth export and it is not on the list**, deliberately: `CompassPoints`
   is named after `bevy_math`'s own `CompassOctant` and `CompassQuadrant`, so a reader who knows Bevy
   guesses right, which is exactly the criterion below. Recorded because a prelude that grows between

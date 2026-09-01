@@ -691,3 +691,118 @@ calibration the player performs and loses on quit is worth little, so the screen
 are one feature. Chunk 72's own "not doing" line, which pointed calibration back at this chunk, was
 rewritten to say so, and the deferred table's gate ("two units of the same kind") is discharged:
 telling two pads apart never needed two pads to test.
+
+### Chunk 52: What the crate has accreted
+
+**Both of the chunk's headline premises were wrong, and checking them was most of the value.** It
+named `ControlClass` "`ChannelShape` minus one variant — the strongest candidate in the crate", and
+that stopped being true when chunk 25 added `CharacterProducing`. That variant is a predicate on an
+*event*, not on a control: the same key is a dead key on one press and a plain letter on the next,
+so no `Control` is ever a member of it. In the other direction `ChannelShape::Axis2` is a shape no
+single control reports on, which is why `ControlClass::of` returns `Option`. A merge therefore has
+to put a non-channel into `ChannelShape` or an always-empty variant into `ControlClass`, trading an
+honest `None` for a filter that silently matches nothing — and no caller in tree ever converts
+between the two, so the friction that motivated it is theoretical. Declined, with a sentence owed to
+`ControlClass`'s doc (chunk 74) so the resemblance does not re-propose it.
+
+**The other premise was a measurement, and it counted tests.** "`context.rs` is 3,325 lines, a
+quarter of the crate and two and a half times the next largest" was the one item the chunk called "a
+certainty rather than a question". By code it is 1,559 lines and `binding.rs` is 2,361. The crate is
+11,452 lines of code and 8,672 of tests, and `context.rs`'s test module alone is 2,759 of them. The
+split is still worth doing and is still chunk 78, but for a different reason (three jobs, one of
+them a monomorphization seam) and no longer ahead of `binding.rs`, which has four.
+
+**The strongest finding was not on the candidate list.** Capture and overrides ask the same three
+questions of a control — scheme, reserved, shape — in two implementations, in two different orders.
+`CaptureSession::verdict` checks reserved before shape and says why in a comment: pressing the
+settings key should be answered with the reason it cannot be bound rather than with a complaint
+about its channel. The override row check takes shape first. So the same control gets two different
+reasons depending on whether the player pressed it or a save file named it. This is the kind of
+thing a survey exists to find — invisible in either diff, and neither side is wrong on its own.
+
+**A helper named after where it sits rather than what it answers.** The author's read of
+`CaptureSession::verdict`, and the correct one: its three answers have nothing in common but what
+`run_captures` does next, so the name had to be abstract enough to cover a position in a function.
+Two questions are tangled in it — whether the control is capture's business at all, and whether it
+may fill the slot — and separating them makes the second one the shared predicate above and the
+first one a guard. `Ignore` stays out of the refusal enum, which is what stopped the obvious
+`Result<(), RefusedReason>` from working: a refused control is claimed and may fire `Refused`, an
+ignored one is deliberately left alone to go on doing its job, which is how the key that cancels a
+capture reaches the thing that cancels it.
+
+**The crate names cross products, and already knows better in one place.** `mappings` /
+`declared_mappings` / `tunables` / `declared_tunables` is one 2×2 written out twelve times — four
+public functions, four `read_*` in `context.rs`, four fn-pointer fields on `DeclaredContext` — while
+`apply_overrides` and its three variants are the same 2×2 over two internal helpers taking
+`Option<&Overrides>`. The code's defence of the split ("registered separately rather than taking a
+flag, because the two are asked by different callers for different reasons") is right about the
+public names and says nothing about four copies of a two-line body. Chunk 75.
+
+**`Phase::Ongoing` is two states with the discriminant in a field.** Found while answering a naming
+question, which is how it should have been found: the author proposed renaming `Ongoing` to
+`Pending`, and `Pending` names only half of what it holds. Every consumer in the tree either
+re-reads the value immediately or wants both halves — including `examples/disasteroids/ship.rs`,
+where a game written against the public API has to write `phase == Ongoing && !value` to ask whether
+the afterburner is charging. Splitting it into `Firing` and `Building` deletes that test from
+`update_action_state`, from `why_not`, and from the example, and completes a rule R3.1 already
+states: a gerund is a level, a past participle is an edge. Chunk 79, and it is the one item in the
+settling phase that changes the public model rather than tidying behind it.
+
+**Three declines worth recording, because each will be re-proposed from a resemblance.**
+`Verdict`/`Phase` stay separate — one is level-triggered per binding per tick, the other
+edge-derived per action, and `update_action_state` is the 3×3 table between them, so collapsing
+makes a function's input and output one type. The four transition events stay four types, because
+the type *is* the observer's filter and `On<Fired<Jump>>` is the whole ergonomic point.
+`ButtonControl` stays, because being `Control` restricted to button shape at compile time is what
+lets `DirectionalButtons::new` refuse a stick axis — which, with `ControlClass::AnyButton` and
+`ChannelShape::Button`, does make "button-shaped" a thing this crate names three times, on purpose.
+
+**`Verdict` is also two types.** There is a second, private `enum Verdict { Take, Refuse, Ignore }`
+in `capture.rs`, unrelated to the condition one, so `grep Verdict` returns two enums in a crate
+about to rename one of them. Chunk 74 deletes the private one and chunk 48 renames the public one to
+`ConditionState`, with variants `Idle`/`Building`/`Satisfied` — level-shaped throughout, which is
+what `Fired` was not.
+
+**The settings-screen scope question is closed as the chunk predicted.** `mappings()`'s doc now
+names `context` beside `category` and `scheme` in its filtering sentence, and one sentence was
+enough: the field is public and the filter is one `.filter()`. The asymmetry recorded rather than
+fixed is that prompts get a declarative `PromptScope { context, scheme, class }` and mappings get
+"sort it yourself"; a convenience filter waits for a second caller that wants one, per this chunk's
+own instruction.
+
+**What a survey chunk costs, since this is the first one.** Reading 20,000 lines for what could be
+fewer things found eleven candidates, of which three were already known, three are declines, and the
+two best — the disagreeing validation and the overloaded `Phase` variant — were both invisible from
+any single file. That is the argument for the format. The argument against is that it produces no
+diff to review, which is why the picks became numbered chunks in the same session rather than a list
+someone would have had to re-derive.
+
+### Chunk 74: One admissibility rule, not two
+
+**The collapse was the small half; the behaviour change was the point.** `capture::admissible` is
+one free function returning `Result<(), RefusedReason>`, and the override side lifts each reason
+into its own `OverrideProblemKind` at the call site — four lines of `match` rather than a `From`
+impl, because `OverrideProblemKind`'s variants carry the control and the shape the row wanted, which
+the shared predicate has no business knowing. What actually changed is the override answer for a
+control refusable twice over: reserved now outranks shape there, as it already did in capture.
+
+**Nothing in the suite noticed, which is the finding.** All 266 tests passed before the new one was
+written. The fixture reserves exactly one control (`F1`, button-shaped) and aims it at a button row,
+so the two orders were indistinguishable through either caller — the disagreement chunk 52 found by
+reading was invisible to the tests by construction, not by oversight. The pin is a direct call on
+the predicate rather than a third app fixture: with one implementation left, testing the rule is
+testing both callers, and contorting `app()` into growing a rebindable non-button row would have
+been a change to a fixture chunk 77 is about to take over anyway.
+
+**`reserved` is a `bool` parameter, deliberately.** The two callers hold the reserved set in two
+shapes — capture a `ReservedControls` resource, overrides a `&[Control]` projected out of it because
+`rewrite` must borrow nothing from the world — and neither a trait nor a closure earns its keep for
+a linear scan of a list that is almost always empty. What the shared function owns is the order the
+*reasons* come in, which is the thing the two sides disagreed about; who evaluates the membership
+was never in dispute.
+
+**`CaptureSession::verdict` came apart exactly where chunk 52 said it would.** The excluded check is
+now a guard at the top of `run_captures`' loop and the rest is the predicate, which also flattened
+the loop body: the `Take` arm was the whole rest of the iteration indented inside a `match`, and
+reads better as the fall-through. The private `enum Verdict` is gone with it, so chunk 48 renames a
+name the crate now has only one of.

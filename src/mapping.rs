@@ -304,7 +304,9 @@ impl Follower {
 /// overridden the two are the same list, which is why the difference is easy to miss.
 ///
 /// Sorting is the caller's: group by [`category`](Mapping::category) to draw headings, and filter by
-/// [`scheme`](Mapping::scheme) to show one device's worth at a time.
+/// [`scheme`](Mapping::scheme) to show one device's worth at a time. Filter by
+/// [`context`](Mapping::context) for a screen that covers part of the game rather than all of it —
+/// a vehicle's controls on their own, or everything except a debug context.
 pub fn mappings(world: &World) -> Vec<Mapping> {
     let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
         return Vec::new();

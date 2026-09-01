@@ -47,7 +47,7 @@ use bevy_ecs::world::World;
 
 use crate::action::ChannelShape;
 use crate::binding::{BindingSpec, Control, MappedPart, apply_tunable_value, mapped_parts};
-use crate::capture::ControlClass;
+use crate::capture::{ControlClass, RefusedReason, admissible};
 use crate::mapping::{Capacity, Mapping, MappingKey, Scheme, Tunable, TunableValue};
 
 /// What a player did to one mapping.
@@ -1018,17 +1018,25 @@ fn refusal(
     // never something a capture offered, so a row naming one came from somewhere else.
     let accepts = ControlClass::of(row.accepts);
     for &control in wanted {
-        if control.scheme() != row.scheme {
-            return Some(OverrideProblemKind::WrongScheme { control });
-        }
-        if !accepts.is_some_and(|class| class.contains(control)) {
-            return Some(OverrideProblemKind::WrongShape {
-                control,
-                accepts: row.accepts,
-            });
-        }
-        if reserved.contains(&control) {
-            return Some(OverrideProblemKind::Reserved { control });
+        // Shared with capture, which is what stops one control getting two different reasons
+        // depending on whether it arrived from a press or from a file.
+        match admissible(
+            control,
+            Some(row.scheme),
+            accepts,
+            reserved.contains(&control),
+        ) {
+            Ok(()) => {}
+            Err(RefusedReason::Scheme) => {
+                return Some(OverrideProblemKind::WrongScheme { control });
+            }
+            Err(RefusedReason::Reserved) => return Some(OverrideProblemKind::Reserved { control }),
+            Err(RefusedReason::Shape) => {
+                return Some(OverrideProblemKind::WrongShape {
+                    control,
+                    accepts: row.accepts,
+                });
+            }
         }
     }
     None

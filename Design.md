@@ -1398,6 +1398,12 @@ and is silent: an excluded control is not being refused, it is busy doing its no
 how the key that cancels a capture reaches the thing that cancels it. *Reserved* is declared on a
 binding and is loud, because a player who pressed it meant to bind it.
 
+**One rule, asked from two directions.** Excluded aside — a guard rather than a reason — the order
+the rest are asked in is the answer's rather than the implementation's: reserved before shape, so
+pressing the settings key hears that it is spoken for rather than that its channel is wrong. §10.1's
+row check asks the same predicate of a control loaded from a file, so one control gets one reason
+whichever direction it arrived from.
+
 **Reserving settles OQ-10, and the second half is the half that matters.** A reserved binding takes
 no mapping *and* its controls are refused by capture across the scheme. Without the second half a
 player cannot rebind the settings key away but can still bind something else over it, which is the

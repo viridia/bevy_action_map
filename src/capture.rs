@@ -344,33 +344,34 @@ impl CaptureSession {
     pub fn is_listening(&self) -> bool {
         self.armed
     }
-
-    /// What capture should do with a control that just arrived.
-    fn verdict(&self, control: Control, reserved: &ReservedControls) -> Verdict {
-        // Excluded first, and unconditionally: an excluded control is not capture's business at
-        // all, which is what lets it go on doing its job while a capture is live.
-        if self.excluded.contains(&control) {
-            return Verdict::Ignore;
-        }
-        if self.scheme.is_some_and(|scheme| scheme != control.scheme()) {
-            return Verdict::Refuse(RefusedReason::Scheme);
-        }
-        // Before the shape check, so that pressing the settings key is answered with the reason it
-        // cannot be bound rather than with a complaint about its channel.
-        if reserved.contains(control) {
-            return Verdict::Refuse(RefusedReason::Reserved);
-        }
-        if !self.accepts.contains(control) {
-            return Verdict::Refuse(RefusedReason::Shape);
-        }
-        Verdict::Take
-    }
 }
 
-enum Verdict {
-    Take,
-    Refuse(RefusedReason),
-    Ignore,
+/// Whether a control may fill a slot that takes `accepts`, and if not, why not.
+///
+/// The same three questions arrive from two directions — a press at a rebinding screen, and a row
+/// in a save file — and one control must get one answer either way. `scheme` is `None` for a
+/// capture not restricted to one; `accepts` is `None` for a mapping no single control can fill,
+/// which admits nothing.
+///
+/// The order is the order the reasons come in, and reserved is asked before shape so that pressing
+/// the settings key is answered with the reason it cannot be bound rather than with a complaint
+/// about its channel.
+pub(crate) fn admissible(
+    control: Control,
+    scheme: Option<Scheme>,
+    accepts: Option<ControlClass>,
+    reserved: bool,
+) -> Result<(), RefusedReason> {
+    if scheme.is_some_and(|scheme| scheme != control.scheme()) {
+        return Err(RefusedReason::Scheme);
+    }
+    if reserved {
+        return Err(RefusedReason::Reserved);
+    }
+    if !accepts.is_some_and(|class| class.contains(control)) {
+        return Err(RefusedReason::Shape);
+    }
+    Ok(())
 }
 
 /// The player chose a control.
@@ -625,42 +626,50 @@ pub fn run_captures(
                 continue;
             };
 
-            match session.verdict(arrival.control, &reserved) {
-                Verdict::Ignore => continue,
-                Verdict::Refuse(reason) => {
-                    // Claimed even though it was refused: the player pressed it at a rebinding
-                    // screen, and whatever it would otherwise have done is not what they meant.
-                    consumed.claim_for_capture(arrival.control);
-                    if arrival.deliberate {
-                        commands.trigger(Refused {
-                            entity,
-                            mapping: session.mapping,
-                            control: arrival.control,
-                            reason,
-                        });
-                    }
-                }
-                Verdict::Take => {
-                    consumed.claim_for_capture(arrival.control);
-                    // Removed *before* the event, and both halves of that matter. An observer is
-                    // entitled to do anything to this entity, despawning it included — a settings
-                    // row that closes on being answered is an ordinary thing to write — so the
-                    // crate must have finished with the entity before it hands it over. It also
-                    // means the observer sees the component already gone, so "is this row still
-                    // listening" reads the same from inside the observer as from anywhere else.
-                    //
-                    // Fallible because one run can answer several sessions, and the first
-                    // observer to run may despawn a later one's entity.
-                    commands.entity(entity).try_remove::<CaptureSession>();
-                    commands.trigger(Captured {
+            // Asked before admissibility, and unconditionally: an excluded control is not capture's
+            // business at all, which is what lets it go on doing its job while a capture is live.
+            if session.excluded.contains(&arrival.control) {
+                continue;
+            }
+
+            if let Err(reason) = admissible(
+                arrival.control,
+                session.scheme,
+                Some(session.accepts),
+                reserved.contains(arrival.control),
+            ) {
+                // Claimed even though it was refused: the player pressed it at a rebinding screen,
+                // and whatever it would otherwise have done is not what they meant.
+                consumed.claim_for_capture(arrival.control);
+                if arrival.deliberate {
+                    commands.trigger(Refused {
                         entity,
                         mapping: session.mapping,
-                        slot: session.slot,
                         control: arrival.control,
+                        reason,
                     });
-                    break;
                 }
+                continue;
             }
+
+            consumed.claim_for_capture(arrival.control);
+            // Removed *before* the event, and both halves of that matter. An observer is entitled
+            // to do anything to this entity, despawning it included — a settings row that closes on
+            // being answered is an ordinary thing to write — so the crate must have finished with
+            // the entity before it hands it over. It also means the observer sees the component
+            // already gone, so "is this row still listening" reads the same from inside the
+            // observer as from anywhere else.
+            //
+            // Fallible because one run can answer several sessions, and the first observer to run
+            // may despawn a later one's entity.
+            commands.entity(entity).try_remove::<CaptureSession>();
+            commands.trigger(Captured {
+                entity,
+                mapping: session.mapping,
+                slot: session.slot,
+                control: arrival.control,
+            });
+            break;
         }
     }
 }
@@ -815,6 +824,23 @@ mod tests {
         assert_eq!(
             app.world().resource::<Heard>().captured,
             [Control::Key(KeyCode::KeyE)]
+        );
+    }
+
+    /// A control can be refusable twice over, and the reason it gets is the one it is owed: a
+    /// player who pressed the settings key wants to hear that it is spoken for, not that its
+    /// channel is wrong. Tested on the predicate rather than through capture because overrides
+    /// answers a saved file from the same rule, and the two must not disagree.
+    #[test]
+    fn reserved_answers_before_shape() {
+        assert_eq!(
+            admissible(
+                Control::Key(KeyCode::F1),
+                None,
+                Some(ControlClass::AnyAxis),
+                true
+            ),
+            Err(RefusedReason::Reserved)
         );
     }
 
