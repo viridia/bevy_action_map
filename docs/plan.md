@@ -160,7 +160,7 @@ Two things land here that have no other home:
 | 3 | `Roadmap.md`, plus the archive sweep below | its 18 remaining chunk sections, the deferred table, the landed index, "Known wrong today" | **done** |
 | 4 | `CLAUDE.md`; move three documents to `archive/`; repoint 22 citations | Roadmap's ground rules, house style, commit format | **done** |
 | 5 | `Requirements.md` | itself, section by section; the `D`-number reconciliation below | **done**, in 1 |
-| 6 | Implementation scan — what is overbuilt, underbuilt or wrongly built | the non-archived documents, and the code | 1 of 3 done |
+| 6 | Implementation scan — what is overbuilt, underbuilt or wrongly built | the non-archived documents, and the code | 2 of 6 done |
 | 7 | Comment scan — the prose in the code, against the same documents | the same | 3 |
 
 Phase 1's sources ran wider than this table originally said: §9.3, §9.5, §9.6 and §11 are model and
@@ -317,14 +317,18 @@ set, it does not exist for the purpose of the scan.
 Two passes, deliberately separate, because judging prose and judging behaviour want undivided
 attention and running them together produces a worse job of both.
 
-**Phase 6 — the implementation.** Three categories, each with its own method, because they are not
+**Phase 6 — the implementation.** Four categories, each with its own method, because they are not
 found the same way:
 
 | | What it is | How it is found |
 | --- | --- | --- |
-| **Overbuilt** | public surface no document asks for | enumerate every `pub` item, check each against `design.md` and `Requirements.md` |
+| **Overbuilt** | machinery out of proportion to the problem — a map where four items ever exist, a type parameter nothing reads, one fact stored three ways | read each type against the sizes and the cases the documents say it actually meets |
+| **Unasked-for** | public surface no document asks for | enumerate every `pub` item, check each against `design.md` and `Requirements.md` |
 | **Underbuilt** | a normative statement with no implementation behind it | walk `Requirements.md` section by section against the code |
 | **Wrongly built** | code that contradicts a document | read `design.md`'s claims against what the code does |
+
+**Session 1 ran the second of these under the first's name**, so `device` and `frame` have had the
+public-surface sweep and not the proportion one. Whichever chunk takes their findings picks it up.
 
 **Excluded, and this is the load-bearing part.** Anything already recorded in `Roadmap.md`'s defect
 register or deferred table, or marked `Still open` in `decisions.md`, is not a finding. Phase 3
@@ -342,10 +346,23 @@ do not exist, so the rule they are checked against is that none may cite an `R`-
 `OQ` or a chunk. Internal comments keep their references and are checked for being *true* — which is
 why this runs after phase 4, when the 23 `Design §` citations have been repointed.
 
-**Both need scoping; neither fits one window.** `src/` is 20,000 lines and the surviving documents
-are 3,000. The split that falls out of the layering is three sessions each: `device` and `frame`;
-then `action`, `binding`, `condition`, `context`, `plan`, `eval` and `event`; then `mapping`,
-`overrides`, `preset`, `capture`, `present`, `inspect`, `player` and `join`.
+**Both need scoping; neither fits one window.** `src/` is 20,000 lines, of which 11,500 are code,
+and the surviving documents are 3,000. The split was estimated at three sessions each by layer;
+sessions 1 and 2 measured the unit at about 2,000 lines of code plus the documents they touch, which
+makes it six:
+
+| | Modules | Code |
+| --- | --- | --- |
+| 1 | `device`, `frame` | 707 |
+| 2 | `action`, `condition`, `event`, `plan` | 2,112 |
+| 3 | `binding` | 2,360 |
+| 4 | `context`, `eval` | 2,498 |
+| 5 | `overrides`, `preset`, `mapping` | 1,642 |
+| 6 | `capture`, `present`, `inspect`, `player`, `join`, `lib` | 2,140 |
+
+Session 1 read 707 and ran short; session 2 read 2,112 and was full, so 3 and 4 are at the ceiling
+rather than under it. Groups 5 and 6 are the persistence and presentation halves, which is the same
+seam `docs/design.md` §9 and §10 already use.
 
 **If phase 5 is skipped**, phase 6 runs against `Requirements.md` as it stands, which is already
 normative. The scans depend on phase 4, not on phase 5.
@@ -397,10 +414,10 @@ nothing in the code or in `Roadmap.md` was edited. The proposal is at the end.
    button state machine and never touches the frame. The placement is right and the `R`-number is
    wrong — phase 7's lane, recorded here because it is the crate's only claim on R14.10.
 
-**Overbuilt came to four items**, which is the honest result for these two modules:
+**Unasked-for surface came to four items**, which is the honest result for these two modules:
 `GamepadCalibration::clear_device` and `is_empty` have no caller and no document behind them, and
 `warn_on_unread_gamepad_settings` and `retire_read_events` are `pub` while only `InputFramePlugin`
-ever names them.
+ever names them. The proportion category did not exist yet and these two modules have not had it.
 
 **Checked and correct**, so a later session need not re-derive it: R9.1–R9.5 and R9.7, including
 the two worth doubting — deltas are summed rather than replaced (`eval.rs:347`, asserted at
@@ -420,6 +437,103 @@ despite phase 0's reconciliation, because every one of them is in a *configurati
 the default build, which is what phase 0 read. The underbuilt walk is the one that wants care: most
 `NONE` results are requirements that are simply built, so the cheap grep for an unrouted `R`-number
 is a starting list and not a finding list.
+
+### Phase 6, session 2 — `action`, `condition`, `event` and `plan`
+
+Eleven findings, on session 1's terms: **unrouted**, nothing in the code or in `Roadmap.md` edited,
+proposal at the end.
+
+**Wrongly built.**
+
+1. **A binding whose only conditions are blocking fires at rest.** `combine` (`condition.rs:361`)
+   tests actuation in the no-conditions case only; once a binding has any condition the "control is
+   off rest" test is gone, and nothing replaces it for a set with no explicit condition that reads
+   the value. One blocking condition that is not vetoing leaves `explicit == 0` and `implicit_all`
+   vacuously true, so the binding fires every tick with the control at rest. Verified by driving
+   `combine` at `ActionValue::Bool(false)`: `Fired`. Unreachable through the built-ins, none of
+   which returns `ConditionKind::Blocking` — but the kind is public API through `Condition`, and
+   chunk 33's `BlockedBy` is the first built-in that would land on it.
+2. **design §4 says a variant rebuilds only the scratch.** `Plan::compile` rebuilds
+   `indexed_controls` and `has_chords` as well, and `plan.rs:716`'s comment says the first is
+   required rather than incidental: an override rewrites which controls a binding reads, so one has
+   to move between indexed and not along with everything else. The code is right and the
+   sentence is a clause short.
+3. **design §3's trait sketch names a constant that does not exist** — `// plus CATEGORY and
+   CONSUME, with defaults`, where the constant is `CONSUMES`. Copying the sketch into a hand-written
+   impl does not compile.
+4. **The advice for writing an `InputContext` by hand leaves out the half that matters.**
+   `action.rs:497` says to implement the trait yourself "if you need to configure the component
+   differently; it is three associated constants" — but the trait is not what makes the type a
+   component. The derive emits `Component`, `Default`, `Clone` and `Copy` alongside it and a
+   hand-written impl gets none of them. `macros/src/lib.rs:131` says "four associated consts" for
+   the same trait, so the two disagree about the count as well; four exist and three are required.
+
+**Unasked-for surface.**
+
+5. **`Plan` is `pub` with nothing public on it** — no field, no method, no constructor, and it
+   appears in no public signature, every wrapper holding one being `pub(crate)`. It is on docs.rs as
+   a struct a reader can name and do nothing with. design §4 names `Plan<C>` in prose, which is
+   architecture rather than a request for it to be public.
+6. **Four public names for two conversions.** `ActionValue::into_output` and `from_output` are
+   one-line forwards to `ActionOutput::from_action_value` and `into_action_value`. `from_output` has
+   no caller in `src/`, `examples/` or the tests and duplicates the four `From` impls twenty lines
+   above it; `into_output` is called only by its own test.
+7. **`Intent::supports_output`** is a public wrapper over `is_one_of`, which is the one the derive
+   calls. Nothing else calls either.
+8. **`ActionState::new`** is a `const fn` constructor for a two-field struct with both fields public
+   and a `Default` impl. No caller.
+
+**Overbuilt**, which is the category session 1 did not have.
+
+9. **The action registry holds one fact three ways.** `next_id` is always `entries.len()`; each
+   entry's stored `ActionId` is always its own index; and `ActionId::info` linear-scans the vector
+   that index would subscript. The table is written once per process and holds tens of rows, so none
+   of it costs anything at run time. What it costs is three invariants a reader has to confirm are
+   still true.
+10. **`Plan<C>`'s type parameter is phantom.** No field and no method reads `C`. What it buys is
+    that handing context A's plan to context B's state does not compile; what it costs is `compile`,
+    130 lines of it, monomorphized once per context type — and the three wrappers that hold a `Plan`
+    carry `C` themselves already. Whether the guard is worth the copies is a judgement, which is why
+    it is here rather than fixed.
+
+**Underbuilt, and unrouted anywhere.**
+
+11. **R3.4 and R3.5 have no implementation and no destination.** R3.4 is a MUST — elapsed time in
+    the current state, in the same simulated seconds the action's own conditions count with — and
+    R3.5 is its SHOULD, progress toward firing for a hold-to-confirm meter. `ActionState` is
+    `{ value, phase }` and nothing public exposes either number. Both exist: `Scratch::time` is the
+    elapsed time and `BindingCondition::Hold`'s `duration` is R3.5's denominator, but the scratch is
+    `pub(crate)` inside `InputContextState` with no read path out. Neither appears in the defect
+    register, the deferred table, or any `Still open` remainder.
+
+**Checked and correct**, so a later session need not re-derive it: R2.2's conversion table matches
+`ActionValue::to_bool`/`to_axis1`/`to_axis2`/`to_axis3` cell for cell, including the two rows the
+requirement expects to be argued about — narrowing to 1D measures the whole value and therefore
+loses the sign, and the bool conversion tests against rest rather than against a press threshold.
+R2.10's two hardware cases hold in `Intent::accepts`: a trigger on a `Button` channel serves
+`Analog1`, and `Directional2` accepts nothing but `Axis2`, which is what forces a D-pad through the
+same composite as four keys. R1.1's declared path is required by the derive with no default. R6.7
+holds by construction — a condition's only clock is the `delta` it is handed. R24.4's
+app-build/runtime split is honoured at both panics, `plan.rs:681` and `action.rs:673`. design §4's
+fourteen `DiagnosticKind` variants and both `Severity` variants match the code exactly.
+
+**One thing the Verification section does not run.** `cargo doc --no-deps --all-features` warns —
+`device.rs:8`, a redundant explicit link target. Doc comments are the crate's public documentation
+and this is the only command that reads them, so it belongs in `CLAUDE.md`'s list.
+
+**The proposed routing.** 1 to the defect register, owned by chunk 33, which is where a built-in
+blocking condition first arrives. 2, 3 and 4 fixed in place, being three document lines and one doc
+comment; 4 is chunk 28's lane as well. 5 to 10 want a chunk of their own that phase 6 accumulates
+into, since sessions 3 onward will add to it and one pass over the whole public surface is cheaper
+than four. 11 wants a chunk: a MUST with no destination is chunk 35's situation exactly, and the
+mechanism is as nearly built as 35's is.
+
+**What the session says about the method.** The estimate does not hold and the split above is the
+correction. On the categories: nine of the eleven came from the three session 1 already had, and the
+two the addendum added are a judgement call and a tidy-up rather than defects — worth keeping, but
+not where the yield is. The underbuilt walk paid this time where it barely did in session 1, and for
+a reason worth carrying forward: `Requirements.md` §3 and §6 are about *state over time*, and the
+requirements a code reading silently satisfies are the ones about shape.
 
 ---
 
