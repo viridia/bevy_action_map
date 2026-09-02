@@ -160,7 +160,7 @@ Two things land here that have no other home:
 | 3 | `Roadmap.md`, plus the archive sweep below | its 18 remaining chunk sections, the deferred table, the landed index, "Known wrong today" | **done** |
 | 4 | `CLAUDE.md`; move three documents to `archive/`; repoint 22 citations | Roadmap's ground rules, house style, commit format | **done** |
 | 5 | `Requirements.md` | itself, section by section; the `D`-number reconciliation below | **done**, in 1 |
-| 6 | Implementation scan — what is overbuilt, underbuilt or wrongly built | the non-archived documents, and the code | 3 |
+| 6 | Implementation scan — what is overbuilt, underbuilt or wrongly built | the non-archived documents, and the code | 1 of 3 done |
 | 7 | Comment scan — the prose in the code, against the same documents | the same | 3 |
 
 Phase 1's sources ran wider than this table originally said: §9.3, §9.5, §9.6 and §11 are model and
@@ -349,6 +349,77 @@ then `action`, `binding`, `condition`, `context`, `plan`, `eval` and `event`; th
 
 **If phase 5 is skipped**, phase 6 runs against `Requirements.md` as it stands, which is already
 normative. The scans depend on phase 4, not on phase 5.
+
+### Phase 6, session 1 — `device` and `frame`
+
+Nine findings, **unrouted**. Ground rule 5 wants each a destination, and that is the author's call;
+nothing in the code or in `Roadmap.md` was edited. The proposal is at the end.
+
+**Wrongly built.**
+
+1. **`ActionMapPlugin` panics on its first update in the no-devices build.** `lib.rs:255` gates
+   `InputFramePlugin` on `any(keyboard, mouse, gamepad)`, and that plugin is the only caller of
+   `init_resource::<InputFrame>()`; `capture.rs:607`'s `run_captures` takes `Res<InputFrame>` and is
+   registered unconditionally, as does `evaluate_context`. Verified by running an `App` under
+   `--no-default-features --features libm`: `Parameter … failed validation: Resource does not
+   exist`. All three single-feature builds pass. **`cargo check` and clippy cannot see this**, which
+   is all the Verification section runs for that configuration.
+2. **The `touch` feature advertises a source that does not exist.** `lib.rs:174` calls it "Touch
+   input as a binding source"; there is no `cfg(feature = "touch")` anywhere in `src/`. design §11
+   says *reserved*, so the contradiction is between the two, and the user-facing half is the wrong
+   one.
+3. **`device.rs`'s module doc claims a persistent identity and capability data**, neither of which
+   the module has (R11.5, R11.3). The `DeviceHandle` doc eight lines below says the first is
+   not-yet-built, so the module page contradicts the type page.
+4. **R14.9's warning reads four of `GamepadSettings`' six fields.** `device.rs:296` misses
+   `default_button_settings` and `default_button_axis_settings`, so a game setting a button
+   threshold gets the silence R14.9 exists to prevent. Its comment's reason is wrong at the pinned
+   commit besides: `ButtonSettings` derives `PartialEq` (`gamepad.rs:821`) and only
+   `ButtonAxisSettings` does not (`gamepad.rs:1413`).
+5. **R16.1 is unimplemented in any build without `keyboard`.** `KeyboardFocusLost` is behind
+   `bevy_input`'s own `keyboard` feature, so a `mouse`-only build samples no focus loss and
+   `eval.rs:430`'s `held_mouse_buttons.clear()` compiles out with it: a held mouse button survives
+   alt-tab. Not fixable at our layer, so it wants a stated price rather than silence.
+
+**Underbuilt, and unrouted anywhere.**
+
+6. **§11's openness** — R11.1, R11.2, R11.3, R11.8, R11.9, three of them MUST. R11.5, R11.6 and
+   R11.7 all have destinations, so what is missing is the *model's openness*, not its identity half.
+   `DeviceHandle` is closed, with no `Custom` and no `#[non_exhaustive]`, and its doc argues for
+   exhaustive matchability — the opposite of D19's choice for modifiers and conditions. That is a
+   decision by the admission test's own standard and `decisions.md` does not carry it.
+7. **§13's pointer half** — R13.1 wants position distinguished from motion and the frame carries
+   no absolute position at all; R13.4 and R13.6 likewise. R13.3 and R13.5 are routed; these are not.
+8. **R9.9's pumped sampling mode** — `sample_input`, `begin_sample` and `record` are all public,
+   so the pieces exist. What is missing is a way to stop `InputFramePlugin` scheduling sampling.
+9. **R14.10's only claimed satisfaction is a mis-citation.** `frame.rs:338` credits calibration's
+   placement with meeting it; R14.10 governs an authority backend, which per D51 enters at the
+   button state machine and never touches the frame. The placement is right and the `R`-number is
+   wrong — phase 7's lane, recorded here because it is the crate's only claim on R14.10.
+
+**Overbuilt came to four items**, which is the honest result for these two modules:
+`GamepadCalibration::clear_device` and `is_empty` have no caller and no document behind them, and
+`warn_on_unread_gamepad_settings` and `retire_read_events` are `pub` while only `InputFramePlugin`
+ever names them.
+
+**Checked and correct**, so a later session need not re-derive it: R9.1–R9.5 and R9.7, including
+the two worth doubting — deltas are summed rather than replaced (`eval.rs:347`, asserted at
+`eval.rs:1131`), and events are replayed singly rather than folded once, which is what keeps a
+press-and-release inside one window from cancelling. R11.4's hot-plug policy holds at `eval.rs:422`;
+the queue's append-monotonic invariant survives `clear()`, since `frame` is never reset; D20's
+stage-1 no-rescale rule holds, clamp included.
+
+**The proposed routing**, for whenever it is decided: 1, 4 and 5 to the defect register; 2 and 3
+fixed in place by whichever chunk takes 1, being three lines and no design question; 6 and 7 two
+deferred rows with gates, plus a `decisions.md` entry for the closed `DeviceHandle`; 8 a deferred
+row; 9 to chunk 28.
+
+**What the session says about the method.** The estimate holds — one module pair, one session, and
+it ran short rather than long. Two of the three categories paid: "wrongly built" yielded five
+despite phase 0's reconciliation, because every one of them is in a *configuration* rather than in
+the default build, which is what phase 0 read. The underbuilt walk is the one that wants care: most
+`NONE` results are requirements that are simply built, so the cheap grep for an unrouted `R`-number
+is a starting list and not a finding list.
 
 ---
 
