@@ -610,8 +610,9 @@ network removed, which was the expensive part.
   depends on insertion history, which bites only a snapshot serialized by iterating — and not one
   restored by value. This chunk says which kind it needs, and `indexmap` is the tool if the answer
   is the former.
-- **It owns `DirtySet::contains`' per-slot read**, `#[cfg(test)]` today because this row was the
-  only caller it was ever waiting for.
+- **The per-slot read it needs, `FixedBitSet::contains`, is already there and ungated** — `dirty`
+  moved off the hand-rolled `DirtySet` to `fixedbitset`, which carries the method as a stock part of
+  the type rather than something built for this chunk's sake.
 - **What stays deferred:** injection and reconciliation — feeding a remote player's frame, and
   disagreeing with the authority about what happened. Those want a network; rewinding does not.
 - **Split if it grows.** Making the state snapshot-able with a differential test is separable from
@@ -710,7 +711,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Glyph ids** (R18.4) | asset-pipeline questions, though *the art is not one of them*: Kenney's input prompt set covers keyboard, mouse and three pad brands and is CC0. What stays open is the identifier scheme, and Kenney is the way to falsify it — R18.4 wants a key of (brand, control), and chunk 37's stored names are already the control half. If that does not survive contact with a real atlas's file names, R18.4 is wrong rather than merely unbuilt |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import |
-| **Netcode injection and reconciliation** | a networked target. Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers and `DirtySet::contains`' per-slot read. What is left here needs a remote player to inject a frame for and an authority to disagree with |
+| **Netcode injection and reconciliation** | a networked target. Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. What is left here needs a remote player to inject a frame for and an authority to disagree with |
 | **Consumption-aware `FocusedInput` dispatch** (R8.2a) | **a game wanting `bevy_ui_widgets`' own widgets working generically, unmodified, without a context per widget kind.** A context per kind is the path to reach for first, and Disasteroids ships that way. A design for the filter was built and set aside: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline rather than a second raw-message read — keyboard only, since every keyboard-driven widget observer at the pinned commit gates on `ButtonState::Pressed` and none reacts to a release |
 | **Promoting `WidgetKind` and the per-kind context into the crate** | [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native widget-kind id. Promoting a shape this crate invented first, ahead of that conversation, risks committing to the wrong one |
 | **A context-level exclusion from the mapping list** | a second screen needing the same filter and duplicating it. `Mapping::context` already carries the data, and one call site filtering on it costs one line — at two, the crate is the one paying for the repetition |

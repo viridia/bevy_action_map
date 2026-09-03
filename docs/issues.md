@@ -711,13 +711,6 @@ confirm is still true.
 - **`BindingsTable` and `TunablesTable` are two structs with the same `Serialize` impl**, differing
   only in the inner map's key type — roughly thirty lines to emit `{scheme_name: rows}` twice.
   Chunk 76 is already merging the neighbouring pair.
-- **`DirtySet` and `require_reset` disagree.** Both are `plan.slot_count()` long, both parallel to
-  `actions`, in the same struct — one bit-packed, one `Vec<bool>`, with the doc on the first
-  arguing against the second's representation eight lines above it. `require_reset` never asks
-  "did any bit move", which is the reason the bitset comment gives, so it is defensible; nothing
-  records it, and read as a pair they look like an accident. `fixedbitset` is already in the graph
-  beneath `bevy_ecs`, so `DirtySet` is thirty hand-written lines against a dependency line the
-  `smallvec` comment's own argument would justify.
 
 ---
 
