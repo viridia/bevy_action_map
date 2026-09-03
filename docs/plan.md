@@ -25,8 +25,10 @@ probe, or where the reachable case is hypothetical, the entry says so in as many
 | **5. Cost and surface** | Public items nothing asks for, and machinery out of proportion |
 | **6. Drop** | Named so nobody re-finds them |
 
-Two things this document does *not* do: route anything to a chunk, and describe what the crate does.
-Routing is ground rule 5's business and yours; `docs/design.md` is the description.
+This document does not *decide* routing, and it does not describe what the crate does — routing is
+ground rule 5's business and yours, and `docs/design.md` is the description. It does record routing
+once it happens: an entry that has been given a chunk says so on its `Fix` line, so what is left
+unrouted can be read off the entries that stay silent.
 
 ---
 
@@ -52,8 +54,9 @@ that produced it was.
 
 Nothing in `docs/design.md` §5.1, `docs/decisions.md` or `Roadmap.md` says what equal priorities do.
 
-*Fix:* plausibly small — order same-priority contexts by declaration order, or refuse the second one
-at `add_context` with a diagnostic. Which of the two is a design call.
+*Fix:* **chunk 80**, which orders same-priority contexts by declaration order. Refusing the second
+one at `add_context` was the alternative, and a warning where their controls overlap was the
+half-measure between them; both were dropped there.
 
 ### 1.2 A player who rebinds a two-slot row down to one control loses the second slot for good
 
@@ -74,7 +77,8 @@ them is the screen, which sizes its columns from `capacity.slots()` (`settings.r
 The fully-cleared case is right by accident: no derived row is found at all, so `current_rows` falls
 back to the declared one, capacity included.
 
-*Fix:* one line and a test — `current_rows` carries the declared capacity through `widest`.
+*Fix:* **chunk 81** — one line and a test, `current_rows` carrying the declared capacity through
+`widest`.
 
 ### 1.3 A save file with a version number this build does not know loads as if it were version 1
 
@@ -90,8 +94,8 @@ MUST is done — a file *missing* `version` fails the whole load — and the oth
 says what a loader does with a number it does not recognise. `docs/design.md` §10.3 shows
 `version = 1` in its sample without saying.
 
-*Fix:* refusing an unknown version is three lines. Deciding what a migration actually looks like is
-not, and is the part worth thinking about before the format ships.
+*Fix:* **chunk 84**. Refusing an unknown version is three lines; deciding what a migration actually
+looks like is not, and is the part worth thinking about before the format ships.
 
 ### 1.4 A dead zone at or above full deflection multiplies by sixteen million instead of zeroing
 
@@ -111,8 +115,8 @@ Reachable wherever the magnitude is not normalized to 1: a diagonal `Directional
 21.0. So it does not take `radial(1.0)` to see it — an ordinary large dead zone on mouse motion is
 enough.
 
-*Fix:* decide whether `lower` is validated at declaration (a plan-build diagnostic) or clamped at
-apply. Small either way; the choice is which one a developer would rather be told about.
+*Fix:* **chunk 85**, which needs both — `tunable_dead_zone` lets a player drive `lower` to full
+deflection from a slider, where a plan-build diagnostic cannot reach.
 
 ### 1.5 While a modal is up, every prompt on screen is redrawn every frame
 
@@ -137,9 +141,9 @@ modal closes the comparison still sees the old shadow, matches `live == false`, 
 `is_active() == true` that frame and false the next. `active_in_state` reads the same stale field
 from `StateTransition`.
 
-*Fix:* the one-line comparison is `context.active == live`. What has to go with it is a reading of
-which of `active` and `is_active` every other caller means, which is why this wants a chunk rather
-than an edit.
+*Fix:* **chunk 86**. The one-line comparison is `context.active == live`; what has to go with it is
+a reading of which of `active` and `is_active` every other caller means, which is why this wants a
+chunk rather than an edit.
 
 ### 1.6 A stick declared `mappable` produces a settings row that cannot work
 
@@ -160,7 +164,8 @@ nothing.
 `MouseMove` is the same shape one degree less visible, since replacing mouse motion with mouse
 motion is at least a no-op rather than a wrong control.
 
-*Fix:* a `DiagnosticKind` from whichever change next touches plan-build diagnostics.
+*Fix:* **chunk 87**, which absorbs this: with a whole-stick control the declaration works rather
+than needing a diagnostic. R4.8's diagnostic is still owed wherever a declaration stays unusable.
 
 ### 1.7 A southpaw preset is refused, and a preset is the only remapping a stick has
 
@@ -179,8 +184,10 @@ example of a preset, and it is the one thing presets cannot express.
 
 `docs/design.md` §10.2 says "sticks included" in as many words.
 
-*Fix:* a decision, not an edit. Either §10.2's sentence goes and R19.12's stick case becomes a
-deferred row with a gate, or `Override` grows a way to name a whole stick.
+*Fix:* **chunk 87**. The decision was taken the other way than this entry frames it: not `Override`
+learning to name a stick, but `Control` doing so — `Control::MouseMotion` is already a whole
+two-dimensional source that works, and the stick's exclusion was inherited from Bevy's event types
+rather than chosen.
 
 ### 1.8 A game that sets a gamepad button threshold is ignored, and told nothing
 
@@ -199,7 +206,8 @@ The comment's stated reason is also wrong at the pinned commit: it says `AxisSet
 one of the three with `PartialEq`, but `ButtonSettings` derives it (`gamepad.rs:821`) and only
 `ButtonAxisSettings` does not (`gamepad.rs:1413`).
 
-*Fix:* two more clauses.
+*Fix:* **chunk 88** — one clause and one field-by-field comparison, since `ButtonAxisSettings` is
+the type without `PartialEq`, plus the correction to the comment that produced the gap.
 
 ### 1.9 `why_not` blames `NoInput` when the real reason is that the device is not this player's
 
@@ -218,6 +226,9 @@ the pairing is the thing being debugged.
 The fifth cause, "condition Z at 40% progress", is missing rather than wrong, and is 3.1 below.
 `Obstacle` is `#[non_exhaustive]`, so both are additions rather than breaking changes.
 
+*Fix:* **chunk 89**, which confirms this before fixing it — it is the one entry in this tier that
+was reasoned rather than run. 3.1 keeps the fifth cause.
+
 ### 1.10 A context spawned but never declared does nothing and reports nothing
 
 `context.rs`, `inspect.rs` · **verified**
@@ -235,8 +246,8 @@ likeliest way to spend an afternoon on nothing. It also bears on R22.14's MUST �
 sufficient", including from a scene — which holds only for a type that was *also* declared
 imperatively, and no document says so.
 
-*Fix:* the cheap half is a warning from the context component's own `on_add` hook when no plan
-resource exists for its type.
+*Fix:* **chunk 90**. The cheap half is a warning from the context component's own `on_add` hook
+when no plan resource exists for its type.
 
 ### 1.11 `ActionMapPlugin` panics on its first update in the no-devices build
 
@@ -252,8 +263,8 @@ All three single-feature builds pass; it is only the zero-feature one. That conf
 `CLAUDE.md`'s own Verification list, and **`cargo check` and clippy cannot see this** — which is all
 that list runs for it.
 
-*Fix:* small. Worth pairing with a smoke test that actually calls `App::update` in that
-configuration, since the whole class is invisible to a type check.
+*Fix:* **chunk 91**, with 1.12. The smoke test that calls `App::update` in that configuration is
+the durable half, since the whole class is invisible to a type check.
 
 ### 1.12 `KeyCode` is not in the prelude, so the design's own first example does not compile
 
@@ -264,6 +275,8 @@ configuration, since the whole class is invisible to a type check.
 because that example also globs `bevy::prelude`.
 
 Low severity and high frequency: it is the first thing anyone types.
+
+*Fix:* **chunk 91**, with 1.11.
 
 ---
 

@@ -22,8 +22,8 @@ faults in someone else's design would not be worth reading.
 
 **The commitment.** `InputReader` reads `Res<ButtonInput<KeyCode>>`,
 `Res<ButtonInput<MouseButton>>`, `Res<AccumulatedMouseMotion>`, `Res<AccumulatedMouseScroll>` and
-`Query<&Gamepad>` directly, inside the evaluation system (`src/context/input_reader.rs`). Every
-condition and modifier is written against "the value of this binding, now".
+`Query<&Gamepad>` directly, inside the evaluation system (BEI's `src/context/input_reader.rs`).
+Every condition and modifier is written against "the value of this binding, now".
 
 **What it buys.** Simplicity, and universality. Anything that can write `ButtonInput` is an input
 source, with no adapter — which for an engine-level crate is a serious virtue. No queue, no
@@ -233,11 +233,11 @@ Even leaving it unused, it reserves the space.
 ### 6. Specificity is spelled through consumption, and only over modifier keys
 
 **The commitment.** Actions within a context are sorted by the maximum `ModKeys` count across their
-bindings, so `Ctrl+S` is evaluated before `S` (`src/context.rs:485`). But order alone decides only
-who goes *first*; suppressing the shorter binding requires `ActionSettings { consume_input: true }`,
-which is off by default. With defaults, pressing Ctrl+S fires both actions. General chords are a
-separate mechanism (the `Chord` condition, referencing another action) and do not participate in the
-ordering at all.
+bindings, so `Ctrl+S` is evaluated before `S` (BEI's `src/context.rs:485`). But order alone decides
+only who goes *first*; suppressing the shorter binding requires
+`ActionSettings { consume_input: true }`, which is off by default. With defaults, pressing Ctrl+S
+fires both actions. General chords are a separate mechanism (the `Chord` condition, referencing
+another action) and do not participate in the ordering at all.
 
 **What it buys.** One mechanism instead of two. Consumption already exists for the
 menu-over-gameplay case; reusing it for chord specificity means no separate arbitration pass.

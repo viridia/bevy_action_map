@@ -58,7 +58,9 @@ in `docs/decisions.md`, where each says what reversing it would cost.
 - **Writing a saved override set to a file.** The crate serializes and deserializes one; where the
   bytes go was always the app's decision.
 - **A caller for the class-binding mechanism.** Nothing in tree is a focused text field, so
-  `ControlClass::CharacterProducing` has never been bound outside its own tests.
+  `ControlClass::CharacterProducing` has never been bound outside its own tests — chunk 82.
+- **A snapshot of a context's state.** The shape is designed and written down; nothing has taken one
+  — chunk 83.
 - **A window on the input frame.** `RawEvent` carries no source window, so nothing can scope a
   binding to one — chunk 63.
 
@@ -148,6 +150,218 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 52  | What the crate has accreted                       |
 | 74  | One admissibility rule, not two                   |
 | 75  | Four names for a 2×2, twelve times over           |
+
+---
+
+## Phase VII — wrong answers from an ordinary build
+
+The live tier of [docs/plan.md](./docs/plan.md): no unusual configuration, no feature nobody has
+used, and the answer is still wrong. Six more of its entries are behind these two and not yet
+routed.
+
+### 80. Same-priority contexts, ordered
+
+Two contexts declaring the same priority land in one `EvaluateAt` set with nothing ordering them,
+and both take `ResMut<ConsumedControls>`. Which one claims a shared control is whatever the executor
+picked that run — R8.3 names this exactly, and it is the hole in R10.2's determinism claim, since
+consumption is only re-derivable if the order that produced it was. The derive's `priority` is
+optional and defaults to 0, so this is what a game gets by not saying otherwise.
+
+- **Declaration order breaks the tie**, extending the rule the priority number already states:
+  earlier is stronger. Its cost is that behaviour now depends on plugin registration order, which
+  Bevy has trained people to believe is irrelevant, so `docs/design.md` §5.1 has to say so.
+- **A nested value-typed set**, `EvaluateSeq(priority, index)`, in `EvaluateAt(priority)` and after
+  its predecessor. Folding the index into `EvaluateAt` instead would make cross-tier ordering
+  `O(contexts²)` where `order_by_priority` is `O(distinct priorities²)` today.
+- **Nothing is paid for at run time.** The two systems already conflict on two `ResMut`s and could
+  never run concurrently, so there is no parallelism to lose — the ordering only decides which
+  serialization happens.
+- **`ExclusionCeiling` is not part of the defect**, though the ambiguity report names it. `raise` is
+  a max and `shadows` is a strict `<`, so a context at `p` is never shadowed by a peer at `p` and
+  the outcome is the same either way. It is flagged for the access conflict alone, and a test says
+  so rather than leaving the next reader to re-derive it.
+- **Not doing:** a build-time warning when two same-priority contexts declare overlapping controls.
+  Dropped rather than deferred — rebinding can create an overlap the build never saw, so the check
+  is weakest in the case that motivates it.
+
+### 81. A rebound row keeps its declared capacity
+
+A mapping declared with two default controls carries `capacity: UpTo(2)`, which is what draws the
+settings screen's Primary and Secondary columns. Rebind it to hold one and `current_rows` takes the
+derived row whole, `mappings_of` re-infers capacity from the bindings that survived, and the row
+comes back `UpTo(1)`. The Secondary column disappears from that row with no way to get it back.
+`docs/design.md` §9.1 and R19.9 both say capacity is raised and never lowered.
+
+- **`current_rows` widens the derived row against the declared one**, through the `widest` that
+  `binding.rs` already has.
+- **The emptied row is right by accident** — no derived row is found, so the declared one is used
+  whole, capacity included. Both cases want a test, or the fix reads as working while the
+  interesting half is untouched.
+- **`refusal` reads the declared row already**, so the model would have accepted the secondary
+  control throughout. What was wrong is only what the screen was told: `settings.rs:942` and
+  `overlay.rs:120` size their columns from `capacity.slots()`, and `examples/capture.rs:173` asks
+  `has_room_for`.
+- **`examples/` does not change**, though those three call sites start behaving.
+
+### 84. A save file from a build that came later
+
+`resolve` binds the version field to `_version` and never reads it, so a file saying `version = 99`
+is parsed row by row as a version 1 file. Half of R17.3 is done — a file *missing* the field fails
+the whole load — and the other half is what a loader does with a number it does not recognise. The
+case is a rollback, a second machine, or a Steam beta branch: a v2 settings file reinterpreted by a
+v1 build rather than refused.
+
+- **Refusing is three lines. The chunk is the other question:** what a migration looks like, or an
+  explicit statement that there is no migration path and the format is frozen until one is
+  designed. Ground rule 5 wants a gate either way, and this is cheaper to answer before the format
+  has files in the wild than after.
+- **`docs/design.md` §10.3 shows `version = 1`** in its sample without saying what any other number
+  means.
+
+### 85. A dead zone at full deflection
+
+`dead_zone_remainder` divides by `(1.0 - lower).max(f32::EPSILON)`, which turns a divide-by-zero
+into a divide-by-epsilon: `DeadZone::radial(1.0)` applied to `(3.0, 0.0)` returns `(16777216.0,
+0.0)`. The comment directly above the guard says the case "leaves nothing to stretch", so the code
+and the comment disagree about the one case the comment exists for.
+
+- **It does not take `radial(1.0)`.** Any magnitude above 1 stretches: a diagonal
+  `DirectionalButtons` reaches 1.414, and `MouseMove` carries an unbounded pixel delta where
+  `radial(0.9)` already turns 3.0 into 21.0.
+- **Both halves are needed, which is what makes it a chunk.** A plan-build diagnostic tells an
+  author who declared `1.0`, but `tunable_dead_zone` means a *player* can drive `lower` to full
+  deflection from a slider, where no build-time check can reach. So the apply path needs a defined
+  answer as well, and the chunk says what that answer is rather than picking whichever guard was
+  nearer.
+- **Not doing:** revisiting the three dead-zone stages (`docs/design.md` §8.4). This is one
+  expression inside one of them.
+
+### 86. `active` and `is_active`, told apart
+
+`apply_active` reads `if context.is_active() == live { continue; }`, but `is_active()` folds in
+shadowing while the branches below assign `active` alone — so under an exclusive context the
+comparison is against a number the assignment cannot move.
+
+- **Every prompt in the game is recomputed every frame while a modal is up.** The `Mut` deref that
+  reaches the early return still marks the component changed, which bumps `PromptGeneration` — the
+  subscription R23.4 promises a prompt layer. What one such pass costs is
+  [docs/plan.md](./docs/plan.md) §5.1, still unrouted: this chunk takes away the *frequency* and
+  leaves the per-call cost where it is.
+- **The same line strands a context for one frame.** A context whose condition goes false *while
+  shadowed* skips its `deactivate`, because `shadowed` is written by `evaluate_context` and read a
+  system earlier by `apply_active`. On the frame the modal closes it still reads `is_active() ==
+  true`, then false the next. `active_in_state` reads the same stale field from `StateTransition`.
+- **The fix is one comparison; the chunk is the audit.** Which of `active` and `is_active` every
+  other caller means has never been read through, and the two names differing by a fold nobody
+  remembers is what produced this.
+- **Verified against a headless `App`** — 5 of 5 quiet frames without the exclusive context, 0 of
+  5 with it.
+
+### 87. A stick is a control
+
+A southpaw preset comes back `WrongShape`. A `Stick::Left` row reports `accepts: Axis2`,
+`ControlClass::of(Axis2)` is `None`, and `admissible` refuses every control against `None` — so
+the canonical example of a preset is the one thing presets cannot express, against R19.12 and a
+`docs/design.md` §10.2 that says "sticks included" in as many words.
+
+- **The mouse already works this way.** `Control::MouseMotion` is a whole two-dimensional source
+  that never decomposed, and `Delta2` maps to `AnyDelta`, so mouse motion is admissible, capturable
+  and rebindable while a stick is none of the three. The asymmetry was inherited from Bevy's event
+  types rather than chosen — `GamepadAxis::LeftStickX` exists upstream so a stick had somewhere to
+  decompose to; mouse motion arrives whole and had nowhere. This chunk makes the gamepad match.
+- **It absorbs the `mappable` stick.** `for_each_part` yields `(Whole, GamepadAxis(LeftStickX))` for
+  a stick, so `bind::<Move>(Stick::Left).mappable()` draws a row captioned "Left Stick X" that
+  `set_part` then cannot fill. With a whole-stick control the part *is* the stick and `set_part`
+  gets its arm, so what was going to be a diagnostic for an unusable declaration becomes a
+  declaration that works. R4.8's diagnostic is still owed wherever a declaration stays unusable.
+- **The rule this chunk owes: does consuming a stick consume its axes?** `ConsumedControls` is a
+  flat map keyed by `Control`, so a whole stick and `GamepadAxis(LeftStickX)` will not alias on
+  their own. `Control`'s own documentation calls itself the granularity at which one context takes
+  a control from another, and this is its first member that contains another one.
+- **The blast radius is the second job `Control` has** — `Mapping::slots`, `Override::Controls`,
+  what a capture returns, the stored names chunk 37 writes to a saved file, and R18.4's glyph key of
+  (brand, control). Every one of those wants the whole stick. Consumption is the only caller that
+  ever wanted the atoms, which is why the enum ended up shaped for it.
+- **Not doing: triggers.** A trigger is already one `GamepadAxis`, `Axis1` maps to `AnyAxis`, and a
+  preset that swaps two of them works today. Nothing about them is waiting on this.
+- **Verified by:** a southpaw preset that applies, and a settings screen that then names the stick
+  the player is actually using.
+
+### 88. The gamepad-settings warning misses the global thresholds
+
+R14.9 exists so a game that configures Bevy's `GamepadSettings` is told they reach no binding,
+rather than left wondering. `is_customized` tests four of that struct's six fields and misses
+`default_button_settings` and `default_button_axis_settings` — the two *global* ones. Setting a
+press threshold for every button at once is the ordinary way to do it and produces silence; setting
+one per button is the unusual way and is caught.
+
+- **One clause and one comparison, not two clauses.** `ButtonSettings` derives `PartialEq` so the
+  first is `!= ButtonSettings::default()`. `ButtonAxisSettings` does not, so the second compares its
+  three public `f32`s against `ButtonAxisSettings::default()`.
+- **The comment above the predicate is what produced the gap** and is false at the pinned commit: it
+  says `AxisSettings` is the only one of the three with `PartialEq`, but `ButtonSettings` derives it
+  (`gamepad.rs:821`) and `AxisSettings` does (`985`) — only `ButtonAxisSettings` does not
+  (`1413`). Correcting it is the half that stops this being re-derived.
+- **The test targets `is_customized`, not the warning.** `bevy_utils::once!` fires once per process,
+  so only the first test in a binary to trip the system would ever observe it.
+- **Not doing:** comparing map *entries* against defaults. A populated map means a game put
+  something there, which is the question being asked.
+
+### 89. `why_not` can see the pairing
+
+R22.1 names five causes an action might not fire, and `Obstacle` answers three. `why_not_id` takes
+`&ConsumedControls` and no `Paired`, so it cannot see device pairing at all. A context whose
+pairing is dropping every event the player generates answers `Obstacle::NoInput` — "nothing was
+pressed" — when something was pressed and was filtered, which is precisely the confusion R22.1
+exists to end, arriving as the answer.
+
+- **It bites where it is hardest to debug.** Pairing is used only in local multiplayer, and worst
+  during a join flow, when the pairing is the thing under suspicion.
+- **`Obstacle` is `#[non_exhaustive]`**, so the new cause is an addition rather than a break.
+- **Not doing: the fifth cause.** "Condition Z at 40% progress" needs a progress number that
+  `ActionState` does not carry — [docs/plan.md](./docs/plan.md) 3.1, which is R3.4 and R3.5, and
+  has no destination at all. This chunk fixes the answer that is *wrong*; that one adds the
+  answer that is *missing*.
+- **Reasoned from the signature, not probed** — the one finding in the live tier that was not run.
+  Confirming it is the first thing this chunk does, and it may end up smaller than it looks.
+
+### 90. A context nobody declared says so
+
+Spawn a `#[derive(InputContext)]` component for a type `add_context` was never called for and
+nothing happens: no `InputContextState` is attached, no diagnostic is logged, and `dump` cannot see
+it either, since `DeclaredContexts` is its only source. The tool built to answer "why is nothing
+happening" is blind to the likeliest cause of it.
+
+- **The mirror case is already handled**, which is what makes this an asymmetry rather than an
+  omission: `ContextDump::instances` documents "declared and nobody has it, which is usually a
+  mistake" and shows it.
+- **The cheap half is a warning from the component's own `on_add` hook** when no plan resource
+  exists for its type.
+- **It owes a sentence to `docs/design.md` §7.1.** R22.14's MUST — spawning must be sufficient,
+  including from a scene — holds only for a type that was *also* declared imperatively, and no
+  document says so today.
+
+### 91. The crate does not do what its own documents say
+
+Two one-line defects that share nothing but a cause: both are invisible to reading, and to
+`cargo check`.
+
+- **`ActionMapPlugin` panics on its first update in the no-devices build.** `InputFramePlugin` is
+  gated on `any(keyboard, mouse, gamepad)` and is the only caller of `init_resource::<InputFrame>`,
+  while `run_captures` and `evaluate_context` take `Res<InputFrame>` unconditionally. All three
+  single-feature builds pass; only the zero-feature one fails, and it is on `CLAUDE.md`'s
+  Verification list — which runs `check` and `clippy` for it, neither of which can see this.
+- **The smoke test is the durable half.** An `App::update` in that configuration, because the whole
+  class of defect is invisible to a type check and will recur otherwise.
+- **`KeyCode` is not in the prelude**, so `docs/design.md` §7.1's opening line —
+  `controls.bind::<Jump>(KeyCode::Space)` — does not compile after a glob import. `lib.rs`'s quick
+  start works only because it also globs `bevy::prelude`. It is the first thing anyone types.
+- **Re-exporting is the fix, and it is safe against a double glob**: it is the same item as
+  `bevy::prelude`'s, so both globs resolve to one thing. What the chunk decides is how far the
+  re-export goes — `KeyCode` alone, or the control vocabulary a binding names. Chunk 48 is
+  rethinking the prelude and inherits whatever this settles.
+- **Chunk 28 owns the general class** — the design's examples actually running — and this does
+  not wait for it.
 
 ---
 
@@ -286,6 +500,8 @@ beside Bevy's own.
 
 Disasteroids is one player reading one set of bindings, so everything about device pairing is
 invisible to it. Split Friction is the example that has to answer *which* device drove an action.
+Two smaller examples sit here for the same reason rather than the same subject: each is the first
+caller a shipped mechanism has ever had, and neither is Split Friction's.
 
 ### 70. Device brand and class
 
@@ -349,6 +565,46 @@ going through a catalogue. The crate's half of R19.14 is done, but the claim tha
   thing it would genuinely test is whether our key syntax collides with its identifier grammar, and
   that is a reading of the spec rather than a dependency.
 - **Review surface:** whether the key is the one an author would actually want to type.
+
+### 82. A text field beside a live context
+
+`ControlClass::CharacterProducing` and the whole class-binding path — `consume`, `ClassDispatch`,
+`class_fires` — are public, shipped, and have never been called by anything but their own tests.
+An example with a focused text field next to a live gameplay context is the caller: typing goes to
+the field, and the bindings the same keys are bound to do not fire.
+
+- **`Space` is the test that matters.** Bound to a gameplay action *and* a character a text field
+  has to receive. If consumption works, the field takes it and nothing jumps.
+- **`CharacterProducing` is decided per event, not per control** — `contains` always answers no
+  and `contains_event` reads the logical key text. That asymmetry is the thing an example either
+  makes ordinary or shows to be awkward, and it is why reading the tests was never going to settle
+  it.
+- **The field is the example's, not the crate's.** A string that accumulates characters and a
+  caret; editing and rendering are the app's business, the same line chunk 73 draws.
+- **Retires the deferred "Text input" row**, whose gate was demand. The reason to build it is that
+  the mechanism is unproven, which is a gate that would never have opened on its own terms.
+- **Verified by:** typing into the field with the game running behind it.
+
+### 83. Rewind, without the network
+
+`InputContextState`'s own comment says a rollback snapshot is the two tables plus the dirty bits,
+and `docs/design.md` §6 says the same. Nothing has ever taken one. A ring buffer of snapshots and
+the `InputFrame`s that followed each, with a key that rewinds N ticks and re-simulates forward, is
+rollback's three requirements — snapshot, restore, deterministic re-simulation — with the
+network removed, which was the expensive part.
+
+- **The recorded transition log and the re-simulated one must match**, which is the assertion doing
+  the real work. The visible rewind is what makes it a chunk rather than a test.
+- **The held-state question gets an answer either way.** The deferred row calls
+  `HashSet<MouseButton>` and `HashMap<GamepadButton, ButtonReading>` an obstacle to snapshotting. A
+  snapshot restored by value may not care about iteration order at all — only a serialized one
+  would — so this chunk either narrows that claim or fixes the containers, and says which.
+- **It owns `DirtySet::contains`' per-slot read**, `#[cfg(test)]` today because this row was the
+  only caller it was ever waiting for.
+- **What stays deferred:** injection and reconciliation — feeding a remote player's frame, and
+  disagreeing with the authority about what happened. Those want a network; rewinding does not.
+- **Split if it grows.** Making the state snapshot-able with a differential test is separable from
+  the example that rewinds, and ground rule 1 says that split happens before the code, not during.
 
 ---
 
@@ -457,10 +713,9 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Glyph ids** (R18.4) | asset-pipeline questions, though *the art is not one of them*: Kenney's input prompt set covers keyboard, mouse and three pad brands and is CC0. What stays open is the identifier scheme, and Kenney is the way to falsify it — R18.4 wants a key of (brand, control), and chunk 37's stored names are already the control half. If that does not survive contact with a real atlas's file names, R18.4 is wrong rather than merely unbuilt |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import |
-| **Netcode injection and rollback** | a testbed that actually rolls back; also wants held device state made snapshot-able, which is `BTreeSet`/`HashMap` today. This row owns `DirtySet::contains`' per-slot read, which is why that method is `#[cfg(test)]` |
+| **Netcode injection and reconciliation** | a networked target. Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers and `DirtySet::contains`' per-slot read. What is left here needs a remote player to inject a frame for and an authority to disagree with |
 | **Consumption-aware `FocusedInput` dispatch** (R8.2a) | **a game wanting `bevy_ui_widgets`' own widgets working generically, unmodified, without a context per widget kind.** A context per kind is the path to reach for first, and Disasteroids ships that way. A design for the filter was built and set aside: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline rather than a second raw-message read — keyboard only, since every keyboard-driven widget observer at the pinned commit gates on `ButtonState::Pressed` and none reacts to a release |
 | **Promoting `WidgetKind` and the per-kind context into the crate** | [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native widget-kind id. Promoting a shape this crate invented first, ahead of that conversation, risks committing to the wrong one |
-| **Text input** | nothing in tree is a focused text field, so `ControlClass::CharacterProducing` stays unexercised beyond its own tests |
 | **A context-level exclusion from the mapping list** | a second screen needing the same filter and duplicating it. `Mapping::context` already carries the data, and one call site filtering on it costs one line — at two, the crate is the one paying for the repetition |
 | **An initial delay distinct from the repeat rate** (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both. Two numbers is a small change; what is missing is a case where equal is wrong, and a two-table settings screen is not it |
 | **Free-form mutually-exclusive context sets** (R7.7 remainder) | nothing in tree needs two independently-exclusive contexts to coexist rather than one dominating the other by priority |
