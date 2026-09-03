@@ -12,11 +12,9 @@
 //! use bevy::prelude::*;
 //! use bevy_action_map::frame::{InputFrame, InputFramePlugin};
 //!
-//! fn main() {
-//!     App::new()
-//!         .add_plugins((MinimalPlugins, InputFramePlugin))
-//!         .run();
-//! }
+//! let mut app = App::new();
+//! app.add_plugins((MinimalPlugins, InputFramePlugin));
+//! app.update();
 //! ```
 
 use alloc::vec::Vec;
