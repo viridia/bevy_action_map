@@ -775,7 +775,7 @@ impl<C: InputContext> InputContextState<C> {
                     if value.to_bool() {
                         continue;
                     }
-                    require_reset[slot] = false;
+                    require_reset.set(slot, false);
                 }
 
                 // Compared rather than inferred from the phase: a held stick reports `Ongoing`

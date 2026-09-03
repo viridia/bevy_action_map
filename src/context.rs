@@ -132,8 +132,8 @@ pub struct InputContextState<C> {
     pub(crate) chord_claims: Vec<(crate::binding::Control, u8)>,
     // Parallel to `actions`: this action may not fire until it has been seen at rest once. Set when
     // a context activates, so a control the player was already holding does not read as a fresh
-    // press (R7.5).
-    pub(crate) require_reset: Vec<bool>,
+    // press.
+    pub(crate) require_reset: FixedBitSet,
     // Every phase change since the last dispatch, in order. Evaluation appends and the dispatcher
     // drains, which is what keeps observers — arbitrary code with `&mut World` — outside the
     // evaluator (R10.2).
@@ -173,7 +173,7 @@ impl<C: InputContext> InputContextState<C> {
             scratch: alloc::vec![Scratch::default(); scratch_slots],
             tunable_scratch: alloc::vec![Scratch::default(); tunable_scratch_slots],
             chord_claims: Vec::new(),
-            require_reset: alloc::vec![false; slots],
+            require_reset: FixedBitSet::with_capacity(slots),
             transitions: Vec::new(),
             class_fires: Vec::new(),
             read_through,
@@ -414,7 +414,7 @@ impl<C: InputContext> InputContextState<C> {
             return;
         }
         self.active = true;
-        self.require_reset.fill(require_reset);
+        self.require_reset.set_range(.., require_reset);
     }
 
     /// Takes a new set of compiled bindings, which is what applying an override does.
@@ -443,7 +443,7 @@ impl<C: InputContext> InputContextState<C> {
         // already live — and this one was just switched off to cancel what it held.
         if was_active {
             self.active = true;
-            self.require_reset.fill(true);
+            self.require_reset.set_range(.., true);
         }
     }
 
@@ -482,7 +482,7 @@ impl<C: InputContext> InputContextState<C> {
             return;
         }
         self.shadowed = false;
-        self.require_reset.fill(true);
+        self.require_reset.set_range(.., true);
     }
 
     /// Reports every `Fired`/`Ongoing` action as `Canceled` rather than left where it was — the one
