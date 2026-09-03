@@ -479,6 +479,7 @@ dependencies = [
  "bevy_state",
  "bevy_time",
  "bevy_utils",
+ "fixedbitset",
  "log",
  "serde",
  "smallvec",

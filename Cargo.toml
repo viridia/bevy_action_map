@@ -51,6 +51,7 @@ bevy_utils = { git = "https://github.com/bevyengine/bevy.git", default-features 
 # For `DeviceHandleSet` (§15): a handful of devices per occupant, heap-spilling rather than
 # hard-capping. Already in the graph beneath `bevy_ecs`.
 smallvec = { version = "1", default-features = false }
+fixedbitset = "0.5"
 
 [dev-dependencies]
 bevy = { git = "https://github.com/bevyengine/bevy.git", features = [

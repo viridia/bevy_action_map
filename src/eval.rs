@@ -246,7 +246,7 @@ pub(crate) fn evaluate_context<
         // players sharing a context cannot take controls from each other.
         let mut claims = Vec::new();
         instance.apply_frame(&frame, &threshold, delta, &consumed, &mut claims, pairing);
-        let moved = instance.dirty.any();
+        let moved = !instance.dirty.is_clear();
         for control in claims {
             consumed.claim::<S>(control, C::PATH);
         }
@@ -784,7 +784,7 @@ impl<C: InputContext> InputContextState<C> {
                 let before = actions[slot];
                 let phase = update_action_state(&mut actions[slot], value, best, kind);
                 if actions[slot] != before {
-                    dirty.set(slot);
+                    dirty.set(slot, true);
                 }
                 // Only the edges. `Idle` and `Ongoing` say that nothing changed, and an observer
                 // firing every tick for a held button would be noise rather than information.

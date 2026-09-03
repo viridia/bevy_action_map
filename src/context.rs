@@ -22,6 +22,7 @@
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
+use fixedbitset::FixedBitSet;
 
 use bevy_app::{App, FixedPreUpdate, PreUpdate};
 use bevy_ecs::component::Component;
@@ -95,52 +96,6 @@ pub(crate) struct ButtonReading {
     pub(crate) pressed: bool,
 }
 
-/// The live state for one declared context.
-///
-/// This holds the current state of every action in a context. It is a component, so an entity
-/// carrying a context type gets one automatically — a player entity, one per local player, or a
-/// bare entity for a context that is not tied to anything in particular.
-///
-/// One bit per action slot, for the ticks on which that action's state moved.
-///
-/// A bitset rather than a `Vec<bool>` so that "did anything move" is one word test for the context
-/// sizes that occur — a plan with 64 actions or fewer is a single word — and so that a snapshot
-/// carries it for the cost of rounding up.
-#[derive(Clone, Default)]
-pub(crate) struct DirtySet {
-    words: Vec<u64>,
-}
-
-impl DirtySet {
-    fn with_capacity(slots: usize) -> Self {
-        Self {
-            words: alloc::vec![0; slots.div_ceil(u64::BITS as usize)],
-        }
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.words.fill(0);
-    }
-
-    pub(crate) fn set(&mut self, slot: usize) {
-        self.words[slot / u64::BITS as usize] |= 1 << (slot % u64::BITS as usize);
-    }
-
-    // The per-slot read has no caller outside the tests yet: what reads these bits one at a time
-    // is a rollback snapshot, and that is still on the deferred table. `any` below is what the
-    // change tick needs, and it is the whole of today's use.
-    #[cfg(test)]
-    pub(crate) fn contains(&self, slot: usize) -> bool {
-        self.words
-            .get(slot / u64::BITS as usize)
-            .is_some_and(|word| word & (1 << (slot % u64::BITS as usize)) != 0)
-    }
-
-    pub(crate) fn any(&self) -> bool {
-        self.words.iter().any(|&word| word != 0)
-    }
-}
-
 /// The struct holds no references into the ECS, so tests and replays can drive one directly
 /// without a `World`.
 ///
@@ -155,11 +110,11 @@ impl DirtySet {
 pub struct InputContextState<C> {
     pub(crate) plan: Arc<Plan<C>>,
     pub(crate) actions: Vec<ActionState>,
-    // Parallel to `actions`: which of them moved since evaluation last cleared this. Per action
-    // rather than per context because the component's own change tick cannot distinguish them
-    // (R23.4), and because a rollback snapshot is the two tables plus these bits
+    // Parallel to `actions`: which ones changed state since evaluation last cleared this. Per
+    // action rather than per context because the component's own change tick cannot distinguish
+    // them (R23.4), and because a rollback snapshot is the two tables plus these bits
     // (docs/design.md §6).
-    pub(crate) dirty: DirtySet,
+    pub(crate) dirty: FixedBitSet,
     pub(crate) active: bool,
     // Set and cleared only by `shadow`/`unshadow` (R7.8), never by `activate`/`deactivate`: `active`
     // is what this context's own condition or lifecycle wants, `shadowed` is what a higher-priority
@@ -212,7 +167,7 @@ impl<C: InputContext> InputContextState<C> {
         Self {
             plan,
             actions,
-            dirty: DirtySet::with_capacity(slots),
+            dirty: FixedBitSet::with_capacity(slots),
             active: true,
             shadowed: false,
             scratch: alloc::vec![Scratch::default(); scratch_slots],
@@ -539,7 +494,7 @@ impl<C: InputContext> InputContextState<C> {
             }
             state.phase = Phase::Canceled;
             state.value = rest_like(state.value);
-            self.dirty.set(slot);
+            self.dirty.set(slot, true);
             self.transitions.push(Transition {
                 slot,
                 phase: Phase::Canceled,
@@ -4295,7 +4250,7 @@ mod tests {
         let bytes = size_of_val(&*state.actions)
             + size_of_val(&*state.scratch)
             + size_of_val(&*state.tunable_scratch)
-            + size_of_val(&*state.dirty.words);
+            + size_of_val(state.dirty.as_slice());
 
         // Three actions and seven bindings' worth of working memory. The bound is generous, and
         // the point of it is the order of magnitude: a rollback window of sixty ticks over four
