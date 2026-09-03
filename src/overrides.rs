@@ -1093,9 +1093,12 @@ fn clone_onto(binding: &BindingSpec, part: crate::binding::Part, control: Contro
 /// The presentation rows for a variant, keyed to the declared ones.
 ///
 /// Derived from the rewritten bindings rather than patched, so the rows and the plan cannot disagree
-/// about what is bound — with one exception the derivation cannot express on its own: a row the
-/// player emptied has no bindings left and so derives nothing at all. It has to stay on the screen,
-/// holding nothing, or there is nowhere to bind it back.
+/// about what is bound — with two exceptions the derivation cannot express on its own. A row the
+/// player emptied has no bindings left and so derives nothing at all; it has to stay on the screen,
+/// holding nothing, or there is nowhere to bind it back. And capacity is raised, never lowered
+/// (R19.9): a row rebound down to one control still derives from one binding, so its capacity is
+/// widened back against what was declared rather than taken from the derived row as-is, or the
+/// second slot a rebind just vacated could never be filled again.
 fn current_rows(
     variant: &[BindingSpec],
     declared: &[Mapping],
@@ -1112,7 +1115,10 @@ fn current_rows(
                         && current.scheme == row.scheme
                         && current.action == row.action
                 })
-                .cloned()
+                .map(|current| Mapping {
+                    capacity: crate::binding::widest(current.capacity, row.capacity),
+                    ..current.clone()
+                })
                 .unwrap_or_else(|| Mapping {
                     slots: Vec::new(),
                     followers: row.followers.clone(),
@@ -1781,6 +1787,70 @@ mod tests {
             ],
             "and the other rows kept both of theirs"
         );
+    }
+
+    /// Capacity is raised by the author and never lowered by a player (R19.9): two `mappable()`
+    /// bindings of one action merge into a two-slot row, and rebinding it down to one control must
+    /// not narrow that back to one — `current_rows` used to take the derived row's capacity as-is,
+    /// and the derived row only sees the one binding that survived the rebind.
+    #[test]
+    fn rebinding_a_row_down_does_not_shrink_its_capacity() {
+        #[derive(InputContext)]
+        #[context(path = "override_tests.two_slots", tick = Render)]
+        struct TwoSlots;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<TwoSlots>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.bind::<Jump>(KeyCode::KeyJ).mappable();
+        });
+
+        let jump = row(&app, "override_tests.jump");
+        assert_eq!(
+            jump.capacity,
+            Capacity::UpTo(2),
+            "two mappable bindings merge into one two-slot row"
+        );
+
+        let overrides = bind(&app, "override_tests.jump", &[Control::Key(KeyCode::Space)]);
+        let problems = apply_overrides(app.world_mut(), &overrides);
+        assert!(problems.is_empty(), "{problems:?}");
+
+        let jump = row(&app, "override_tests.jump");
+        assert_eq!(jump.slots, [Control::Key(KeyCode::Space)]);
+        assert_eq!(
+            jump.capacity,
+            Capacity::UpTo(2),
+            "the vacated secondary must stay fillable"
+        );
+    }
+
+    /// The other shape of the same rule, already right by accident: a row cleared to nothing finds
+    /// no derived row to widen against and falls back to the declared one whole, capacity included.
+    /// A test of its own so the accident does not become a regression once the case above is fixed.
+    #[test]
+    fn clearing_a_row_does_not_shrink_its_capacity() {
+        #[derive(InputContext)]
+        #[context(path = "override_tests.cleared_slots", tick = Render)]
+        struct ClearedSlots;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<ClearedSlots>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.bind::<Jump>(KeyCode::KeyJ).mappable();
+        });
+
+        let jump = row(&app, "override_tests.jump");
+        let mut overrides = Overrides::new();
+        overrides.set(jump.scheme, jump.key, Override::Cleared);
+        let problems = apply_overrides(app.world_mut(), &overrides);
+        assert!(problems.is_empty(), "{problems:?}");
+
+        let jump = row(&app, "override_tests.jump");
+        assert!(jump.slots.is_empty());
+        assert_eq!(jump.capacity, Capacity::UpTo(2));
     }
 
     /// A key match alone must not move an override across schemes: `hold_or_toggle` reaching both

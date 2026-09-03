@@ -247,7 +247,7 @@ pub(crate) struct ClassBindingSpec {
 /// Several bindings can feed one mapping, and each carries whatever its own combinator asked for.
 /// The mapping takes the widest: a narrower declaration on one binding says nothing about the
 /// mapping itself, only about a binding that happens to share the row.
-const fn widest(
+pub(crate) const fn widest(
     a: crate::mapping::Capacity,
     b: crate::mapping::Capacity,
 ) -> crate::mapping::Capacity {

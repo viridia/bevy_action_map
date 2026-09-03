@@ -151,6 +151,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 74  | One admissibility rule, not two                   |
 | 75  | Four names for a 2×2, twelve times over           |
 | 80  | Same-priority contexts, ordered                   |
+| 81  | A rebound row keeps its declared capacity         |
 
 ---
 
@@ -159,25 +160,6 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 The live tier of [docs/issues.md](./docs/issues.md): no unusual configuration, no feature nobody has
 used, and the answer is still wrong. Six more of its entries are behind this one and not yet
 routed.
-
-### 81. A rebound row keeps its declared capacity
-
-A mapping declared with two default controls carries `capacity: UpTo(2)`, which is what draws the
-settings screen's Primary and Secondary columns. Rebind it to hold one and `current_rows` takes the
-derived row whole, `mappings_of` re-infers capacity from the bindings that survived, and the row
-comes back `UpTo(1)`. The Secondary column disappears from that row with no way to get it back.
-`docs/design.md` §9.1 and R19.9 both say capacity is raised and never lowered.
-
-- **`current_rows` widens the derived row against the declared one**, through the `widest` that
-  `binding.rs` already has.
-- **The emptied row is right by accident** — no derived row is found, so the declared one is used
-  whole, capacity included. Both cases want a test, or the fix reads as working while the
-  interesting half is untouched.
-- **`refusal` reads the declared row already**, so the model would have accepted the secondary
-  control throughout. What was wrong is only what the screen was told: `settings.rs:942` and
-  `overlay.rs:120` size their columns from `capacity.slots()`, and `examples/capture.rs:173` asks
-  `has_room_for`.
-- **`examples/` does not change**, though those three call sites start behaving.
 
 ### 84. A save file from a build that came later
 
