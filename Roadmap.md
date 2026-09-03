@@ -155,7 +155,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 
 ## Phase VII — wrong answers from an ordinary build
 
-The live tier of [docs/plan.md](./docs/plan.md): no unusual configuration, no feature nobody has
+The live tier of [docs/issues.md](./docs/issues.md): no unusual configuration, no feature nobody has
 used, and the answer is still wrong. Six more of its entries are behind these two and not yet
 routed.
 
@@ -245,8 +245,8 @@ comparison is against a number the assignment cannot move.
 - **Every prompt in the game is recomputed every frame while a modal is up.** The `Mut` deref that
   reaches the early return still marks the component changed, which bumps `PromptGeneration` — the
   subscription R23.4 promises a prompt layer. What one such pass costs is
-  [docs/plan.md](./docs/plan.md) §5.1, still unrouted: this chunk takes away the *frequency* and
-  leaves the per-call cost where it is.
+  [docs/issues.md](./docs/issues.md) §5.1, still unrouted: this chunk takes away the *frequency*
+  and leaves the per-call cost where it is.
 - **The same line strands a context for one frame.** A context whose condition goes false *while
   shadowed* skips its `deactivate`, because `shadowed` is written by `evaluate_context` and read a
   system earlier by `apply_active`. On the frame the modal closes it still reads `is_active() ==
@@ -319,8 +319,8 @@ exists to end, arriving as the answer.
   during a join flow, when the pairing is the thing under suspicion.
 - **`Obstacle` is `#[non_exhaustive]`**, so the new cause is an addition rather than a break.
 - **Not doing: the fifth cause.** "Condition Z at 40% progress" needs a progress number that
-  `ActionState` does not carry — [docs/plan.md](./docs/plan.md) 3.1, which is R3.4 and R3.5, and
-  has no destination at all. This chunk fixes the answer that is *wrong*; that one adds the
+  `ActionState` does not carry — [docs/issues.md](./docs/issues.md) 3.1, which is R3.4 and R3.5,
+  and has no destination at all. This chunk fixes the answer that is *wrong*; that one adds the
   answer that is *missing*.
 - **Reasoned from the signature, not probed** — the one finding in the live tier that was not run.
   Confirming it is the first thing this chunk does, and it may end up smaller than it looks.
@@ -403,17 +403,15 @@ Nothing here changes what the crate can do.
 `Requirements.md` accreted argument because the house style used to point it there. This is the pass
 that clears what accumulated under the old rule.
 
-- **The target is 23 italic `_(...)_` asides**, not the long requirements. Measurement first,
+- **The target is 20 italic `_(...)_` asides**, not the long requirements. Measurement first,
   because the instinct is wrong: 220 requirements, 962 lines of body, median 3 lines, only 14 over
   twelve — and most of those are long because they carry a table of cases or an enumerated set of
   states, which *is* the requirement. Trimming by length would remove constitutional content.
 - **The test, per requirement:** does this sentence say what must be true, or defend it? Defence
   moves to `docs/decisions.md`. It is moved rather than deleted.
 - **Withdrawn requirements are exempt.**
-- **Why it is a chunk rather than an afternoon.** Twenty-three judgement calls in the document every
+- **Why it is a chunk rather than an afternoon.** Twenty judgement calls in the document every
   other document defers to, where dropping a load-bearing clause is invisible in a diff.
-- **Overlaps phase 5 of [docs/plan.md](./docs/plan.md)**, which is the same job reached from the
-  other direction. Whichever runs first discharges the other.
 - **Review surface:** whether anything moved landed somewhere a reader would find it. Text moved out
   of the constitution and into a section nobody opens has been deleted with extra steps.
 
@@ -588,7 +586,7 @@ the field, and the bindings the same keys are bound to do not fire.
   in the same pass: without that variant it is one line over `contains`.
 - **Shaping the declaration here is the point**, not a detour. It has never had a caller, so this is
   the first and only chance to test the spelling against a real use rather than guess at it.
-  [docs/plan.md](./docs/plan.md) 2.3 is the finding.
+  [docs/issues.md](./docs/issues.md) 2.3 is the finding.
 - **The field is the example's, not the crate's.** A string that accumulates characters and a
   caret; editing and rendering are the app's business, the same line chunk 73 draws.
 - **Retires the deferred "Text input" row**, whose gate was demand. The reason to build it is that
@@ -696,22 +694,14 @@ second implementer and the real one cannot live here.
   cite an `R`-number, a `§`, an `OQ` or a decision, concentrated in `capture.rs` (18) and
   `context.rs` (10). Module-level `//!` blocks first; they are the landing pages and the worst of
   it. The reasoning usually survives the edit — dropping the parenthesis loses nothing — and what
-  must not happen is deleting the sentence along with the citation. **This is phase 7 of
-  [docs/plan.md](./docs/plan.md)**, and whichever runs first discharges the other.
+  must not happen is deleting the sentence along with the citation. This is the comment scan the
+  implementation scan never ran.
 - **The README rewrite** — a user-facing introduction, feature list and quickstart, with examples
   lifted from a real game rather than invented.
 - **Comparison upkeep.** [docs/comparison.md](./docs/comparison.md) is read against BEI 0.26.0 and
   LWIM 0.21.0, which is a claim with a date on it. Both crates move.
 - **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
   look at the module pages the way a stranger would.
-
-### 46. Documents an outsider will read
-
-**Superseded by [docs/plan.md](./docs/plan.md)**, which answered the two questions this chunk was
-written to ask. An outsider reads a third document rather than the specification or the
-architecture; and the problem was structural duplication rather than length. `docs/design.md`,
-`docs/decisions.md`, `docs/comparison.md` and `docs/one-way-doors.md` are the result. What remains
-of this chunk is phases 3 to 5 of that plan, and the doc-comment half is chunk 28's.
 
 ---
 

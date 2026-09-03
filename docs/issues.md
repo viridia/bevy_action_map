@@ -796,13 +796,8 @@ binding live rather than silencing it, which is R0.6 and chunk 42's review surfa
 documents do not exist, so the rule is that none may cite an `R`-number, a `§`, an `OQ` or a chunk.
 Around forty do, concentrated in `capture.rs` (18) and `context.rs` (10). Internal comments keep
 their references and are checked for being *true* — §4.3 above is what that pass would produce more
-of. `Roadmap.md`'s chunk 28 owns the same job from the other side, and whichever runs first
-discharges the other.
+of. `Roadmap.md`'s chunk 28 owns it.
 
 **One thing the Verification section does not run.** `cargo doc --no-deps --all-features` warns —
 `device.rs:8`, a redundant explicit link target. That command is the only one that reads doc
 comments, so it belongs in `CLAUDE.md`'s list.
-
-**A note on this file.** It is no longer a plan, and `CLAUDE.md`'s document table still describes it
-as "the document refactor, phase by phase". Either that row changes or this moves to a name that
-says what it is.

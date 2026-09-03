@@ -26,7 +26,7 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 | `Requirements.md` | 221 numbered requirements, `R<section>.<n>` | you need to know what must be true, or a chunk cites an R-number |
 | `docs/comparison.md` | how this crate differs from BEI and LWIM | someone asks why this exists |
 | `docs/one-way-doors.md` | what stops being revisable if an input crate goes upstream | upstreaming comes up |
-| `docs/plan.md` | the document refactor, phase by phase | you are working on the documents themselves |
+| `docs/issues.md` | the implementation scan's findings, `1.1`–`6`, by severity | a finding needs routing, or you are about to re-find one |
 
 `archive/` holds the retired `Design.md`, `Log.md` and `Log-archive.md`. **Nothing in flight reasons
 from them** — they describe the crate as it was, two of them are longer than anything in `docs/`,
