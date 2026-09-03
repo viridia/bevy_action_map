@@ -34,30 +34,6 @@ unrouted can be read off the entries that stay silent.
 
 ## 1. Live — an ordinary build gets a wrong answer
 
-### 1.1 Two contexts with the same priority evaluate in whatever order the executor picks
-
-`context.rs:1091` · **verified** by Bevy's own `ambiguity_detection: LogLevel::Error` on `PreUpdate`
-
-Contexts are ordered by putting each into an `EvaluateAt(priority)` set and ordering the sets. Two
-contexts declaring the *same* priority land in one set with nothing ordering them, and both take
-`ResMut<ConsumedControls>` and `ResMut<ExclusionCeiling>`. Bevy's detector reports the pair as
-having indeterminate execution order, conflicting on both.
-
-The derive's `priority` is optional and defaults to 0. **Two contexts colliding is what a game gets
-by not saying otherwise** — it is not an edge case a developer has to reach for.
-
-What it costs: which of the two claims a shared control first is whatever the executor picked that
-run, so on a multi-core machine the same inputs can produce different action state on different
-runs. That is R8.3, a MUST that names this exactly ("no ordering ambiguity between systems"), and it
-is also the one hole in R10.2's determinism claim — consumption is only re-derivable if the order
-that produced it was.
-
-Nothing in `docs/design.md` §5.1, `docs/decisions.md` or `Roadmap.md` says what equal priorities do.
-
-*Fix:* **chunk 80**, which orders same-priority contexts by declaration order. Refusing the second
-one at `add_context` was the alternative, and a warning where their controls overlap was the
-half-measure between them; both were dropped there.
-
 ### 1.2 A player who rebinds a two-slot row down to one control loses the second slot for good
 
 `overrides.rs`, `current_rows` and `mappings_of` · **verified** against a headless `App`

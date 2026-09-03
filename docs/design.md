@@ -229,6 +229,13 @@ priority gets its own `EvaluateAt(i32)` system set, ordered against every other 
 declared in that schedule. Higher priorities run first and claim controls before anyone else reads
 them. Nothing is decided per frame.
 
+Two contexts declared at the same priority — the default, if neither says otherwise — still need
+an answer for who claims a control they both bind. Each gets its own set nested inside their
+shared `EvaluateAt`, ordered after the one declared before it, so `add_context` call order is the
+tiebreak. Registration order becoming meaningful this way is easy to miss, since Bevy plugins are
+usually independent of each other's ordering: two contexts at the same priority are the one place
+here that they are not.
+
 **Chord length is a pre-pass inside one evaluation.** Whether a chord is satisfied is a pure
 function of what is held, so before any binding is read the longest satisfied chord on each control
 is found. A binding shorter than the winner on any of its controls reads as at rest. `Ctrl+S` beats

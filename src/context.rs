@@ -998,25 +998,37 @@ impl ActionMapAppExt for App {
 #[derive(bevy_ecs::schedule::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct EvaluateAt(i32);
 
-/// Which priorities have been seen, so a new one can be ordered against them.
+/// Where the *n*th context declared at a priority evaluates, relative to its same-priority
+/// siblings. Nested inside that priority's `EvaluateAt`, so ordering it against another priority
+/// stays `EvaluateAt`'s job alone.
+///
+/// `PRIORITY` defaults to 0, so two contexts declaring nothing in particular still need a
+/// tiebreak — declaration order is the only one `add_context`'s caller controls (R8.3).
+#[derive(bevy_ecs::schedule::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct EvaluateSeq(i32, u32);
+
+/// How many contexts have been declared at each priority, so the next one can be numbered and
+/// ordered after the last.
 #[derive(Resource, Default)]
 struct DeclaredPriorities {
-    render: alloc::collections::BTreeSet<i32>,
-    fixed: alloc::collections::BTreeSet<i32>,
+    render: alloc::collections::BTreeMap<i32, u32>,
+    fixed: alloc::collections::BTreeMap<i32, u32>,
 }
 
-/// Orders a newly seen priority against every other in its schedule.
+/// Numbers a context within its priority and orders its `EvaluateSeq` against its predecessor and,
+/// the first time this priority is seen in this schedule, against every other priority already
+/// declared. Returns the index to evaluate this context at.
 ///
-/// Done once per distinct priority at app build rather than per frame, keeping the single
-/// deterministic evaluation pass free of any run-time ordering decision. The number of distinct
-/// priorities is small — a handful of layers, not a handful per context.
+/// Done once per context at app build rather than per frame, keeping the single deterministic
+/// evaluation pass free of any run-time ordering decision. The number of distinct priorities is
+/// small — a handful of layers, not a handful per context.
 fn order_by_priority(
     app: &mut App,
     schedule: impl bevy_ecs::schedule::ScheduleLabel + Clone,
     domain: TickDomain,
     priority: i32,
-) {
-    let others: alloc::vec::Vec<i32> = {
+) -> u32 {
+    let (index, others) = {
         let mut declared = app
             .world_mut()
             .get_resource_or_insert_with(DeclaredPriorities::default);
@@ -1024,11 +1036,27 @@ fn order_by_priority(
             TickDomain::Render => &mut declared.render,
             TickDomain::Fixed => &mut declared.fixed,
         };
-        if !seen.insert(priority) {
-            return;
-        }
-        seen.iter().copied().filter(|&p| p != priority).collect()
+        let index = seen.entry(priority).or_insert(0);
+        let this = *index;
+        *index += 1;
+        let others = if this == 0 {
+            declared_others(&declared, domain, priority)
+        } else {
+            alloc::vec::Vec::new()
+        };
+        (this, others)
     };
+
+    if index > 0 {
+        app.configure_sets(
+            schedule.clone(),
+            EvaluateSeq(priority, index).after(EvaluateSeq(priority, index - 1)),
+        );
+    }
+    app.configure_sets(
+        schedule.clone(),
+        EvaluateSeq(priority, index).in_set(EvaluateAt(priority)),
+    );
 
     for other in others {
         if priority > other {
@@ -1043,10 +1071,28 @@ fn order_by_priority(
             );
         }
     }
-    app.configure_sets(
-        schedule,
-        EvaluateAt(priority).in_set(ActionMapSystems::Evaluate),
-    );
+    if index == 0 {
+        app.configure_sets(
+            schedule,
+            EvaluateAt(priority).in_set(ActionMapSystems::Evaluate),
+        );
+    }
+
+    index
+}
+
+/// Every other priority already declared in this schedule's domain, for ordering a newly seen one
+/// against them.
+fn declared_others(
+    declared: &DeclaredPriorities,
+    domain: TickDomain,
+    priority: i32,
+) -> alloc::vec::Vec<i32> {
+    let seen = match domain {
+        TickDomain::Render => &declared.render,
+        TickDomain::Fixed => &declared.fixed,
+    };
+    seen.keys().copied().filter(|&p| p != priority).collect()
 }
 
 /// Reads the mappings of one context back out once its type is no longer known.
@@ -1468,29 +1514,28 @@ fn declare_context<C: InputContext + Component>(
 
     let dispatch = dispatch_transitions::<C>.in_set(ActionMapSystems::Dispatch);
     let dispatch_classes = dispatch_class_fires::<C>.in_set(ActionMapSystems::Dispatch);
-    let order = EvaluateAt(C::PRIORITY);
     match C::TICK {
         TickDomain::Render => {
+            let index = order_by_priority(app, PreUpdate, TickDomain::Render, C::PRIORITY);
             app.add_systems(
                 PreUpdate,
                 (
-                    evaluate_context::<C, PreUpdate>.in_set(order),
+                    evaluate_context::<C, PreUpdate>.in_set(EvaluateSeq(C::PRIORITY, index)),
                     dispatch,
                     dispatch_classes,
                 ),
             );
-            order_by_priority(app, PreUpdate, TickDomain::Render, C::PRIORITY);
         }
         TickDomain::Fixed => {
+            let index = order_by_priority(app, FixedPreUpdate, TickDomain::Fixed, C::PRIORITY);
             app.add_systems(
                 FixedPreUpdate,
                 (
-                    evaluate_context::<C, FixedPreUpdate>.in_set(order),
+                    evaluate_context::<C, FixedPreUpdate>.in_set(EvaluateSeq(C::PRIORITY, index)),
                     dispatch,
                     dispatch_classes,
                 ),
             );
-            order_by_priority(app, FixedPreUpdate, TickDomain::Fixed, C::PRIORITY);
         }
     }
 
@@ -2597,6 +2642,67 @@ mod tests {
             seen.screenshot,
             "but f12 was never claimed, so it still works"
         );
+    }
+
+    /// Two contexts at the same priority — both left at the default — still need a winner when
+    /// they consume the same control (R8.3). `First` is declared before `Second`, so it claims
+    /// `Escape`.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn same_priority_contexts_break_the_tie_by_declaration_order() {
+        #[derive(InputAction)]
+        #[action(path = "tests.first_dismiss", output = bool, intent = Button)]
+        struct FirstDismiss;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.second_dismiss", output = bool, intent = Button)]
+        struct SecondDismiss;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.first", tick = Render)]
+        struct First;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.second", tick = Render)]
+        struct Second;
+
+        #[derive(Resource, Default)]
+        struct Seen {
+            first: bool,
+            second: bool,
+        }
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<First>(|context| {
+            context.bind::<FirstDismiss>(KeyCode::Escape).consume();
+        });
+        app.add_context::<Second>(|context| {
+            context.bind::<SecondDismiss>(KeyCode::Escape).consume();
+        });
+        app.world_mut().spawn(First);
+        app.world_mut().spawn(Second);
+        app.init_resource::<Seen>();
+        app.add_systems(
+            Update,
+            |first: Actions<First>,
+             second: Actions<Second>,
+             mut seen: bevy_ecs::system::ResMut<'_, Seen>| {
+                seen.first = first.value::<FirstDismiss>();
+                seen.second = second.value::<SecondDismiss>();
+            },
+        );
+
+        app.world_mut()
+            .write_message(press(KeyCode::Escape, Key::Escape, ButtonState::Pressed));
+        app.update();
+
+        let seen = app.world().resource::<Seen>();
+        assert!(
+            seen.first,
+            "First was declared before Second at the same priority"
+        );
+        assert!(!seen.second, "so Second never sees the control it lost");
     }
 
     /// An exclusive context shadows every lower-priority one exactly as `deactivate` would —

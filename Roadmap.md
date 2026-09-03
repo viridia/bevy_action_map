@@ -150,39 +150,15 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 52  | What the crate has accreted                       |
 | 74  | One admissibility rule, not two                   |
 | 75  | Four names for a 2×2, twelve times over           |
+| 80  | Same-priority contexts, ordered                   |
 
 ---
 
 ## Phase VII — wrong answers from an ordinary build
 
 The live tier of [docs/issues.md](./docs/issues.md): no unusual configuration, no feature nobody has
-used, and the answer is still wrong. Six more of its entries are behind these two and not yet
+used, and the answer is still wrong. Six more of its entries are behind this one and not yet
 routed.
-
-### 80. Same-priority contexts, ordered
-
-Two contexts declaring the same priority land in one `EvaluateAt` set with nothing ordering them,
-and both take `ResMut<ConsumedControls>`. Which one claims a shared control is whatever the executor
-picked that run — R8.3 names this exactly, and it is the hole in R10.2's determinism claim, since
-consumption is only re-derivable if the order that produced it was. The derive's `priority` is
-optional and defaults to 0, so this is what a game gets by not saying otherwise.
-
-- **Declaration order breaks the tie**, extending the rule the priority number already states:
-  earlier is stronger. Its cost is that behaviour now depends on plugin registration order, which
-  Bevy has trained people to believe is irrelevant, so `docs/design.md` §5.1 has to say so.
-- **A nested value-typed set**, `EvaluateSeq(priority, index)`, in `EvaluateAt(priority)` and after
-  its predecessor. Folding the index into `EvaluateAt` instead would make cross-tier ordering
-  `O(contexts²)` where `order_by_priority` is `O(distinct priorities²)` today.
-- **Nothing is paid for at run time.** The two systems already conflict on two `ResMut`s and could
-  never run concurrently, so there is no parallelism to lose — the ordering only decides which
-  serialization happens.
-- **`ExclusionCeiling` is not part of the defect**, though the ambiguity report names it. `raise` is
-  a max and `shadows` is a strict `<`, so a context at `p` is never shadowed by a peer at `p` and
-  the outcome is the same either way. It is flagged for the access conflict alone, and a test says
-  so rather than leaving the next reader to re-derive it.
-- **Not doing:** a build-time warning when two same-priority contexts declare overlapping controls.
-  Dropped rather than deferred — rebinding can create an overlap the build never saw, so the check
-  is weakest in the case that motivates it.
 
 ### 81. A rebound row keeps its declared capacity
 

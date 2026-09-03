@@ -258,9 +258,12 @@ this was judged acceptable rather than free.
 
 **Decided.** The obvious shape — one list of every binding touching a control, sorted by context
 priority and chord length — is not built. Priority becomes system ordering, fixed at app build:
-each distinct priority gets its own system set, ordered against the others in its schedule. Chord
-length is resolved by a pre-pass within one evaluation, finding the longest satisfied chord on each
-control before any binding is read.
+each distinct priority gets its own system set, ordered against the others in its schedule. Two
+contexts declared at the same priority get their own nested set in turn, ordered after the one
+before it — declaration order breaks the tie a priority number left open, the same way it already
+does everywhere else two things read together (D15's fold, D36's prompt scan). Chord length is
+resolved by a pre-pass within one evaluation, finding the longest satisfied chord on each control
+before any binding is read.
 
 **Rules out.** The single sorted list. It cannot be built: a plan belongs to one context and cannot
 see another's bindings, and one list cannot span two schedules.
