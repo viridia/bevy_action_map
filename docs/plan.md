@@ -335,10 +335,9 @@ of a movement composite means.
 `prompts(Jump, ANY.of(CharacterProducing))` returns 0 where `ANY.of(AnyButton)` returns 1 — so
 narrowing a prompt scope to that class silently empties it.
 
-**The overlap to decide rather than assume:** `Roadmap.md`'s deferred "Text input" row gates the
-class staying *unexercised*. It does not say that the two entry points which accept it as an
-argument answer wrongly when it is passed. Whether that makes this a finding or a restatement of the
-row is your call.
+*Fix:* **chunk 82**, which takes `CharacterProducing` out of `ControlClass` — text input is its
+only use case, so the class-binding builder gets its own door for it and both entry points here
+become total. A second door rather than a second type: one variant gone, one method added.
 
 ### 2.4 A binding whose only conditions are blocking fires every tick at rest
 

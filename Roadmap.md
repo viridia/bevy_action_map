@@ -575,10 +575,20 @@ the field, and the bindings the same keys are bound to do not fire.
 
 - **`Space` is the test that matters.** Bound to a gameplay action *and* a character a text field
   has to receive. If consumption works, the field takes it and nothing jumps.
-- **`CharacterProducing` is decided per event, not per control** — `contains` always answers no
-  and `contains_event` reads the logical key text. That asymmetry is the thing an example either
-  makes ordinary or shows to be awkward, and it is why reading the tests was never going to settle
-  it.
+- **`CharacterProducing` leaves `ControlClass`**, which is one type doing two jobs. The three shape
+  classes are properties of a control's identity and are what capture and prompt filtering want;
+  this one is a property of an *event*, and text input is its only use. Today
+  `CaptureSession::accepting` and `PromptScope::of` accept it and cannot honour it — a session
+  refuses every key and never ends, a prompt scope silently empties.
+- **A second door, not a second type.** `bind_class` keeps the three shape classes for the
+  `FocusedInput` row that plans to use `AnyButton`; the character case becomes
+  `bind_characters::<A>()`, and `ClassBindingSpec::class` becomes a private two-case filter. Net
+  public surface is one variant gone and one method added, with no new type — and `contains` stops
+  having a variant it can never say yes to. Consider dropping `contains_event` from the public API
+  in the same pass: without that variant it is one line over `contains`.
+- **Shaping the declaration here is the point**, not a detour. It has never had a caller, so this is
+  the first and only chance to test the spelling against a real use rather than guess at it.
+  [docs/plan.md](./docs/plan.md) 2.3 is the finding.
 - **The field is the example's, not the crate's.** A string that accumulates characters and a
   caret; editing and rendering are the app's business, the same line chunk 73 draws.
 - **Retires the deferred "Text input" row**, whose gate was demand. The reason to build it is that
@@ -595,10 +605,13 @@ network removed, which was the expensive part.
 
 - **The recorded transition log and the re-simulated one must match**, which is the assertion doing
   the real work. The visible rewind is what makes it a chunk rather than a test.
-- **The held-state question gets an answer either way.** The deferred row calls
-  `HashSet<MouseButton>` and `HashMap<GamepadButton, ButtonReading>` an obstacle to snapshotting. A
-  snapshot restored by value may not care about iteration order at all — only a serialized one
-  would — so this chunk either narrows that claim or fixes the containers, and says which.
+- **The held-state question is narrower than the deferred row made it sound.**
+  `HashSet<MouseButton>` and `HashMap<GamepadButton, ButtonReading>` were called an obstacle to
+  snapshotting, but `bevy_platform`'s maps default to `FixedHasher`, so iteration order is
+  deterministic across runs and processes rather than randomly seeded. What is left is that order
+  depends on insertion history, which bites only a snapshot serialized by iterating — and not one
+  restored by value. This chunk says which kind it needs, and `indexmap` is the tool if the answer
+  is the former.
 - **It owns `DirtySet::contains`' per-slot read**, `#[cfg(test)]` today because this row was the
   only caller it was ever waiting for.
 - **What stays deferred:** injection and reconciliation — feeding a remote player's frame, and
