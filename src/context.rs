@@ -640,7 +640,7 @@ pub enum Obstacle {
 
 /// System parameter for polling the actions of a context with exactly one instance.
 ///
-/// Most games have one of a given context — one on-foot context, one menu context — and this reads
+/// Most games have one of a given context (one on-foot context, one menu context), and this reads
 /// it directly: [`value`](Self::value), [`phase`](Self::phase) and [`fired`](Self::fired) need no
 /// entity, because there is only one it could mean.
 ///
@@ -900,18 +900,9 @@ impl<C: InputContext + Component> InputContextBuilder<C> {
     /// Use [`active_in_state`](Self::active_in_state) instead. `in_state` works here and the
     /// context does follow the state, but a frame later than it needs to: Bevy applies state
     /// transitions *after* `PreUpdate`, so a condition polled here reads the state as it was
-    /// before this frame's transition.
-    ///
-    /// |                                       | `active_in_state` | `active_if(in_state(..))` |
-    /// | ------------------------------------- | ----------------- | ------------------------- |
-    /// | A render-tick context next evaluates  | next frame        | next frame — no difference |
-    /// | A fixed-tick context next evaluates   | this frame        | next frame                |
-    /// | What a system in `OnEnter` sees       | already in step   | still the old answer      |
-    ///
-    /// Two ways that shows up. A gameplay context on the fixed tick keeps driving the simulation
-    /// for one more tick after the state has changed, so a pause that should have stopped the ship
-    /// lets it thrust once more. And a system running in `OnEnter` finds the context it is about
-    /// to set up still in its previous state.
+    /// before this frame's transition — a gameplay context on the fixed tick keeps driving the
+    /// simulation for one more tick after a pause, and a system running in `OnEnter` finds the
+    /// context it is about to set up still in its previous state.
     ///
     /// # Panics
     ///
@@ -3720,9 +3711,9 @@ mod tests {
         assert!(app.world().resource::<Probe>().value, "gamepad binding");
     }
 
-    /// R15.3's mixed case: a keyboard-paired instance and a gamepad-paired instance of the same
-    /// context, sharing no code path, so a routing bug cannot hide behind symmetry the way it could
-    /// between two identical pads.
+    // The mixed case (R15.3): a keyboard-paired instance and a gamepad-paired instance of the same
+    // context, sharing no code path, so a routing bug cannot hide behind symmetry the way it could
+    // between two identical pads.
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_keyboard_paired_and_a_gamepad_paired_instance_are_deaf_to_each_other() {
@@ -3788,9 +3779,9 @@ mod tests {
         );
     }
 
-    /// R15.3's identity case: two pads of the same model, where kind alone cannot tell them apart
-    /// and only the device handle does. This is the test that fails without routing — every context
-    /// reads the whole frame today, so an unpaired build sees both presses as its own.
+    // The identity case (R15.3): two pads of the same model, where kind alone cannot tell them
+    // apart and only the device handle does. This is the test that fails without routing — every
+    // context reads the whole frame today, so an unpaired build sees both presses as its own.
     #[cfg(feature = "gamepad")]
     #[test]
     fn two_identically_bound_gamepads_do_not_drive_each_others_instance() {

@@ -23,7 +23,7 @@ use crate::event::{Dispatch, dispatch_for};
 /// A control that reports on a button channel.
 ///
 /// This is what the parts of a [`DirectionalButtons`] composite are made of. A keyboard key and a
-/// D-pad button are the same kind of thing here — both report pressed or not — which is what lets
+/// D-pad button are the same kind of thing here: both report pressed or not, which is what lets
 /// one composite serve either.
 ///
 /// You seldom write this type. Anywhere a part is wanted, the control itself will do:
@@ -118,8 +118,8 @@ impl AxisButtons {
 /// Four buttons that together make a direction.
 ///
 /// A direction never arrives from the hardware as a direction. WASD is four keys and a D-pad is
-/// four buttons — Bevy reports no D-pad axis at all — so both reach a 2D action through this, and
-/// through the same code. Whichever a player uses, an action bound this way behaves identically.
+/// four buttons, since Bevy reports no D-pad axis at all, so both reach a 2D action through this,
+/// and through the same code. Whichever a player uses, an action bound this way behaves identically.
 ///
 /// ```ignore
 /// context.bind::<Move>(DirectionalButtons::wasd());
@@ -280,14 +280,13 @@ pub(crate) struct MappingDecl {
 
 /// What a player may tune on one binding.
 ///
-/// [`tunable_dead_zone`](BindingHandle::tunable_dead_zone) and
-/// [`hold_or_toggle`](InputContextBuilder::hold_or_toggle) both declare one of these: a named, typed
-/// value that overwrites one field of one modifier already on the binding, applied the same way a
-/// rebind is — by rewriting `modifiers[modifier_index]` and recompiling (R19.11).
+/// `tunable_dead_zone` and `hold_or_toggle` both declare one of these: a named, typed value that
+/// overwrites one field of one modifier already on the binding, applied the same way a rebind is —
+/// by rewriting `modifiers[modifier_index]` and recompiling (R19.11).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TunableDecl {
-    /// A localization key (R19.14), chosen by the game rather than derived — unlike a mapping's
-    /// key, nothing about a modifier names itself.
+    /// A localization key (R19.14), chosen by the game rather than derived — unlike a mapping's key,
+    /// nothing about a modifier names itself.
     pub(crate) key: &'static str,
     /// Which entry of this binding's `modifiers` the tunable's value rewrites.
     pub(crate) modifier_index: usize,
@@ -377,20 +376,20 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
     parts
 }
 
-/// The [`Mapping`](crate::mapping::Mapping) list for one binding list: one row per mappable part.
+/// The `Mapping` list for one binding list: one row per mappable part.
 ///
-/// Called on the bindings a context declares (from [`mappings`](InputContextBuilder::mappings)) and
-/// again, unchanged, on the rewritten bindings a variant plan holds once an override has been
-/// applied (from [`rewrite`](crate::overrides::rewrite)) — same rule either way, so that a row built
-/// one way and a row rewritten another can never disagree about what is bound.
+/// Called on the bindings a context declares (from `mappings`) and again, unchanged, on the
+/// rewritten bindings a variant plan holds once an override has been applied (from
+/// `overrides::rewrite`) — same rule either way, so that a row built one way and a row rewritten
+/// another can never disagree about what is bound.
 ///
 /// Empty for a game that declares none, which is the default and costs nothing.
 ///
-/// Bindings that derive the same key in the same scheme for the same action are **merged into
-/// one mapping** holding both controls, because that is what a player sees: one row for Jump with
-/// a primary and a secondary, not two rows both called Jump. Merging is keyed by scheme as well
-/// as by name, so the keyboard and gamepad rows stay separate; and by action, so two different
-/// actions landing on one name is still reported as a collision.
+/// Bindings that derive the same key in the same scheme for the same action are merged into one
+/// mapping holding both controls, because that is what a player sees: one row for Jump with a
+/// primary and a secondary, not two rows both called Jump. Merging is keyed by scheme as well as
+/// by name, so the keyboard and gamepad rows stay separate; and by action, so two different actions
+/// landing on one name is still reported as a collision.
 pub(crate) fn mappings_of(
     bindings: &[BindingSpec],
     context: &'static str,
@@ -489,9 +488,9 @@ pub(crate) fn mappings_of(
     mappings
 }
 
-/// The [`Tunable`](crate::mapping::Tunable) list for one binding list: one row per declared tunable.
+/// The `Tunable` list for one binding list: one row per declared tunable.
 ///
-/// Called the same way [`mappings_of`] is — on a context's own bindings, and again on the rewritten
+/// Called the same way `mappings_of` is — on a context's own bindings, and again on the rewritten
 /// bindings a variant plan holds once a tunable override has been applied — so a row built one way
 /// and a row rewritten another never disagree about what value is live. The current value is read
 /// straight off the modifier it targets rather than kept separately, for the same reason: a row and
@@ -538,15 +537,15 @@ pub(crate) fn binding_scheme(source: &BindingSource) -> Option<crate::mapping::S
     scheme
 }
 
-/// Whether this binding's raw value is always a plain press — `ActionValue::Bool` every tick,
-/// never a continuous fraction — which is what [`hold_or_toggle`](InputContextBuilder::hold_or_toggle)
-/// needs to be safe: toggling a value that carries real analog information would flatten it.
+/// Whether this binding's raw value is always a plain press — `ActionValue::Bool` every tick, never
+/// a continuous fraction — which is what `hold_or_toggle` needs to be safe: toggling a value that
+/// carries real analog information would flatten it.
 ///
-/// A key or a mouse button always qualifies — neither has anything but a press to report. A
-/// gamepad button is R2.10's own case: the same control reads as `Bool` when the action wants a
-/// plain press and as a continuous `Axis1` fraction otherwise (see `BindingSource::GamepadButton`
-/// in `eval.rs`), so it qualifies only when `intent` is [`Intent::Button`]. Every composite, axis
-/// or motion source reports something other than `Bool` outright and never qualifies.
+/// A key or a mouse button always qualifies — neither has anything but a press to report. A gamepad
+/// button is the interesting case (R2.10): the same control reads as `Bool` when the action wants a
+/// plain press and as a continuous `Axis1` fraction otherwise (see `BindingSource::GamepadButton` in
+/// `eval.rs`), so it qualifies only when `intent` is `Intent::Button`. Every composite, axis or
+/// motion source reports something other than `Bool` outright and never qualifies.
 fn always_reports_bool(source: &BindingSource, intent: Intent) -> bool {
     #[cfg(not(feature = "gamepad"))]
     let _ = intent;
@@ -2223,23 +2222,23 @@ fn compass_direction(value: Vec2, points: CompassPoints) -> Vec2 {
     .as_vec2()
 }
 
-/// Bit position within [`Scratch::flags`](crate::action::Scratch::flags) this modifier's latch
-/// lives at. Its own `Scratch` slot — see `apply_modifiers`' per-modifier split in `eval.rs` — so
-/// nothing else on the binding can collide with it.
+/// Bit position within `Scratch::flags` this modifier's latch lives at. Its own `Scratch` slot —
+/// see `apply_modifiers`' per-modifier split in `eval.rs` — so nothing else on the binding can
+/// collide with it.
 const TOGGLE_LATCH: u8 = 1 << 0;
 
 /// Converts a momentary button into a sustained latch, active only while `active` says so.
 ///
-/// Inactive is identity, so declaring [`hold_or_toggle`](InputContextBuilder::hold_or_toggle) and
-/// never turning it on costs nothing beyond the one modifier call — the binding behaves exactly as
-/// if it had not been declared. `scratch.prev` is tracked whether or not the latch is live, so
-/// switching modes mid-press cannot manufacture a spurious edge the tick after the switch.
+/// Inactive is identity, so declaring `hold_or_toggle` and never turning it on costs nothing beyond
+/// the one modifier call — the binding behaves exactly as if it had not been declared. `scratch.prev`
+/// is tracked whether or not the latch is live, so switching modes mid-press cannot manufacture a
+/// spurious edge the tick after the switch.
 ///
-/// Used only for a binding whose tunable is *not* shared with another. A shared one is resolved
-/// once per tick for the whole group instead — see `eval.rs`'s `fold`, which reads
-/// [`toggle_latch`] rather than calling this at all, and the doc on `TunableShared` for why:
-/// running this independently per binding, against a scratch cell other bindings in the group also
-/// write, spuriously re-flips the latch on every tick a *different* member of the group is held.
+/// Used only for a binding whose tunable is *not* shared with another. A shared one is resolved once
+/// per tick for the whole group instead — see `eval.rs`'s `fold`, which reads `toggle_latch` rather
+/// than calling this at all, and the doc on `TunableShared` for why: running this independently per
+/// binding, against a scratch cell other bindings in the group also write, spuriously re-flips the
+/// latch on every tick a *different* member of the group is held.
 fn apply_toggle(value: ActionValue, scratch: &mut Scratch, active: bool) -> ActionValue {
     let actuated = value.to_bool();
     let was = scratch.prev.to_bool();

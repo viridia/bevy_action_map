@@ -10,8 +10,8 @@
 //! Declaring one action mappable twice in one scheme is how you ship both defaults, and the mapping
 //! grows to fit them.
 //!
-//! A mapping is not a binding. For anything composite the binding has no single control to show — a
-//! movement binding is four keys — so each *part* of it becomes a mapping of its own, which is how
+//! A mapping is not a binding. For anything composite the binding has no single control to show: a
+//! movement binding is four keys, so each *part* of it becomes a mapping of its own, which is how
 //! every shipped game presents movement and is why the composite never reaches the player.
 //!
 //! **Every binding is listed; changing one is what has to be asked for.** A player is entitled to
@@ -20,7 +20,7 @@
 //! row changeable, and [`private`](crate::binding::BindingHandle::private) is what keeps a binding
 //! out of the list altogether, for the ones that are genuinely the game's own business.
 //!
-//! Two actions may deliberately share one control — tap to dodge, hold to sprint — and the player
+//! Two actions may deliberately share one control (tap to dodge, hold to sprint), and the player
 //! rebinds *the control* rather than either of them.
 //! [`follow`](crate::binding::InputContextBuilder::follow) says so: it declares one action riding
 //! another's bindings, one for one, contributing no row of its own and moving with them when the
@@ -157,7 +157,7 @@ impl core::fmt::Display for MappingKey {
 ///
 /// [`Any`](Capacity::Any) exists for the other kind of program: a tool whose command set is large
 /// and open, where the shortcuts cannot be laid out in advance and the screen grows an "add" button
-/// instead. Blender and VS Code work this way; games essentially do not.
+/// instead. Blender and VS Code work this way; games do not.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Capacity {
     /// At most this many slots. Never zero.
@@ -194,8 +194,8 @@ impl Capacity {
 /// own settings, or to whatever software is driving the pad.
 ///
 /// A screen reads this to decide whether a row is a button or a label. It is never a security
-/// boundary — a game that does not want a control changed simply does not offer it — and it says
-/// nothing about whether the binding *works*.
+/// boundary: a game that does not want a control changed simply does not offer it. It says nothing
+/// about whether the binding *works*.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Rebinding {
     /// The player may change it, in this game's own screen.
@@ -277,10 +277,9 @@ pub struct Follower {
     /// [`Mapping`] itself carries. A localization key, so a catalogue answers it and
     /// [`fallback_label`](Self::fallback_label) derives "Afterburner" for a game without one.
     pub action_path: &'static str,
-    /// What distinguishes this action's firing from a bare press of the row's controls — held a
-    /// while longer, most often. [`ConditionDescriptor::None`] means nothing does, which a screen
-    /// showing this follower at all should treat as a game that has declared something with nothing
-    /// to tell the player.
+    /// What distinguishes this action's firing from a bare press of the row's controls, most often
+    /// held a while longer. [`ConditionDescriptor::None`] means nothing distinguishes it: a follower
+    /// declared with nothing for a screen to tell the player about it.
     pub condition: ConditionDescriptor,
 }
 
@@ -400,7 +399,7 @@ fn gather_mappings(world: &World, stage: OverrideStage) -> Vec<Mapping> {
         .collect()
 }
 
-/// [`gather_mappings`] for the tunables half.
+// `gather_mappings` for the tunables half.
 fn gather_tunables(world: &World, stage: OverrideStage) -> Vec<Tunable> {
     let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
         return Vec::new();

@@ -228,8 +228,8 @@ mod tests {
         assert!(menu.instances.is_empty());
     }
 
-    /// A dump carries the answer to "so why is nothing happening", the question anyone reading an
-    /// overlay actually has.
+    // A dump carries the answer to "so why is nothing happening", the question anyone reading an
+    // overlay actually has.
     #[test]
     fn the_dump_carries_the_obstacle_for_each_action() {
         use crate::context::{InputContextState, Obstacle};
@@ -253,7 +253,7 @@ mod tests {
         assert_eq!(obstacle(&mut app), Obstacle::ContextInactive);
     }
 
-    /// A world with no contexts declared is not an error, and asking is not a panic.
+    // A world with no contexts declared is not an error, and asking is not a panic.
     #[test]
     fn dumping_a_world_with_no_contexts_is_empty() {
         let mut app = App::new();

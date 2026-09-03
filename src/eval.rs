@@ -94,8 +94,8 @@ pub fn release_consumed_controls(mut consumed: bevy_ecs::prelude::ResMut<'_, Con
 
 /// The priority of the highest-priority active exclusive context seen so far this frame.
 ///
-/// Unlike [`ConsumedControls`], this needs no per-schedule bookkeeping: a context's activity does
-/// not reset between fixed ticks the way a control's actuation does, so an exclusive context simply
+/// Unlike `ConsumedControls`, this needs no per-schedule bookkeeping: a context's activity does not
+/// reset between fixed ticks the way a control's actuation does, so an exclusive context simply
 /// re-raises the ceiling to the same value every time it runs. One number, reset once at the top of
 /// the frame, is the whole mechanism — set by whichever exclusive context runs first in priority
 /// order (render-tick contexts run before fixed-tick ones, so the same forward-only direction

@@ -1,7 +1,7 @@
 //! Prompts: which control fires an action, and what to call it.
 //!
-//! "Press ⟨something⟩ to jump" is two questions. Which control — the reverse of everything else in
-//! this crate, which turns controls into values and forgets the control on the way — and what to
+//! "Press ⟨something⟩ to jump" is two questions. Which control (the reverse of everything else in
+//! this crate, which turns controls into values and forgets the control on the way), and what to
 //! call it on screen. [`Prompts`] answers the first and [`Control::name`] and
 //! [`Control::fallback_label`] answer the second.
 //!
@@ -35,9 +35,9 @@
 //! rather than a rounding error, and one this crate cannot fix alone: nothing in Bevy reports what
 //! a physical key produces on the current layout outside of an event that has already happened.
 //!
-//! What an app can do today is supply the control half of its catalogue per layout. What the crate
-//! will be able to do once capture lands is remember the logical key seen at the moment a player
-//! bound something, which is right for every binding they chose themselves.
+//! What an app can do today is supply the control half of its catalogue per layout. Remembering the
+//! logical key seen at the moment a player bound something, which would be right for every binding
+//! they chose themselves, is not something this crate does yet.
 //!
 //! # Which control
 //!
@@ -57,7 +57,7 @@
 //!
 //! [`Prompts`] is a trait because this crate is not always the authority. Where an external backend
 //! owns the bindings, it owns the answer too, and its controls are its own enumeration of things we
-//! have no name for — which is why an [`ControlOrigin`] is not a [`Control`].
+//! have no name for — which is why a [`ControlOrigin`] is not a [`Control`].
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -1465,8 +1465,8 @@ mod prompt_tests {
         assert!(generation(&app) > active, "deactivation said nothing");
     }
 
-    /// The claim the touch is written as an insert to keep true: a resource is a component on an
-    /// entity of its own, so a consumer can observe the signal instead of polling for it.
+    // What keeps true the claim that the touch is written as an insert: a resource is a component
+    // on an entity of its own, so a consumer can observe the signal instead of polling for it.
     #[test]
     fn the_signal_can_be_observed_rather_than_polled() {
         use bevy_ecs::lifecycle::Insert;

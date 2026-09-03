@@ -134,8 +134,8 @@ pub struct ClassFired<A: ClassBinding> {
 
 /// Turns one logged class hit into the typed event for its class binding.
 ///
-/// The plan stores one of these per class binding, mirroring [`Dispatch`] and for the same reason:
-/// it is the only place the concrete `ClassBinding` type survives to.
+/// The plan stores one of these per class binding, mirroring `Dispatch` and for the same reason: it
+/// is the only place the concrete `ClassBinding` type survives to.
 pub(crate) type ClassDispatch = fn(&mut Commands<'_, '_>, Entity, RawEvent);
 
 pub(crate) fn class_dispatch_for<A: ClassBinding>(

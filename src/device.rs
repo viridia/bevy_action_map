@@ -8,15 +8,15 @@
 /// Not persistent: a gamepad's [`Entity`](bevy_ecs::entity::Entity) is reassigned by the backend
 /// on every reconnect, so nothing should compare a saved `DeviceHandle` against a live one across a
 /// restart. Surviving a reconnect needs a stable identity, which is a separate, not-yet-built
-/// mechanism (R11.5).
+/// mechanism.
 ///
-/// The keyboard and mouse are modeled as one device, `KeyboardMouse` — this crate has never treated
-/// them as separable, and [`RawEvent::MouseMotion`](crate::frame::RawEvent::MouseMotion) is
-/// unconditionally part of the frame even with both features off, so this variant is unconditional
-/// too, for the same reason: an enum a `match` can be written against without a feature-gated
-/// catch-all arm.
+/// The keyboard and mouse are modeled as one device, `KeyboardMouse`, since this crate has never
+/// treated them as separable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DeviceHandle {
+    // Unconditional even with both device features off: `RawEvent::MouseMotion` is always part of
+    // the frame, and this keeps a `match` on `DeviceHandle` exhaustive without a feature-gated
+    // catch-all arm.
     /// The keyboard and mouse, treated as one device.
     KeyboardMouse,
     /// One connected gamepad, identified by the backend's own entity for it.
@@ -37,10 +37,8 @@ impl DeviceHandle {
 
 /// The devices one occupant has claimed.
 ///
-/// A plain value type, not a component — [`Paired`](crate::player::Paired) is the component that
-/// attaches one of these to a context entity, and keeping the set itself component-free is what
-/// lets it be read outside a query: constructed inline in a test, or passed to a future
-/// presentation filter without threading `Option<&Paired>` through a query tuple.
+/// A plain value type, not itself a component — attach it to a context entity with
+/// [`Paired`](crate::player::Paired), which is what makes an occupant's claimed devices queryable.
 ///
 /// Backed by a small inline array rather than a hard cap: a handful of devices per occupant is the
 /// common case (a keyboard and mouse plus a pad or two), and a fifth device spills to the heap
@@ -116,7 +114,7 @@ use bevy_platform::collections::HashMap;
 /// is knowable in advance: a game can say what its turning mechanic needs, but not how worn this
 /// particular player's left stick is.
 ///
-/// The default is the identity — centred at zero, wandering not at all — which is what an
+/// The default is the identity: centred at zero, wandering not at all, which is what an
 /// uncalibrated pad is taken to do.
 #[cfg(feature = "gamepad")]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -131,8 +129,8 @@ pub struct AxisCalibration {
 impl AxisCalibration {
     /// Corrects one raw reading: recentre, then suppress anything inside the rest envelope.
     ///
-    /// Deliberately does not rescale. At most one stage may — otherwise a threshold stops denoting
-    /// any particular stick position — and that one is the binding's, which is the only threshold a
+    /// Deliberately does not rescale. At most one stage may, since otherwise a threshold would stop
+    /// denoting any particular stick position, and that one is the binding's: the only threshold a
     /// player was ever shown a number for.
     pub fn apply(self, raw: f32) -> f32 {
         let centered = raw - self.center;
@@ -147,7 +145,7 @@ impl AxisCalibration {
 
 /// What each connected gamepad's axes do when nobody is touching them.
 ///
-/// Empty by default, which reads as "every axis is honest" — a game that never touches this gets
+/// Empty by default, which reads as "every axis is honest": a game that never touches this gets
 /// exactly the behavior it had before. Fill it from [`CalibrationSampling`], or
 /// [`set`](Self::set) a value directly for a game that lets the player enter one.
 ///
@@ -417,8 +415,8 @@ mod tests {
         );
     }
 
-    /// A pad arrives carrying default settings, so the warning has to be about a game that moved
-    /// them — firing on the default would mean warning every game that ever connects a gamepad.
+    // A pad arrives carrying default settings, so the warning has to be about a game that moved
+    // them — firing on the default would mean warning every game that ever connects a gamepad.
     #[cfg(feature = "gamepad")]
     #[test]
     fn only_settings_moved_off_the_default_are_worth_warning_about() {

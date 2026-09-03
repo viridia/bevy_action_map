@@ -690,12 +690,6 @@ second implementer and the real one cannot live here.
   doctest binary, so every `///` example compiles but none runs. Fixing it means making
   `dynamic_linking` opt-in, at the cost of slower example builds — a trade-off to make deliberately
   rather than inherit.
-- **Get the requirement and design references out of the public docs.** Around forty doc comments
-  cite an `R`-number, a `§`, an `OQ` or a decision, concentrated in `capture.rs` (18) and
-  `context.rs` (10). Module-level `//!` blocks first; they are the landing pages and the worst of
-  it. The reasoning usually survives the edit — dropping the parenthesis loses nothing — and what
-  must not happen is deleting the sentence along with the citation. This is the comment scan the
-  implementation scan never ran.
 - **The README rewrite** — a user-facing introduction, feature list and quickstart, with examples
   lifted from a real game rather than invented.
 - **Comparison upkeep.** [docs/comparison.md](./docs/comparison.md) is read against BEI 0.26.0 and

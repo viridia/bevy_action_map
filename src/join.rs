@@ -2,11 +2,12 @@
 //!
 //! Nothing here is a new mechanism. A game declares "join" as an ordinary action on an ordinary
 //! context, using [`bind_class`](crate::binding::InputContextBuilder::bind_class) to bind it to
-//! [`ControlClass::AnyButton`](crate::capture::ControlClass::AnyButton) — or to whichever class
-//! fits — rather than to one named control. Left with no [`Paired`] of its own, that context reads
-//! every device, the same way any other unpaired context does, and [`ClassFired`](crate::event::ClassFired)'s
-//! event is the untouched raw event, so `event.device()` says which device pressed it without a
-//! folded action value throwing that away.
+//! [`ControlClass::AnyButton`](crate::capture::ControlClass::AnyButton) (or to whichever class
+//! fits) rather than to one named control. Left with no [`Paired`] of its own, that context reads
+//! every device, the same way any other unpaired context does.
+//!
+//! [`ClassFired`](crate::event::ClassFired)'s event is the untouched raw event, not an action's
+//! collapsed value, so `event.device()` still says which device pressed it.
 //!
 //! ```ignore
 //! struct Join;

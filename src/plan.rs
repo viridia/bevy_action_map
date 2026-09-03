@@ -593,9 +593,9 @@ impl<C> Plan<C> {
     /// What an override applies as. The slot allocation is `template`'s rather than derived afresh,
     /// and both consequences are wanted:
     ///
-    /// - an action whose every binding the player unbound **keeps its slot**, so reading it gives a
-    ///   rest value rather than the "not bound in this context" warning, which is a typo diagnostic
-    ///   and not what happened here;
+    /// - an action whose every binding the player unbound keeps its slot, so reading it gives a rest
+    ///   value rather than the "not bound in this context" warning, which is a typo diagnostic and
+    ///   not what happened here;
     /// - slot indices stay put across the swap, so an instance's action states and require-reset
     ///   flags stay aligned with no rebuilding.
     ///
@@ -824,8 +824,8 @@ mod tests {
     #[action(path = "plan_tests.move", output = bevy_math::Vec2, intent = Directional2)]
     struct Move;
 
-    /// Bound twice to the same control: harmless for a button, doubling for a delta, and a mistake
-    /// either way. Reported against the second one, once, rather than once per binding in the pair.
+    // Bound twice to the same control: harmless for a button, doubling for a delta, and a mistake
+    // either way. Reported against the second one, once, rather than once per binding in the pair.
     #[cfg(feature = "keyboard")]
     #[test]
     fn one_control_bound_twice_is_reported_once() {
@@ -846,9 +846,9 @@ mod tests {
         );
     }
 
-    /// Two bindings on one control where only one consumes it. Whether a lower-priority context
-    /// ever sees that control then depends on which of the two fired, which is not a thing anyone
-    /// can reason about from the declaration.
+    // Two bindings on one control where only one consumes it. Whether a lower-priority context
+    // ever sees that control then depends on which of the two fired, which is not a thing anyone
+    // can reason about from the declaration.
     #[cfg(feature = "keyboard")]
     #[test]
     fn disagreeing_about_consuming_one_control_is_reported() {
@@ -869,8 +869,8 @@ mod tests {
         );
     }
 
-    /// Bindings that touch different controls are none of each other's business, however their
-    /// consume flags read.
+    // Bindings that touch different controls are none of each other's business, however their
+    // consume flags read.
     #[cfg(feature = "keyboard")]
     #[test]
     fn consuming_a_control_nobody_else_reads_is_fine() {
@@ -883,8 +883,8 @@ mod tests {
         assert_eq!(builder.diagnostics(), &[]);
     }
 
-    /// Two different actions sharing one tunable name in one scheme is the tunable half of
-    /// `DuplicateMappingKey`: a saved change to one would land on the other.
+    // Two different actions sharing one tunable name in one scheme is the tunable half of
+    // `DuplicateMappingKey`: a saved change to one would land on the other.
     #[cfg(feature = "keyboard")]
     #[test]
     fn two_actions_cannot_share_a_tunable_key() {
@@ -906,10 +906,10 @@ mod tests {
         );
     }
 
-    /// Two bindings of *one* action may share a tunable key on purpose — that is what
-    /// `hold_or_toggle` reaching a primary and a secondary control declares — but only if they
-    /// agree about what the tunable is. A range on one side and a switch on the other has nothing
-    /// coherent to share.
+    // Two bindings of *one* action may share a tunable key on purpose — that is what
+    // `hold_or_toggle` reaching a primary and a secondary control declares — but only if they
+    // agree about what the tunable is. A range on one side and a switch on the other has nothing
+    // coherent to share.
     #[cfg(feature = "keyboard")]
     #[test]
     fn sharing_a_tunable_key_with_a_different_shape_is_reported() {
@@ -938,8 +938,8 @@ mod tests {
         );
     }
 
-    /// The reason this is a list rather than an assertion: three mistakes should cost one run to
-    /// find, not three runs to find one at a time.
+    // The reason this is a list rather than an assertion: three mistakes should cost one run to
+    // find, not three runs to find one at a time.
     #[cfg(feature = "keyboard")]
     #[test]
     fn every_problem_is_reported_together() {
@@ -983,8 +983,8 @@ mod tests {
         const PATH: &'static str = "plan_tests.any_key";
     }
 
-    /// A control a plain binding already names is never handed to the class list — computed once at
-    /// compile time, not re-derived per event.
+    // A control a plain binding already names is never handed to the class list — computed once at
+    // compile time, not re-derived per event.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_plainly_bound_control_is_indexed() {
@@ -999,8 +999,8 @@ mod tests {
         assert!(!plan.is_indexed(Control::Key(KeyCode::KeyA)));
     }
 
-    /// Two class bindings watching the same class: the second can never fire, and that should be
-    /// caught rather than discovered by a player.
+    // Two class bindings watching the same class: the second can never fire, and that should be
+    // caught rather than discovered by a player.
     #[cfg(feature = "keyboard")]
     #[test]
     fn two_class_bindings_on_the_same_class_is_reported() {
@@ -1019,8 +1019,8 @@ mod tests {
         );
     }
 
-    /// Different classes overlapping is not a mistake — it's how an app says "claim these
-    /// specifically, then everything else" — so nothing is reported.
+    // Different classes overlapping is not a mistake — it's how an app says "claim these
+    // specifically, then everything else" — so nothing is reported.
     #[cfg(feature = "keyboard")]
     #[test]
     fn two_different_classes_is_fine_even_though_they_overlap() {

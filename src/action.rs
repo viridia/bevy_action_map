@@ -363,7 +363,8 @@ impl Default for ActionState {
 }
 
 impl ActionState {
-    /// Creates a state from a value and phase.
+    /// A state built directly rather than through the evaluator's own transitions, for a test or
+    /// anything else constructing one from outside the normal frame.
     pub const fn new(value: ActionValue, phase: Phase) -> Self {
         Self { value, phase }
     }

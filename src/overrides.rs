@@ -537,11 +537,11 @@ impl<'de> serde::Deserialize<'de> for RawOverride {
 
 /// Turns what a file said into what this build can use.
 ///
-/// Each row's mapping name is matched against `declared`, since a [`MappingKey`] can only ever be
-/// one the game already has. A name that matches nothing comes back in the returned
-/// [`UnresolvedMapping`] list rather than being dropped in silence; a control name that does not
-/// parse becomes an [`OverrideProblem`] instead, because by that point the mapping *did* resolve
-/// and there is a row to file the problem against.
+/// Each row's mapping name is matched against `declared`, since a `MappingKey` can only ever be one
+/// the game already has. A name that matches nothing comes back in the returned `UnresolvedMapping`
+/// list rather than being dropped in silence; a control name that does not parse becomes an
+/// `OverrideProblem` instead, because by that point the mapping *did* resolve and there is a row to
+/// file the problem against.
 #[cfg(feature = "serialize")]
 fn resolve(
     raw: RawOverrides,
@@ -651,9 +651,8 @@ fn resolve(
 
 /// Deserializes a saved override set, resolving it against what this build currently declares.
 ///
-/// Needs `declared` because a [`MappingKey`] cannot be manufactured from a loaded string — see
-/// [`UnresolvedMapping`] — so this is a [`DeserializeSeed`](serde::de::DeserializeSeed) rather than
-/// a plain [`Deserialize`](serde::Deserialize) impl on [`Overrides`] itself.
+/// Needs `declared` because a [`MappingKey`] cannot be manufactured from a loaded string alone —
+/// see [`UnresolvedMapping`].
 ///
 /// ```ignore
 /// let declared = declared_mappings(world);
@@ -727,8 +726,8 @@ pub fn apply_overrides_with_preset(
 
 /// Like [`apply_overrides`], but reaches only one entity's own instance rather than every one.
 ///
-/// For a game with more than one occupant sharing a context type — two split-screen players on
-/// identical pads, say — where each keeps its own independently-persisted [`Overrides`] and wants
+/// For a game with more than one occupant sharing a context type (two split-screen players on
+/// identical pads, say) where each keeps its own independently-persisted [`Overrides`] and wants
 /// it to reach only its own entity. The declared baseline and the world-wide default new instances
 /// inherit at spawn are both left untouched, so a freshly spawned third instance still gets the
 /// unmodified default, and the diff this computes is against the same pristine declaration

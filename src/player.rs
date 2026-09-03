@@ -10,10 +10,10 @@ use crate::device::{DeviceHandle, DeviceHandleSet};
 
 /// The devices one occupant's contexts should read, and no others.
 ///
-/// A sibling component next to [`InputContextState`](crate::context::InputContextState), not a
-/// field on it and not a filter on the shared [`Plan`](crate::plan::Plan) — generic-free, so
-/// something outside a declared context type (a device-selection screen, say) can still ask "is
-/// this device claimed by anything" without enumerating every context a game has declared.
+/// Attach it beside [`InputContextState`](crate::context::InputContextState) to restrict which
+/// devices that context reads. Being a plain component rather than part of the context's own state
+/// means something outside any declared context type — a device-selection screen, say — can still
+/// ask "is this device claimed by anything" without knowing every context a game has declared.
 ///
 /// A context entity with no `Paired` reads every device, which is exactly today's single-player
 /// behavior: nothing has to opt in for a game that never mentions this component to keep working

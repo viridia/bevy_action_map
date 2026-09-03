@@ -17,8 +17,7 @@
 //!
 //! # When there is more than one
 //!
-//! Conditions come in three kinds, and they compose the way Unreal's triggers do because that
-//! formulation is the clearest one available:
+//! Conditions come in three kinds:
 //!
 //! - **Explicit** — if a binding has any, at least one must be satisfied.
 //! - **Implicit** — every one must be satisfied.
@@ -162,9 +161,9 @@ impl ConditionDescriptor {
     /// English fallback text combining this with a control's own label — "Hold W", "W ×2" — for a
     /// game with no catalogue to ask instead.
     ///
-    /// **The whole formula, not a diff against the control.** A bare "Hold" means nothing to a
-    /// player who has not already read the control it qualifies, so this always returns the two
-    /// together. Word order is English; a catalogue exists so a translator can choose its own.
+    /// Returns the whole formula rather than a diff against the control, because a bare "Hold"
+    /// means nothing to a player who has not already read the control it qualifies. Word order is
+    /// English; a catalogue exists so a translator can choose its own.
     pub fn fallback_format(self, control: &str) -> alloc::string::String {
         match self {
             Self::None => alloc::string::String::from(control),
@@ -175,7 +174,7 @@ impl ConditionDescriptor {
 }
 
 impl BindingCondition {
-    /// What this one condition contributes to a [`ConditionDescriptor`], where it contributes
+    /// What this one condition contributes to a `ConditionDescriptor`, where it contributes
     /// anything. `HoldAndRelease` reads as a hold for the same reason `Hold` does: the player still
     /// has to hold the control, even though what fires is the release at the end of it.
     fn descriptor(&self) -> Option<ConditionDescriptor> {
@@ -474,8 +473,8 @@ mod tests {
         );
     }
 
-    /// The distinction that makes a hold worth having: letting go early has to be visibly different
-    /// from letting go late, and neither may look like nothing happened.
+    // The distinction that makes a hold worth having: letting go early has to be visibly different
+    // from letting go late, and neither may look like nothing happened.
     #[test]
     fn hold_and_release_fires_only_when_the_hold_was_long_enough() {
         use Verdict::{Fired, Idle, Ongoing};
@@ -544,7 +543,7 @@ mod tests {
         );
     }
 
-    /// The three-way split. Each kind is checked for the thing only it can do.
+    // The three-way split. Each kind is checked for the thing only it can do.
     #[test]
     fn the_three_kinds_compose_as_documented() {
         struct Always(Verdict, ConditionKind);
@@ -601,8 +600,8 @@ mod tests {
         );
     }
 
-    /// Drives one condition through a script of values, which is what `run` cannot do: a condition
-    /// that compares one tick against the last needs the value and not only whether it was down.
+    // Drives one condition through a script of values, which is what `run` cannot do: a condition
+    // that compares one tick against the last needs the value and not only whether it was down.
     fn run_values(condition: &BindingCondition, script: &[ActionValue]) -> Vec<Verdict> {
         let mut scratch = Scratch::default();
         script
@@ -627,9 +626,9 @@ mod tests {
         );
     }
 
-    /// The trap a `Bool(false)` default sets: a fresh scratch and a stick sitting at centre are the
-    /// same input spelled two ways, and reading them as a change would fire on the first tick of
-    /// every context with nobody touching anything.
+    // The trap a `Bool(false)` default sets: a fresh scratch and a stick sitting at centre are the
+    // same input spelled two ways, and reading them as a change would fire on the first tick of
+    // every context with nobody touching anything.
     #[test]
     fn rest_spelled_differently_is_not_a_change() {
         use bevy_math::Vec2;
@@ -643,9 +642,9 @@ mod tests {
         );
     }
 
-    /// A held direction has to keep saying something, because consumption follows the verdict: a
-    /// menu that dropped to `Idle` between two crossings would hand the stick back to the game
-    /// underneath it for those ticks.
+    // A held direction has to keep saying something, because consumption follows the verdict: a
+    // menu that dropped to `Idle` between two crossings would hand the stick back to the game
+    // underneath it for those ticks.
     #[test]
     fn a_held_direction_stays_ongoing_between_changes() {
         let held = run_values(&BindingCondition::Change, &[ActionValue::Axis1(1.0); 4]);
@@ -660,8 +659,8 @@ mod tests {
         );
     }
 
-    /// Auto-repeat, built from two conditions that exist for other reasons: the change fires on the
-    /// crossing, and the pulse keeps firing while the direction is held.
+    // Auto-repeat, built from two conditions that exist for other reasons: the change fires on the
+    // crossing, and the pulse keeps firing while the direction is held.
     #[test]
     fn a_change_and_a_pulse_together_are_auto_repeat() {
         use Verdict::{Fired, Ongoing};
@@ -684,8 +683,8 @@ mod tests {
         assert_eq!(verdicts, [Fired, Ongoing, Fired, Ongoing, Ongoing, Fired]);
     }
 
-    /// Hold and multi-tap, the two conditions that need a caption of their own, and a bare press,
-    /// which reads the same as no condition and so has nothing to add.
+    // Hold and multi-tap, the two conditions that need a caption of their own, and a bare press,
+    // which reads the same as no condition and so has nothing to add.
     #[test]
     fn describing_finds_the_hold_or_the_multi_tap() {
         assert_eq!(
@@ -709,8 +708,8 @@ mod tests {
         assert_eq!(describe(&[]), ConditionDescriptor::None);
     }
 
-    /// `HoldAndRelease` still asks the player to hold the control, even though what fires is the
-    /// release — the caption is the same one `Hold` gets.
+    // `HoldAndRelease` still asks the player to hold the control, even though what fires is the
+    // release — the caption is the same one `Hold` gets.
     #[test]
     fn hold_and_release_reads_as_a_hold() {
         assert_eq!(
@@ -719,8 +718,8 @@ mod tests {
         );
     }
 
-    /// The whole formula rather than a qualifier on its own: a bare "Hold" means nothing to a
-    /// player who has not already read the control it modifies.
+    // The whole formula rather than a qualifier on its own: a bare "Hold" means nothing to a
+    // player who has not already read the control it modifies.
     #[test]
     fn the_fallback_renderer_names_the_control_every_time() {
         assert_eq!(ConditionDescriptor::None.fallback_format("W"), "W");

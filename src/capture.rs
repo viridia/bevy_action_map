@@ -476,17 +476,18 @@ pub fn conflicts(world: &World, control: Control, target: Option<MappingKey>) ->
 /// is laid over it: a row `pending` names reads as that row says, and everything else reads as
 /// `mappings` already has it.
 ///
-/// A backend-owned row (`Override::NotOurs` in `pending`) reads as `mappings` already has it —
-/// unaffected, not cleared — matching how [`crate::overrides::apply_overrides`] treats it.
+/// A backend-owned row (`Override::NotOurs` in `pending`) reads as `mappings` already has it
+/// (unaffected, not cleared), matching how [`crate::overrides::apply_overrides`] treats it.
 ///
 /// Resolving a conflict this finds is the caller's decision, made with [`Overrides::bind`] and
-/// [`Overrides::get`] directly rather than through another crate API: refuse it by not writing the
-/// candidate row at all; allow the duplicate by writing it regardless; or read the conflicting row's
-/// current list the same way this function does — `pending.get(mapping.scheme, mapping.key)` falling
-/// back to `mapping.slots` — and `bind` it back with the shared control removed, or with the
-/// candidate's own previous control put in its place to trade the two. The same look at a row's own
-/// candidate list, before writing it, is how a caller notices it would hold one control twice: that
-/// case never reaches this function, because a mapping never conflicts with itself.
+/// [`Overrides::get`] directly rather than through another crate API. A caller can refuse the
+/// conflict by not writing the candidate row at all, allow the duplicate by writing it regardless,
+/// or read the conflicting row's current list the same way this function does —
+/// `pending.get(mapping.scheme, mapping.key)` falling back to `mapping.slots` — and `bind` it back
+/// with the shared control removed, or with the candidate's own previous control put in its place
+/// to trade the two. That same look at a row's own candidate list, before writing it, is how a
+/// caller notices it would hold one control twice: that case never reaches this function, because a
+/// mapping never conflicts with itself.
 pub fn conflicts_pending(
     mappings: &[Mapping],
     pending: &Overrides,
@@ -496,7 +497,7 @@ pub fn conflicts_pending(
     conflicts_in(mappings, Some(pending), control, target)
 }
 
-/// The shared walk behind [`conflicts`] and [`conflicts_pending`].
+/// The shared walk behind `conflicts` and `conflicts_pending`.
 ///
 /// `pending` is `None` for the world-only form; `Some` layers a working copy over `mappings` before
 /// asking the same question, which is why both forms produce identical results for identical inputs.

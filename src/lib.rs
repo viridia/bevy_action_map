@@ -117,8 +117,7 @@
 //! context on the fixed tick, both reading the same devices without either one guessing at the
 //! other's timing. Fixed and render ticks disagree about how often they run relative to each
 //! other, so a fixed-tick context still sees every press and release exactly once, however many
-//! times (or how few) `FixedUpdate` runs between one rendered frame and the next; the crate queues
-//! timestamped input and drains it by time window rather than by polling a live snapshot.
+//! times (or how few) `FixedUpdate` runs between one rendered frame and the next.
 //!
 //! An action needed at both rates must be declared in two contexts, one per domain — a context's
 //! tick domain is fixed at declaration time, not chosen per read.
