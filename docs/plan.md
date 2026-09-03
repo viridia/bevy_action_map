@@ -1,556 +1,796 @@
-# Plan: refactoring the documents
+# Findings: the implementation scan
 
-The project's documents have accumulated four separate descriptions of what has been built, and the
-reasoning behind the work is spread across all of them. This plan replaces them with a set where
-each document answers one question, and each carries the rule that keeps it from drifting back.
+Everything the six-session scan of `src/` turned up, reordered by how much it matters rather than by
+which session found it. Nothing here has been acted on: no code and no `Roadmap.md` entry was
+changed while it was being written.
 
-`docs/design.md` is written and is phase 0. Everything below follows from it existing.
+**How to read an entry.** Each says where the problem is, what someone would actually observe, and
+whether it was confirmed by running something or only by reading. That last distinction is the
+important one, and it is stated per entry rather than assumed.
 
-**Every phase is a rewrite-up from named sources, never an edit-down.** A pass that opens the old
-document and deletes from it reproduces its structure and keeps its slop; a pass that opens the old
-document, reads it, and writes a new one from the sources named here does not.
+**The calibration warning, stated up front because it is fair.** Ask a model to find sixty problems
+and it will find sixty. Some of what follows is real and some is a rule nobody would ever violate.
+The tiers below are the honest attempt to separate them, and §6 names the ones I would drop outright
+rather than leaving them to look like work. Where a finding rests on reasoning rather than on a
+probe, or where the reachable case is hypothetical, the entry says so in as many words.
 
----
+**What the tiers mean.**
 
-## 1. The target set
-
-| Question a session asks | Document | Status |
-| --- | --- | --- |
-| How does it work now? | `docs/design.md` | written |
-| Why is it this way — can I change it? | `docs/decisions.md` | written |
-| What must stay true? | `Requirements.md` | phase 5, optional |
-| What is left, and what is broken? | `Roadmap.md` | phase 3 |
-| How do I work here? | `CLAUDE.md` | phase 4 |
-| How does it compare? Should it go upstream? | `docs/comparison.md`, `docs/one-way-doors.md` | unchanged |
-| What is this crate? | `README.md` | unchanged |
-
-Moved to `archive/` at the end: `Design.md`, `Log.md`, `Log-archive.md`.
-
-### What each document admits
-
-Stated in the document itself, because the rule is what stops the drift. Each is an **exclusion**
-rule first: it says what to leave out.
-
-| Document | Admits | The test |
-| --- | --- | --- |
-| `docs/design.md` | mechanism, present tense | Would this sentence still be true after the reason for it is forgotten? |
-| `docs/decisions.md` | decisions expensive to reverse | Name what breaks if it is reversed. If you cannot, it is a code comment. |
-| `Requirements.md` | normative statements | Can it be violated? If nothing could violate it, it is design. |
-| `Roadmap.md` | work not done, and gaps | Does it name something that will change? If it describes the present, it is design. |
-| `CLAUDE.md` | process | Is it about the work rather than about the crate? |
-
-The consequence worth stating on its own: **"what has been built" is described in exactly one place,
-`docs/design.md`.** Roadmap's "Works today" prose is deleted rather than moved. Its "What has
-landed" table survives as a bare index of chunk numbers — an index names the work, it does not
-describe the crate — and the Log's per-chunk delivery record is git's job.
-
----
-
-## 2. The section map
-
-This table does two jobs. It is the source list for phases 1–2 — the right-hand column says where
-each old section's *argument* goes, once its mechanism has already been extracted. And it is the
-remap table for phase 4, where 23 live citations of `Design §n` have to be repointed.
-
-| `Design.md` § | Subject | Mechanism now in | Argument goes to |
-| --- | --- | --- | --- |
-| 1 | Architecture | design §1 | D: layer seam, L2 reads only L1 |
-| 2 | Data flow through one frame | design §2 | D: event queue vs. level sampling; the timestamp shim |
-| 3 | Core object model | design §3 | D: action as a type |
-| 3.1 | Naming actions and contexts | design §3.3 | D: declared path, not type path |
-| 4 | The compiled plan | design §4 | D: compile once, share by `Arc` |
-| 4.1 | Where class bindings do not fit | **design §5.4** | D: two structures, not an expanded class |
-| 5 | Evaluation pipeline | design §5 | — |
-| 5.1 | Folding several bindings | **design §5.5** | D: intent decides the fold |
-| 5.2 | Consumption across tick domains | design §5.2 | D: consumption flows forward in schedule order |
-| 5.3 | Exclusive contexts | design §5.3 | D: a ceiling, not a third context state |
-| 6 | State and storage | design §6 | D: two tables, uniform scratch (closes OQ-3 / D9) |
-| 7 | Tick domains | design §1, §3 | D: one domain per context (closes OQ-6) |
-| 8 | Extensibility | design §8.2 | D: enum plus `Custom` (closes OQ-5) |
-| 8.1 | The deadzone stages | **design §8.4** | D: three stages, one rescaling (D6) |
-| 9.1–9.2 | Worked examples | README, rustdoc | — |
-| 9.3 | What the derives generate | design §3 | D: registry keyed by path, not the reflect registry |
-| 9.4 | Binding combinators | design §8.2 | — |
-| 9.5 | Diagnostics — three tiers | design §4 | D: the three tiers |
-| 9.6 / 9.6.1 | Observers, BSN | **design §5.6** | D: generic `EntityEvent` on the context entity |
-| 9.7 | The presentation surface | **design §9.1** | D: D7 split; four listing states; slots and capacity; `follow` |
-| 9.8 | Navigating a screen | design §8.3 | D: two combinators rather than a navigation path |
-| 10.1 | The overrides structure | design §10 | D: diff against defaults; variant plan; three row states |
-| 10.2 | What Steam's IGA file is | — | D: what it is a model for, and what it is not |
-| 10.3 | Naming a control | **design §9.2** | D: one name as identity and key; our table, not Bevy's |
-| 10.4 | Capture | **design §9.3** | D: reads L1 directly; the refusal order; conflicts not resolved |
-| 10.5 | The backend seam | — (nothing built) | D: authority writes a value, not a state; nothing names Steam |
-| 10.6 | The reverse lookup | **design §9.2** | D: a trait, `ControlOrigin`, and the ranking refused |
-| 10.7 | Prompts on screen | **design §9.2** | D: the crate keeps the lookup, not the drawing |
-| 10.8 | Brand resolution | — (open) | D: the generic tier, recorded as unresolved |
-| 10.9 | Device pairing, join gesture | **design §7.4** | D: runtime handle, not persistent identity |
-| 11 | Crate structure | design §11 | D: one crate; what must not move upstream |
-| 12 | Consequences, tensions, risks | — | D, and the Roadmap defect register |
-
-Bold entries are the ones whose number **moved**. The rest kept theirs.
-
-### The 23 citations to repoint (phase 4)
-
-| Where | Cites |
+| | Test |
 | --- | --- |
-| `src/lib.rs:275`, `src/lib.rs:277` | §5.2, §5.3 — unchanged |
-| `src/eval.rs:223` | §5.3 — unchanged |
-| `src/context.rs:160` | §6 — unchanged |
-| `src/plan.rs:559`, `src/eval.rs:359` | §4.1 → **§5.4** |
-| `examples/capture.rs:196` | §9.7 → **§9.1** |
-| `Requirements.md` × 8, `docs/comparison.md` × 6, `docs/one-way-doors.md` × 2 | mixed — read each |
+| **1. Live** | An ordinary build, an ordinary API call, and the answer is wrong |
+| **2. Latent** | The code is wrong and the path is not taken in tree — a feature exists that nothing has used yet |
+| **3. Absent** | Not wrong, missing, with a requirement saying it must exist |
+| **4. Prose** | A comment or document contradicts the code. No behaviour at stake |
+| **5. Cost and surface** | Public items nothing asks for, and machinery out of proportion |
+| **6. Drop** | Named so nobody re-finds them |
 
-Citations inside `Roadmap.md` (14) and `CLAUDE.md` (2) need no separate pass; those documents are
-rewritten in phases 3 and 4 anyway. Citations inside `Log.md` and `Log-archive.md` (13) go to
-`archive/` with them and are not repointed.
-
-**This is a reading, not a find-and-replace.** Some of the 23 point at a section whose argument has
-moved to `decisions.md` rather than at one whose number changed, and the correct repoint is to the
-decision, not to a design section.
+Two things this document does *not* do: route anything to a chunk, and describe what the crate does.
+Routing is ground rule 5's business and yours; `docs/design.md` is the description.
 
 ---
 
-## 3. `docs/decisions.md`
+## 1. Live — an ordinary build gets a wrong answer
 
-**One file, numbered `D1..Dn`, with a one-line index at the top** so `grep -n` reaches a known
-target. One file rather than several because the admission rule already does the sorting a subject
-split would ask for per entry — and because `D`-numbers have **zero citations in code**, so the
-numbering is free to be assigned afresh. (`R`-numbers have 52 and are not.)
+### 1.1 Two contexts with the same priority evaluate in whatever order the executor picks
 
-`D1`–`D9` in `Requirements.md` are absorbed rather than preserved; nothing outside the documents
-depends on those identities.
+`context.rs:1091` · **verified** by Bevy's own `ambiguity_detection: LogLevel::Error` on `PreUpdate`
 
-Per entry:
+Contexts are ordered by putting each into an `EvaluateAt(priority)` set and ordering the sets. Two
+contexts declaring the *same* priority land in one set with nothing ordering them, and both take
+`ResMut<ConsumedControls>` and `ResMut<ExclusionCeiling>`. Bevy's detector reports the pair as
+having indeterminate execution order, conflicting on both.
 
-> **What was decided.** One or two sentences.
-> **What it rules out.** The alternatives it forecloses, named.
-> **What reversal would cost.** Concretely — an API break, a save-format break, a reshaped pipeline.
+The derive's `priority` is optional and defaults to 0. **Two contexts colliding is what a game gets
+by not saying otherwise** — it is not an edge case a developer has to reach for.
 
-The load-bearing few get the fuller treatment `docs/one-way-doors.md` already uses on someone else's
-crate; that document is the house format for exactly this, and turning it on ourselves is the point.
+What it costs: which of the two claims a shared control first is whatever the executor picked that
+run, so on a multi-core machine the same inputs can produce different action state on different
+runs. That is R8.3, a MUST that names this exactly ("no ordering ambiguity between systems"), and it
+is also the one hole in R10.2's determinism claim — consumption is only re-derivable if the order
+that produced it was.
 
-Estimated at 25–40 entries and 500–800 lines. **It came out at 53 and 1083.** The overshoot is
-concentrated in overrides and persistence, where the admission rule explicitly names the save format
-and there are seven distinct rows that breaking would corrupt a player's file. Every entry passes
-the test; nothing was padded. If it wants shortening later, the honest lever is merging D45 with D46
-and D49 with D50, not dropping an entry.
+Nothing in `docs/design.md` §5.1, `docs/decisions.md` or `Roadmap.md` says what equal priorities do.
 
-The estimate mattering here is phase 5's: `Requirements.md` is larger than `Design.md` was, and this
-one ran 35% long.
+*Fix:* plausibly small — order same-priority contexts by declaration order, or refuse the second one
+at `add_context` with a diagnostic. Which of the two is a design call.
 
-Two things land here that have no other home:
+### 1.2 A player who rebinds a two-slot row down to one control loses the second slot for good
 
-- **Deliberate non-fixes.** Roadmap's "Known wrong today" mixes defects with accepted limitations.
-  The per-device gamepad-state entry is not a defect — it is a limitation with a stated price ("a
-  per-device map in every context instance") and a decision not to pay it. Those become decisions.
-  Actual defects stay in `Roadmap.md`.
-- **Design commitments inside the upstreaming stance.** Nothing under `src/` names Steam; no
-  `bevy_ui` dependency. The stance *itself* gates chunks and stays in `Roadmap.md`; the commitments
-  it implies are decisions.
+`overrides.rs`, `current_rows` and `mappings_of` · **verified** against a headless `App`
+
+A mapping declared with two default controls (say `Space` and `KeyJ`) has `capacity: UpTo(2)`, which
+is what draws the settings screen's "Primary" and "Secondary" columns. Rebind it to hold one control
+and `current_rows` takes the derived row whole, `mappings_of` re-infers capacity from the bindings
+that survived, and the row comes back `UpTo(1)`.
+
+What the player sees: the Secondary column disappears from that row and there is no way to get it
+back. `refusal` still reads the *declared* row, so the model would accept the secondary — what stops
+them is the screen, which sizes its columns from `capacity.slots()` (`settings.rs:942`,
+`overlay.rs:120`) or asks `has_room_for` (`examples/capture.rs:173`).
+
+`docs/design.md` §9.1 and R19.9 both say capacity is raised and never lowered.
+
+The fully-cleared case is right by accident: no derived row is found at all, so `current_rows` falls
+back to the declared one, capacity included.
+
+*Fix:* one line and a test — `current_rows` carries the declared capacity through `widest`.
+
+### 1.3 A save file with a version number this build does not know loads as if it were version 1
+
+`overrides.rs:558` · **verified**
+
+`resolve` binds the version field to `_version` and never branches on it, with a comment saying
+there is only one version so far. A file saying `version = 99` is therefore read row by row as a
+version 1 file.
+
+The case: you ship a v2 format, a player runs a v1 build (a rollback, a second machine, a Steam beta
+branch), and their v2 settings file is silently reinterpreted rather than refused. Half of R17.3's
+MUST is done — a file *missing* `version` fails the whole load — and the other half is that nothing
+says what a loader does with a number it does not recognise. `docs/design.md` §10.3 shows
+`version = 1` in its sample without saying.
+
+*Fix:* refusing an unknown version is three lines. Deciding what a migration actually looks like is
+not, and is the part worth thinking about before the format ships.
+
+### 1.4 A dead zone at or above full deflection multiplies by sixteen million instead of zeroing
+
+`binding.rs:2164`, `dead_zone_remainder` · **verified** by probe
+
+```rust
+remainder / (1.0 - dead_zone.lower).max(f32::EPSILON)
+```
+
+The `.max(f32::EPSILON)` turns a divide-by-zero into a divide-by-epsilon. `DeadZone::radial(1.0)`
+applied to `(3.0, 0.0)` returns `(16777216.0, 0.0)`. The comment directly above the guard says the
+case "leaves nothing to stretch", so the code and the comment disagree about the one case the
+comment exists for.
+
+Reachable wherever the magnitude is not normalized to 1: a diagonal `DirectionalButtons` reaches
+1.414, and `MouseMove` carries an unbounded pixel delta, where `radial(0.9)` already turns 3.0 into
+21.0. So it does not take `radial(1.0)` to see it — an ordinary large dead zone on mouse motion is
+enough.
+
+*Fix:* decide whether `lower` is validated at declaration (a plan-build diagnostic) or clamped at
+apply. Small either way; the choice is which one a developer would rather be told about.
+
+### 1.5 While a modal is up, every prompt on screen is redrawn every frame
+
+`context.rs:856` · **verified** against a headless `App`, 5 of 5 quiet frames against 0 of 5 without
+the exclusive context
+
+`apply_active` reads `if context.is_active() == live { continue; }` and the two branches below set
+`active` alone. `is_active()` folds in shadowing, so under an exclusive context the comparison is
+against a number the assignment cannot move. `activate` returns early, but the `Mut` deref that
+reaches it does not, so `changed` is set regardless — and that bumps `PromptGeneration`.
+
+What that costs: `PromptGeneration` is the subscription a prompt layer runs off, promised by R23.4
+and by `InputContextState`'s own change-detection doc. For as long as a modal (any `EXCLUSIVE`
+context) is up, that subscription fires every frame and every prompt in the game is recomputed with
+it — and §5.1 of this document says one prompt lookup walks every declared context.
+
+**The same line has a second consequence**, also verified: a context whose condition goes false
+*while it is shadowed* evaluates as active for one frame after the shadow lifts. `shadowed` is
+written by `evaluate_context` and read one system earlier by `apply_active`, so on the frame the
+modal closes the comparison still sees the old shadow, matches `live == false`, and skips the
+`deactivate`. Set a modal's and the game's conditions false together and the game context reads
+`is_active() == true` that frame and false the next. `active_in_state` reads the same stale field
+from `StateTransition`.
+
+*Fix:* the one-line comparison is `context.active == live`. What has to go with it is a reading of
+which of `active` and `is_active` every other caller means, which is why this wants a chunk rather
+than an edit.
+
+### 1.6 A stick declared `mappable` produces a settings row that cannot work
+
+`binding.rs` · **verified**, all three halves
+
+`bind::<Move>(Stick::Left).mappable()` is the obvious thing to write and three things go wrong at
+once: no plan-build diagnostic is produced; `for_each_part` yields the single part
+`(Whole, GamepadAxis(LeftStickX))`, so the row a screen draws **names half the stick**; and
+`set_part` has no `GamepadStick` arm, so applying an override for it returns `false` and changes
+nothing.
+
+The player sees a row captioned "Left Stick X", presses something, and nothing happens.
+`for_each_part`'s own comment states the intended rule — a stick has no part a player rebinds, and
+"what they get instead of per-part rebinding is a tunable" — and nothing enforces it. R4.8 is the
+requirement: an unusable declaration must produce an actionable error rather than silently doing
+nothing.
+
+`MouseMove` is the same shape one degree less visible, since replacing mouse motion with mouse
+motion is at least a no-op rather than a wrong control.
+
+*Fix:* a `DiagnosticKind` from whichever change next touches plan-build diagnostics.
+
+### 1.7 A southpaw preset is refused, and a preset is the only remapping a stick has
+
+`overrides.rs:1017`, `capture.rs:146` · **verified**: the answer is `WrongShape`
+
+A `Stick::Left` row reports `accepts: Axis2`. `ControlClass::of(Axis2)` is `None`, and `admissible`
+refuses every control against `None` — so a preset that swaps the two sticks comes back
+`WrongShape`.
+
+This is the model rather than a missing match arm: `Override::Controls` holds `Control`s and no
+`Control` names a whole stick, which is what `overrides.rs:1017`'s own comment says. It is 1.6 seen
+from the far end — that one is a stick declared `mappable`, this is a stick moved by a preset — and
+R19.12 is the requirement neither reaches: a preset is meant to be the entire remapping story for a
+device class that offers no per-mapping rebinding, **sticks especially**. Southpaw is the canonical
+example of a preset, and it is the one thing presets cannot express.
+
+`docs/design.md` §10.2 says "sticks included" in as many words.
+
+*Fix:* a decision, not an edit. Either §10.2's sentence goes and R19.12's stick case becomes a
+deferred row with a gate, or `Override` grows a way to name a whole stick.
+
+### 1.8 A game that sets a gamepad button threshold is ignored, and told nothing
+
+`device.rs:296`, `is_customized` · **verified** by reading the field list against
+`GamepadSettings`
+
+The crate applies its own thresholds rather than Bevy's, and R14.9 exists so that a game which
+configured Bevy's is warned rather than left wondering. The warning's trigger reads four of
+`GamepadSettings`' six fields — `default_axis_settings`, `axis_settings`, `button_settings`,
+`button_axis_settings` — and misses `default_button_settings` and `default_button_axis_settings`.
+
+So a game that sets a *global* button press/release threshold (the common way to do it, rather than
+per-button) gets exactly the silence R14.9 was written to prevent.
+
+The comment's stated reason is also wrong at the pinned commit: it says `AxisSettings` is the only
+one of the three with `PartialEq`, but `ButtonSettings` derives it (`gamepad.rs:821`) and only
+`ButtonAxisSettings` does not (`gamepad.rs:1413`).
+
+*Fix:* two more clauses.
+
+### 1.9 `why_not` blames `NoInput` when the real reason is that the device is not this player's
+
+`eval.rs`, `why_not_id` · reasoned from the signature, **not probed**
+
+R22.1 names five causes an action might not fire and `Obstacle` answers three. The one that produces
+a *wrong* answer rather than a missing one is device ownership: `why_not_id` takes
+`&ConsumedControls` and no `Paired`, so it cannot see the pairing at all. A context whose `Paired`
+is dropping every event the player generates reports `Obstacle::NoInput` — "nothing was pressed" —
+when something was pressed and was filtered.
+
+That is precisely the confusion R22.1 exists to end, arriving as the answer. It bites in local
+multiplayer, which is the only place pairing is used, and it bites hardest during a join flow when
+the pairing is the thing being debugged.
+
+The fifth cause, "condition Z at 40% progress", is missing rather than wrong, and is 3.1 below.
+`Obstacle` is `#[non_exhaustive]`, so both are additions rather than breaking changes.
+
+### 1.10 A context spawned but never declared does nothing and reports nothing
+
+`context.rs`, `inspect.rs` · **verified**
+
+Spawn a `#[derive(InputContext)]` component for a type that `add_context` was never called for and:
+no `InputContextState` appears on the entity, no diagnostic is logged, and `dump` does not list it —
+`DeclaredContexts` is the dump's only source, so the tool built to answer "why is nothing happening"
+cannot see this case at all.
+
+`ContextDump::instances` documents the *mirror* case ("declared and nobody has it, which is usually
+a mistake") and makes it visible, which sharpens the asymmetry.
+
+Forgetting one `add_context` call while adding a context is an ordinary mistake, and it is the
+likeliest way to spend an afternoon on nothing. It also bears on R22.14's MUST — "spawning must be
+sufficient", including from a scene — which holds only for a type that was *also* declared
+imperatively, and no document says so.
+
+*Fix:* the cheap half is a warning from the context component's own `on_add` hook when no plan
+resource exists for its type.
+
+### 1.11 `ActionMapPlugin` panics on its first update in the no-devices build
+
+`lib.rs:255`, `capture.rs:607` · **verified** by running an `App` under
+`--no-default-features --features libm`
+
+`InputFramePlugin` is gated on `any(keyboard, mouse, gamepad)` and is the only caller of
+`init_resource::<InputFrame>()`. `run_captures` takes `Res<InputFrame>` and is registered
+unconditionally, as does `evaluate_context`. The result is
+`Parameter … failed validation: Resource does not exist`.
+
+All three single-feature builds pass; it is only the zero-feature one. That configuration is in
+`CLAUDE.md`'s own Verification list, and **`cargo check` and clippy cannot see this** — which is all
+that list runs for it.
+
+*Fix:* small. Worth pairing with a smoke test that actually calls `App::update` in that
+configuration, since the whole class is invisible to a type check.
+
+### 1.12 `KeyCode` is not in the prelude, so the design's own first example does not compile
+
+`lib.rs:319` · **verified**
+
+`docs/design.md` §7.1 opens with `controls.bind::<Jump>(KeyCode::Space)`, and after a glob import of
+`bevy_action_map::prelude` that does not compile. It works in `lib.rs`'s own quick start only
+because that example also globs `bevy::prelude`.
+
+Low severity and high frequency: it is the first thing anyone types.
 
 ---
 
-## 4. Phases
+## 2. Latent — the code is wrong and nothing in tree takes the path
 
-| Phase | Work | Sources | Sessions |
-| --- | --- | --- | --- |
-| 0 | `docs/design.md` | old `Design.md`, the code | **done** |
-| 1 | `docs/decisions.md` D1–D26 — pipeline and model | `Design.md` §1–§8, §9.3, §9.5, §9.6, §11, §12; `Requirements.md` D1–D9 and the OQ closures | **done** |
-| 2 | `docs/decisions.md` D27–D53 — presentation and persistence | `Design.md` §9.7, §9.8, §10; the OQ-9 closure | **done** |
-| 3 | `Roadmap.md`, plus the archive sweep below | its 18 remaining chunk sections, the deferred table, the landed index, "Known wrong today" | **done** |
-| 4 | `CLAUDE.md`; move three documents to `archive/`; repoint 22 citations | Roadmap's ground rules, house style, commit format | **done** |
-| 5 | `Requirements.md` | itself, section by section; the `D`-number reconciliation below | **done**, in 1 |
-| 6 | Implementation scan — what is overbuilt, underbuilt or wrongly built | the non-archived documents, and the code | 2 of 6 done |
-| 7 | Comment scan — the prose in the code, against the same documents | the same | 3 |
+### 2.1 Wrapping a rescaling dead zone defeats the one-rescaling-stage rule
 
-Phase 1's sources ran wider than this table originally said: §9.3, §9.5, §9.6 and §11 are model and
-pipeline rather than presentation, so they were taken there rather than left for phase 2.
+`binding.rs:2355` · **verified**: `PerSecond(100.0)` at `delta = 0.5` returns `Axis1(0.0)` through
+the trait against `Axis1(50.0)` inherent; `Toggle { active: true }` never latches; `rescales()`
+reports `false` for a rescaling dead zone
 
-### What phase 2 handed to phase 3
+`impl Modifier for BindingModifier` forwards to the inherent `apply` with `&mut Scratch::default()`
+and `0.0`, and does not forward `rescales` at all.
 
-**An archive sweep that phase 2 did not do.** The plan named "the durable half of `Log.md` and
-`Log-archive.md`" as a source. `Log.md`'s recent entries were read and one archive entry was
-spot-checked; the other 28 were not, on the reasoning that `Design.md` §9.7 and §10 are the
-consolidated form of the chunks that produced them. Chunk 54 is a counterexample to exactly that
-reasoning — it records that a crate-side `ConflictPolicy` enum and a resolving `Overrides::rebind`
-were *built and rejected on review*, which `Design.md` only gestures at, and which became D43 and
-D53. So the reasoning is weaker than it looked, and the entries whose titles name a rejected
-approach or a withdrawn requirement are worth reading before the archive moves in phase 4:
+The reachable consequence is the third: `.custom(BindingModifier::DeadZone(..))` wraps the enum in
+`Custom(Arc<dyn Modifier>)`, whose `rescales` asks the trait. So **two stacked rescaling dead zones
+are refused as `ChainedRescaling` when both are declared with `.dead_zone`, and accepted when the
+second is wrapped** — the same chain, one spelling caught and the other not. That rule is R5.3 and
+D20.
 
-`The review, and the requirements amendments it produced` · `The second grooming, after §§9–16` ·
-`Reading bevy_enhanced_input's state integration` · `Chunk 32: activation by run condition` ·
-`Chunk 53: a context the player never sees` · `The persistence design, before any of it was built` ·
-`The Steam grooming, before chunks 40 and 38` · `Focus-driven dispatch, and R22.7 withdrawn`
+Nothing in `src/`, `examples/` or the tests calls the impl, so nobody has hit it. It is public API,
+and it is one of the two shapes `docs/design.md` §8.2 asks for.
 
-About 400 lines. Anything durable found there is a late entry in `decisions.md`, appended rather
-than renumbered.
+*Fix:* delete the impl. That removes the finding outright and costs a public impl, which wants
+naming in the commit; add a test that a wrapped rescaling modifier is still counted.
 
-**Four things phase 2 declined to admit, which now need a destination.**
+### 2.2 Clearing one part of a composite empties the other three
 
-| From | Why it is not a decision | Goes to |
+`overrides.rs:941` · **verified** against a headless `App`: four empty rows, no problem reported
+
+`rewrite` drops a whole *binding* per slot the row no longer has, and a composite's four rows are
+four *parts of one binding*. So `Override::Cleared` on `move.up` takes the binding away and
+`move.down`, `.left` and `.right` come back holding nothing.
+
+Nothing in tree produces a `Cleared` row — `settings.rs:1218` is the only site that reads one — but
+the state is R17.7's and first-class, and `Overrides::bind` with an empty list is the door. A
+settings screen with an "unbind" button is the obvious way in.
+
+`CompositeCannotGrow` refuses the mirror case in the same pass, so the refusal list already knows
+the shape and covers only the growing half.
+
+*Fix:* a chunk rather than an edit. Dropping per part instead of per binding and refusing the clear
+outright are both defensible, and which is right is a design question about what clearing one arrow
+of a movement composite means.
+
+### 2.3 A capture accepting `CharacterProducing` refuses every key, loudly, and never ends
+
+`capture.rs`, `run_captures` → `admissible` · **verified**: `KeyA` answers
+`Refused { reason: Shape }` and the session stays
+
+`admissible` asks `class.contains(control)`, and that method's own doc says it is always `false` for
+`CharacterProducing`, because membership is a property of the *event* rather than of the control.
+`contains_event` is the one test that works, and `eval.rs:485` is its only caller.
+
+`PromptScope::of` is the same root from the other side: `prompts(Jump, ANY)` returns 1 and
+`prompts(Jump, ANY.of(CharacterProducing))` returns 0 where `ANY.of(AnyButton)` returns 1 — so
+narrowing a prompt scope to that class silently empties it.
+
+**The overlap to decide rather than assume:** `Roadmap.md`'s deferred "Text input" row gates the
+class staying *unexercised*. It does not say that the two entry points which accept it as an
+argument answer wrongly when it is passed. Whether that makes this a finding or a restatement of the
+row is your call.
+
+### 2.4 A binding whose only conditions are blocking fires every tick at rest
+
+`condition.rs:361`, `combine` · **verified** by driving `combine` at `ActionValue::Bool(false)`:
+`Fired`
+
+`combine` tests actuation in the no-conditions case only. Once a binding has any condition, the
+"control is off rest" test is gone and nothing replaces it for a set with no explicit condition that
+reads the value. One blocking condition that is not vetoing leaves `explicit == 0` and
+`implicit_all` vacuously true, so the binding fires with the control at rest.
+
+Unreachable through the built-ins — none of them returns `ConditionKind::Blocking` — but the kind is
+public API through `Condition`, and a `BlockedBy` built-in would be the first thing to land on it.
+
+### 2.5 In a build without `keyboard`, a held mouse button survives alt-tab
+
+`eval.rs:430` · reasoned from the `cfg` structure, **not probed**
+
+`KeyboardFocusLost` is behind `bevy_input`'s own `keyboard` feature, so a `mouse`-only build samples
+no focus loss, and `held_mouse_buttons.clear()` compiles out with it. R16.1's MUST — the alt-tab
+stuck-key bug must be impossible — is therefore unimplemented in that configuration.
+
+Not fixable at our layer; it wants a stated price rather than silence.
+
+---
+
+## 3. Absent — a requirement says it should exist and nothing does
+
+Ordered by what a real game would miss first.
+
+### 3.1 An action has no elapsed time and no progress, so a hold-to-confirm meter cannot be drawn
+
+R3.4 (MUST) and R3.5 · `action.rs:349`
+
+`ActionState` is `{ value, phase }`. R3.4 wants elapsed time in the current state, in the same
+simulated seconds the action's own conditions count with; R3.5 wants progress toward firing, which
+is the number a charge bar or a hold-to-confirm ring is drawn from.
+
+**Both numbers already exist** — `Scratch::time` is the elapsed time and `BindingCondition::Hold`'s
+`duration` is R3.5's denominator — but the scratch is `pub(crate)` inside `InputContextState` with
+no read path out. So this is a plumbing job, not a design one.
+
+It is also the missing fifth cause in 1.9: R22.1's "condition Z at 40% progress" is the same number.
+
+Neither requirement appears in `Roadmap.md`'s register, the deferred table, or any `Still open`
+remainder.
+
+### 3.2 Nothing can bind to where the pointer is
+
+R13.1, R13.4, R13.6 · `frame.rs`
+
+The input frame carries mouse *motion* and no absolute position at all, so position cannot be
+distinguished from motion because only one of the two is there. R13.1 wants both. R13.3's mouse
+wheel is deferred with a gate; these are not, and R15.10's split-screen pointer-to-viewport mapping
+is blocked behind them.
+
+### 3.3 Keyboard: no logical keys, no "either Ctrl", and no `Cmd` ≡ `Ctrl`
+
+`Requirements.md` §12 has no citation anywhere in the project — not in `Roadmap.md`,
+`docs/decisions.md`, `docs/design.md`, `src/` or `examples/`. Four MUSTs bear on bindings and three
+are unbuilt:
+
+- **R12.1** — physical or logical key binding, explicitly chosen. Only `KeyCode` is bindable.
+  `RawEvent::Keyboard` carries the whole `KeyboardInput`, so `logical_key` already reaches the frame
+  and nothing can bind it. The requirement's own example is `Ctrl+Z`, which this crate can spell
+  only physically — so on AZERTY it is the wrong key.
+- **R12.3** — left/right variants plus "either" as a first-class concept. `with` takes one
+  `ButtonControl`, so "either Ctrl" is two bindings a game writes out by hand. R4.10 assigns this to
+  the chord mechanism *by name*, so it has a destination in the requirements and none in the plan.
+- **R12.4** — `Cmd` on macOS ≡ `Ctrl` elsewhere, as a named modifier resolved at binding time.
+  Nothing. Every cross-platform game needs this and writes it itself.
+
+R12.2 and R12.7 are presentation; R12.6 is the deferred text-input row; R12.5 is met.
+
+### 3.4 `Reflect` reaches two modules, and nothing anywhere registers a type
+
+R24.3 (MUST) · `action.rs`, `frame.rs`
+
+`#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]` appears in `action.rs` and `frame.rs` and
+nowhere else, and **nothing in the crate or the examples calls `register_type`** — so even the types
+that do derive it are absent from the type registry.
+
+`Control`, `Scheme`, `Mapping`, `Capacity`, `Rebinding`, `Prompt`, `ControlOrigin`, `DeviceHandle`,
+`Obstacle` and `Paired` carry no `Reflect`. `Paired` is a component a scene would author, and the
+five resources `ActionMapPlugin` initializes are unregistered.
+
+`bevy_reflect` is a **default** feature, so this is the shipped configuration: an inspector, an
+editor or a scene serializer sees nothing of this crate.
+
+Chunk 17c owns R5.6 and R17.5 — `Modifier` and `Condition` — and `docs/decisions.md:430`
+deliberately keeps those two bound-free. Neither is R24.3.
+
+### 3.5 Local multiplayer: no disconnect signal, no control schemes, no auto-switching
+
+`Requirements.md` §15 has one cited requirement (R15.3) and four real gaps:
+
+- **R15.5** (MUST) — on device loss the owning player must be identifiable, in-flight actions
+  canceled, **and a signal raised so the app can pause and show a reconnect prompt**. The first two
+  hold: a disconnect clears held state at `eval.rs:422` and the actions fall out of flight; the
+  owner is identifiable by querying `Paired`. Nothing is raised. An app can read Bevy's own
+  `GamepadConnectionEvent`, but no document says that is the intended answer, and a pause-on-
+  disconnect prompt is a console certification item.
+- **R15.7** (SHOULD) — named device-requirement sets with required and optional devices. Nothing.
+  `Scheme` is a two-variant enum and is not this. See 4.3: `player.rs`'s own module doc claims it.
+- **R15.8** (SHOULD) — auto-switching a player's active scheme on input, with hysteresis. Nothing —
+  and R18.6's *withdrawal* names this as the one thing that would revive it, so an unbuilt SHOULD is
+  load-bearing for a withdrawn requirement staying withdrawn.
+- **R15.9** (SHOULD) — opaque platform-user identity attached to a player. Nothing.
+
+R15.6 reaches chunk 72 through R11.5; R15.10 waits on 3.2.
+
+### 3.6 Accessibility has no citation anywhere in the project
+
+`Requirements.md` §20, all six requirements, uncited in `src/`, `examples/`, `docs/`, `Roadmap.md`
+and `CLAUDE.md`. The section's own preamble calls these "cheap to accommodate now and expensive to
+retrofit", which is the argument for looking at it before more is built on top.
+
+R20.2 and R20.5 are built (chunk 64) and R20.1 holds by construction. Two have nothing:
+
+- **R20.4** — every hold duration, tap window and repeat rate globally scalable by one user
+  preference. The crate's only scaling is a per-mapping tunable, so a game wanting "all timings
+  ×1.5" sets every one of them by hand.
+- **R20.6** (MAY) — sticky modifiers / one-handed support.
+
+R20.3's sequential alternative to chords is chunk 34 by content and by no other link.
+
+### 3.7 Four smaller absences, each with a requirement and no destination
+
+- **R19.8** (MUST) — a row a backend owns should say "not rebindable here, delegate to that
+  backend's own UI". `Rebinding` is `Here | Fixed` and `Override::NotOurs` is a row in the
+  *player's* diff, so a screen reading `mappings()` cannot tell a backend-owned row from an ordinary
+  fixed one without consulting its own working copy.
+- **R19.12**, the tunable half — "named alternative arrangements of mappings **and tunables**".
+  `PresetBuilder` has `bind` and no `tune`. Reachable by hand (`Preset::rows` is public and
+  `Overrides::tune` applies through the same path), offered by nothing, tested by nothing. The
+  smallest item in this document: one builder method.
+- **R4.4** (SHOULD) — semantic control aliases (`Submit`, `Cancel`, `MenuLeft`) resolving per device
+  class. Nothing in tree. It is load-bearing rather than convenient: R4.4 names it as what makes
+  R18.7's console confirm-button swap tractable.
+- **R9.9** — a pumped sampling mode. `sample_input`, `begin_sample` and `record` are all public, so
+  the pieces exist; what is missing is a way to stop `InputFramePlugin` scheduling sampling at all.
+
+### 3.8 The device model is closed, which is a decision nobody wrote down
+
+R11.1, R11.2, R11.3, R11.8, R11.9 — three of them MUST. `DeviceHandle` has no `Custom` and no
+`#[non_exhaustive]`, and its doc argues for exhaustive matchability — the opposite of D19's choice
+for modifiers and conditions.
+
+R11.5, R11.6 and R11.7 have destinations, so what is missing is the model's *openness*, not its
+identity half. The closure is a decision by `docs/decisions.md`'s own admission test and that
+document does not carry it.
+
+### 3.9 A context instance cannot be driven from outside the crate
+
+R23.6 · `InputContextState::new` and `apply_frame` are both `pub(crate)`
+
+`docs/design.md` §6 says "a test or replay harness can drive one directly". From outside, the only
+way to get an instance is to spawn an entity and the only way to advance one is `App::update`. The
+struct's freedom from ECS references is real and unreachable, and R23.6's standalone half has no
+citation anywhere. The netcode deferred row is where this plausibly already belongs.
+
+### 3.10 Focus and picking ordering is neither documented nor enforced
+
+R22.4 (MUST) wants documented ordering and integration with `bevy_input::InputSystems`,
+`bevy_input_focus` and `bevy_picking`. The `InputSystems` third is met and documented
+(`frame.rs:374`, design §1). The other two:
+
+- **`bevy_picking` has no mention anywhere in the tree** — not in `src/`, `examples/`, `docs/` or
+  `Roadmap.md`.
+- **R22.11** (MUST) — focus changes must resolve before the same frame's actions are evaluated.
+  `active_if` schedules `condition.pipe(apply_active::<C>)` in `PreUpdate` `.before(Evaluate)`
+  (`context.rs:924`) with no constraint against whatever writes `InputFocus`, and
+  `examples/common/widget_focus.rs`'s `focus_is` adds none. Disasteroids is not bitten because it
+  disables `InputDispatchPlugin` and moves focus from an observer in `Dispatch`, so the write lands
+  after the read by construction rather than by an ordering — which is exactly the arrangement that
+  stops holding for a game that keeps the plugin. **Reasoned, not probed.**
+
+### 3.11 Two documentation requirements with no document
+
+- **R16.4** (SHOULD) — the web caveats: pointer lock and gamepad access needing a user gesture,
+  gamepad events being polled, key codes and `vendor_id` being less reliable. There is no occurrence
+  of "wasm", "web" or "pointer lock" in `README.md`, `docs/` or `src/`.
+- **R16.5** (SHOULD) — name the OS-reserved combinations that are unavailable. Nothing.
+
+### 3.12 `tracing` is contradicted by a dependency choice recorded only in `Cargo.toml`
+
+R22.3 (SHOULD) wants spans and events at the sampling and firing boundaries. What exists is four
+`log::warn!` sites, all app-build or misconfiguration.
+
+The crate depends on `log` rather than `bevy_log`, and the comment in `Cargo.toml` gives the reason:
+`bevy_log` installs a `tracing-subscriber` and is `std`-only. That is a decision by
+`docs/decisions.md`'s own admission test — name what breaks if reversed, and the answer is R22.3 or
+the `no_std` build — and that document does not carry it.
+
+### 3.13 Two routing gaps rather than findings
+
+- `Roadmap.md`'s chunk 17c calls serializing whole binding definitions (R17.6, R22.16) "deferred"
+  inside a bullet. There is no row and no gate, which is what ground rule 5 forbids in as many
+  words. Both are MAYs, so the stakes are small and the omission is not.
+- **R7.5's opt-out has no exercise.** `activate_including_held` has no caller and no test in `src/`,
+  `examples/` or `tests/`. It is named by design §7.2, so it is asked for; what is missing is that
+  the MUST's "unless explicitly opted in" clause is the only half of R7.5 nothing runs.
+
+---
+
+## 4. Prose — a comment or document contradicts the code
+
+No behaviour at stake. All are small, and the reason to do them together is that a reader trusting
+any one of them is misled about a mechanism.
+
+### 4.1 Public docs that promise a feature
+
+| Where | Says | Actually |
 | --- | --- | --- |
-| `Design.md` §10.8, brand resolution and the generic tier | explicitly unresolved — `fallback_label` is brand-agnostic "by omission, not by decision" | deferred table, with a gate |
-| `Design.md` §10.2, what Steam's IGA file is | comparative analysis of prior art, not a choice this crate made | `comparison.md`, or dropped |
-| `Design.md` §12, "R23.2 is unenforced" | a risk with no tooling behind it | defect register |
-| `Design.md` §12, "the derive carrying too much" | relieved when player-facing names became keys | dropped |
+| `lib.rs:174` | the `touch` feature is "Touch input as a binding source" | no `cfg(feature = "touch")` anywhere in `src/`; design §11 says *reserved* |
+| `device.rs` module doc | the module has persistent device identity and capability data | neither (R11.5, R11.3); the `DeviceHandle` doc eight lines below says the first is not built |
+| `player.rs` module doc | the module "describes the named device requirements a game can assign players against" | it holds `Paired` and nothing else; that is R15.7, which is 3.5 |
+| `inspect.rs:76` | `ActionDump::state` is "Value, phase, elapsed time and progress" | `ActionState` is `{ value, phase }`; the two extra numbers are 3.1 |
+| `lib.rs:218` | `ActionMapSystems` is "the two stages of the input pipeline" | four variants; the body names `Sample` and `Evaluate` and says nothing about `Capture` or `Dispatch`, both of which are public ordering targets |
+| `action.rs:497` | write `InputContext` by hand "if you need to configure the component differently; it is three associated constants" | the trait is not what makes the type a component — the derive emits `Component`, `Default`, `Clone` and `Copy` alongside it, and a hand-written impl gets none. `macros/src/lib.rs:131` says "four associated consts" for the same trait; four exist and three are required |
+| `mapping.rs`, `Mapping::capacity` | "Meaningful only where `rebinding` is `Here`" | a preset moving a `Fixed` row is refused `TooManyControls { capacity: UpTo(1), given: 2 }`, verified — capacity is the second thing `refusal` consults on exactly the rows the sentence excuses it from |
 
-**Five decisions carry an unresolved remainder**, each marked `Still open` in `decisions.md`, and
-ground rule 5 wants every one of them a row in the deferred table with a stated gate:
+### 4.2 Examples and sketches that do not compile
 
-| | Remainder |
-| --- | --- |
-| D4 | gamepad timing stays frame-quantized until gilrs polling is rewritten upstream |
-| D9 | schedule enforcement is not airtight — Bevy gives a `SystemParam` no way to know its schedule |
-| D13 | the exclusion ceiling is global, so one player's modal shadows every player |
-| D22 | whether an authority backend's actions can participate in rollback at all |
-| D52 | owner-scoping consumption and the exclusion ceiling themselves |
+- `docs/design.md` §3's trait sketch says `// plus CATEGORY and CONSUME, with defaults`. The
+  constant is `CONSUMES`. Copying the sketch into a hand-written impl does not compile.
+- `overrides.rs:666`, `OverridesLoader`'s doc example passes `&mut de`, and `toml::Deserializer`
+  implements `Deserializer` by value only. The crate's own round-trip test 1,265 lines below passes
+  `toml::Deserializer::new(&text)`. The example is `ignore`d, so nothing would catch it.
 
-### Phase 3 — what `Roadmap.md` keeps
+### 4.3 Internal comments whose stated reason is false
 
-Keeps: the remaining chunk sections; the deferred table with its gates; the ground rules *pointer*
-(the statement itself moves to `CLAUDE.md` in phase 4); the defect register, which is "Known wrong
-today" minus the accepted limitations; the upstreaming stance, because it gates chunks.
+- `binding.rs:205`, `BindingSpec` justifies its copies with "the plan keys state by `ActionId`,
+  which does not reach back to the type". `ActionId::info` reaches back to exactly the three fields
+  the comment is justifying. The copies are still right — `info` takes the registry lock and linear
+  scans — but the stated reason is the one a reader would use to decide whether the duplication may
+  go.
+- `frame.rs:338` credits calibration's placement with meeting R14.10. R14.10 governs an authority
+  backend, which per D51 enters at the button state machine and never touches the frame. The
+  placement is right and the `R`-number is wrong; it is the crate's only claim on R14.10.
+- `action.rs:330`, `Scratch::flags` is documented as "Condition-defined bits" and a modifier defines
+  one too (`TOGGLE_LATCH`, `binding.rs:2229`). Related, and worth carrying with it:
+  `condition.rs:206` does not carry the note `binding.rs:2226` does, explaining why two constants in
+  two files can both be `1 << 0` — `plan.rs:691` gives every modifier and every condition its own
+  cell.
 
-Keeps, trimmed: **the landed index.** Chunk numbers are stable identities, cited in commit messages
-and in eleven code comments, so the sequence has to stay recoverable. It becomes two columns —
+### 4.4 Design sentences that are a clause short
 
-| # | Chunk |
-| --- | --- |
-| 8 | Gamepad and the design-stage deadzone |
+- **§4 says a variant rebuilds only the scratch.** `Plan::compile` rebuilds `indexed_controls` and
+  `has_chords` as well, and `plan.rs:716`'s comment says the first is required rather than
+  incidental: an override rewrites which controls a binding reads, so one has to move between
+  indexed and not. The code is right and the sentence is short.
+- **§5.3 says the exclusion ceiling "is set by the `PreUpdate` pass and read — never rewritten — by
+  every `FixedPreUpdate` run".** `evaluate_context` raises it for any `C::EXCLUSIVE` with an active
+  instance in whichever schedule it runs, which is what makes a `Fixed` exclusive context work at
+  all. The consequence the sentence hides, verified: a fixed exclusive context shadows lower-
+  priority *fixed* contexts and never a render one, in that frame or the next, because the reset
+  runs at the top of `PreUpdate`. §5.2 states this for consumption and nothing states it for
+  exclusion.
+- **§6's "a test or replay harness can drive one directly"** — see 3.9.
+- **§7 does not state R7.3's cost.** Two simultaneously-active layers hold separate action state, so
+  a game reading `Actions<Base>` does not see the layer's answer and has to read both. R7.3 is a
+  MUST that is met and claimed nowhere.
+- **Four `§10.1` citations point at the wrong section.** `overrides.rs:311`, `:379` and `:608` are
+  about the serialized form, now §10.3; `context.rs:1390` is about the override store being keyed by
+  mapping alone, which is §10's preamble. New §10.1 is "Applying" and none of the four is about
+  applying.
 
-— dropping the `State` column. That column's forward-references ("stages 1 and 3 → 22") were
-tracking obligations, and ground rule 5 already guarantees every open one a row in the deferred
-table; a second copy in a history index is one of the four descriptions this refactor is removing.
+---
 
-Deletes: **"Works today."** `docs/design.md` is that list, and a second copy is the exact failure
-this refactor exists to end.
+## 5. Cost and surface
 
-### Phase 4 — the archive
+### 5.1 One prompt lookup walks every declared context
 
-`Design.md`, `Log.md` and `Log-archive.md` move to `archive/` — `git mv`, not deletion, so the
-history stays browsable in the working tree until it is clearly not wanted. `CLAUDE.md`'s document
-table loses their rows and gains one line saying `archive/` exists and that nothing in flight
-reasons from it.
+`present.rs`, `BindingTable::prompts` → `context.rs:1244`, `read_bindings`
 
-`Log.md`'s stated job is "reach for it when a decision looks arbitrary" — which is `decisions.md`'s
-job. Its other half, what each chunk delivered, is `docs/design.md` plus git. It moves **last**,
-after `decisions.md` exists, so the extraction can be checked against it first.
+`prompts` rebuilds every declared context's binding list on every call — two fresh vectors per
+context, every binding and every part — then does an O(n²) scan for earlier claims and an O(n²)
+dedup. The cost does not depend on which action was asked for, so it is paid in full per call:
+`examples/common/prompt_ui.rs:138` calls it once per span, so twenty spans over six contexts rebuild
+a hundred and twenty context binding lists.
 
-`CLAUDE.md` absorbs the full statement of the ground rules, house style and commit format, which
-`Roadmap.md` currently holds and `CLAUDE.md` currently summarizes. Removing the hop is most of the
-point: the always-loaded document should carry the rules that apply to every session, not a pointer
-to them.
+`PromptGeneration` bounds how *often* this runs and nothing bounds what one pass costs.
+`BindingTable` holds the world for exactly the lifetime an amortization would want. Not on the
+per-tick path, so R23.2 does not apply — but see 1.5, which makes "how often" every frame.
 
-### What phase 4 handed to phase 5
+### 5.2 R23.2 is unenforced, and the register's count of violations is stale
 
-**Two `D`-numbering schemes now coexist, and phase 4 deliberately did not merge them.**
-`Requirements.md` carries 48 references to its own `D1`–`D9`, defined in its "Resolved decisions"
-table. `docs/decisions.md` assigned its numbers afresh, on the stated grounds that nothing outside
-the documents cited a `D`-number. That was true of the *code* and false of `Requirements.md`, which
-phase 1's count did not separate.
+`Roadmap.md` says two violations have reached the per-tick path and both were caught by reading. The
+scan found two more:
 
-Nothing dangles — every `D`-reference in `Requirements.md` resolves against that document's own
-table — so this is duplication, not breakage, and it is phase 5's to resolve. It was not done in
-phase 4 because a mechanical remap is exactly the kind that fails silently:
+- `eval.rs:750` calls `binding.source.controls()`, allocating a `Vec<Control>` once per consuming
+  binding per tick it fires or is ongoing. `for_each_control` is the allocation-free form and its
+  doc says so in as many words; `eval.rs:750` is `controls`' only caller in the tree. **One line.**
+- `eval.rs:247` builds `let mut claims = Vec::new()` per instance per tick and allocates the moment
+  anything is claimed. `chord_claims` sits on `InputContextState` and cites R23.2 in its comment for
+  exactly this reason, and `dispatch_transitions` two hundred lines up takes and hands back its log
+  to keep the allocation — so both idioms are established in the same file and `claims` follows
+  neither.
 
-| `Requirements.md` | `docs/decisions.md` | |
-| --- | --- | --- |
-| D1 actions are types | **D5** | |
-| D3 external backends | **D22**, extended by **D51** | |
-| D4 focus by activation | **D23** | D4 and D5 both land here — |
-| D5 interception is static | **D23** | the merge loses which half was cited |
-| D6 dead-zone chain | **D20**, with **D21** | |
-| D7 presentation separate | **D27** | |
-| D8 declared path | **D6** | collides with the old D6 |
-| D9 state layout | **D8** | collides with the old D8 |
+The finding is not really either line. It is that four violations have now been found by reading,
+which is what the register calls "a rule with no tooling behind it", and the count is the part that
+keeps going stale.
 
-Two collisions and one merge. A sequential find-and-replace maps old D8 to new D6 and then that new
-D6 onward again; the D4/D5 merge needs a reading of each site to know which half it meant. Do this
-by reading, or leave `Requirements.md`'s numbering alone and say in its own preamble that it is
-local — which is the cheaper answer and may be the right one.
+### 5.3 Public items with no caller and no document
 
-Until then, `CLAUDE.md` tells a reader to interpret a `D`-number against the document it appears in.
+Twenty-two, accumulated across the scan. Splitting them by why they are here, because the answer
+differs:
 
-### Phase 5 — what it turned out to be
+**Should probably be `pub(crate)`** — used only inside the crate, while a sibling doing the same job
+is already crate-private:
 
-Estimated at 3+ sessions and it took one, because phases 1–2 had drained more than the estimate
-assumed. What was actually left:
+- `eval.rs`: `release_consumed_controls`, `release_consumed_in`, `dispatch_transitions`,
+  `dispatch_class_fires` — `pub` with `ActionMapPlugin` and `declare_context` as their only
+  registrars, beside `reset_exclusion_ceiling` and `evaluate_context`, which are `pub(crate)` and do
+  the same job in the same file.
+- `frame.rs`: `warn_on_unread_gamepad_settings`, `retire_read_events` — same shape, only
+  `InputFramePlugin` names them.
+- `capture.rs`: `ReservedControls::claimant` and `iter` — every caller is inside the crate.
+  `claimant` is the one with a plausible unwritten caller, since a screen refusing a reserved
+  control wants to say what reserved it.
 
-- **86 lines of pure duplication** — the `D1`–`D9` table and the resolved-`OQ` list, both fully
-  carried by `decisions.md`. Deleted, replaced by a pointer.
-- **53 `D`-references remapped** through unique placeholders, so the two collisions could not
-  double-map. Verified by checking every remapped tag lands on a decision whose title matches the
-  requirement's subject.
-- **Only ~14 of the 24 italic asides were argument**; the rest were `_(D8)_`-style tags. Eight were
-  trimmed or deleted, six kept — the enumerated-state explanation under R3.1 because structure *is*
-  the requirement, the withdrawn half of R3.6 because a withdrawn requirement's argument is what
-  stops re-proposal, and four one-clause reasons that make their requirement intelligible.
-- **The wrap**, reflowed to 100 columns and verified by asserting the word sequence byte-identical
-  before and after.
+**No caller anywhere, and no document asks for them:**
 
-Two staleness finds the pass turned up rather than the diff: `OQ-5` was still listed **open** when
-`D19` had resolved it, and `OQ-10` was referenced at R4.7 and never defined anywhere.
+- `capture.rs`: `CaptureSession::mapping`, `slot`, `accepts`, `scheme`, `excluded`, `is_listening` —
+  six readers, named by no document. `is_listening`'s own doc says it "exists for tests". `Captured`
+  carries the mapping and the slot back, which is the path a screen actually takes.
+- `device.rs`: `GamepadCalibration::clear_device`, `is_empty`.
+- `mapping.rs`: `MappingKey::part` — plausible for a screen grouping a composite's four rows, and
+  nothing does.
+- `overrides.rs`: `Overrides::is_empty` — called only by its own test; design §10 enumerates twelve
+  `Overrides` methods and this is not one.
+- `action.rs`: `ActionValue::from_output` — no caller in `src/`, `examples/` or the tests, and it
+  duplicates the four `From` impls twenty lines above it. `into_output` is called only by its own
+  test. Four public names for two conversions.
+- `action.rs`: `Intent::supports_output` — a public wrapper over `is_one_of`, which is the one the
+  derive calls. Nothing else calls either.
+- `action.rs`: `ActionState::new` — a `const fn` constructor for a two-field struct with both fields
+  public and a `Default` impl.
+- `plan.rs`: `Plan` is `pub` with **nothing public on it** — no field, no method, no constructor,
+  and it appears in no public signature, every wrapper holding one being `pub(crate)`. It is on
+  docs.rs as a struct a reader can name and do nothing with. Design §4 names `Plan<C>` in prose,
+  which is architecture rather than a request for it to be public.
 
-**One regression caught in verification, worth recording.** The first reflow wrapped the 39 link
-definitions as if they were prose, merging them into one paragraph and breaking every reference link
-in the document. The word-sequence check passed — the words were all still there, in order — so
-*content* verification alone did not catch it. What caught it was counting structural line types
-before and after. Any future reflow needs both checks.
+Worth stating for calibration: `docs/design.md` §7.3, §8.2, §9.1 and §10 *enumerate* their public
+surface rather than describing it, so the sweep over those was a diff and came back nearly empty —
+eleven conditions, ten modifiers, six presentation methods, eleven `Mapping` fields, eight problem
+kinds, all matching one for one. The list above is concentrated where no document enumerates.
 
-### Phase 5 — why it had ranked last
+### 5.4 Machinery out of proportion
 
-It is the largest document, the **least** duplicative, and the only one with live code citations —
-52 of them. Its slop is real, but it has the worst ratio of risk to relief in the set, and phases
-1–2 will drain some of it into `decisions.md` on their own. Decide whether to do it after seeing how
-much is left.
+None of these costs anything measurable at run time. What each costs is an invariant a reader has to
+confirm is still true.
 
-Its numbering is load-bearing either way: an `R`-number is an identity, and a rewrite that renumbers
-breaks 52 comments in the code.
+- **The action registry holds one fact three ways.** `next_id` is always `entries.len()`; each
+  entry's stored `ActionId` is always its own index; and `ActionId::info` linear-scans the vector
+  that index would subscript. Written once per process, holding tens of rows.
+- **`Plan<C>`'s type parameter is phantom.** No field and no method reads `C`. It buys that handing
+  context A's plan to context B's state does not compile; it costs `compile`, 130 lines of it,
+  monomorphized once per context type — and the three wrappers that hold a `Plan` carry `C`
+  themselves already. A judgement call, which is why it is here rather than fixed.
+- **`ConsumedControls` is a `HashMap<TypeId, HashMap<Control, &'static str>>` over two schedules.**
+  `claim::<S>` is instantiated at `PreUpdate` and `FixedPreUpdate` and nowhere else, so the outer
+  map holds at most two entries for the life of the process and `claimant` walks both per lookup.
+  Two fields would say the same thing, and the `ScheduleLabel` bound would stop being propagated
+  through `evaluate_context`, `release_consumed_in` and `declare_context`'s two arms to key a map of
+  two.
+- **`MappedPart` caches two facts it could derive.** `scheme` is always `control.scheme()` and `key`
+  is always `MappingKey::new(prefix_of(binding), part)` — which `mappings_of`'s follower pass
+  recomputes from the same inputs twenty lines later rather than reading.
+- **`BindingsTable` and `TunablesTable` are two structs with the same `Serialize` impl**, differing
+  only in the inner map's key type — roughly thirty lines to emit `{scheme_name: rows}` twice.
+  Chunk 76 is already merging the neighbouring pair.
+- **`DirtySet` and `require_reset` disagree.** Both are `plan.slot_count()` long, both parallel to
+  `actions`, in the same struct — one bit-packed, one `Vec<bool>`, with the doc on the first
+  arguing against the second's representation eight lines above it. `require_reset` never asks
+  "did any bit move", which is the reason the bitset comment gives, so it is defensible; nothing
+  records it, and read as a pair they look like an accident. `fixedbitset` is already in the graph
+  beneath `bevy_ecs`, so `DirtySet` is thirty hand-written lines against a dependency line the
+  `smallvec` comment's own argument would justify.
 
-### Phases 6 and 7 — the scans
+---
 
-The reason the refactor is worth doing, and the test of whether it worked. The documents are the
-**only** source of truth: `README.md`, `docs/`, `Requirements.md`, `Roadmap.md`, `CLAUDE.md`.
-Nothing in `archive/` is consulted, and neither is git history — if a fact is not in the surviving
-set, it does not exist for the purpose of the scan.
+## 6. Drop
 
-Two passes, deliberately separate, because judging prose and judging behaviour want undivided
-attention and running them together produces a worse job of both.
+Named here rather than deleted, so nobody re-finds them and writes them up again.
 
-**Phase 6 — the implementation.** Four categories, each with its own method, because they are not
-found the same way:
+- **`GamepadCalibration::clear_device` and `is_empty`, `MappingKey::part`, `Overrides::is_empty`,
+  `ActionState::new`.** Ordinary API completeness on small types. "No caller in tree" is not a
+  defect for a library; it is only worth acting on for items that are *also* misleading, and none of
+  these is.
+- **The four `§10.1` citations and the `R14.10` mis-citation.** Real, and worth a minute if
+  something else is open in those files. Not worth a pass of their own.
+- **`Plan<C>`'s phantom parameter.** The compile-time cost is real and the type safety it buys is
+  also real. Nothing has measured either, and this is the kind of thing that should not be changed
+  without a measurement.
+- **R20.6's sticky modifiers.** A MAY, with no in-tree pressure and no case behind it.
 
-| | What it is | How it is found |
-| --- | --- | --- |
-| **Overbuilt** | machinery out of proportion to the problem — a map where four items ever exist, a type parameter nothing reads, one fact stored three ways | read each type against the sizes and the cases the documents say it actually meets |
-| **Unasked-for** | public surface no document asks for | enumerate every `pub` item, check each against `design.md` and `Requirements.md` |
-| **Underbuilt** | a normative statement with no implementation behind it | walk `Requirements.md` section by section against the code |
-| **Wrongly built** | code that contradicts a document | read `design.md`'s claims against what the code does |
+---
 
-**Session 1 ran the second of these under the first's name**, so `device` and `frame` have had the
-public-surface sweep and not the proportion one. Whichever chunk takes their findings picks it up.
+## Checked and correct
 
-**Excluded, and this is the load-bearing part.** Anything already recorded in `Roadmap.md`'s defect
-register or deferred table, or marked `Still open` in `decisions.md`, is not a finding. Phase 3
-therefore decides what phase 6 is able to report: a defect missing from the register arrives as
-news, and a stale entry silently suppresses a real finding.
+Recorded so nobody re-derives it. Every one of these was read against the code and holds.
 
-**Temper the expectation on "wrongly built".** Phase 0 reconciled every disagreement it found
-between `Design.md` and the code *in favour of the code* — `ActionState`'s fields, the module tree,
-the persistence table names. So that category starts from documents already trued against the
-implementation, and the yield will be in what phase 0 did not look at: the code against
-`Requirements.md`, which no phase has checked in either direction.
+**Values and shapes.** R2.2's conversion table matches `to_bool`/`to_axis1`/`to_axis2`/`to_axis3`
+cell for cell, including the two rows the requirement expects an argument about. R2.10's two
+hardware cases hold in `Intent::accepts`. R1.1's declared path is required by the derive with no
+default. Design §4's fourteen `DiagnosticKind` variants and both `Severity` variants match exactly.
 
-**Phase 7 — the comments.** Doc comments are user-facing and render on docs.rs where our documents
-do not exist, so the rule they are checked against is that none may cite an `R`-number, a `§`, an
-`OQ` or a chunk. Internal comments keep their references and are checked for being *true* — which is
-why this runs after phase 4, when the 23 `Design §` citations have been repointed.
+**The frame.** R9.1–R9.5 and R9.7, including the two worth doubting: deltas are summed rather than
+replaced (`eval.rs:347`, asserted at `eval.rs:1131`), and events are replayed singly rather than
+folded once, which is what keeps a press-and-release inside one window from cancelling. The queue's
+append-monotonic invariant survives `clear()`. R11.4's hot-plug policy holds at `eval.rs:422`.
+`retire_read_events`, the per-instance cursor and the `level_changes == 0` top-up together give
+R9.3 and R9.4, confirmed from both the frame's side and the evaluator's.
 
-**Both need scoping; neither fits one window.** `src/` is 20,000 lines, of which 11,500 are code,
-and the surviving documents are 3,000. The split was estimated at three sessions each by layer;
-sessions 1 and 2 measured the unit at about 2,000 lines of code plus the documents they touch, which
-makes it six:
+**Bindings.** R4.1a's three placements for a mouse button all hold. R4.2's five composites exist.
+R4.7's two opposite defaults are both right. R5.1, R5.2, R5.3, R5.5, R5.7 and R5.8 hold. R5.4's
+remainder is the netcode row's. D20's stage-1 no-rescale rule holds, clamp included. R12.5 holds by
+construction rather than by a filter: keyboard actuation is a set insert/remove keyed on `state`, so
+a `repeat: true` event moves nothing. R6.7 holds by construction — a condition's only clock is the
+`delta` it is handed. The three enums over one control space were read for proportion and judged
+proportionate.
 
-| | Modules | Code |
-| --- | --- | --- |
-| 1 | `device`, `frame` | 707 |
-| 2 | `action`, `condition`, `event`, `plan` | 2,112 |
-| 3 | `binding` | 2,360 |
-| 4 | `context`, `eval` | 2,498 |
-| 5 | `overrides`, `preset`, `mapping` | 1,642 |
-| 6 | `capture`, `present`, `inspect`, `player`, `join`, `lib` | 2,140 |
+**Evaluation and storage.** R23.5's O(1) holds with no hash on that path. R23.3 holds: activation
+sets a flag and fills a vector. R23.7 holds by construction. R7.4's cancellation matches
+`Fired | Ongoing`, with the `Started` gap already in `Roadmap.md`. R8.1's chord pre-pass is a pure
+function of held state and `is_pressed` refuses a consumed control inside it. R10.2 holds but for
+1.1. The three `Fold` kinds partition correctly. R7.5's default half holds for a newly spawned
+context by the empty held-state map rather than by the require-reset latch. R24.4's app-build /
+runtime split is honoured at both panics.
 
-Session 1 read 707 and ran short; session 2 read 2,112 and was full, so 3 and 4 are at the ceiling
-rather than under it. Groups 5 and 6 are the persistence and presentation halves, which is the same
-seam `docs/design.md` §9 and §10 already use.
+**Overrides and presentation.** R17.1 holds by construction, which is also D47. R17.7's three states
+round-trip and the two bare words cannot collide with a control name. R17.8 holds by construction.
+R17.2's tolerance holds on both axes. R19.4's four resets exist. R19.16 holds in both directions.
+R19.9 holds at declaration — it is only the rewrite that lowers it, which is 1.2. The tunable pass
+runs after the control rewrite and matches scheme as well as key. R18.2's consumption filter reads
+only earlier contexts' claims; the sort is stable, so declaration order survives as the last
+tiebreak. R18.5's invalidation covers every clause but the layout one its own aside withdraws.
+R18.8 and R18.9's origin half hold. The four control tables round-trip exhaustively, unnamed
+variants included. R22.6's migration path exists in `docs/comparison.md`. R21.1–R21.3 are met by the
+test suite's shape. Capture's arming skips the press that opened the session, and a refused press is
+claimed so it does not also play the game. `admissible` asks scheme before reserved before shape.
+R15.1's many-to-many holds — neither `Paired` nor `is_claimed` enforces exclusivity, which is what
+lets two players share one keyboard.
 
-**If phase 5 is skipped**, phase 6 runs against `Requirements.md` as it stands, which is already
-normative. The scans depend on phase 4, not on phase 5.
+**Excluded rather than missed**, both already recorded: `apply_overrides_for` discards the rewritten
+rows, which is the per-entity presentation deferred row; and `Override::NotOurs` leaves the crate's
+binding live rather than silencing it, which is R0.6 and chunk 42's review surface.
 
-### Phase 6, session 1 — `device` and `frame`
+---
 
-Nine findings, **unrouted**. Ground rule 5 wants each a destination, and that is the author's call;
-nothing in the code or in `Roadmap.md` was edited. The proposal is at the end.
+## What was never done
 
-**Wrongly built.**
-
-1. **`ActionMapPlugin` panics on its first update in the no-devices build.** `lib.rs:255` gates
-   `InputFramePlugin` on `any(keyboard, mouse, gamepad)`, and that plugin is the only caller of
-   `init_resource::<InputFrame>()`; `capture.rs:607`'s `run_captures` takes `Res<InputFrame>` and is
-   registered unconditionally, as does `evaluate_context`. Verified by running an `App` under
-   `--no-default-features --features libm`: `Parameter … failed validation: Resource does not
-   exist`. All three single-feature builds pass. **`cargo check` and clippy cannot see this**, which
-   is all the Verification section runs for that configuration.
-2. **The `touch` feature advertises a source that does not exist.** `lib.rs:174` calls it "Touch
-   input as a binding source"; there is no `cfg(feature = "touch")` anywhere in `src/`. design §11
-   says *reserved*, so the contradiction is between the two, and the user-facing half is the wrong
-   one.
-3. **`device.rs`'s module doc claims a persistent identity and capability data**, neither of which
-   the module has (R11.5, R11.3). The `DeviceHandle` doc eight lines below says the first is
-   not-yet-built, so the module page contradicts the type page.
-4. **R14.9's warning reads four of `GamepadSettings`' six fields.** `device.rs:296` misses
-   `default_button_settings` and `default_button_axis_settings`, so a game setting a button
-   threshold gets the silence R14.9 exists to prevent. Its comment's reason is wrong at the pinned
-   commit besides: `ButtonSettings` derives `PartialEq` (`gamepad.rs:821`) and only
-   `ButtonAxisSettings` does not (`gamepad.rs:1413`).
-5. **R16.1 is unimplemented in any build without `keyboard`.** `KeyboardFocusLost` is behind
-   `bevy_input`'s own `keyboard` feature, so a `mouse`-only build samples no focus loss and
-   `eval.rs:430`'s `held_mouse_buttons.clear()` compiles out with it: a held mouse button survives
-   alt-tab. Not fixable at our layer, so it wants a stated price rather than silence.
-
-**Underbuilt, and unrouted anywhere.**
-
-6. **§11's openness** — R11.1, R11.2, R11.3, R11.8, R11.9, three of them MUST. R11.5, R11.6 and
-   R11.7 all have destinations, so what is missing is the *model's openness*, not its identity half.
-   `DeviceHandle` is closed, with no `Custom` and no `#[non_exhaustive]`, and its doc argues for
-   exhaustive matchability — the opposite of D19's choice for modifiers and conditions. That is a
-   decision by the admission test's own standard and `decisions.md` does not carry it.
-7. **§13's pointer half** — R13.1 wants position distinguished from motion and the frame carries
-   no absolute position at all; R13.4 and R13.6 likewise. R13.3 and R13.5 are routed; these are not.
-8. **R9.9's pumped sampling mode** — `sample_input`, `begin_sample` and `record` are all public,
-   so the pieces exist. What is missing is a way to stop `InputFramePlugin` scheduling sampling.
-9. **R14.10's only claimed satisfaction is a mis-citation.** `frame.rs:338` credits calibration's
-   placement with meeting it; R14.10 governs an authority backend, which per D51 enters at the
-   button state machine and never touches the frame. The placement is right and the `R`-number is
-   wrong — phase 7's lane, recorded here because it is the crate's only claim on R14.10.
-
-**Unasked-for surface came to four items**, which is the honest result for these two modules:
-`GamepadCalibration::clear_device` and `is_empty` have no caller and no document behind them, and
-`warn_on_unread_gamepad_settings` and `retire_read_events` are `pub` while only `InputFramePlugin`
-ever names them. The proportion category did not exist yet and these two modules have not had it.
-
-**Checked and correct**, so a later session need not re-derive it: R9.1–R9.5 and R9.7, including
-the two worth doubting — deltas are summed rather than replaced (`eval.rs:347`, asserted at
-`eval.rs:1131`), and events are replayed singly rather than folded once, which is what keeps a
-press-and-release inside one window from cancelling. R11.4's hot-plug policy holds at `eval.rs:422`;
-the queue's append-monotonic invariant survives `clear()`, since `frame` is never reset; D20's
-stage-1 no-rescale rule holds, clamp included.
-
-**The proposed routing**, for whenever it is decided: 1, 4 and 5 to the defect register; 2 and 3
-fixed in place by whichever chunk takes 1, being three lines and no design question; 6 and 7 two
-deferred rows with gates, plus a `decisions.md` entry for the closed `DeviceHandle`; 8 a deferred
-row; 9 to chunk 28.
-
-**What the session says about the method.** The estimate holds — one module pair, one session, and
-it ran short rather than long. Two of the three categories paid: "wrongly built" yielded five
-despite phase 0's reconciliation, because every one of them is in a *configuration* rather than in
-the default build, which is what phase 0 read. The underbuilt walk is the one that wants care: most
-`NONE` results are requirements that are simply built, so the cheap grep for an unrouted `R`-number
-is a starting list and not a finding list.
-
-### Phase 6, session 2 — `action`, `condition`, `event` and `plan`
-
-Eleven findings, on session 1's terms: **unrouted**, nothing in the code or in `Roadmap.md` edited,
-proposal at the end.
-
-**Wrongly built.**
-
-1. **A binding whose only conditions are blocking fires at rest.** `combine` (`condition.rs:361`)
-   tests actuation in the no-conditions case only; once a binding has any condition the "control is
-   off rest" test is gone, and nothing replaces it for a set with no explicit condition that reads
-   the value. One blocking condition that is not vetoing leaves `explicit == 0` and `implicit_all`
-   vacuously true, so the binding fires every tick with the control at rest. Verified by driving
-   `combine` at `ActionValue::Bool(false)`: `Fired`. Unreachable through the built-ins, none of
-   which returns `ConditionKind::Blocking` — but the kind is public API through `Condition`, and
-   chunk 33's `BlockedBy` is the first built-in that would land on it.
-2. **design §4 says a variant rebuilds only the scratch.** `Plan::compile` rebuilds
-   `indexed_controls` and `has_chords` as well, and `plan.rs:716`'s comment says the first is
-   required rather than incidental: an override rewrites which controls a binding reads, so one has
-   to move between indexed and not along with everything else. The code is right and the
-   sentence is a clause short.
-3. **design §3's trait sketch names a constant that does not exist** — `// plus CATEGORY and
-   CONSUME, with defaults`, where the constant is `CONSUMES`. Copying the sketch into a hand-written
-   impl does not compile.
-4. **The advice for writing an `InputContext` by hand leaves out the half that matters.**
-   `action.rs:497` says to implement the trait yourself "if you need to configure the component
-   differently; it is three associated constants" — but the trait is not what makes the type a
-   component. The derive emits `Component`, `Default`, `Clone` and `Copy` alongside it and a
-   hand-written impl gets none of them. `macros/src/lib.rs:131` says "four associated consts" for
-   the same trait, so the two disagree about the count as well; four exist and three are required.
-
-**Unasked-for surface.**
-
-5. **`Plan` is `pub` with nothing public on it** — no field, no method, no constructor, and it
-   appears in no public signature, every wrapper holding one being `pub(crate)`. It is on docs.rs as
-   a struct a reader can name and do nothing with. design §4 names `Plan<C>` in prose, which is
-   architecture rather than a request for it to be public.
-6. **Four public names for two conversions.** `ActionValue::into_output` and `from_output` are
-   one-line forwards to `ActionOutput::from_action_value` and `into_action_value`. `from_output` has
-   no caller in `src/`, `examples/` or the tests and duplicates the four `From` impls twenty lines
-   above it; `into_output` is called only by its own test.
-7. **`Intent::supports_output`** is a public wrapper over `is_one_of`, which is the one the derive
-   calls. Nothing else calls either.
-8. **`ActionState::new`** is a `const fn` constructor for a two-field struct with both fields public
-   and a `Default` impl. No caller.
-
-**Overbuilt**, which is the category session 1 did not have.
-
-9. **The action registry holds one fact three ways.** `next_id` is always `entries.len()`; each
-   entry's stored `ActionId` is always its own index; and `ActionId::info` linear-scans the vector
-   that index would subscript. The table is written once per process and holds tens of rows, so none
-   of it costs anything at run time. What it costs is three invariants a reader has to confirm are
-   still true.
-10. **`Plan<C>`'s type parameter is phantom.** No field and no method reads `C`. What it buys is
-    that handing context A's plan to context B's state does not compile; what it costs is `compile`,
-    130 lines of it, monomorphized once per context type — and the three wrappers that hold a `Plan`
-    carry `C` themselves already. Whether the guard is worth the copies is a judgement, which is why
-    it is here rather than fixed.
-
-**Underbuilt, and unrouted anywhere.**
-
-11. **R3.4 and R3.5 have no implementation and no destination.** R3.4 is a MUST — elapsed time in
-    the current state, in the same simulated seconds the action's own conditions count with — and
-    R3.5 is its SHOULD, progress toward firing for a hold-to-confirm meter. `ActionState` is
-    `{ value, phase }` and nothing public exposes either number. Both exist: `Scratch::time` is the
-    elapsed time and `BindingCondition::Hold`'s `duration` is R3.5's denominator, but the scratch is
-    `pub(crate)` inside `InputContextState` with no read path out. Neither appears in the defect
-    register, the deferred table, or any `Still open` remainder.
-
-**Checked and correct**, so a later session need not re-derive it: R2.2's conversion table matches
-`ActionValue::to_bool`/`to_axis1`/`to_axis2`/`to_axis3` cell for cell, including the two rows the
-requirement expects to be argued about — narrowing to 1D measures the whole value and therefore
-loses the sign, and the bool conversion tests against rest rather than against a press threshold.
-R2.10's two hardware cases hold in `Intent::accepts`: a trigger on a `Button` channel serves
-`Analog1`, and `Directional2` accepts nothing but `Axis2`, which is what forces a D-pad through the
-same composite as four keys. R1.1's declared path is required by the derive with no default. R6.7
-holds by construction — a condition's only clock is the `delta` it is handed. R24.4's
-app-build/runtime split is honoured at both panics, `plan.rs:681` and `action.rs:673`. design §4's
-fourteen `DiagnosticKind` variants and both `Severity` variants match the code exactly.
+**The comment scan.** Doc comments are public documentation and render on docs.rs where these
+documents do not exist, so the rule is that none may cite an `R`-number, a `§`, an `OQ` or a chunk.
+Around forty do, concentrated in `capture.rs` (18) and `context.rs` (10). Internal comments keep
+their references and are checked for being *true* — §4.3 above is what that pass would produce more
+of. `Roadmap.md`'s chunk 28 owns the same job from the other side, and whichever runs first
+discharges the other.
 
 **One thing the Verification section does not run.** `cargo doc --no-deps --all-features` warns —
-`device.rs:8`, a redundant explicit link target. Doc comments are the crate's public documentation
-and this is the only command that reads them, so it belongs in `CLAUDE.md`'s list.
+`device.rs:8`, a redundant explicit link target. That command is the only one that reads doc
+comments, so it belongs in `CLAUDE.md`'s list.
 
-**The proposed routing.** 1 to the defect register, owned by chunk 33, which is where a built-in
-blocking condition first arrives. 2, 3 and 4 fixed in place, being three document lines and one doc
-comment; 4 is chunk 28's lane as well. 5 to 10 want a chunk of their own that phase 6 accumulates
-into, since sessions 3 onward will add to it and one pass over the whole public surface is cheaper
-than four. 11 wants a chunk: a MUST with no destination is chunk 35's situation exactly, and the
-mechanism is as nearly built as 35's is.
-
-**What the session says about the method.** The estimate does not hold and the split above is the
-correction. On the categories: nine of the eleven came from the three session 1 already had, and the
-two the addendum added are a judgement call and a tidy-up rather than defects — worth keeping, but
-not where the yield is. The underbuilt walk paid this time where it barely did in session 1, and for
-a reason worth carrying forward: `Requirements.md` §3 and §6 are about *state over time*, and the
-requirements a code reading silently satisfies are the ones about shape.
-
----
-
-## 5. What could go wrong
-
-- ~~**`decisions.md` becomes a second Log.**~~ _It did not. All 53 entries answer the admission
-  test, and four candidates were turned away by it — chunks 74 and 75 as internal refactors, and the
-  two `Design.md` §12 items in the table above. What the rule does **not** bound is volume: it
-  governs what gets in, not how much, which is how the document ran 35% past its estimate while
-  every entry earned its place. Phase 5 should size from that._
-- ~~**A decision is lost between phases 1 and 2.**~~ _Partly. The section map worked as a checklist
-  and caught §9.5's diagnostic tiers missing after the first twenty-five were numbered, which
-  became D26 and is why the numbering has one deliberate jump. It could not catch the archive gap,
-  because the map covers `Design.md` and nothing else — which is the hole the sweep above closes._
-- **Phase 4 repoints a citation to the wrong place.** Some of the 23 point at an argument rather
-  than at a mechanism. Read each one; a find-and-replace over `§4.1` would silently send a reader to
-  a section about class-binding *mechanism* when the comment cited the reason it works that way.
-- **`archive/` is read as current.** It is three documents that describe the crate as it was, two of
-  them longer than anything in `docs/`. The one line in `CLAUDE.md` has to say plainly that nothing
-  in flight reasons from them, or a future session will orient off a stale `Design.md`.
+**A note on this file.** It is no longer a plan, and `CLAUDE.md`'s document table still describes it
+as "the document refactor, phase by phase". Either that row changes or this moves to a name that
+says what it is.
