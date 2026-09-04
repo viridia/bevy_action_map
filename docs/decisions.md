@@ -80,8 +80,8 @@ here, so there is one `D`-numbering in the project.
 | **D55** | State-driven activation runs inside `StateTransition`                         | design §7.2     |
 | **D56** | Activation answers per context type, and is declared on the builder           | design §7.2     |
 | **D57** | Where two pads report one axis, the one that moved last speaks                | design §7.4     |
-| **D58** | A gamepad stick is a `Control`, named whole                                   | design §8.1     |
 | **D60** | The character-producing door is a method, not a fourth `ControlClass`         | design §5.4     |
+| **D61** | A gamepad stick is a `Control`, named whole                                   | design §8.1     |
 
 ---
 
@@ -1267,7 +1267,7 @@ rather than only that one's. A paired instance never sees this, because it reads
 construction. `leafwing-input-manager` takes the same position, and its maintainer reports never
 having had a complaint.
 
-### D58 — A gamepad stick is a `Control`, named whole
+### D61 — A gamepad stick is a `Control`, named whole
 
 **Decided.** `Control` gains `GamepadStick(Stick)`, reporting `ChannelShape::Axis2` on the same terms
 `MouseMotion` already reports `Delta2`. `ControlClass::of` becomes total — `AnyStick` fills the one

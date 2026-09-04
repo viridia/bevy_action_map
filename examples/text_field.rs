@@ -2,8 +2,7 @@
 //!
 //! Run it: `cargo run --example text_field`.
 //!
-//! `ControlClass::CharacterProducing` (chunk 25) shipped with no caller — `bind_characters` (chunk
-//! 82, its replacement) had never had one either, until now. Two contexts are active at once:
+//! `bind_characters` had never had a caller before this example. Two contexts are active at once:
 //! `TextField` claims every character-producing key with `bind_characters` and consumes it;
 //! `OnFoot`, at the default (lower) priority, binds the same `Space` to `Jump`.
 //!
@@ -13,8 +12,8 @@
 //! field and a gameplay action both want, decided by consumption rather than by the app checking
 //! which one has focus.
 //!
-//! `InputDispatchPlugin` is disabled, the same call Disasteroids makes and for the same reason
-//! (`docs/issues.md` 2.3): left enabled, `bevy_ui_widgets`' own text-input handling reads a bubbled
+//! `InputDispatchPlugin` is disabled, the same call Disasteroids makes and for the same reason:
+//! left enabled, `bevy_ui_widgets`' own text-input handling reads a bubbled
 //! `FocusedInput<KeyboardInput>` that never asks the mapper anything, so Space would land in the
 //! field *and* still reach `OnFoot` — the exact bypass this example exists to rule out. With it
 //! disabled, `EditableText` is a plain data structure with nothing feeding it but the observers
