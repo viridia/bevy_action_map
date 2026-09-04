@@ -395,8 +395,14 @@ from a database such as SDL_GameControllerDB.
   seam; the full database is data an app supplies.
 - **It is the missing half of the glyph row**, not a separate errand. R18.4 keys a glyph
   identifier on (brand, control) and chunk 37 already stores the control half.
+- **The tiering question above stopped being hypothetical.** Kenney's generic icon set ships
+  blank, unlabeled buttons — a generic icon needs a text stamp, not just a swap-in image — which
+  the **Glyph ids** deferred row now carries in full. This chunk's answer to the tiering question
+  should keep that constraint in view.
 - **Verified by:** Split Friction's device label naming the pad actually being held rather than
-  "Gamepad".
+  "Gamepad". Open: whether the acceptance test should also check the resolved brand against
+  Kenney's real file names — a sharper falsification of the generic tier than a text label alone,
+  without pulling glyph rendering into this chunk.
 
 ### 71. Per-player presets
 
@@ -585,7 +591,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | Area | Gated on |
 | --- | --- |
 | **Persisting calibration**, keyed to identity (R11.7, R14.11) | R11.5's stable device identity, which chunk 72 builds. Measured calibration lasts as long as the process |
-| **Glyph ids** (R18.4) | asset-pipeline questions, though *the art is not one of them*: Kenney's input prompt set covers keyboard, mouse and three pad brands and is CC0. What stays open is the identifier scheme, and Kenney is the way to falsify it — R18.4 wants a key of (brand, control), and chunk 37's stored names are already the control half. If that does not survive contact with a real atlas's file names, R18.4 is wrong rather than merely unbuilt |
+| **Glyph ids** (R18.4) | asset-pipeline questions, sharper than they looked when this row was written. Kenney's input prompt set covers keyboard, mouse, three pad brands and Steam, CC0 — but its generic set ships blank, unlabeled buttons, so a generic-tier icon is not the self-contained image the brand → generic → text chain assumed; it needs a short text stamp, and the crate has no short form today, only `fallback_label`'s sentence-shaped strings ("East Button"). The identifier scheme is the other open half — R18.4 wants a key of (brand, control), chunk 37's stored names are already the control half, and Kenney's real file names are still the way to falsify it. Presentation sketch: `PromptIcon`, standalone in `examples/common/` beside `PromptSpan` rather than a mode of it — `PromptSpan` is `TextSpan`-based for inline prose, and Bevy/parley has no inline-image-in-text-run support, so an icon-capable prompt is necessarily block-level — resolving through R18.9's glyph-source sum type rather than assuming our own identifier is the only shape a backend hands back. The stamp text is a defaults question, not a missing feature: the studio's answer is R19.14's catalogue, the long tail's is a heuristic (leading candidate: the compass name's first letter, "E" for East) that has to be *right* rather than merely present, per "Who this is for"'s standard for a default nobody tests |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import |
 | **Netcode injection and reconciliation** | a networked target. Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. What is left here needs a remote player to inject a frame for and an authority to disagree with |
