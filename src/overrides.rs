@@ -1001,8 +1001,6 @@ fn refusal(
     {
         return Some(OverrideProblemKind::CompositeCannotGrow);
     }
-    // `None` is a mapping no single control can fill — a stick or a mouse bound whole — which is
-    // never something a capture offered, so a row naming one came from somewhere else.
     let accepts = ControlClass::of(row.accepts);
     for &control in wanted {
         // Shared with capture, which is what stops one control getting two different reasons
@@ -1586,6 +1584,58 @@ mod tests {
                 control: Control::MouseMotion,
                 accepts: ChannelShape::Button
             }]
+        );
+    }
+
+    /// A southpaw preset swaps the two sticks — the canonical thing a preset is for, and the case
+    /// that was refused as `WrongShape` before `Control` could name a stick whole.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_southpaw_preset_swaps_the_sticks() {
+        use crate::binding::Stick;
+
+        #[derive(InputAction)]
+        #[action(path = "override_tests.stick.move", output = bevy_math::Vec2, intent = Directional2)]
+        struct StickMove;
+
+        #[derive(InputAction)]
+        #[action(path = "override_tests.stick.look", output = bevy_math::Vec2, intent = Directional2)]
+        struct StickLook;
+
+        #[derive(InputContext)]
+        #[context(path = "override_tests.sticks", tick = Render)]
+        struct WithSticks;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<WithSticks>(|controls| {
+            controls.bind::<StickMove>(Stick::Left).mappable();
+            controls.bind::<StickLook>(Stick::Right).mappable();
+        });
+
+        let mut southpaw = Overrides::new();
+        let move_row = row(&app, "override_tests.stick.move");
+        let look_row = row(&app, "override_tests.stick.look");
+        southpaw.bind(
+            move_row.scheme,
+            move_row.key,
+            [Control::GamepadStick(Stick::Right)],
+        );
+        southpaw.bind(
+            look_row.scheme,
+            look_row.key,
+            [Control::GamepadStick(Stick::Left)],
+        );
+
+        let problems = apply_overrides(app.world_mut(), &southpaw);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(
+            slots(&app, "override_tests.stick.move"),
+            [Control::GamepadStick(Stick::Right)]
+        );
+        assert_eq!(
+            slots(&app, "override_tests.stick.look"),
+            [Control::GamepadStick(Stick::Left)]
         );
     }
 

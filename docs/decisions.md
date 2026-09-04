@@ -80,6 +80,7 @@ here, so there is one `D`-numbering in the project.
 | **D55** | State-driven activation runs inside `StateTransition`                         | design §7.2     |
 | **D56** | Activation answers per context type, and is declared on the builder           | design §7.2     |
 | **D57** | Where two pads report one axis, the one that moved last speaks                | design §7.4     |
+| **D58** | A gamepad stick is a `Control`, named whole                                   | design §8.1     |
 
 ---
 
@@ -1264,3 +1265,26 @@ stick on the second pad reads zero until it next moves, and a disconnect clears 
 rather than only that one's. A paired instance never sees this, because it reads one device by
 construction. `leafwing-input-manager` takes the same position, and its maintainer reports never
 having had a complaint.
+
+### D58 — A gamepad stick is a `Control`, named whole
+
+**Decided.** `Control` gains `GamepadStick(Stick)`, reporting `ChannelShape::Axis2` on the same terms
+`MouseMotion` already reports `Delta2`. `ControlClass::of` becomes total — `AnyStick` fills the one
+gap `Axis2` used to leave — so a stick is admissible, capturable and rebindable exactly as the mouse
+already was: `for_each_part`, `set_part` and `arrival` all resolve a stick push to this one control,
+never to one of its two axes.
+
+**Rules out.** R19.12 as first written, which named sticks as the paradigm case of a device class
+with no per-mapping rebinding, presets the only way to move one. That premise is what left
+`ControlClass::of(Axis2)` with no answer, and `admissible` refused every control against it —
+R19.12 is revised alongside this decision.
+
+**What stays split.** Consumption does not follow: `for_each_control` still decomposes
+`BindingSource::GamepadStick` into its two `GamepadAxis` atoms, unchanged, which is the granularity
+`ConsumedControls` and reservation already key on. `Control::GamepadStick` is the first `Control`
+naming something another `Control` also names in part, and it stays confined to presentation,
+override and capture — it is never a claim.
+
+**Reversal.** Every settings screen offering a capture button for a stick row would need to go back
+to not offering one, and a saved file's `stick/Left` row would need to be read as unrecognized rather
+than as a control.

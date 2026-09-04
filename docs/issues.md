@@ -121,50 +121,6 @@ from `StateTransition`.
 a reading of which of `active` and `is_active` every other caller means, which is why this wants a
 chunk rather than an edit.
 
-### 1.6 A stick declared `mappable` produces a settings row that cannot work
-
-`binding.rs` · **verified**, all three halves
-
-`bind::<Move>(Stick::Left).mappable()` is the obvious thing to write and three things go wrong at
-once: no plan-build diagnostic is produced; `for_each_part` yields the single part
-`(Whole, GamepadAxis(LeftStickX))`, so the row a screen draws **names half the stick**; and
-`set_part` has no `GamepadStick` arm, so applying an override for it returns `false` and changes
-nothing.
-
-The player sees a row captioned "Left Stick X", presses something, and nothing happens.
-`for_each_part`'s own comment states the intended rule — a stick has no part a player rebinds, and
-"what they get instead of per-part rebinding is a tunable" — and nothing enforces it. R4.8 is the
-requirement: an unusable declaration must produce an actionable error rather than silently doing
-nothing.
-
-`MouseMove` is the same shape one degree less visible, since replacing mouse motion with mouse
-motion is at least a no-op rather than a wrong control.
-
-*Fix:* **chunk 87**, which absorbs this: with a whole-stick control the declaration works rather
-than needing a diagnostic. R4.8's diagnostic is still owed wherever a declaration stays unusable.
-
-### 1.7 A southpaw preset is refused, and a preset is the only remapping a stick has
-
-`overrides.rs:1017`, `capture.rs:146` · **verified**: the answer is `WrongShape`
-
-A `Stick::Left` row reports `accepts: Axis2`. `ControlClass::of(Axis2)` is `None`, and `admissible`
-refuses every control against `None` — so a preset that swaps the two sticks comes back
-`WrongShape`.
-
-This is the model rather than a missing match arm: `Override::Controls` holds `Control`s and no
-`Control` names a whole stick, which is what `overrides.rs:1017`'s own comment says. It is 1.6 seen
-from the far end — that one is a stick declared `mappable`, this is a stick moved by a preset — and
-R19.12 is the requirement neither reaches: a preset is meant to be the entire remapping story for a
-device class that offers no per-mapping rebinding, **sticks especially**. Southpaw is the canonical
-example of a preset, and it is the one thing presets cannot express.
-
-`docs/design.md` §10.2 says "sticks included" in as many words.
-
-*Fix:* **chunk 87**. The decision was taken the other way than this entry frames it: not `Override`
-learning to name a stick, but `Control` doing so — `Control::MouseMotion` is already a whole
-two-dimensional source that works, and the stick's exclusion was inherited from Bevy's event types
-rather than chosen.
-
 ### 1.8 A game that sets a gamepad button threshold is ignored, and told nothing
 
 `device.rs:296`, `is_customized` · **verified** by reading the field list against

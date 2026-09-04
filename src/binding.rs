@@ -678,9 +678,14 @@ impl Part {
 /// One physical control.
 ///
 /// A binding names a *source*, which may be a control or an arrangement of several — a directional
-/// composite is four buttons and a stick is two axes. This is what those decompose into, and it is
-/// the granularity at which one context takes a control from another: a menu claiming the movement
-/// keys claims four controls, and a global screenshot key bound to a fifth is unaffected.
+/// composite is four buttons. This is what those decompose into, and it is the granularity at which
+/// one context takes a control from another: a menu claiming the movement keys claims four controls,
+/// and a global screenshot key bound to a fifth is unaffected.
+///
+/// [`GamepadStick`](Self::GamepadStick) is the one exception: a stick is two axes, but nothing binds
+/// or rebinds one of them on its own, so it is named here whole, the same way
+/// [`MouseMotion`](Self::MouseMotion) already is. It still decomposes to those two axes for
+/// consumption — see [`BindingSource::for_each_control`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Control {
     /// A keyboard key.
@@ -695,6 +700,9 @@ pub enum Control {
     /// One axis of a gamepad stick or trigger.
     #[cfg(feature = "gamepad")]
     GamepadAxis(GamepadAxis),
+    /// A gamepad stick, read whole rather than as its two axes.
+    #[cfg(feature = "gamepad")]
+    GamepadStick(Stick),
     /// The mouse being moved.
     MouseMotion,
 }
@@ -712,7 +720,9 @@ impl Control {
             Self::MouseButton(_) => crate::mapping::Scheme::KeyboardMouse,
             Self::MouseMotion => crate::mapping::Scheme::KeyboardMouse,
             #[cfg(feature = "gamepad")]
-            Self::GamepadButton(_) | Self::GamepadAxis(_) => crate::mapping::Scheme::Gamepad,
+            Self::GamepadButton(_) | Self::GamepadAxis(_) | Self::GamepadStick(_) => {
+                crate::mapping::Scheme::Gamepad
+            }
         }
     }
 
@@ -722,9 +732,9 @@ impl Control {
     /// arrangement of them, and what decides whether a captured control fits the mapping it was
     /// captured for.
     ///
-    /// Note what is missing: no control answers [`Axis2`](ChannelShape::Axis2). A stick is two
-    /// axes and a directional composite is four buttons, so a two-dimensional reading is always
-    /// something several controls produce together and never something one of them is.
+    /// A directional composite is still never one of these: four buttons produce a two-dimensional
+    /// reading together, and none of them is it alone. A stick is the exception, read whole rather
+    /// than decomposed, on the same terms as [`MouseMotion`](Self::MouseMotion).
     pub const fn shape(self) -> ChannelShape {
         match self {
             #[cfg(feature = "keyboard")]
@@ -736,6 +746,8 @@ impl Control {
             Self::GamepadButton(_) => ChannelShape::Button,
             #[cfg(feature = "gamepad")]
             Self::GamepadAxis(_) => ChannelShape::Axis1,
+            #[cfg(feature = "gamepad")]
+            Self::GamepadStick(_) => ChannelShape::Axis2,
             Self::MouseMotion => ChannelShape::Delta2,
         }
     }
@@ -806,6 +818,8 @@ impl From<Control> for BindingSource {
             Control::GamepadButton(button) => Self::GamepadButton(button),
             #[cfg(feature = "gamepad")]
             Control::GamepadAxis(axis) => Self::GamepadAxis(axis),
+            #[cfg(feature = "gamepad")]
+            Control::GamepadStick(stick) => Self::GamepadStick(stick),
             Control::MouseMotion => Self::MouseMotion,
         }
     }
@@ -842,9 +856,11 @@ pub enum BindingSource {
 impl BindingSource {
     /// Calls `visit` with every physical control this source reads.
     ///
-    /// One for a plain control, four for a directional composite, two for a stick. This is what
-    /// consumption and chord clashes are recorded against, so that taking a composite takes its
-    /// parts rather than an arrangement nothing else can name.
+    /// One for a plain control, four for a directional composite, two for a stick — its two axes,
+    /// never [`Control::GamepadStick`] itself, so that a plain binding on one axis and a binding on
+    /// the whole stick still contest the same control. This is what consumption and chord clashes
+    /// are recorded against, so that taking a composite takes its parts rather than an arrangement
+    /// nothing else can name.
     ///
     /// Allocation-free, because it runs per binding per tick. Use [`controls`](Self::controls)
     /// where a collection is more convenient than a callback.
@@ -912,10 +928,7 @@ impl BindingSource {
             #[cfg(feature = "gamepad")]
             Self::GamepadAxis(axis) => visit(Part::Whole, Control::GamepadAxis(*axis)),
             #[cfg(feature = "gamepad")]
-            Self::GamepadStick(stick) => {
-                let (x, _) = stick.axes();
-                visit(Part::Whole, Control::GamepadAxis(x));
-            }
+            Self::GamepadStick(stick) => visit(Part::Whole, Control::GamepadStick(*stick)),
         }
     }
 
@@ -932,17 +945,17 @@ impl BindingSource {
     pub(crate) fn set_part(&mut self, part: Part, control: Control) -> bool {
         match (&mut *self, part) {
             // A whole binding is replaced outright, since the new source is entirely the new
-            // control. A stick is deliberately not in here: it reads two axes and reports a
-            // direction, and no single control can stand in for that.
+            // control.
             (Self::MouseMotion, Part::Whole) => self.replace_whole(control),
             #[cfg(feature = "keyboard")]
             (Self::Button(_), Part::Whole) => self.replace_whole(control),
             #[cfg(feature = "mouse")]
             (Self::MouseButton(_), Part::Whole) => self.replace_whole(control),
             #[cfg(feature = "gamepad")]
-            (Self::GamepadButton(_) | Self::GamepadAxis(_), Part::Whole) => {
-                self.replace_whole(control)
-            }
+            (
+                Self::GamepadButton(_) | Self::GamepadAxis(_) | Self::GamepadStick(_),
+                Part::Whole,
+            ) => self.replace_whole(control),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             (Self::Axis1(parts), Part::Negative) => set_button(&mut parts.negative, control),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
@@ -1002,7 +1015,7 @@ impl BindingSource {
 
 /// The left or right stick on a gamepad.
 #[cfg(feature = "gamepad")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Stick {
     /// The left stick.
     Left,
@@ -1017,6 +1030,15 @@ impl Stick {
         match self {
             Self::Left => (GamepadAxis::LeftStickX, GamepadAxis::LeftStickY),
             Self::Right => (GamepadAxis::RightStickX, GamepadAxis::RightStickY),
+        }
+    }
+
+    /// Which stick this axis is half of, if it is half of one — `None` for a trigger.
+    pub const fn containing(axis: GamepadAxis) -> Option<Self> {
+        match axis {
+            GamepadAxis::LeftStickX | GamepadAxis::LeftStickY => Some(Self::Left),
+            GamepadAxis::RightStickX | GamepadAxis::RightStickY => Some(Self::Right),
+            _ => None,
         }
     }
 }

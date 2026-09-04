@@ -153,6 +153,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 80  | Same-priority contexts, ordered                   |
 | 81  | A rebound row keeps its declared capacity         |
 | 84  | A save file from a build that came later          |
+| 87  | A stick is a control                              |
 
 ---
 
@@ -200,36 +201,6 @@ comparison is against a number the assignment cannot move.
   remembers is what produced this.
 - **Verified against a headless `App`** — 5 of 5 quiet frames without the exclusive context, 0 of
   5 with it.
-
-### 87. A stick is a control
-
-A southpaw preset comes back `WrongShape`. A `Stick::Left` row reports `accepts: Axis2`,
-`ControlClass::of(Axis2)` is `None`, and `admissible` refuses every control against `None` — so
-the canonical example of a preset is the one thing presets cannot express, against R19.12 and a
-`docs/design.md` §10.2 that says "sticks included" in as many words.
-
-- **The mouse already works this way.** `Control::MouseMotion` is a whole two-dimensional source
-  that never decomposed, and `Delta2` maps to `AnyDelta`, so mouse motion is admissible, capturable
-  and rebindable while a stick is none of the three. The asymmetry was inherited from Bevy's event
-  types rather than chosen — `GamepadAxis::LeftStickX` exists upstream so a stick had somewhere to
-  decompose to; mouse motion arrives whole and had nowhere. This chunk makes the gamepad match.
-- **It absorbs the `mappable` stick.** `for_each_part` yields `(Whole, GamepadAxis(LeftStickX))` for
-  a stick, so `bind::<Move>(Stick::Left).mappable()` draws a row captioned "Left Stick X" that
-  `set_part` then cannot fill. With a whole-stick control the part *is* the stick and `set_part`
-  gets its arm, so what was going to be a diagnostic for an unusable declaration becomes a
-  declaration that works. R4.8's diagnostic is still owed wherever a declaration stays unusable.
-- **The rule this chunk owes: does consuming a stick consume its axes?** `ConsumedControls` is a
-  flat map keyed by `Control`, so a whole stick and `GamepadAxis(LeftStickX)` will not alias on
-  their own. `Control`'s own documentation calls itself the granularity at which one context takes
-  a control from another, and this is its first member that contains another one.
-- **The blast radius is the second job `Control` has** — `Mapping::slots`, `Override::Controls`,
-  what a capture returns, the stored names chunk 37 writes to a saved file, and R18.4's glyph key of
-  (brand, control). Every one of those wants the whole stick. Consumption is the only caller that
-  ever wanted the atoms, which is why the enum ended up shaped for it.
-- **Not doing: triggers.** A trigger is already one `GamepadAxis`, `Axis1` maps to `AnyAxis`, and a
-  preset that swaps two of them works today. Nothing about them is waiting on this.
-- **Verified by:** a southpaw preset that applies, and a settings screen that then names the stick
-  the player is actually using.
 
 ### 88. The gamepad-settings warning misses the global thresholds
 

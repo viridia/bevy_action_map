@@ -1241,9 +1241,9 @@ and response curves ([IGA file][steam-iga]).
   tunable that happens to drive a modifier parameter is the supported path, and it is what satisfies
   R20.5.
 - **R19.12 (SHOULD)** **Presets**: named alternative arrangements of mappings and tunables
-  ("Default", "Southpaw", "Lefty") that a player selects as a unit. For device classes where
-  per-mapping rebinding is not offered — sticks especially — a preset is the entire remapping story,
-  and it is also how a game ships a sensible starting point per control scheme.
+  ("Default", "Southpaw", "Lefty") that a player selects as a unit, moving several rows — including
+  a `Fixed` one a capture screen never offers a button for — in one step. It is also how a game
+  ships a sensible starting point per control scheme.
 - **R19.13 (SHOULD)** A game that offers no rebinding UI at all must still work: mappings,
   tunables, and presets are additive declarations, never a precondition for binding an action.
 - **R19.14 (MUST)** Every player-visible name this crate carries — mapping names (R19.9), action

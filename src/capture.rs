@@ -83,9 +83,9 @@ pub const MOUSE_MOTION: f32 = 8.0;
 /// reasonable. "Any button-shaped control" qualifies because the device set is open. "The arrow
 /// keys" does not — there are four of them, and naming them is clearer.
 ///
-/// **There is no class of two-dimensional controls.** No single control reports a position in two
-/// dimensions: a stick is two axes and a directional composite is four buttons. A player rebinds
-/// one part at a time, so the case a two-dimensional class would serve never reaches capture.
+/// A directional composite is still not a member of any class here: it is four buttons, and a
+/// player rebinds one of them at a time. A stick is the one two-dimensional reading a single
+/// control produces, on the same terms as the mouse's [`AnyDelta`](Self::AnyDelta).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ControlClass {
     /// Anything with a pressed sense: keyboard keys, gamepad buttons, and analog triggers, which
@@ -93,6 +93,8 @@ pub enum ControlClass {
     AnyButton,
     /// Any single bipolar axis, such as one half of a stick.
     AnyAxis,
+    /// A gamepad stick, read as the whole two-axis position it reports rather than as one axis.
+    AnyStick,
     /// Anything reporting a displacement that has already happened, such as the mouse.
     AnyDelta,
     /// A keyboard key whose event carries text, once IME composition and dead keys are accounted
@@ -116,6 +118,7 @@ impl ControlClass {
             (self, control.shape()),
             (Self::AnyButton, ChannelShape::Button)
                 | (Self::AnyAxis, ChannelShape::Axis1)
+                | (Self::AnyStick, ChannelShape::Axis2)
                 | (Self::AnyDelta, ChannelShape::Delta2)
         )
     }
@@ -134,16 +137,12 @@ impl ControlClass {
     }
 
     /// The class of controls that can fill a mapping expecting this channel.
-    ///
-    /// `None` for [`Axis2`](ChannelShape::Axis2), because no one control reports one — see the note
-    /// on this type. A mapping that accepts `Axis2` is a stick or a mouse bound whole, and gets a
-    /// tunable rather than a rebinding row.
-    pub const fn of(shape: ChannelShape) -> Option<Self> {
+    pub const fn of(shape: ChannelShape) -> Self {
         match shape {
-            ChannelShape::Button => Some(Self::AnyButton),
-            ChannelShape::Axis1 => Some(Self::AnyAxis),
-            ChannelShape::Delta2 => Some(Self::AnyDelta),
-            ChannelShape::Axis2 => None,
+            ChannelShape::Button => Self::AnyButton,
+            ChannelShape::Axis1 => Self::AnyAxis,
+            ChannelShape::Axis2 => Self::AnyStick,
+            ChannelShape::Delta2 => Self::AnyDelta,
         }
     }
 }
@@ -244,8 +243,8 @@ impl CaptureSession {
     /// Listens for a control for this mapping's first slot.
     ///
     /// Takes the shape and the scheme from the mapping, which is what makes a keyboard row accept a
-    /// key and not a gamepad button. Returns `None` for a mapping no single control can fill — a
-    /// stick or a mouse bound whole — because there is nothing for capture to offer there.
+    /// key and not a gamepad button, and a stick row accept a stick pushed whole rather than one of
+    /// its axes.
     ///
     /// A mapping holds a list of slots, and this addresses the front of it — the "primary" column
     /// of a table with more than one. Use [`for_slot`](Self::for_slot) for the others.
@@ -262,9 +261,8 @@ impl CaptureSession {
     /// Returns `None` for a slot the mapping does not have: past its
     /// [`capacity`](crate::mapping::Mapping::capacity), or more than one past the controls it holds
     /// now. The second is what stops a capture leaving a hole in a list whose *order* is what
-    /// primary and secondary mean. It also returns `None` for a mapping no single control can fill,
-    /// exactly as [`for_mapping`](Self::for_mapping) does, and for one the player may not change at
-    /// all — see [`Rebinding`](crate::mapping::Rebinding).
+    /// primary and secondary mean. It also returns `None` for one the player may not change at all
+    /// — see [`Rebinding`](crate::mapping::Rebinding).
     pub fn for_slot(mapping: &Mapping, slot: usize) -> Option<Self> {
         // A mapping the player cannot change has nothing to capture *for*. It is on the screen so
         // they can read it, and a screen that asked anyway would be offering a rebind it could not
@@ -278,7 +276,7 @@ impl CaptureSession {
         Some(Self {
             mapping: Some(mapping.key),
             slot,
-            ..Self::accepting(ControlClass::of(mapping.accepts)?).within(mapping.scheme)
+            ..Self::accepting(ControlClass::of(mapping.accepts)).within(mapping.scheme)
         })
     }
 
@@ -350,8 +348,7 @@ impl CaptureSession {
 ///
 /// The same three questions arrive from two directions — a press at a rebinding screen, and a row
 /// in a save file — and one control must get one answer either way. `scheme` is `None` for a
-/// capture not restricted to one; `accepts` is `None` for a mapping no single control can fill,
-/// which admits nothing.
+/// capture not restricted to one.
 ///
 /// The order is the order the reasons come in, and reserved is asked before shape so that pressing
 /// the settings key is answered with the reason it cannot be bound rather than with a complaint
@@ -359,7 +356,7 @@ impl CaptureSession {
 pub(crate) fn admissible(
     control: Control,
     scheme: Option<Scheme>,
-    accepts: Option<ControlClass>,
+    accepts: ControlClass,
     reserved: bool,
 ) -> Result<(), RefusedReason> {
     if scheme.is_some_and(|scheme| scheme != control.scheme()) {
@@ -368,7 +365,7 @@ pub(crate) fn admissible(
     if reserved {
         return Err(RefusedReason::Reserved);
     }
-    if !accepts.is_some_and(|class| class.contains(control)) {
+    if !accepts.contains(control) {
         return Err(RefusedReason::Shape);
     }
     Ok(())
@@ -554,9 +551,18 @@ struct Arrival {
 }
 
 /// Turns one raw event into the control a player would say they just used, if any.
-fn arrival(event: &RawEvent, threshold: &ButtonThreshold) -> Option<Arrival> {
+///
+/// `accepts` is what disambiguates a stick's axis: the same deflection is the whole
+/// [`Control::GamepadStick`] to a session listening for one, and the bare
+/// [`Control::GamepadAxis`] to one listening for a trigger or a single axis bound directly. Every
+/// other event has only one control it could ever mean, `accepts` or not.
+fn arrival(
+    event: &RawEvent,
+    threshold: &ButtonThreshold,
+    accepts: ControlClass,
+) -> Option<Arrival> {
     #[cfg(not(feature = "gamepad"))]
-    let _ = threshold;
+    let _ = (threshold, accepts);
 
     match event {
         // Presses only. Capturing on release would let go of a key the player is still holding, and
@@ -589,9 +595,15 @@ fn arrival(event: &RawEvent, threshold: &ButtonThreshold) -> Option<Arrival> {
                 })
             }
             bevy_input::gamepad::RawGamepadEvent::Axis(axis) => (axis.value.abs() >= DEFLECTION)
-                .then_some(Arrival {
-                    control: Control::GamepadAxis(axis.axis),
-                    deliberate: false,
+                .then(|| {
+                    let control = match (accepts, crate::binding::Stick::containing(axis.axis)) {
+                        (ControlClass::AnyStick, Some(stick)) => Control::GamepadStick(stick),
+                        _ => Control::GamepadAxis(axis.axis),
+                    };
+                    Arrival {
+                        control,
+                        deliberate: false,
+                    }
                 }),
             bevy_input::gamepad::RawGamepadEvent::Connection(_) => None,
         },
@@ -623,7 +635,7 @@ pub fn run_captures(
         for event in frame.events_after(session.cursor) {
             session.cursor = Some(event.timestamp);
 
-            let Some(arrival) = arrival(&event.event, &threshold) else {
+            let Some(arrival) = arrival(&event.event, &threshold, session.accepts) else {
                 continue;
             };
 
@@ -636,7 +648,7 @@ pub fn run_captures(
             if let Err(reason) = admissible(
                 arrival.control,
                 session.scheme,
-                Some(session.accepts),
+                session.accepts,
                 reserved.contains(arrival.control),
             ) {
                 // Claimed even though it was refused: the player pressed it at a rebinding screen,
@@ -835,12 +847,7 @@ mod tests {
     #[test]
     fn reserved_answers_before_shape() {
         assert_eq!(
-            admissible(
-                Control::Key(KeyCode::F1),
-                None,
-                Some(ControlClass::AnyAxis),
-                true
-            ),
+            admissible(Control::Key(KeyCode::F1), None, ControlClass::AnyAxis, true),
             Err(RefusedReason::Reserved)
         );
     }
@@ -1141,10 +1148,12 @@ mod tests {
 
         assert_eq!(
             ControlClass::of(ChannelShape::Button),
-            Some(ControlClass::AnyButton)
+            ControlClass::AnyButton
         );
-        // The one with no answer, and the reason there is no two-dimensional class.
-        assert_eq!(ControlClass::of(ChannelShape::Axis2), None);
+        assert_eq!(
+            ControlClass::of(ChannelShape::Axis2),
+            ControlClass::AnyStick
+        );
     }
 
     /// `CharacterProducing` cannot be decided from a bare control, so `contains` always says no,
@@ -1181,17 +1190,27 @@ mod tests {
         assert!(!ControlClass::AnyDelta.contains_event(&key(Some("a"), ButtonState::Pressed)));
     }
 
-    /// A stick bound whole is not a rebinding row, so `for_slot` says so rather than making one
-    /// that can never be filled.
+    /// A stick bound whole is now a rebinding row like any other: pushing it is what a settings
+    /// screen offers, and `Control::GamepadStick` is what comes back — never the bare axis that
+    /// happened to cross the threshold first.
     #[cfg(feature = "gamepad")]
     #[test]
-    fn a_slot_no_single_control_can_fill_has_no_capture() {
+    fn a_pushed_stick_is_captured_whole() {
+        use bevy_input::gamepad::{GamepadAxis, RawGamepadAxisChangedEvent};
+
         #[derive(InputContext)]
         #[context(path = "capture_tests.stick", tick = Render)]
         struct WithStick;
 
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.init_resource::<Heard>();
+        app.add_observer(|event: On<Captured>, mut heard: ResMut<'_, Heard>| {
+            heard.captured.push(event.control);
+        });
+        app.add_observer(|event: On<Refused>, mut heard: ResMut<'_, Heard>| {
+            heard.refused.push((event.control, event.reason));
+        });
         app.add_context::<WithStick>(|controls| {
             controls
                 .bind::<Move>(crate::binding::Stick::Left)
@@ -1200,7 +1219,31 @@ mod tests {
 
         let target = &crate::mapping::mappings(app.world())[0];
         assert_eq!(target.accepts, ChannelShape::Axis2);
-        assert!(CaptureSession::for_mapping(target).is_none());
+        app.world_mut()
+            .spawn(CaptureSession::for_mapping(target).expect("a stick mapping now captures"));
+        app.update();
+
+        // A trigger deflects too, and is not this stick: a continuous reading past its threshold
+        // is refused in silence, the same as everything else that shape does not fit (`DEFLECTION`
+        // and `MOUSE_MOTION`'s own doc explains why nothing is said out loud for these).
+        app.world_mut()
+            .write_message(bevy_input::gamepad::RawGamepadEvent::Axis(
+                RawGamepadAxisChangedEvent::new(Entity::PLACEHOLDER, GamepadAxis::LeftZ, 1.0),
+            ));
+        app.update();
+        let heard = app.world().resource::<Heard>();
+        assert!(heard.captured.is_empty());
+        assert!(heard.refused.is_empty());
+
+        app.world_mut()
+            .write_message(bevy_input::gamepad::RawGamepadEvent::Axis(
+                RawGamepadAxisChangedEvent::new(Entity::PLACEHOLDER, GamepadAxis::LeftStickX, 0.8),
+            ));
+        app.update();
+        assert_eq!(
+            app.world().resource::<Heard>().captured,
+            [Control::GamepadStick(crate::binding::Stick::Left)]
+        );
     }
 
     /// Reserving and declaring a mapping say opposite things about one binding.

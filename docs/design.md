@@ -129,8 +129,9 @@ and `Delta2` is a displacement that already happened. `Intent::accepts` decides 
 can serve which intent, and a binding whose channel cannot serve its action's intent is refused when
 the context is declared. The derive checks output against intent in a compile-time assertion.
 
-No single `Control` reports `Axis2`: a stick is two axes and a directional composite is four
-buttons, so a two-dimensional reading is always several controls together.
+A directional composite's `Axis2` is still four buttons read together; a gamepad stick's is the one
+exception, a single `Control::GamepadStick` reporting a position the same way `MouseMotion` reports a
+displacement.
 
 ### 3.2 Runtime values
 
@@ -279,7 +280,7 @@ A class binding names a `ControlClass` rather than a control, which is what a fo
 claims character-producing keys with:
 
 ```rust
-pub enum ControlClass { AnyButton, AnyAxis, AnyDelta, CharacterProducing }
+pub enum ControlClass { AnyButton, AnyAxis, AnyStick, AnyDelta, CharacterProducing }
 ```
 
 The plan carries these as a second, separate list. Evaluation consults it only for an event on a
@@ -463,7 +464,7 @@ owner.
 
 ```rust
 pub enum Control { Key(KeyCode), MouseButton(MouseButton), GamepadButton(GamepadButton),
-                   GamepadAxis(GamepadAxis), MouseMotion }
+                   GamepadAxis(GamepadAxis), GamepadStick(Stick), MouseMotion }
 ```
 
 A `BindingSource` is one control or an arrangement of them. Composites carry a `Part` naming which
@@ -475,7 +476,12 @@ pub enum Part { Whole, Negative, Positive, Up, Down, Left, Right }
 
 `AxisButtons` makes a bipolar axis from two buttons; `DirectionalButtons` makes a direction from
 four (`DirectionalButtons::wasd()` is the named case); `Stick` and `MouseMove` are the analog
-sources. `Control::scheme()` and `Control::shape()` classify one control, and
+sources, and both read as `Part::Whole` — a stick has no part a player rebinds one of. `GamepadStick`
+is `Control`'s only member naming what another one of its members names in part: a whole stick, for
+presentation, override application and capture, reporting `ChannelShape::Axis2` the way `MouseMotion`
+reports `Delta2`. Consumption does not follow it — `BindingSource::for_each_control` still decomposes
+a stick binding into its two `GamepadAxis` atoms, which is the granularity `ConsumedControls` and
+reservation key on. `Control::scheme()` and `Control::shape()` classify one control, and
 `BindingSource::channel_shape` classifies an arrangement.
 
 ### 8.2 The builder
@@ -779,9 +785,9 @@ when an action has no mapping in that scheme or more than one.
 
 Passing a preset to `apply_overrides_with_preset` exempts exactly the rows that preset names from
 the `NotRebindable` refusal — which is what lets a preset move a `Fixed` row a capture screen never
-offers a button for, sticks included. Every other refusal still applies. A preset is a starting
-point, not a layer: selecting one writes its rows into the same working copy a manual capture writes
-into, and there is no persisted "which preset is active" anywhere.
+offers a button for. Every other refusal still applies. A preset is a starting point, not a layer:
+selecting one writes its rows into the same working copy a manual capture writes into, and there is
+no persisted "which preset is active" anywhere.
 
 There is no crate-owned registry of presets. A game keeps its own list, as it keeps its own working
 copy.

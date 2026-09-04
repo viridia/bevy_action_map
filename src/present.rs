@@ -71,6 +71,8 @@ use crate::condition::ConditionDescriptor;
 use crate::mapping::Scheme;
 
 #[cfg(feature = "gamepad")]
+use crate::binding::Stick;
+#[cfg(feature = "gamepad")]
 use bevy_input::gamepad::{GamepadAxis, GamepadButton};
 #[cfg(feature = "keyboard")]
 use bevy_input::keyboard::KeyCode;
@@ -363,6 +365,7 @@ impl Control {
     /// ```ignore
     /// Control::Key(KeyCode::Space).name()             // "key/Space"
     /// Control::GamepadButton(GamepadButton::South).name()  // "pad/South"
+    /// Control::GamepadStick(Stick::Left).name()             // "stick/Left"
     /// ```
     pub fn name(self) -> alloc::borrow::Cow<'static, str> {
         use alloc::borrow::Cow;
@@ -387,6 +390,11 @@ impl Control {
                 },
                 Cow::Borrowed,
             ),
+            #[cfg(feature = "gamepad")]
+            Self::GamepadStick(stick) => Cow::Borrowed(match stick {
+                Stick::Left => "stick/Left",
+                Stick::Right => "stick/Right",
+            }),
             #[cfg(feature = "mouse")]
             Self::MouseButton(button) => mouse_name(button).map_or_else(
                 || match button {
@@ -430,6 +438,12 @@ impl Control {
                 .parse()
                 .ok()
                 .map(|index| Self::GamepadAxis(GamepadAxis::Other(index)));
+        }
+        #[cfg(feature = "gamepad")]
+        match name {
+            "stick/Left" => return Some(Self::GamepadStick(Stick::Left)),
+            "stick/Right" => return Some(Self::GamepadStick(Stick::Right)),
+            _ => {}
         }
         #[cfg(feature = "mouse")]
         if let Some(button) = mouse_from_name(name) {
@@ -475,6 +489,11 @@ impl Control {
                 },
                 Cow::Borrowed,
             ),
+            #[cfg(feature = "gamepad")]
+            Self::GamepadStick(stick) => Cow::Borrowed(match stick {
+                Stick::Left => "Left Stick",
+                Stick::Right => "Right Stick",
+            }),
             #[cfg(feature = "mouse")]
             Self::MouseButton(button) => mouse_label(button).map_or_else(
                 || match button {
@@ -548,7 +567,7 @@ impl ControlOrigin {
     /// the question went unanswered rather than that the control has no class.
     pub const fn class(&self) -> Option<ControlClass> {
         match self {
-            Self::Ours(control) => ControlClass::of(control.shape()),
+            Self::Ours(control) => Some(ControlClass::of(control.shape())),
             Self::Foreign { class, .. } => *class,
         }
     }
@@ -887,6 +906,8 @@ mod tests {
         {
             round_trip(Control::GamepadButton(GamepadButton::Other(7)));
             round_trip(Control::GamepadAxis(GamepadAxis::Other(3)));
+            round_trip(Control::GamepadStick(Stick::Left));
+            round_trip(Control::GamepadStick(Stick::Right));
         }
         #[cfg(feature = "mouse")]
         round_trip(Control::MouseButton(MouseButton::Other(9)));
@@ -917,6 +938,11 @@ mod tests {
                 .map(|&button| Control::MouseButton(button).name()),
         );
         names.push(Control::MouseMotion.name());
+        #[cfg(feature = "gamepad")]
+        names.extend([
+            Control::GamepadStick(Stick::Left).name(),
+            Control::GamepadStick(Stick::Right).name(),
+        ]);
 
         let mut sorted = names.clone();
         sorted.sort_unstable();
