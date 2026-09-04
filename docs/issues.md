@@ -540,9 +540,6 @@ any one of them is misled about a mechanism.
 
 - `docs/design.md` §3's trait sketch says `// plus CATEGORY and CONSUME, with defaults`. The
   constant is `CONSUMES`. Copying the sketch into a hand-written impl does not compile.
-- `overrides.rs:666`, `OverridesLoader`'s doc example passes `&mut de`, and `toml::Deserializer`
-  implements `Deserializer` by value only. The crate's own round-trip test 1,265 lines below passes
-  `toml::Deserializer::new(&text)`. The example is `ignore`d, so nothing would catch it.
 
 ### 4.3 Internal comments whose stated reason is false
 

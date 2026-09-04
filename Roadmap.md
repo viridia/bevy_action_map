@@ -56,7 +56,7 @@ in `docs/decisions.md`, where each says what reversing it would cost.
 
 - **Glyphs.** Identifiers are defined; no image is resolved.
 - **Writing a saved override set to a file.** The crate serializes and deserializes one; where the
-  bytes go was always the app's decision.
+  bytes go was always the app's decision — chunk 92.
 - **A caller for the class-binding mechanism.** Nothing in tree is a focused text field, so
   `ControlClass::CharacterProducing` has never been bound outside its own tests — chunk 82.
 - **A snapshot of a context's state.** The shape is designed and written down; nothing has taken one
@@ -152,6 +152,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 75  | Four names for a 2×2, twelve times over           |
 | 80  | Same-priority contexts, ordered                   |
 | 81  | A rebound row keeps its declared capacity         |
+| 84  | A save file from a build that came later          |
 
 ---
 
@@ -160,21 +161,6 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 The live tier of [docs/issues.md](./docs/issues.md): no unusual configuration, no feature nobody has
 used, and the answer is still wrong. Six more of its entries are behind this one and not yet
 routed.
-
-### 84. A save file from a build that came later
-
-`resolve` binds the version field to `_version` and never reads it, so a file saying `version = 99`
-is parsed row by row as a version 1 file. Half of R17.3 is done — a file *missing* the field fails
-the whole load — and the other half is what a loader does with a number it does not recognise. The
-case is a rollback, a second machine, or a Steam beta branch: a v2 settings file reinterpreted by a
-v1 build rather than refused.
-
-- **Refusing is three lines. The chunk is the other question:** what a migration looks like, or an
-  explicit statement that there is no migration path and the format is frozen until one is
-  designed. Ground rule 5 wants a gate either way, and this is cheaper to answer before the format
-  has files in the wild than after.
-- **`docs/design.md` §10.3 shows `version = 1`** in its sample without saying what any other number
-  means.
 
 ### 85. A dead zone at full deflection
 
@@ -377,7 +363,7 @@ that clears what accumulated under the old rule.
 
 `UnresolvedMapping` and `UnresolvedTunable` are the same struct — `{ scheme, name }` — each
 documented as being for the same reason as the other. One type with a field saying which kind of row
-it was, and `OverridesLoader::deserialize`'s four-tuple becomes a struct with three fields.
+it was, and `resolve_saved`'s `ResolvedOverrides` four-tuple becomes a struct with three fields.
 
 - **Not doing:** anything to `OverrideProblem`. That is a different report at a different time.
 
@@ -575,6 +561,35 @@ network removed, which was the expensive part.
   disagreeing with the authority about what happened. Those want a network; rewinding does not.
 - **Split if it grows.** Making the state snapshot-able with a differential test is separable from
   the example that rewinds, and ground rule 1 says that split happens before the code, not during.
+
+### 92. Persisting bindings through `bevy_settings`
+
+Chunk 23 wired `Overrides` into Disasteroids' settings screen; nothing has ever written one to disk.
+"Writing a saved override set to a file" is still listed as never built, the destination left to the
+app on purpose (D53). `bevy_settings` is that destination: register `SavedOverrides` (D59) as a
+`SettingsGroup` resource and let it merge into the game's one settings file alongside whatever else
+the app declares there.
+
+- **The mechanism is validated, not open.** A scratch test against `bevy_settings::resources_to_toml`
+  / `apply_settings_to_world` confirmed the whole path round-trips correctly: `SavedOverrides`'s own
+  fields are walked structurally (no stutter, no bevy_settings change needed), and its nested
+  `SavedRow`/`SavedTunableValue` fields bridge through `#[reflect(Serialize, Deserialize)]` to their
+  own hand-written encoding rather than bevy_reflect's generic enum shape. This crate's own
+  `overrides::tests::persistence::a_saved_override_set_round_trips_through_reflect` pins the same
+  contract without a `bevy_settings` dependency. This chunk is the remaining wiring, not a risk to
+  chase.
+- **Load at startup, save on Confirm.** `apply_and_close` in `settings.rs` already applies a pending
+  `Overrides` to the running game; this chunk adds a startup system calling `resolve_saved` against
+  the loaded `SavedOverrides` resource before the first `apply_overrides`, and a `save_overrides` call
+  on Confirm feeding back into it.
+- **A dev-dependency of the examples, not the crate.** This crate publishes `SavedOverrides` and no
+  opinion about where the bytes go (D53); `bevy_settings` is wired into `examples/disasteroids` only.
+- **Not doing:** per-profile or per-scheme settings groups (R17.4), and anything Split Friction's two
+  protagonists need — chunk 71 owns per-player preset selection once a settings group exists to read
+  and write, this chunk owns getting one player's set to and from disk at all.
+- **Retires the "Writing a saved override set to a file" row** in "Never built".
+- **Verified by:** rebinding a control, quitting Disasteroids, relaunching it, and finding the
+  binding still applied.
 
 ---
 

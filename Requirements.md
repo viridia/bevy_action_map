@@ -1030,7 +1030,8 @@ that assumes any of that is stable loses player data silently on the next patch.
   loading its settings, because settings load early.
 - **R17.2 (MUST)** Loading must tolerate unknown actions, unknown controls, and removed devices
   without failing the whole load; unresolved entries must be reported, not dropped silently.
-- **R17.3 (MUST)** A version field with a documented migration path.
+- **R17.3 (MUST)** _(D58)_ A version field. Loading refuses a saved set whose version this build
+  never shipped rather than reinterpreting it as one it did.
 - **R17.4 (SHOULD)** Multiple named profiles per user, and separate override sets per control scheme
   (a KBM remap must not disturb the gamepad layout).
 - **R17.5 (SHOULD)** Serialization must go through `Reflect` + the type registry so third-party
@@ -1061,6 +1062,11 @@ that assumes any of that is stable loses player data silently on the next patch.
   would put that obligation somewhere we do not control — an upstream rename would silently orphan
   every saved binding. The format must also carry what the binding layer already distinguishes:
   physical versus logical keys (§12.R12.1) and device class, at minimum.
+- **R17.10 (MUST)** _(D59)_ The portable saved type claims no field besides `action_map_version`,
+  `bindings`, and `tunables`, and the version field is not a bare `version`. A settings layer that
+  merges several resources' fields into one shared TOML table by name may place this type's fields
+  beside an unrelated struct's, so the field most likely to collide with something else's is
+  namespaced.
 
 ---
 

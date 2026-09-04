@@ -71,6 +71,8 @@ here, so there is one `D`-numbering in the project.
 | **D48** | Applying rewrites the authored bindings; a variant keeps the declared slots   | design §10.1    |
 | **D49** | The control encoding is a format we own                                       | design §10.3    |
 | **D50** | Loading is pure, and reports rather than drops                                | design §10.3    |
+| **D58** | An unrecognized version refuses the set; no migration exists yet              | design §10.3    |
+| **D59** | Persistence goes through a separate, reflectable type                         | design §10.3    |
 | **D51** | An authority backend writes a value, not a state                              | —               |
 | **D52** | Pairing is a runtime handle; the join gesture reuses class bindings           | design §7.4     |
 | **D53** | The crate detects and reports; the app decides                                | —               |
@@ -1028,6 +1030,67 @@ unrecognized control is reported, never dropped in silence.
 back in the same diagnostic shape the plan-build tier produces.
 
 **Accepted.** A renamed action's row is dropped on the next save rather than preserved unresolved.
+
+### D58 — An unrecognized version refuses the set; no migration exists yet
+
+**Decided.** `resolve_saved` requires `SavedOverrides::action_map_version` to equal the one format
+this crate has ever shipped; any other value returns `UnsupportedVersion` rather than resolving
+anything. There is no migration mechanism, because no second version has ever existed to say what it
+would convert from.
+
+**Rules out.** Silently reinterpreting a newer or otherwise unrecognized set as the current version —
+resolving whatever rows happen to look familiar and discarding the rest without saying so.
+
+**Reversal.** A migration path designed now would be designed against a guess, since nothing has
+ever shipped a second version to specify what changed. Refusing is what a version field is for in
+the meantime: rejecting with a stated reason costs nothing to undo once a real second version needs
+a real migration, where guessing wrong now would already have shipped a converter for the wrong
+shape.
+
+**Accepted.** A save from a build that came later — a rollback, a second machine on a newer patch, a
+Steam beta branch — is rejected outright rather than partially salvaged. That is a stricter tolerance
+than R17.2 gives an unresolved row, and deliberately so: a resolved row from the wrong version's
+default is a mismatch the game cannot see the way it can see an `UnresolvedMapping`.
+
+**What forces a bump, and what doesn't.** Growing the vocabulary never does: a new `Control` name, a
+new scheme, a new mapping or tunable name, or a third row-state word all fail safely on an older
+build, because unknown text in any of those positions is already reported rather than guessed at —
+an `UnknownControl`, an `UnresolvedMapping`, a skipped scheme table. A new row-state word is safe
+only because it cannot be mistaken for a control name (every real one carries a `/`); the two words
+that exist and the control-name table are exactly the vocabulary this crate must never redefine.
+What forces a bump is reusing one of those with a new meaning, or changing a row's shape rather than
+its vocabulary — redefining what `"cleared"` means, reassigning a control-name string to a different
+physical control, or moving a row from a scalar-or-list to some other shape. The first kind an old
+build silently gets wrong; the second it fails on with an unlabeled parse error instead of a labeled
+refusal. Either is what the version field exists to catch.
+
+### D59 — Persistence goes through a separate, reflectable type
+
+**Decided.** `Overrides` is never itself the wire type. `SavedOverrides` is a plain, `Reflect`-derived
+struct — `action_map_version`, `bindings`, `tunables`, each an owned `String`-keyed map — that
+`save_overrides`/`resolve_saved` convert to and from. Its own fields are the only ones it claims;
+`action_map_version` rather than a bare `version`, since a settings layer may place these fields
+beside an unrelated struct's under one shared table (R17.10).
+
+**Rules out.** Deriving `Reflect` on `Overrides` itself. A hand-rolled `Serialize`/`Deserialize` pair
+on `Overrides` as the crate's only persistence path, with no plain-data type standing in for it.
+
+**Reversal.** `Overrides`'s own fields hold a `MappingKey`, constructible only from a `&'static str`
+the game already compiled in (D50), and no generic reflection walk can manufacture one from loaded
+data — the same reason `OverridesLoader` was a `DeserializeSeed` rather than a plain `Deserialize`
+before this decision replaced it. A settings crate that lets several resources share one TOML table
+by name (rather than one file per resource) turns every bare field name `SavedOverrides` has into a
+claim against whatever else lands in the same table — the same problem R1.8 solves for action paths
+by requiring a namespacing convention, except here there is no author to apply one: the app picks the
+shared table, not this crate. Two crates both wanting a field named `version` is far likelier than
+both wanting one named `bindings`, which is why only the generic name is renamed.
+
+**Accepted.** `bindings` and `tunables` are themselves unprefixed field names and carry the same
+collision risk in principle — accepted as unlikely rather than eliminated, since prefixing every field
+this crate ever writes would cost legibility for a risk this small. Structural reflection also costs
+two things a hand-rolled encoding controlled: `bindings`' scheme tables sort alphabetically by name
+rather than in `Scheme`'s own declared order, and an empty `tunables` table still gets written rather
+than omitted.
 
 ---
 

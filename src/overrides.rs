@@ -44,6 +44,8 @@ use alloc::vec::Vec;
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
+#[cfg(feature = "serialize")]
+use bevy_reflect::{Reflect, ReflectDeserialize, ReflectSerialize};
 
 use crate::action::ChannelShape;
 use crate::binding::{BindingSpec, Control, MappedPart, apply_tunable_value, mapped_parts};
@@ -274,10 +276,10 @@ pub enum OverrideProblemKind {
     },
 }
 
-/// This crate's own on-disk format version.
+/// This crate's own persistence-format version.
 ///
-/// Only one exists so far, so nothing yet reads it beyond requiring it be present. It exists so a
-/// migration has somewhere to attach once a second version does.
+/// Only one has ever shipped, so there is no migration to run — a [`SavedOverrides`] naming any
+/// other version is refused outright by [`resolve_saved`] rather than resolved as this one (D58).
 #[cfg(feature = "serialize")]
 const FORMAT_VERSION: u32 = 1;
 
@@ -299,113 +301,195 @@ fn scheme_from_name(name: &str) -> Option<Scheme> {
     }
 }
 
+/// A row's saved value: the portable counterpart to [`Override`].
+///
+/// Reached only as a value inside [`SavedOverrides::bindings`]'s nested map, never as a document's
+/// own top level. That placement is what makes the reflect bridge below apply: a `Reflect`-based
+/// deserializer defers to a registered type's own `Deserialize` for a *field's* value (confirmed
+/// against `bevy_reflect`'s map deserializer, which reconstructs a map's value type the same way it
+/// would any other field), which is what keeps the wire form the three compact shapes below rather
+/// than bevy_reflect's own generic enum representation — `{"Controls": [...]}` and the like.
 #[cfg(feature = "serialize")]
-impl serde::Serialize for Override {
+#[derive(Reflect, Clone, Debug, PartialEq)]
+#[reflect(Serialize, Deserialize)]
+pub enum SavedRow {
+    /// The controls the player put in the mapping, in slot order. See [`Override::Controls`].
+    Controls(Vec<String>),
+    /// The player deliberately emptied the mapping. Written and read as `"cleared"`.
+    Cleared,
+    /// Something outside this crate owns this mapping. Written and read as `"external"`.
+    NotOurs,
+}
+
+#[cfg(feature = "serialize")]
+impl serde::Serialize for SavedRow {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             // Bare words a person reads as neither a control nor a mistake — every real control
             // name carries a `/` (chunk 37), so the two can never collide with one (R17.7).
-            Override::Cleared => serializer.serialize_str("cleared"),
-            Override::NotOurs => serializer.serialize_str("external"),
+            SavedRow::Cleared => serializer.serialize_str("cleared"),
+            SavedRow::NotOurs => serializer.serialize_str("external"),
             // A scalar is the same thing as a one-element list, and most rows hold one — a player
             // editing this by hand should not have to type brackets to say so (§10.1).
-            Override::Controls(controls) if controls.len() == 1 => {
-                serializer.serialize_str(controls[0].name().as_ref())
+            SavedRow::Controls(names) if names.len() == 1 => serializer.serialize_str(&names[0]),
+            SavedRow::Controls(names) => names.serialize(serializer),
+        }
+    }
+}
+
+#[cfg(feature = "serialize")]
+impl<'de> serde::Deserialize<'de> for SavedRow {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct RowVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for RowVisitor {
+            type Value = SavedRow;
+
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str("a control name, a list of them, \"cleared\", or \"external\"")
             }
-            Override::Controls(controls) => {
-                use serde::ser::SerializeSeq;
-                let mut seq = serializer.serialize_seq(Some(controls.len()))?;
-                for control in controls {
-                    seq.serialize_element(control.name().as_ref())?;
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(match v {
+                    "cleared" => SavedRow::Cleared,
+                    "external" => SavedRow::NotOurs,
+                    other => SavedRow::Controls(alloc::vec![String::from(other)]),
+                })
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut controls = Vec::new();
+                while let Some(name) = seq.next_element::<String>()? {
+                    controls.push(name);
                 }
-                seq.end()
+                Ok(SavedRow::Controls(controls))
             }
         }
+
+        deserializer.deserialize_any(RowVisitor)
     }
 }
 
-/// The `[bindings.*]` half of the file: one table per scheme, in `Scheme`'s own declared order
-/// rather than sorted by name — so `gamepad` never jumps ahead of `keyboard_mouse` merely because
-/// "g" sorts before "k".
+/// A tunable's saved value: the portable counterpart to [`TunableValue`] — a bare number or a bare
+/// bool, never the bounds, which the game's own declaration carries and a saved set has no business
+/// repeating. Reached only as a nested field value, on the same terms as [`SavedRow`].
 #[cfg(feature = "serialize")]
-struct BindingsTable<'a>(BTreeMap<Scheme, BTreeMap<String, &'a Override>>);
-
-#[cfg(feature = "serialize")]
-impl serde::Serialize for BindingsTable<'_> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.0.len()))?;
-        for (scheme, rows) in &self.0 {
-            map.serialize_entry(scheme_name(*scheme), rows)?;
-        }
-        map.end()
-    }
+#[derive(Reflect, Clone, Copy, Debug, PartialEq)]
+#[reflect(Serialize, Deserialize)]
+pub enum SavedTunableValue {
+    /// See [`TunableValue::Range`].
+    Number(f32),
+    /// See [`TunableValue::Bool`].
+    Bool(bool),
 }
 
-/// A tunable's value, on the wire: a bare number or a bare bool — never the bounds, which the
-/// game's own declaration carries and a save file has no business repeating.
 #[cfg(feature = "serialize")]
-impl serde::Serialize for TunableValue {
+impl serde::Serialize for SavedTunableValue {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            TunableValue::Range { value, .. } => serializer.serialize_f32(*value),
-            TunableValue::Bool(value) => serializer.serialize_bool(*value),
+            SavedTunableValue::Number(value) => serializer.serialize_f32(*value),
+            SavedTunableValue::Bool(value) => serializer.serialize_bool(*value),
         }
     }
 }
 
-/// The `[tunables.*]` half of the file, shaped exactly like [`BindingsTable`].
 #[cfg(feature = "serialize")]
-struct TunablesTable(BTreeMap<Scheme, BTreeMap<&'static str, TunableValue>>);
+impl<'de> serde::Deserialize<'de> for SavedTunableValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ValueVisitor;
 
-#[cfg(feature = "serialize")]
-impl serde::Serialize for TunablesTable {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.0.len()))?;
-        for (scheme, rows) in &self.0 {
-            map.serialize_entry(scheme_name(*scheme), rows)?;
+        impl<'de> serde::de::Visitor<'de> for ValueVisitor {
+            type Value = SavedTunableValue;
+
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str("a number or a bool")
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(SavedTunableValue::Bool(v))
+            }
+
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
+                Ok(SavedTunableValue::Number(v as f32))
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                Ok(SavedTunableValue::Number(v as f32))
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(SavedTunableValue::Number(v as f32))
+            }
         }
-        map.end()
+
+        deserializer.deserialize_any(ValueVisitor)
     }
 }
 
+/// The portable, reflectable shape of an override set.
+///
+/// [`Overrides`] itself cannot be this shape: its fields hold a [`MappingKey`], constructible only
+/// from a `&'static str` the game already compiled in, which no generic reflection walk can
+/// manufacture from loaded data. `SavedOverrides` is what a save file or a `Reflect`-based settings
+/// layer (`bevy_settings` and similar) actually stores — plain, owned strings, needing no context to
+/// construct. Turning one into a live [`Overrides`] is [`resolve_saved`]; the reverse is
+/// [`save_overrides`].
+///
+/// `action_map_version` rather than a bare `version`, and no field beyond `bindings`/`tunables`
+/// (R17.10, D59): a settings layer may place these fields beside an unrelated struct's under one
+/// shared table, so nothing here claims a name likely to collide with someone else's.
 #[cfg(feature = "serialize")]
-impl serde::Serialize for Overrides {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
+#[derive(Reflect, Clone, Debug, Default, PartialEq)]
+pub struct SavedOverrides {
+    /// This build's persistence-format version. See [`resolve_saved`].
+    pub action_map_version: u32,
+    /// One table per scheme, each a map from a mapping's declared path to its saved row.
+    pub bindings: BTreeMap<String, BTreeMap<String, SavedRow>>,
+    /// One table per scheme, each a map from a tunable's declared key to its saved value.
+    pub tunables: BTreeMap<String, BTreeMap<String, SavedTunableValue>>,
+}
 
-        // Grouped by scheme first — a keyboard remap has to read as visibly separate from the
-        // pad's (§10.1) — and within a scheme sorted by the key's own text, so the file reads the
-        // same way twice running.
-        let mut by_scheme: BTreeMap<Scheme, BTreeMap<String, &Override>> = BTreeMap::new();
-        for (scheme, key, value) in self.iter() {
-            by_scheme
-                .entry(scheme)
-                .or_default()
-                .insert(key.to_string(), value);
-        }
-        let mut tunables_by_scheme: BTreeMap<Scheme, BTreeMap<&'static str, TunableValue>> =
-            BTreeMap::new();
-        for (scheme, key, value) in self.iter_tunables() {
-            tunables_by_scheme
-                .entry(scheme)
-                .or_default()
-                .insert(key, value);
-        }
+/// Turns a live [`Overrides`] into its portable, reflectable shape, stamped with the version this
+/// build writes. The reverse of [`resolve_saved`].
+#[cfg(feature = "serialize")]
+pub fn save_overrides(overrides: &Overrides) -> SavedOverrides {
+    let mut bindings: BTreeMap<String, BTreeMap<String, SavedRow>> = BTreeMap::new();
+    for (scheme, key, value) in overrides.iter() {
+        let row = match value {
+            Override::Controls(controls) => SavedRow::Controls(
+                controls
+                    .iter()
+                    .map(|control| control.name().into_owned())
+                    .collect(),
+            ),
+            Override::Cleared => SavedRow::Cleared,
+            Override::NotOurs => SavedRow::NotOurs,
+        };
+        bindings
+            .entry(scheme_name(scheme).to_string())
+            .or_default()
+            .insert(key.to_string(), row);
+    }
 
-        // "version" before either table: TOML requires a table's own key/value pairs to precede
-        // any nested table header, so the order these are emitted in is load-bearing, not cosmetic.
-        // `tunables` is left out entirely rather than written as an empty header when nothing has
-        // been tuned, the same way a game that declares none pays nothing for the mechanism.
-        let omit_tunables = tunables_by_scheme.is_empty();
-        let mut map = serializer.serialize_map(Some(if omit_tunables { 2 } else { 3 }))?;
-        map.serialize_entry("version", &FORMAT_VERSION)?;
-        map.serialize_entry("bindings", &BindingsTable(by_scheme))?;
-        if !omit_tunables {
-            map.serialize_entry("tunables", &TunablesTable(tunables_by_scheme))?;
-        }
-        map.end()
+    let mut tunables: BTreeMap<String, BTreeMap<String, SavedTunableValue>> = BTreeMap::new();
+    for (scheme, key, value) in overrides.iter_tunables() {
+        let saved = match value {
+            TunableValue::Range { value, .. } => SavedTunableValue::Number(value),
+            TunableValue::Bool(value) => SavedTunableValue::Bool(value),
+        };
+        tunables
+            .entry(scheme_name(scheme).to_string())
+            .or_default()
+            .insert(key.to_string(), saved);
+    }
+
+    SavedOverrides {
+        action_map_version: FORMAT_VERSION,
+        bindings,
+        tunables,
     }
 }
 
@@ -441,129 +525,74 @@ pub struct UnresolvedTunable {
     pub name: String,
 }
 
+/// A [`SavedOverrides`] named a persistence-format version this build never shipped.
+///
+/// Returned by [`resolve_saved`] instead of resolving anything — the case is a rollback, a second
+/// machine, or a Steam beta branch: a save from a build that came later, read by one that came
+/// before it (D58). There is no migration path, because there has never been a second version for
+/// one to convert from.
 #[cfg(feature = "serialize")]
-#[derive(serde::Deserialize)]
-struct RawOverrides {
-    version: u32,
-    #[serde(default)]
-    bindings: BTreeMap<String, BTreeMap<String, RawOverride>>,
-    #[serde(default)]
-    tunables: BTreeMap<String, BTreeMap<String, RawTunableValue>>,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnsupportedVersion {
+    /// The version [`SavedOverrides::action_map_version`] named.
+    pub found: u32,
+    /// The one version this build resolves.
+    pub supported: u32,
 }
 
-/// A tunable's value, before it has been matched against a declared tunable's shape.
+/// What resolving a [`SavedOverrides`] against a game's current declarations produces: the usable
+/// diff, plus a problem list per way a row could fail to carry over.
 #[cfg(feature = "serialize")]
-enum RawTunableValue {
-    Number(f32),
-    Bool(bool),
-}
+pub type ResolvedOverrides = (
+    Overrides,
+    Vec<OverrideProblem>,
+    Vec<UnresolvedMapping>,
+    Vec<UnresolvedTunable>,
+);
 
-#[cfg(feature = "serialize")]
-impl<'de> serde::Deserialize<'de> for RawTunableValue {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct ValueVisitor;
-
-        impl<'de> serde::de::Visitor<'de> for ValueVisitor {
-            type Value = RawTunableValue;
-
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_str("a number or a bool")
-            }
-
-            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Self::Value, E> {
-                Ok(RawTunableValue::Bool(v))
-            }
-
-            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
-                Ok(RawTunableValue::Number(v as f32))
-            }
-
-            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
-                Ok(RawTunableValue::Number(v as f32))
-            }
-
-            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
-                Ok(RawTunableValue::Number(v as f32))
-            }
-        }
-
-        deserializer.deserialize_any(ValueVisitor)
-    }
-}
-
-/// A row's value, before its mapping name has been resolved against anything.
-#[cfg(feature = "serialize")]
-enum RawOverride {
-    Controls(Vec<String>),
-    Cleared,
-    NotOurs,
-}
-
-#[cfg(feature = "serialize")]
-impl<'de> serde::Deserialize<'de> for RawOverride {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct RowVisitor;
-
-        impl<'de> serde::de::Visitor<'de> for RowVisitor {
-            type Value = RawOverride;
-
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_str("a control name, a list of them, \"cleared\", or \"external\"")
-            }
-
-            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
-                Ok(match v {
-                    "cleared" => RawOverride::Cleared,
-                    "external" => RawOverride::NotOurs,
-                    other => RawOverride::Controls(alloc::vec![String::from(other)]),
-                })
-            }
-
-            fn visit_seq<A: serde::de::SeqAccess<'de>>(
-                self,
-                mut seq: A,
-            ) -> Result<Self::Value, A::Error> {
-                let mut controls = Vec::new();
-                while let Some(name) = seq.next_element::<String>()? {
-                    controls.push(name);
-                }
-                Ok(RawOverride::Controls(controls))
-            }
-        }
-
-        deserializer.deserialize_any(RowVisitor)
-    }
-}
-
-/// Turns what a file said into what this build can use.
+/// Turns a loaded [`SavedOverrides`] into what this build can use.
 ///
 /// Each row's mapping name is matched against `declared`, since a `MappingKey` can only ever be one
 /// the game already has. A name that matches nothing comes back in the returned `UnresolvedMapping`
 /// list rather than being dropped in silence; a control name that does not parse becomes an
 /// `OverrideProblem` instead, because by that point the mapping *did* resolve and there is a row to
 /// file the problem against.
+///
+/// A version this build never shipped refuses the whole set at once, rather than resolving whatever
+/// rows happen to look familiar (D58) — see [`UnsupportedVersion`].
+///
+/// ```ignore
+/// let declared = declared_mappings(world);
+/// let declared_tunables = mapping::declared_tunables(world);
+/// let (overrides, problems, unresolved, unresolved_tunables) =
+///     resolve_saved(&saved, &declared, &declared_tunables)?;
+/// ```
 #[cfg(feature = "serialize")]
-fn resolve(
-    raw: RawOverrides,
+pub fn resolve_saved(
+    data: &SavedOverrides,
     declared: &[Mapping],
     declared_tunables: &[Tunable],
-) -> (
-    Overrides,
-    Vec<OverrideProblem>,
-    Vec<UnresolvedMapping>,
-    Vec<UnresolvedTunable>,
-) {
-    // Read for its presence (R17.3) — there is only one version so far, so nothing yet branches on
-    // its value.
-    let _version = raw.version;
+) -> Result<ResolvedOverrides, UnsupportedVersion> {
+    if data.action_map_version != FORMAT_VERSION {
+        return Err(UnsupportedVersion {
+            found: data.action_map_version,
+            supported: FORMAT_VERSION,
+        });
+    }
+
+    // Cloned so the loop below can move rows out of it exactly as it would an owned document —
+    // `data` is a live resource a caller may want to keep, not a just-deserialized value this
+    // function is free to consume.
+    let bindings = data.bindings.clone();
+    let tunables = data.tunables.clone();
 
     let mut overrides = Overrides::new();
     let mut problems = Vec::new();
     let mut unresolved = Vec::new();
     let mut unresolved_tunables = Vec::new();
 
-    for (scheme_text, rows) in raw.bindings {
-        // Not one of ours — a foreign or future top-level key. Nothing typed to report this
+    for (scheme_text, rows) in bindings {
+        // Not one of ours — a foreign or future scheme name. Nothing typed to report this
         // against, so R17.2's tolerance is all this can be: skip the table, keep the rest.
         let Some(scheme) = scheme_from_name(&scheme_text) else {
             continue;
@@ -578,15 +607,15 @@ fn resolve(
             };
 
             let names = match row {
-                RawOverride::Cleared => {
+                SavedRow::Cleared => {
                     overrides.set(scheme, mapping.key, Override::Cleared);
                     continue;
                 }
-                RawOverride::NotOurs => {
+                SavedRow::NotOurs => {
                     overrides.set(scheme, mapping.key, Override::NotOurs);
                     continue;
                 }
-                RawOverride::Controls(names) => names,
+                SavedRow::Controls(names) => names,
             };
 
             let mut controls = Vec::with_capacity(names.len());
@@ -612,11 +641,11 @@ fn resolve(
         }
     }
 
-    for (scheme_text, rows) in raw.tunables {
+    for (scheme_text, rows) in tunables {
         let Some(scheme) = scheme_from_name(&scheme_text) else {
             continue;
         };
-        for (name, raw_value) in rows {
+        for (name, saved_value) in rows {
             let Some(tunable) = declared_tunables
                 .iter()
                 .find(|candidate| candidate.scheme == scheme && candidate.key == name)
@@ -625,15 +654,17 @@ fn resolve(
                 continue;
             };
 
-            let value = match (tunable.value, raw_value) {
-                (TunableValue::Range { min, max, .. }, RawTunableValue::Number(number)) => {
+            let value = match (tunable.value, saved_value) {
+                (TunableValue::Range { min, max, .. }, SavedTunableValue::Number(number)) => {
                     TunableValue::Range {
                         value: number.clamp(min, max),
                         min,
                         max,
                     }
                 }
-                (TunableValue::Bool(_), RawTunableValue::Bool(value)) => TunableValue::Bool(value),
+                (TunableValue::Bool(_), SavedTunableValue::Bool(value)) => {
+                    TunableValue::Bool(value)
+                }
                 // The wrong shape for what this build declares — a bool where a range is wanted,
                 // most likely a save written against an older declaration. Reported the same as a
                 // name that resolves to nothing, since either way there is nothing usable here.
@@ -646,50 +677,7 @@ fn resolve(
         }
     }
 
-    (overrides, problems, unresolved, unresolved_tunables)
-}
-
-/// Deserializes a saved override set, resolving it against what this build currently declares.
-///
-/// Needs `declared` because a [`MappingKey`] cannot be manufactured from a loaded string alone —
-/// see [`UnresolvedMapping`].
-///
-/// ```ignore
-/// let declared = declared_mappings(world);
-/// let declared_tunables = mapping::declared_tunables(world);
-/// let mut de = toml::Deserializer::new(&text);
-/// let (overrides, problems, unresolved, unresolved_tunables) = OverridesLoader {
-///     declared: &declared,
-///     declared_tunables: &declared_tunables,
-/// }
-/// .deserialize(&mut de)?;
-/// ```
-#[cfg(feature = "serialize")]
-pub struct OverridesLoader<'a> {
-    /// What the game currently declares —
-    /// [`declared_mappings`](crate::mapping::declared_mappings)'s own output, or a subset of it.
-    pub declared: &'a [Mapping],
-    /// What the game currently declares tunables as —
-    /// [`declared_tunables`](crate::mapping::declared_tunables)'s own output, or a subset of it.
-    pub declared_tunables: &'a [Tunable],
-}
-
-#[cfg(feature = "serialize")]
-impl<'de> serde::de::DeserializeSeed<'de> for OverridesLoader<'_> {
-    type Value = (
-        Overrides,
-        Vec<OverrideProblem>,
-        Vec<UnresolvedMapping>,
-        Vec<UnresolvedTunable>,
-    );
-
-    fn deserialize<D: serde::Deserializer<'de>>(
-        self,
-        deserializer: D,
-    ) -> Result<Self::Value, D::Error> {
-        let raw = <RawOverrides as serde::Deserialize>::deserialize(deserializer)?;
-        Ok(resolve(raw, self.declared, self.declared_tunables))
-    }
+    Ok((overrides, problems, unresolved, unresolved_tunables))
 }
 
 /// Makes a running game agree with an override set.
@@ -1903,13 +1891,15 @@ mod tests {
         );
     }
 
-    /// The file a person edits by hand, pinned by a golden document rather than by an intention
-    /// nobody rechecks.
+    /// `SavedOverrides`'s reflect-driven wire shape, pinned by a golden document rather than by an
+    /// intention nobody rechecks, and what `resolve_saved`/`save_overrides` do with it once loaded.
     #[cfg(all(feature = "gamepad", feature = "serialize"))]
     mod persistence {
         use super::*;
 
         use bevy_input::gamepad::GamepadButton;
+        use bevy_reflect::serde::{TypedReflectDeserializer, TypedReflectSerializer};
+        use bevy_reflect::{FromReflect, TypeRegistry};
         use serde::de::DeserializeSeed;
 
         #[derive(InputAction)]
@@ -1951,23 +1941,43 @@ mod tests {
                 .key
         }
 
-        const GOLDEN: &str = "version = 1\n\
+        /// A `TypeRegistry` carrying everything `SavedOverrides` reaches. What a real app builds
+        /// via `app.register_type::<T>()` per reachable type; a bare registry needs each one named
+        /// explicitly, container types included.
+        fn types() -> TypeRegistry {
+            let mut types = TypeRegistry::default();
+            types.register::<SavedOverrides>();
+            types.register::<SavedRow>();
+            types.register::<SavedTunableValue>();
+            types.register::<Vec<String>>();
+            types.register::<BTreeMap<String, SavedRow>>();
+            types.register::<BTreeMap<String, BTreeMap<String, SavedRow>>>();
+            types.register::<BTreeMap<String, SavedTunableValue>>();
+            types.register::<BTreeMap<String, BTreeMap<String, SavedTunableValue>>>();
+            types
+        }
+
+        const GOLDEN: &str = "action_map_version = 1\n\
+            \n\
+            [bindings.gamepad]\n\
+            \"persist_tests.jump\" = \"cleared\"\n\
             \n\
             [bindings.keyboard_mouse]\n\
             \"persist_tests.jump\" = [\"key/Space\", \"key/KeyJ\"]\n\
             \"persist_tests.move.up\" = \"key/KeyI\"\n\
             \"persist_tests.settings\" = \"external\"\n\
             \n\
-            [bindings.gamepad]\n\
-            \"persist_tests.jump\" = \"cleared\"\n";
+            [tunables]\n";
 
-        /// What `Overrides` writes is a document a person would be willing to write by hand, and
-        /// reading it back produces the identical value — a scalar for the row that holds one
-        /// control, a list for the row that holds two, and the two three-state words neither of
-        /// which could ever be mistaken for a control name.
+        /// What [`save_overrides`] writes is a document a person would be willing to write by
+        /// hand, and reading it back through `bevy_reflect` — the way a `Reflect`-based settings
+        /// layer actually would — produces the identical value: a scalar for the row that holds
+        /// one control, a list for the row that holds two, and the two three-state words neither
+        /// of which could ever be mistaken for a control name.
         #[test]
-        fn a_saved_override_set_round_trips_through_a_legible_file() {
+        fn a_saved_override_set_round_trips_through_reflect() {
             let declared = declared();
+            let types = types();
             let mut overrides = Overrides::new();
             overrides.bind(
                 Scheme::KeyboardMouse,
@@ -1990,39 +2000,85 @@ mod tests {
                 Override::Cleared,
             );
 
-            let text = toml::to_string(&overrides).expect("serializes");
+            let saved = save_overrides(&overrides);
+            let serializer = TypedReflectSerializer::new(&saved, &types);
+            let text = toml::to_string(&serializer).expect("serializes");
             assert_eq!(text, GOLDEN);
 
-            let (loaded, problems, unresolved, unresolved_tunables) = OverridesLoader {
-                declared: &declared,
-                declared_tunables: &[],
-            }
-            .deserialize(toml::Deserializer::new(&text))
-            .expect("deserializes");
+            let registration = types
+                .get(core::any::TypeId::of::<SavedOverrides>())
+                .unwrap();
+            let value: toml::Value = toml::from_str(&text).expect("parses");
+            let reflected = TypedReflectDeserializer::new(registration, &types)
+                .deserialize(value)
+                .expect("deserializes");
+            let loaded_saved =
+                <SavedOverrides as FromReflect>::from_reflect(&*reflected).expect("round-trips");
+            assert_eq!(loaded_saved, saved);
 
+            let (loaded, problems, unresolved, unresolved_tunables) =
+                resolve_saved(&loaded_saved, &declared, &[]).expect("a version this build wrote");
             assert!(problems.is_empty(), "{problems:?}");
             assert!(unresolved.is_empty(), "{unresolved:?}");
             assert!(unresolved_tunables.is_empty(), "{unresolved_tunables:?}");
             assert_eq!(loaded, overrides);
         }
 
-        /// A name this build cannot turn into a `Control` is reported rather than dropped in
-        /// silence, and the row after it in the same file still loads.
+        /// A version this build never shipped — newer, from a build that came later, or simply
+        /// wrong — refuses the whole set at once rather than resolving whatever rows happen to
+        /// look familiar (D58).
         #[test]
-        fn an_unknown_control_is_reported_and_the_rest_still_loads() {
+        fn an_unrecognized_version_refuses_the_whole_set() {
             let declared = declared();
-            let text = "version = 1\n\
-                \n\
-                [bindings.keyboard_mouse]\n\
-                \"persist_tests.move.up\" = \"key/DoesNotExist\"\n\
-                \"persist_tests.jump\" = \"key/Space\"\n";
+            let saved = SavedOverrides {
+                action_map_version: 99,
+                bindings: BTreeMap::from([(
+                    "keyboard_mouse".to_string(),
+                    BTreeMap::from([(
+                        "persist_tests.jump".to_string(),
+                        SavedRow::Controls(alloc::vec!["key/KeyZ".to_string()]),
+                    )]),
+                )]),
+                tunables: BTreeMap::new(),
+            };
 
-            let (loaded, problems, unresolved, unresolved_tunables) = OverridesLoader {
-                declared: &declared,
-                declared_tunables: &[],
-            }
-            .deserialize(toml::Deserializer::new(text))
-            .expect("deserializes");
+            let err = resolve_saved(&saved, &declared, &[])
+                .expect_err("a version this build never shipped must not resolve as one it did");
+
+            assert_eq!(
+                err,
+                UnsupportedVersion {
+                    found: 99,
+                    supported: 1
+                }
+            );
+        }
+
+        /// A name this build cannot turn into a `Control` is reported rather than dropped in
+        /// silence, and the row after it in the same set still resolves.
+        #[test]
+        fn an_unknown_control_is_reported_and_the_rest_still_resolves() {
+            let declared = declared();
+            let saved = SavedOverrides {
+                action_map_version: 1,
+                bindings: BTreeMap::from([(
+                    "keyboard_mouse".to_string(),
+                    BTreeMap::from([
+                        (
+                            "persist_tests.move.up".to_string(),
+                            SavedRow::Controls(alloc::vec!["key/DoesNotExist".to_string()]),
+                        ),
+                        (
+                            "persist_tests.jump".to_string(),
+                            SavedRow::Controls(alloc::vec!["key/Space".to_string()]),
+                        ),
+                    ]),
+                )]),
+                tunables: BTreeMap::new(),
+            };
+
+            let (loaded, problems, unresolved, unresolved_tunables) =
+                resolve_saved(&saved, &declared, &[]).expect("a version this build wrote");
 
             assert!(unresolved.is_empty(), "{unresolved:?}");
             assert!(unresolved_tunables.is_empty(), "{unresolved_tunables:?}");
@@ -2043,7 +2099,7 @@ mod tests {
                 ),
                 None
             );
-            // And the row after it in the file still loaded.
+            // And the row after it in the set still resolved.
             assert_eq!(
                 loaded.get(
                     Scheme::KeyboardMouse,
@@ -2060,17 +2116,20 @@ mod tests {
         #[test]
         fn an_unresolved_mapping_name_is_reported_by_name() {
             let declared = declared();
-            let text = "version = 1\n\
-                \n\
-                [bindings.keyboard_mouse]\n\
-                \"persist_tests.no_such_action\" = \"key/KeyZ\"\n";
+            let saved = SavedOverrides {
+                action_map_version: 1,
+                bindings: BTreeMap::from([(
+                    "keyboard_mouse".to_string(),
+                    BTreeMap::from([(
+                        "persist_tests.no_such_action".to_string(),
+                        SavedRow::Controls(alloc::vec!["key/KeyZ".to_string()]),
+                    )]),
+                )]),
+                tunables: BTreeMap::new(),
+            };
 
-            let (loaded, problems, unresolved, unresolved_tunables) = OverridesLoader {
-                declared: &declared,
-                declared_tunables: &[],
-            }
-            .deserialize(toml::Deserializer::new(text))
-            .expect("deserializes");
+            let (loaded, problems, unresolved, unresolved_tunables) =
+                resolve_saved(&saved, &declared, &[]).expect("a version this build wrote");
 
             assert!(problems.is_empty(), "{problems:?}");
             assert!(unresolved_tunables.is_empty(), "{unresolved_tunables:?}");
@@ -2094,9 +2153,10 @@ mod tests {
             crate::mapping::declared_tunables(app.world())
         }
 
-        /// A tunable round-trips through the same file a mapping does.
+        /// A tunable round-trips through [`save_overrides`]/[`resolve_saved`] the same way a
+        /// mapping does.
         #[test]
-        fn a_tunable_round_trips_through_a_saved_file() {
+        fn a_tunable_round_trips_through_save_and_resolve() {
             let declared = declared();
             let tunables = declared_hold_or_toggle();
 
@@ -2106,14 +2166,10 @@ mod tests {
                 "persist_tests.jump.hold_or_toggle",
                 TunableValue::Bool(true),
             );
-            let text = toml::to_string(&overrides).expect("serializes");
+            let saved = save_overrides(&overrides);
 
-            let (loaded, problems, unresolved, unresolved_tunables) = OverridesLoader {
-                declared: &declared,
-                declared_tunables: &tunables,
-            }
-            .deserialize(toml::Deserializer::new(&text))
-            .expect("deserializes");
+            let (loaded, problems, unresolved, unresolved_tunables) =
+                resolve_saved(&saved, &declared, &tunables).expect("a version this build wrote");
 
             assert!(problems.is_empty(), "{problems:?}");
             assert!(unresolved.is_empty(), "{unresolved:?}");
@@ -2126,17 +2182,20 @@ mod tests {
         #[test]
         fn an_unresolved_tunable_name_is_reported_by_name() {
             let declared = declared();
-            let text = "version = 1\n\
-                \n\
-                [tunables.keyboard_mouse]\n\
-                \"persist_tests.no_such_tunable\" = true\n";
+            let saved = SavedOverrides {
+                action_map_version: 1,
+                bindings: BTreeMap::new(),
+                tunables: BTreeMap::from([(
+                    "keyboard_mouse".to_string(),
+                    BTreeMap::from([(
+                        "persist_tests.no_such_tunable".to_string(),
+                        SavedTunableValue::Bool(true),
+                    )]),
+                )]),
+            };
 
-            let (loaded, problems, unresolved, unresolved_tunables) = OverridesLoader {
-                declared: &declared,
-                declared_tunables: &[],
-            }
-            .deserialize(toml::Deserializer::new(text))
-            .expect("deserializes");
+            let (loaded, problems, unresolved, unresolved_tunables) =
+                resolve_saved(&saved, &declared, &[]).expect("a version this build wrote");
 
             assert!(problems.is_empty(), "{problems:?}");
             assert!(unresolved.is_empty(), "{unresolved:?}");
@@ -2165,17 +2224,20 @@ mod tests {
             });
             let tunables = crate::mapping::declared_tunables(app.world());
 
-            let text = "version = 1\n\
-                \n\
-                [tunables.gamepad]\n\
-                \"persist_tests.move.stick_deadzone\" = 5.0\n";
+            let saved = SavedOverrides {
+                action_map_version: 1,
+                bindings: BTreeMap::new(),
+                tunables: BTreeMap::from([(
+                    "gamepad".to_string(),
+                    BTreeMap::from([(
+                        "persist_tests.move.stick_deadzone".to_string(),
+                        SavedTunableValue::Number(5.0),
+                    )]),
+                )]),
+            };
 
-            let (loaded, problems, unresolved, unresolved_tunables) = OverridesLoader {
-                declared: &[],
-                declared_tunables: &tunables,
-            }
-            .deserialize(toml::Deserializer::new(text))
-            .expect("deserializes");
+            let (loaded, problems, unresolved, unresolved_tunables) =
+                resolve_saved(&saved, &[], &tunables).expect("a version this build wrote");
 
             assert!(problems.is_empty(), "{problems:?}");
             assert!(unresolved.is_empty(), "{unresolved:?}");

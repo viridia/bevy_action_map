@@ -100,8 +100,15 @@ bevy_reflect = [
   "bevy_time/bevy_reflect",
 ]
 
-# Persistence of binding overrides and input frames (§17, R10.1).
-serialize = ["dep:serde", "bevy_input/serialize", "bevy_math/serialize"]
+# Persistence of binding overrides and input frames (§17, R10.1). Depends on `bevy_reflect`:
+# `SavedOverrides` is the portable shape a save file or a Reflect-based settings layer actually
+# stores (D50), and needs `Reflect` to be structurally walkable.
+serialize = [
+  "dep:serde",
+  "bevy_input/serialize",
+  "bevy_math/serialize",
+  "bevy_reflect",
+]
 
 # bevy_input_focus integration: focus-activated contexts, dispatch effects (D4, R22.10).
 focus = ["dep:bevy_input_focus"]

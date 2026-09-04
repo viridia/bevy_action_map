@@ -788,32 +788,67 @@ copy.
 
 ### 10.3 Serialization
 
-Behind the `serialize` feature, hand-written rather than derived, so the document is one a person
-would be willing to edit:
+Behind the `serialize` feature. `Overrides` itself cannot be the wire type: its fields hold a
+`MappingKey`, constructible only from a `&'static str` the game already compiled in, which no
+generic reflection walk can manufacture from loaded data. [`SavedOverrides`] is the portable shape
+that stands in for it — plain, owned strings, needing no context to construct:
+
+```rust
+pub struct SavedOverrides {
+    pub action_map_version: u32,
+    pub bindings: BTreeMap<String, BTreeMap<String, SavedRow>>,   // scheme -> mapping -> row
+    pub tunables: BTreeMap<String, BTreeMap<String, SavedTunableValue>>,
+}
+
+pub enum SavedRow { Controls(Vec<String>), Cleared, NotOurs }
+pub enum SavedTunableValue { Number(f32), Bool(bool) }
+```
+
+`SavedOverrides` derives `Reflect` and is walked structurally — its own field names *are* the TOML
+keys, so a `Reflect`-based settings layer (`bevy_settings` and similar) can register and load it with
+no code of this crate's own in the path. `SavedRow` and `SavedTunableValue`, reached only as nested
+field values, carry their own hand-written `Serialize`/`Deserialize` and are marked
+`#[reflect(Serialize, Deserialize)]`, so a `Reflect`-based deserializer bridges to that encoding
+rather than its own generic enum representation:
 
 ```toml
-version = 1
+action_map_version = 1
+
+[bindings.gamepad]
+"gameplay.jump" = "cleared"
 
 [bindings.keyboard_mouse]
 "gameplay.jump"    = ["key/Space", "key/KeyJ"]   # primary, secondary
 "gameplay.move.up" = "key/KeyI"                  # a scalar is a one-element list
 "ui.settings"      = "external"
 
-[bindings.gamepad]
-"gameplay.jump" = "cleared"
+[tunables]
 ```
 
-One table per scheme. A row holding one control writes as a bare scalar and reads back from either
-form; position in a list is which slot, so a cleared middle slot needs `"cleared"` rather than a
-shortened list. The two state words cannot collide with a control name, because the control
-encoding is a format this crate owns rather than `Debug` or serde on Bevy's own types — an upstream
-rename becomes a compile error in an exhaustive match while the stored string stays what it was.
+A row holding one control writes as a bare scalar and reads back from either form; position in a
+list is which slot, so a cleared middle slot needs `"cleared"` rather than a shortened list. The two
+state words cannot collide with a control name, because the control encoding is a format this crate
+owns rather than `Debug` or serde on Bevy's own types — an upstream rename becomes a compile error in
+an exhaustive match while the stored string stays what it was. `bindings`/`gamepad` sorts ahead of
+`bindings`/`keyboard_mouse` alphabetically rather than in `Scheme`'s own declared order, and an empty
+`tunables` still gets a header — both accepted costs of a plain, structurally reflected type over a
+hand-rolled one.
 
-**Loading is a pure function** from declarations and a document to bindings and problems.
-`OverridesLoader` resolves a saved mapping name against what the game currently declares — a
+**`SavedOverrides` claims no field besides `action_map_version`, `bindings` and `tunables`, and none
+of those is a bare `version`** (R17.10, D59). A settings layer that lets several resources share one
+TOML table by name can put `SavedOverrides`'s fields beside an unrelated struct's, so the one field
+likely to collide with something else's is the namespaced one.
+
+**`save_overrides`/`resolve_saved` are the pure functions** in and out of this shape.
+`resolve_saved` resolves a saved mapping name against what the game currently declares — a
 `MappingKey` can only ever be one already declared — and reports an `UnresolvedMapping` or
 `UnresolvedTunable` rather than dropping either in silence. A renamed action's row is dropped on the
 next save rather than preserved unresolved.
+
+`action_map_version` is checked before any row is read: a `SavedOverrides` naming a version this
+build never shipped is refused as a whole (`UnsupportedVersion`) rather than resolved as the one
+version that exists today. There is no migration path yet, because there has never been a second
+version for one to convert from.
 
 ---
 
@@ -859,7 +894,7 @@ screen rendering actions it was never compiled against.
 | `std` | `no_std` + `alloc` otherwise | yes |
 | `libm` | glam's math backend for a `no_std` build | no |
 | `bevy_reflect` | reflection, and with it serialization of custom modifiers | yes |
-| `serialize` | persistence of overrides and input frames | no |
+| `serialize` | persistence of overrides and input frames; pulls in `bevy_reflect` | no |
 | `state` | a context's activation following a `bevy_state` state | yes |
 | `focus` | the `bevy_input_focus` dependency | no |
 
