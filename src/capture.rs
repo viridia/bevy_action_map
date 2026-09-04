@@ -97,22 +97,10 @@ pub enum ControlClass {
     AnyStick,
     /// Anything reporting a displacement that has already happened, such as the mouse.
     AnyDelta,
-    /// A keyboard key whose event carries text, once IME composition and dead keys are accounted
-    /// for.
-    ///
-    /// Membership here cannot be read off a [`Control`]: the same key is a dead key on one press
-    /// and a plain letter on the next, so what changes is whether that particular
-    /// [`KeyboardInput`] carries text, not which key it was. See
-    /// [`contains_event`](Self::contains_event), the only place this class can actually be tested.
-    CharacterProducing,
 }
 
 impl ControlClass {
     /// Whether this control is a member.
-    ///
-    /// Always `false` for [`CharacterProducing`](Self::CharacterProducing): that class is a
-    /// property of the *event* a control produced, not of the control's identity, so no control on
-    /// its own is ever a member. Test [`contains_event`](Self::contains_event) instead.
     pub const fn contains(self, control: Control) -> bool {
         matches!(
             (self, control.shape()),
@@ -123,19 +111,6 @@ impl ControlClass {
         )
     }
 
-    /// Whether the control that produced `event` is a member, given what actually happened.
-    ///
-    /// For the three shape-based classes this is [`contains`](Self::contains) on the event's own
-    /// control. For [`CharacterProducing`](Self::CharacterProducing) it reads the event itself.
-    pub fn contains_event(self, event: &crate::frame::RawEvent) -> bool {
-        match self {
-            Self::CharacterProducing => character_producing(event),
-            _ => event
-                .control()
-                .is_some_and(|control| self.contains(control)),
-        }
-    }
-
     /// The class of controls that can fill a mapping expecting this channel.
     pub const fn of(shape: ChannelShape) -> Self {
         match shape {
@@ -143,6 +118,38 @@ impl ControlClass {
             ChannelShape::Axis1 => Self::AnyAxis,
             ChannelShape::Axis2 => Self::AnyStick,
             ChannelShape::Delta2 => Self::AnyDelta,
+        }
+    }
+}
+
+/// What a class binding actually watches: one of the three shape classes above, or the
+/// character-producing door [`InputContextBuilder::bind_characters`] opens instead.
+///
+/// Not a fourth [`ControlClass`] variant: membership in that class is a property of the *event* a
+/// control produced, not of the control's identity — the same key is a dead key on one press and a
+/// plain letter on the next — so it could never honestly answer [`contains`](ControlClass::contains)
+/// the way the other three do. Kept private, since a class binding is the only thing that needs to
+/// name it.
+///
+/// [`InputContextBuilder::bind_characters`]: crate::binding::InputContextBuilder::bind_characters
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ClassFilter {
+    /// One of the three shape classes, matched against the event's own control.
+    Shape(ControlClass),
+    /// Any keyboard key whose event carries text, once IME composition and dead keys are
+    /// accounted for.
+    Characters,
+}
+
+impl ClassFilter {
+    /// Whether the control that produced `event` matches this filter, given what actually
+    /// happened.
+    pub(crate) fn matches(self, event: &crate::frame::RawEvent) -> bool {
+        match self {
+            Self::Shape(class) => event
+                .control()
+                .is_some_and(|control| class.contains(control)),
+            Self::Characters => character_producing(event),
         }
     }
 }
@@ -1156,13 +1163,10 @@ mod tests {
         );
     }
 
-    /// `CharacterProducing` cannot be decided from a bare control, so `contains` always says no,
-    /// and only `contains_event` can actually answer.
+    /// `ClassFilter::Characters` cannot be decided from a bare control, only from the event.
     #[cfg(feature = "keyboard")]
     #[test]
     fn character_producing_is_a_property_of_the_event_not_the_control() {
-        assert!(!ControlClass::CharacterProducing.contains(Control::Key(KeyCode::KeyA)));
-
         let key = |text: Option<&str>, state: ButtonState| {
             crate::frame::RawEvent::Keyboard(KeyboardInput {
                 key_code: KeyCode::KeyA,
@@ -1174,20 +1178,21 @@ mod tests {
             })
         };
 
-        assert!(
-            ControlClass::CharacterProducing.contains_event(&key(Some("a"), ButtonState::Pressed))
-        );
+        assert!(ClassFilter::Characters.matches(&key(Some("a"), ButtonState::Pressed)));
         // A dead key on this press: same `KeyCode`, no text yet.
-        assert!(!ControlClass::CharacterProducing.contains_event(&key(None, ButtonState::Pressed)));
+        assert!(!ClassFilter::Characters.matches(&key(None, ButtonState::Pressed)));
         // Release is not a choice, the same rule every other binding follows.
-        assert!(
-            !ControlClass::CharacterProducing
-                .contains_event(&key(Some("a"), ButtonState::Released))
-        );
+        assert!(!ClassFilter::Characters.matches(&key(Some("a"), ButtonState::Released)));
 
-        // The other three classes read straight off the event's own control, same as `contains`.
-        assert!(ControlClass::AnyButton.contains_event(&key(Some("a"), ButtonState::Pressed)));
-        assert!(!ControlClass::AnyDelta.contains_event(&key(Some("a"), ButtonState::Pressed)));
+        // The shape classes read straight off the event's own control, same as `contains`.
+        assert!(
+            ClassFilter::Shape(ControlClass::AnyButton)
+                .matches(&key(Some("a"), ButtonState::Pressed))
+        );
+        assert!(
+            !ClassFilter::Shape(ControlClass::AnyDelta)
+                .matches(&key(Some("a"), ButtonState::Pressed))
+        );
     }
 
     /// A stick bound whole is now a rebinding row like any other: pushing it is what a settings

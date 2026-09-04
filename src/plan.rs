@@ -7,7 +7,7 @@ use core::marker::PhantomData;
 
 use crate::action::{ActionId, ChannelShape, Intent};
 use crate::binding::{BindingModifier, BindingSource, BindingSpec, ClassBindingSpec, Control};
-use crate::capture::ControlClass;
+use crate::capture::{ClassFilter, ControlClass};
 use crate::condition::BindingCondition;
 use crate::event::{ClassDispatch, Dispatch};
 
@@ -131,8 +131,9 @@ pub enum DiagnosticKind {
     },
     /// Two class bindings in one context watch the same class.
     DuplicateClassBinding {
-        /// The class they share.
-        class: ControlClass,
+        /// The shape class they share, or `None` for two bindings both claiming
+        /// character-producing keys.
+        class: Option<ControlClass>,
     },
     /// Two different actions declare a tunable under the same name in the same scheme.
     DuplicateTunableKey {
@@ -224,12 +225,18 @@ impl core::fmt::Display for BindingDiagnostic {
                  `private` too and accept that rebinding will not move it",
                 self.action
             ),
-            DiagnosticKind::DuplicateClassBinding { class } => write!(
-                f,
-                "`{}` binds the class {class:?}, and so does something else in this context. The \
-                 first one declared claims every matching control; the second can never fire",
-                self.action
-            ),
+            DiagnosticKind::DuplicateClassBinding { class } => {
+                let watched = match class {
+                    Some(class) => alloc::format!("the class {class:?}"),
+                    None => "character-producing keys".into(),
+                };
+                write!(
+                    f,
+                    "`{}` binds {watched}, and so does something else in this context. The \
+                     first one declared claims every matching control; the second can never fire",
+                    self.action
+                )
+            }
             DiagnosticKind::DuplicateTunableKey { key } => write!(
                 f,
                 "`{}` declares a tunable named `{key}`, and so does something else. A saved \
@@ -452,23 +459,26 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
 
 /// Everything wrong with a set of authored class bindings.
 ///
-/// One check, deliberately: two class bindings in one context declaring the same
-/// [`ControlClass`] mean the second can never fire, since arbitration between class bindings is
-/// declaration order with no per-tick contest to decide it otherwise. Two *different* classes that
-/// happen to overlap — `AnyButton` and `CharacterProducing` both match a character key — are not
-/// reported; declaring both, in a chosen order, is how an app says "claim character keys first,
-/// then everything else," the same tiebreak plain bindings already use.
+/// One check, deliberately: two class bindings in one context watching the same filter mean the
+/// second can never fire, since arbitration between class bindings is declaration order with no
+/// per-tick contest to decide it otherwise. Two *different* filters that happen to overlap —
+/// `AnyButton` and the character-producing door both match a letter key — are not reported;
+/// declaring both, in a chosen order, is how an app says "claim character keys first, then
+/// everything else," the same tiebreak plain bindings already use.
 pub(crate) fn diagnose_classes(bindings: &[ClassBindingSpec]) -> Vec<BindingDiagnostic> {
     let mut found = Vec::new();
     for (index, binding) in bindings.iter().enumerate() {
         if bindings[..index]
             .iter()
-            .any(|earlier| earlier.class == binding.class)
+            .any(|earlier| earlier.filter == binding.filter)
         {
             found.push(BindingDiagnostic {
                 action: binding.action_path,
                 kind: DiagnosticKind::DuplicateClassBinding {
-                    class: binding.class,
+                    class: match binding.filter {
+                        ClassFilter::Shape(class) => Some(class),
+                        ClassFilter::Characters => None,
+                    },
                 },
             });
         }
@@ -517,7 +527,7 @@ impl CompiledBinding {
 /// and evaluation never has to name one back to a person.
 #[derive(Clone)]
 pub(crate) struct CompiledClassBinding {
-    pub(crate) class: ControlClass,
+    pub(crate) filter: ClassFilter,
     pub(crate) consume: bool,
     pub(crate) dispatch: ClassDispatch,
 }
@@ -580,7 +590,7 @@ impl<C> Plan<C> {
         plan.class_bindings = class_bindings
             .into_iter()
             .map(|spec| CompiledClassBinding {
-                class: spec.class,
+                filter: spec.filter,
                 consume: spec.consume,
                 dispatch: spec.dispatch,
             })
@@ -999,33 +1009,31 @@ mod tests {
         assert!(!plan.is_indexed(Control::Key(KeyCode::KeyA)));
     }
 
-    // Two class bindings watching the same class: the second can never fire, and that should be
+    // Two class bindings watching the same filter: the second can never fire, and that should be
     // caught rather than discovered by a player.
     #[cfg(feature = "keyboard")]
     #[test]
-    fn two_class_bindings_on_the_same_class_is_reported() {
+    fn two_class_bindings_on_the_same_filter_is_reported() {
         let mut builder = InputContextBuilder::<()>::default();
-        builder.bind_class::<CharacterInput>(crate::capture::ControlClass::CharacterProducing);
-        builder.bind_class::<AnyKey>(crate::capture::ControlClass::CharacterProducing);
+        builder.bind_characters::<CharacterInput>();
+        builder.bind_characters::<AnyKey>();
 
         let found = builder.diagnostics();
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found[0].severity(), Severity::Warning);
         assert_eq!(
             found[0].kind,
-            DiagnosticKind::DuplicateClassBinding {
-                class: crate::capture::ControlClass::CharacterProducing
-            }
+            DiagnosticKind::DuplicateClassBinding { class: None }
         );
     }
 
-    // Different classes overlapping is not a mistake — it's how an app says "claim these
+    // Different filters overlapping is not a mistake — it's how an app says "claim these
     // specifically, then everything else" — so nothing is reported.
     #[cfg(feature = "keyboard")]
     #[test]
-    fn two_different_classes_is_fine_even_though_they_overlap() {
+    fn two_different_filters_is_fine_even_though_they_overlap() {
         let mut builder = InputContextBuilder::<()>::default();
-        builder.bind_class::<CharacterInput>(crate::capture::ControlClass::CharacterProducing);
+        builder.bind_characters::<CharacterInput>();
         builder.bind_class::<AnyKey>(crate::capture::ControlClass::AnyButton);
 
         assert_eq!(builder.diagnostics(), &[]);

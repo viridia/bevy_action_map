@@ -57,8 +57,6 @@ in `docs/decisions.md`, where each says what reversing it would cost.
 - **Glyphs.** Identifiers are defined; no image is resolved.
 - **Writing a saved override set to a file.** The crate serializes and deserializes one; where the
   bytes go was always the app's decision — chunk 92.
-- **A caller for the class-binding mechanism.** Nothing in tree is a focused text field, so
-  `ControlClass::CharacterProducing` has never been bound outside its own tests — chunk 82.
 - **A snapshot of a context's state.** The shape is designed and written down; nothing has taken one
   — chunk 83.
 - **A window on the input frame.** `RawEvent` carries no source window, so nothing can scope a
@@ -154,6 +152,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 81  | A rebound row keeps its declared capacity         |
 | 84  | A save file from a build that came later          |
 | 87  | A stick is a control                              |
+| 82  | A text field beside a live context                |
 
 ---
 
@@ -478,35 +477,6 @@ going through a catalogue. The crate's half of R19.14 is done, but the claim tha
   thing it would genuinely test is whether our key syntax collides with its identifier grammar, and
   that is a reading of the spec rather than a dependency.
 - **Review surface:** whether the key is the one an author would actually want to type.
-
-### 82. A text field beside a live context
-
-`ControlClass::CharacterProducing` and the whole class-binding path — `consume`, `ClassDispatch`,
-`class_fires` — are public, shipped, and have never been called by anything but their own tests.
-An example with a focused text field next to a live gameplay context is the caller: typing goes to
-the field, and the bindings the same keys are bound to do not fire.
-
-- **`Space` is the test that matters.** Bound to a gameplay action *and* a character a text field
-  has to receive. If consumption works, the field takes it and nothing jumps.
-- **`CharacterProducing` leaves `ControlClass`**, which is one type doing two jobs. The three shape
-  classes are properties of a control's identity and are what capture and prompt filtering want;
-  this one is a property of an *event*, and text input is its only use. Today
-  `CaptureSession::accepting` and `PromptScope::of` accept it and cannot honour it — a session
-  refuses every key and never ends, a prompt scope silently empties.
-- **A second door, not a second type.** `bind_class` keeps the three shape classes for the
-  `FocusedInput` row that plans to use `AnyButton`; the character case becomes
-  `bind_characters::<A>()`, and `ClassBindingSpec::class` becomes a private two-case filter. Net
-  public surface is one variant gone and one method added, with no new type — and `contains` stops
-  having a variant it can never say yes to. Consider dropping `contains_event` from the public API
-  in the same pass: without that variant it is one line over `contains`.
-- **Shaping the declaration here is the point**, not a detour. It has never had a caller, so this is
-  the first and only chance to test the spelling against a real use rather than guess at it.
-  [docs/issues.md](./docs/issues.md) 2.3 is the finding.
-- **The field is the example's, not the crate's.** A string that accumulates characters and a
-  caret; editing and rendering are the app's business, the same line chunk 73 draws.
-- **Retires the deferred "Text input" row**, whose gate was demand. The reason to build it is that
-  the mechanism is unproven, which is a gate that would never have opened on its own terms.
-- **Verified by:** typing into the field with the game running behind it.
 
 ### 83. Rewind, without the network
 

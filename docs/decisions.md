@@ -81,6 +81,7 @@ here, so there is one `D`-numbering in the project.
 | **D56** | Activation answers per context type, and is declared on the builder           | design §7.2     |
 | **D57** | Where two pads report one axis, the one that moved last speaks                | design §7.4     |
 | **D58** | A gamepad stick is a `Control`, named whole                                   | design §8.1     |
+| **D60** | The character-producing door is a method, not a fourth `ControlClass`         | design §5.4     |
 
 ---
 
@@ -1288,3 +1289,19 @@ override and capture — it is never a claim.
 **Reversal.** Every settings screen offering a capture button for a stick row would need to go back
 to not offering one, and a saved file's `stick/Left` row would need to be read as unrecognized rather
 than as a control.
+
+### D60 — The character-producing door is a method, not a fourth `ControlClass`
+
+**Decided.** `ControlClass` keeps the three shape classes, each true of a control's identity.
+Character-producing keys get their own builder method, `bind_characters`, backed by a private filter
+that is not a `ControlClass` variant.
+
+**Rules out.** A fourth `ControlClass` variant standing for something that is a property of the
+*event* a control produced rather than of the control itself — the same key is a dead key on one
+press and a plain letter on the next.
+
+**Reversal.** That variant shipped once (chunk 25) and had no caller until this one. Both places that
+took a bare `ControlClass` — `CaptureSession::accepting` and `PromptScope::of` — could not honor it:
+a capture accepting it refused every key and never ended, and a prompt scope narrowed to it came back
+empty. `contains` carried a variant it could never say yes to, and `contains_event` existed only to
+work around that. Reversing this brings all of it back.

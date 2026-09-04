@@ -276,14 +276,19 @@ run that frame, then cleared at the top of the next frame alongside the consumpt
 
 ### 5.4 Class bindings
 
-A class binding names a `ControlClass` rather than a control, which is what a focused text field
-claims character-producing keys with:
+A class binding names a class of controls rather than one control. `bind_class` takes a
+`ControlClass`:
 
 ```rust
-pub enum ControlClass { AnyButton, AnyAxis, AnyStick, AnyDelta, CharacterProducing }
+pub enum ControlClass { AnyButton, AnyAxis, AnyStick, AnyDelta }
 ```
 
-The plan carries these as a second, separate list. Evaluation consults it only for an event on a
+`bind_characters` is the other door, for keys that produce text rather than a fixed shape — a
+focused text field's own case. Membership there is a property of the *event* a control produced, not
+of the control's identity: the same key is a dead key on one press and a plain letter on the next, so
+it is a separate method rather than a fourth `ControlClass` variant.
+
+The plan carries both kinds as a second, separate list. Evaluation consults it only for an event on a
 control no plain binding in that context indexes. What is dispatched is the original `RawEvent`, not
 a folded value — there is no lifecycle to fold it into — as a `ClassFired<A>` event on the context
 entity.

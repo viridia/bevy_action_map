@@ -482,7 +482,7 @@ impl<C: InputContext> InputContextState<C> {
             .plan
             .class_bindings()
             .iter()
-            .position(|binding| binding.class.contains_event(event))
+            .position(|binding| binding.filter.matches(event))
         else {
             return;
         };
@@ -1916,12 +1916,8 @@ mod tests {
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_class_binding_fires_and_consumes_an_unclaimed_key() {
-        use crate::capture::ControlClass;
-
         let mut builder = InputContextBuilder::<Flying>::default();
-        builder
-            .bind_class::<CharacterInput>(ControlClass::CharacterProducing)
-            .consume();
+        builder.bind_characters::<CharacterInput>().consume();
         let plan = Arc::new({
             let (bindings, class_bindings) = builder.finish();
             Plan::from_bindings(bindings, class_bindings)
@@ -1994,10 +1990,8 @@ mod tests {
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_non_consuming_class_binding_claims_nothing() {
-        use crate::capture::ControlClass;
-
         let mut builder = InputContextBuilder::<Flying>::default();
-        builder.bind_class::<CharacterInput>(ControlClass::CharacterProducing);
+        builder.bind_characters::<CharacterInput>();
         let plan = Arc::new({
             let (bindings, class_bindings) = builder.finish();
             Plan::from_bindings(bindings, class_bindings)

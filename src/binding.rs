@@ -237,7 +237,7 @@ pub(crate) struct BindingSpec {
 /// consumes what it catches, and where to send it.
 pub(crate) struct ClassBindingSpec {
     pub(crate) action_path: &'static str,
-    pub(crate) class: crate::capture::ControlClass,
+    pub(crate) filter: crate::capture::ClassFilter,
     pub(crate) consume: bool,
     pub(crate) dispatch: crate::event::ClassDispatch,
 }
@@ -2068,31 +2068,59 @@ impl<C> InputContextBuilder<C> {
     /// one control.
     ///
     /// Where a plain [`bind`](Self::bind) reads one control you name, this reads whichever member of
-    /// the class shows up — the mechanism a focused text field uses to claim character-producing
-    /// keys without the app enumerating them. It fires once per matching, otherwise-unclaimed event,
-    /// carrying that event untouched; there is no value to combine and nothing to hold between
-    /// ticks, so it skips modifiers, conditions and the presentation mapping list entirely.
+    /// the class shows up. It fires once per matching, otherwise-unclaimed event, carrying that
+    /// event untouched; there is no value to combine and nothing to hold between ticks, so it skips
+    /// modifiers, conditions and the presentation mapping list entirely.
     ///
     /// ```ignore
-    /// struct CharacterInput;
-    /// impl ClassBinding for CharacterInput {
-    ///     const PATH: &'static str = "ui.character_input";
+    /// struct AnyPress;
+    /// impl ClassBinding for AnyPress {
+    ///     const PATH: &'static str = "ui.any_press";
     /// }
     ///
-    /// controls.bind_class::<CharacterInput>(ControlClass::CharacterProducing).consume();
+    /// controls.bind_class::<AnyPress>(ControlClass::AnyButton);
     /// ```
     ///
     /// A control already named by a plain binding in this context never reaches a class binding,
     /// however it is declared — see [`bind`](Self::bind)'s doc for how several bindings on one
     /// action combine; a class binding does not compete in that the way a chord does, it simply
-    /// yields.
+    /// yields. For keys that produce text rather than a fixed shape, use
+    /// [`bind_characters`](Self::bind_characters) instead.
     pub fn bind_class<A: crate::event::ClassBinding>(
         &mut self,
         class: crate::capture::ControlClass,
     ) -> ClassBindingHandle<'_, C> {
+        self.push_class_binding::<A>(crate::capture::ClassFilter::Shape(class))
+    }
+
+    /// Binds to every keyboard key whose event carries text, once IME composition and dead keys are
+    /// accounted for — the mechanism a focused text field uses to claim character-producing keys
+    /// without the app enumerating them.
+    ///
+    /// Not a [`ControlClass`](crate::capture::ControlClass): which key this matches is a property
+    /// of the *event*, not of the control's identity — the same key is a dead key on one press and a
+    /// plain letter on the next — so there is no fixed set of controls to name here the way
+    /// [`bind_class`](Self::bind_class) does.
+    ///
+    /// ```ignore
+    /// struct TypedCharacter;
+    /// impl ClassBinding for TypedCharacter {
+    ///     const PATH: &'static str = "ui.typed_character";
+    /// }
+    ///
+    /// controls.bind_characters::<TypedCharacter>().consume();
+    /// ```
+    pub fn bind_characters<A: crate::event::ClassBinding>(&mut self) -> ClassBindingHandle<'_, C> {
+        self.push_class_binding::<A>(crate::capture::ClassFilter::Characters)
+    }
+
+    fn push_class_binding<A: crate::event::ClassBinding>(
+        &mut self,
+        filter: crate::capture::ClassFilter,
+    ) -> ClassBindingHandle<'_, C> {
         self.class_bindings.push(ClassBindingSpec {
             action_path: A::PATH,
-            class,
+            filter,
             consume: false,
             dispatch: crate::event::class_dispatch_for::<A>,
         });
