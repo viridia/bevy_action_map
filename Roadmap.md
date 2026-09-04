@@ -154,6 +154,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 87  | A stick is a control                              |
 | 82  | A text field beside a live context                |
 | 85  | A dead zone at full deflection                    |
+| 86  | `active` and `is_active`, told apart               |
 
 ---
 
@@ -162,27 +163,6 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 The live tier of [docs/issues.md](./docs/issues.md): no unusual configuration, no feature nobody has
 used, and the answer is still wrong. Six more of its entries are behind this one and not yet
 routed.
-
-### 86. `active` and `is_active`, told apart
-
-`apply_active` reads `if context.is_active() == live { continue; }`, but `is_active()` folds in
-shadowing while the branches below assign `active` alone — so under an exclusive context the
-comparison is against a number the assignment cannot move.
-
-- **Every prompt in the game is recomputed every frame while a modal is up.** The `Mut` deref that
-  reaches the early return still marks the component changed, which bumps `PromptGeneration` — the
-  subscription R23.4 promises a prompt layer. What one such pass costs is
-  [docs/issues.md](./docs/issues.md) §5.1, still unrouted: this chunk takes away the *frequency*
-  and leaves the per-call cost where it is.
-- **The same line strands a context for one frame.** A context whose condition goes false *while
-  shadowed* skips its `deactivate`, because `shadowed` is written by `evaluate_context` and read a
-  system earlier by `apply_active`. On the frame the modal closes it still reads `is_active() ==
-  true`, then false the next. `active_in_state` reads the same stale field from `StateTransition`.
-- **The fix is one comparison; the chunk is the audit.** Which of `active` and `is_active` every
-  other caller means has never been read through, and the two names differing by a fold nobody
-  remembers is what produced this.
-- **Verified against a headless `App`** — 5 of 5 quiet frames without the exclusive context, 0 of
-  5 with it.
 
 ### 88. The gamepad-settings warning misses the global thresholds
 

@@ -805,10 +805,15 @@ fn apply_active<C: InputContext + Component>(
 
     let mut changed = false;
     for mut context in contexts {
+        // Against `active`, not `is_active()`: `activate`/`deactivate` only ever move `active`, and
+        // under an exclusive context `is_active()` is pinned to `false` by `shadowed` regardless of
+        // what this condition says, which would either call `activate` every frame for nothing or
+        // skip the `deactivate` a shadowed context still needs to catch up on once the shadow lifts.
+        //
         // `activate` and `deactivate` both return immediately when there is nothing to do; the
         // check here is what keeps the mutable deref, and with it the change tick, off the frames
         // where nothing happened.
-        if context.is_active() == live {
+        if context.active == live {
             continue;
         }
         if live {
@@ -2825,6 +2830,119 @@ mod tests {
         assert!(
             app.world().resource::<Seen>().0,
             "priority 20 is above the exclusive context's 10, so it was never shadowed"
+        );
+    }
+
+    /// The bug `apply_active` had: comparing the condition's answer against `is_active()`, which
+    /// folds in shadowing, against a field `activate`/`deactivate` never move while shadowed. A
+    /// context whose condition keeps saying yes should stay quiet the whole time it is shadowed —
+    /// before the fix it was marked changed, and its prompt invalidated, every single frame.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_shadowed_context_whose_condition_stays_satisfied_is_quiet() {
+        use bevy_ecs::schedule::common_conditions::resource_exists;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.exclusive_menu_over_condition", tick = Render, priority = 10, exclusive)]
+        struct Menu;
+
+        #[derive(Resource)]
+        struct Live;
+
+        #[derive(Resource, Default)]
+        struct Quiet(usize);
+
+        fn count_quiet(
+            changed: Query<'_, '_, (), bevy_ecs::prelude::Changed<InputContextState<FreeLook>>>,
+            mut quiet: bevy_ecs::system::ResMut<'_, Quiet>,
+        ) {
+            if changed.is_empty() {
+                quiet.0 += 1;
+            }
+        }
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.active_if(resource_exists::<Live>);
+            context.bind::<Turn>(KeyCode::KeyD);
+        });
+        app.add_context::<Menu>(|context| {
+            context.bind::<Jump>(KeyCode::Escape);
+        });
+        app.world_mut().spawn(FreeLook);
+        app.world_mut().insert_resource(Live);
+        app.init_resource::<Quiet>();
+        app.add_systems(Update, count_quiet);
+
+        // Settle the activation itself before the exclusive context arrives.
+        app.update();
+
+        app.world_mut().spawn(Menu);
+        app.update();
+
+        // Both settling updates above are real changes — the first activation, then the shadow
+        // taking hold — so only the steady state that follows is what this test is about.
+        app.world_mut().resource_mut::<Quiet>().0 = 0;
+        for _ in 0..5 {
+            app.update();
+        }
+
+        assert_eq!(
+            app.world().resource::<Quiet>().0,
+            5,
+            "the condition never changed its answer, so a shadowed instance should not either"
+        );
+    }
+
+    /// The other half of the same bug: while shadowed, `is_active()` already reads `false`, so a
+    /// condition going false too used to compare equal and skip the `deactivate` — stranding
+    /// `active` at `true` until the shadow itself lifted a frame later and finally noticed the
+    /// mismatch.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_condition_going_false_while_shadowed_deactivates_on_the_same_frame() {
+        use bevy_ecs::schedule::common_conditions::resource_exists;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.exclusive_menu_over_condition_2", tick = Render, priority = 10, exclusive)]
+        struct Menu;
+
+        #[derive(Resource)]
+        struct Live;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.active_if(resource_exists::<Live>);
+            context.bind::<Turn>(KeyCode::KeyD);
+        });
+        app.add_context::<Menu>(|context| {
+            context.bind::<Jump>(KeyCode::Escape);
+        });
+        let entity = app.world_mut().spawn(FreeLook).id();
+        app.world_mut().insert_resource(Live);
+        app.update();
+
+        app.world_mut().spawn(Menu);
+        app.update();
+        assert!(
+            app.world()
+                .get::<InputContextState<FreeLook>>(entity)
+                .unwrap()
+                .shadowed,
+            "the exclusive context is up, so this instance should be shadowed"
+        );
+
+        app.world_mut().remove_resource::<Live>();
+        app.update();
+        assert!(
+            !app.world()
+                .get::<InputContextState<FreeLook>>(entity)
+                .unwrap()
+                .active,
+            "the condition said no on this very frame, and `active` should have moved with it \
+             instead of waiting for the shadow to lift"
         );
     }
 
