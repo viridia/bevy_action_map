@@ -153,6 +153,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 84  | A save file from a build that came later          |
 | 87  | A stick is a control                              |
 | 82  | A text field beside a live context                |
+| 85  | A dead zone at full deflection                    |
 
 ---
 
@@ -161,24 +162,6 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 The live tier of [docs/issues.md](./docs/issues.md): no unusual configuration, no feature nobody has
 used, and the answer is still wrong. Six more of its entries are behind this one and not yet
 routed.
-
-### 85. A dead zone at full deflection
-
-`dead_zone_remainder` divides by `(1.0 - lower).max(f32::EPSILON)`, which turns a divide-by-zero
-into a divide-by-epsilon: `DeadZone::radial(1.0)` applied to `(3.0, 0.0)` returns `(16777216.0,
-0.0)`. The comment directly above the guard says the case "leaves nothing to stretch", so the code
-and the comment disagree about the one case the comment exists for.
-
-- **It does not take `radial(1.0)`.** Any magnitude above 1 stretches: a diagonal
-  `DirectionalButtons` reaches 1.414, and `MouseMove` carries an unbounded pixel delta where
-  `radial(0.9)` already turns 3.0 into 21.0.
-- **Both halves are needed, which is what makes it a chunk.** A plan-build diagnostic tells an
-  author who declared `1.0`, but `tunable_dead_zone` means a *player* can drive `lower` to full
-  deflection from a slider, where no build-time check can reach. So the apply path needs a defined
-  answer as well, and the chunk says what that answer is rather than picking whichever guard was
-  nearer.
-- **Not doing:** revisiting the three dead-zone stages (`docs/design.md` §8.4). This is one
-  expression inside one of them.
 
 ### 86. `active` and `is_active`, told apart
 

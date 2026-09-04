@@ -58,7 +58,8 @@ impl BindingDiagnostic {
             | DiagnosticKind::TunableShapeDisagreement { .. } => Severity::Error,
             DiagnosticKind::DuplicateBinding { .. }
             | DiagnosticKind::ConsumeDisagreement { .. }
-            | DiagnosticKind::DuplicateClassBinding { .. } => Severity::Warning,
+            | DiagnosticKind::DuplicateClassBinding { .. }
+            | DiagnosticKind::DeadZoneAtFullDeflection { .. } => Severity::Warning,
         }
     }
 }
@@ -144,6 +145,11 @@ pub enum DiagnosticKind {
     TunableShapeDisagreement {
         /// The name they share.
         key: &'static str,
+    },
+    /// A deadzone is declared at or beyond full deflection, where ordinary input never escapes it.
+    DeadZoneAtFullDeflection {
+        /// The declared lower bound.
+        lower: f32,
     },
 }
 
@@ -250,6 +256,13 @@ impl core::fmt::Display for BindingDiagnostic {
                  different bounds. Every binding sharing a tunable must agree",
                 self.action
             ),
+            DiagnosticKind::DeadZoneAtFullDeflection { lower } => write!(
+                f,
+                "`{}` declares a deadzone at {lower}, at or beyond full deflection. Ordinary \
+                 input never escapes it — only a control whose magnitude overshoots 1.0, such as \
+                 a diagonal directional composite, produces anything",
+                self.action
+            ),
         }
     }
 }
@@ -345,6 +358,18 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
             .count();
         if rescaling > 1 {
             found.push(at(DiagnosticKind::ChainedRescaling { count: rescaling }));
+        }
+
+        // Only the declared value: a player driving `lower` there at runtime through
+        // `tunable_dead_zone` is a case this build-time check cannot reach.
+        for modifier in &binding.modifiers {
+            if let BindingModifier::DeadZone(dead_zone) = modifier
+                && dead_zone.lower >= 1.0
+            {
+                found.push(at(DiagnosticKind::DeadZoneAtFullDeflection {
+                    lower: dead_zone.lower,
+                }));
+            }
         }
 
         // Reserving contradicts *rebindability*, not listing: a reserved control is one nothing may
@@ -913,6 +938,42 @@ mod tests {
                 DiagnosticKind::DuplicateTunableKey { key } if *key == "plan_tests.shared_toggle"
             )),
             "{found:?}"
+        );
+    }
+
+    // A deadzone declared at or beyond full deflection reads centered for every ordinary input, so
+    // it is reported even though it compiles and runs. `tunable_dead_zone` driving `lower` there
+    // at runtime is not this check's business — no build-time scan reaches a player's slider.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_dead_zone_at_full_deflection_is_reported() {
+        use bevy_input::keyboard::KeyCode;
+
+        use crate::binding::{AxisButtons, DeadZone};
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder
+            .bind::<Jump>(AxisButtons::ad())
+            .dead_zone(DeadZone::radial(1.0));
+
+        let found = builder.diagnostics();
+        assert!(
+            found.iter().any(|d| matches!(
+                d.kind,
+                DiagnosticKind::DeadZoneAtFullDeflection { lower } if lower == 1.0
+            )),
+            "{found:?}"
+        );
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder
+            .bind::<Jump>(KeyCode::KeyA)
+            .dead_zone(DeadZone::radial(0.1));
+        assert!(
+            !builder
+                .diagnostics()
+                .iter()
+                .any(|d| matches!(d.kind, DiagnosticKind::DeadZoneAtFullDeflection { .. }))
         );
     }
 

@@ -2212,9 +2212,13 @@ fn apply_dead_zone(value: ActionValue, dead_zone: DeadZone) -> ActionValue {
 /// Removes `lower` from a distance, optionally stretching what remains back over the full range.
 fn dead_zone_remainder(magnitude: f32, dead_zone: DeadZone) -> f32 {
     let remainder = magnitude - dead_zone.lower;
-    if dead_zone.rescale {
-        // A deadzone at or above full deflection leaves nothing to stretch.
-        remainder / (1.0 - dead_zone.lower).max(f32::EPSILON)
+    // A deadzone at or above full deflection leaves nothing to stretch the remainder onto, so it
+    // passes through unstretched rather than dividing by (near) zero — reachable at runtime even
+    // where `dead_zone` was declared well inside range, since `tunable_dead_zone` lets a player
+    // drag `lower` there from a slider. Not continuous with `lower` just under 1.0, where rescaling
+    // still stretches hard; smoothing that approach is a wider change than this one expression owns.
+    if dead_zone.rescale && dead_zone.lower < 1.0 {
+        remainder / (1.0 - dead_zone.lower)
     } else {
         remainder
     }
@@ -3004,6 +3008,22 @@ mod tests {
         // reads short by exactly the zone.
         let kept = dead_zoned(DeadZone::radial(0.2).without_rescale(), Vec2::new(1.0, 0.0));
         assert!((kept.x - 0.8).abs() < 1e-6, "{kept:?}");
+    }
+
+    #[test]
+    fn a_dead_zone_at_full_deflection_does_not_blow_up() {
+        // Reachable from `radial(1.0)` directly, and from any lower value a player drove there
+        // with `tunable_dead_zone`. A magnitude past 1.0 is not exotic: a diagonal
+        // `DirectionalButtons` reaches 1.414, and `MouseMove` carries an unbounded pixel delta.
+        let out = dead_zoned(DeadZone::radial(1.0), Vec2::new(3.0, 0.0));
+        assert!((out.x - 2.0).abs() < 1e-6, "{out:?}");
+        assert_eq!(out.y, 0.0);
+
+        // At or under full deflection, nothing survives the zone.
+        assert_eq!(
+            dead_zoned(DeadZone::radial(1.0), Vec2::new(1.0, 0.0)),
+            Vec2::ZERO
+        );
     }
 
     #[test]
