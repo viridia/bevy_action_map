@@ -98,7 +98,9 @@ use bevy_ecs::entity::Entity;
 #[cfg(feature = "gamepad")]
 use bevy_ecs::prelude::{Changed, Query, Resource};
 #[cfg(feature = "gamepad")]
-use bevy_input::gamepad::{AxisSettings, GamepadAxis, GamepadSettings};
+use bevy_input::gamepad::{
+    AxisSettings, ButtonAxisSettings, ButtonSettings, GamepadAxis, GamepadSettings,
+};
 #[cfg(feature = "gamepad")]
 use bevy_platform::collections::HashMap;
 
@@ -288,11 +290,25 @@ pub fn warn_on_unread_gamepad_settings(
 }
 
 /// Whether a gamepad's settings have been moved off Bevy's own defaults.
-// `AxisSettings` is the only one of the three with `PartialEq`, so the per-control maps are tested
-// for being populated at all rather than compared field by field against a default.
+// `ButtonSettings` and `AxisSettings` derive `PartialEq`; `ButtonAxisSettings` does not, so its
+// three public fields are compared by hand. The per-control maps are tested for being populated at
+// all rather than compared field by field against a default.
 #[cfg(feature = "gamepad")]
 fn is_customized(settings: &GamepadSettings) -> bool {
-    settings.default_axis_settings != AxisSettings::default()
+    let default_button_axis = ButtonAxisSettings::default();
+    let moved_button_axis = &settings.default_button_axis_settings;
+
+    settings.default_button_settings != ButtonSettings::default()
+        || settings.default_axis_settings != AxisSettings::default()
+        || (
+            moved_button_axis.high,
+            moved_button_axis.low,
+            moved_button_axis.threshold,
+        ) != (
+            default_button_axis.high,
+            default_button_axis.low,
+            default_button_axis.threshold,
+        )
         || !settings.axis_settings.is_empty()
         || !settings.button_settings.is_empty()
         || !settings.button_axis_settings.is_empty()
@@ -431,6 +447,19 @@ mod tests {
             .axis_settings
             .insert(GamepadAxis::LeftStickX, AxisSettings::default());
         assert!(is_customized(&per_axis));
+
+        // The two global fields: setting a threshold for every button at once, rather than one
+        // button at a time, is the ordinary way to configure `GamepadSettings`, and chunk 88 is
+        // what makes it caught.
+        let global_button = GamepadSettings {
+            default_button_settings: ButtonSettings::new(0.9, 0.1).unwrap(),
+            ..Default::default()
+        };
+        assert!(is_customized(&global_button));
+
+        let mut global_button_axis = GamepadSettings::default();
+        global_button_axis.default_button_axis_settings.threshold = 0.5;
+        assert!(is_customized(&global_button_axis));
     }
 
     #[cfg(feature = "gamepad")]

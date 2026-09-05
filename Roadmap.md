@@ -151,6 +151,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 86  | `active` and `is_active`, told apart               |
 | 93  | A shared toggle ignored the hold setting          |
 | 79  | `Phase` tells building from firing                |
+| 88  | The gamepad-settings warning sees the global thresholds |
 
 ---
 
@@ -159,26 +160,6 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 The live tier of [docs/issues.md](./docs/issues.md): no unusual configuration, no feature nobody has
 used, and the answer is still wrong. Six more of its entries are behind this one and not yet
 routed.
-
-### 88. The gamepad-settings warning misses the global thresholds
-
-R14.9 exists so a game that configures Bevy's `GamepadSettings` is told they reach no binding,
-rather than left wondering. `is_customized` tests four of that struct's six fields and misses
-`default_button_settings` and `default_button_axis_settings` — the two *global* ones. Setting a
-press threshold for every button at once is the ordinary way to do it and produces silence; setting
-one per button is the unusual way and is caught.
-
-- **One clause and one comparison, not two clauses.** `ButtonSettings` derives `PartialEq` so the
-  first is `!= ButtonSettings::default()`. `ButtonAxisSettings` does not, so the second compares its
-  three public `f32`s against `ButtonAxisSettings::default()`.
-- **The comment above the predicate is what produced the gap** and is false at the pinned commit: it
-  says `AxisSettings` is the only one of the three with `PartialEq`, but `ButtonSettings` derives it
-  (`gamepad.rs:821`) and `AxisSettings` does (`985`) — only `ButtonAxisSettings` does not
-  (`1413`). Correcting it is the half that stops this being re-derived.
-- **The test targets `is_customized`, not the warning.** `bevy_utils::once!` fires once per process,
-  so only the first test in a binary to trip the system would ever observe it.
-- **Not doing:** comparing map *entries* against defaults. A populated map means a game put
-  something there, which is the question being asked.
 
 ### 89. `why_not` can see the pairing
 
