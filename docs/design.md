@@ -138,15 +138,18 @@ displacement.
 ```rust
 pub enum ActionValue { Bool(bool), Axis1(f32), Axis2(Vec2), Axis3(Vec3) }
 
-pub enum Phase { Idle, Started, Ongoing, Fired, Completed, Canceled }
+pub enum Phase { Idle, Started, Building, Fired, Firing, Completed, Canceled }
 
 pub struct ActionState { pub value: ActionValue, pub phase: Phase }
 ```
 
-`Started` is a condition that has begun without being satisfied — a hold part way through.
-`Ongoing` covers both a held action still firing and a condition still building toward firing; the
-value tells them apart, since one has a value and the other is at rest. `Canceled` is a condition
-abandoned or an action interrupted; `Completed` is an ordinary release.
+A gerund or adjective is a level, still true next tick (`Idle`, `Building`, `Firing`); a past
+participle is an edge, true for one tick only (`Started`, `Fired`, `Completed`, `Canceled`).
+`Started` is a condition that has begun without being satisfied — a hold part way through —
+and `Building` is the same condition on every tick after that while it keeps not being satisfied.
+`Firing` is the equivalent for an action already active: `Fired` is the tick it became so, `Firing`
+every tick after that it stays so. `Canceled` is a condition abandoned or an action interrupted;
+`Completed` is an ordinary release.
 
 ### 3.3 Paths
 

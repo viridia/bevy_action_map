@@ -79,7 +79,7 @@ what does not:
 | | |
 | --- | --- |
 | Actions as types with a derive | As in BEI, and unlike LWIM's one-enum-per-map, which no other crate can add to (§1). Note the asymmetry the other way: BEI's actions are entities, so a third-party crate can add one to a context it does not own; bindings compiled at app build cannot. |
-| A richer state machine than pressed/just_pressed | `Ongoing` / `Fired` / `Canceled`, as in BEI and Unreal — needed for holds, chords, and hold-to-confirm UI (§3). |
+| A richer state machine than pressed/just_pressed | `Building` / `Firing` / `Fired` / `Canceled`, extending BEI and Unreal's `Ongoing` — needed for holds, chords, and hold-to-confirm UI (§3). |
 | A declared name, separate from the Rust type | **Neither has one.** LWIM's saved bindings key on the enum variant, BEI's on the type path, so a rename — or, for BEI, a module move — orphans what a player saved. D6 requires a `PATH` that a refactor cannot touch, and which doubles as the label's localization key (§1, §17). |
 | Contexts with priority | As in BEI, plus Steam's _additive layers_, which override part of a context rather than replacing it (§7). |
 | Deadzones owned end to end | **Differs from both.** Both read the `Gamepad` component, downstream of `GamepadSettings`, and apply their own deadzone above it; this crate consumes raw events and owns all three stages, because a clamp applied below you cannot be undone above you (§14). |
@@ -356,15 +356,18 @@ an ongoing condition is abandoned; surfaced as five events. Unity: `started / pe
 LWIM: polled `ActionState` with `current_duration()` and explicit `consume()`.
 
 - **R3.1 (MUST)** Model an explicit state machine, not just edges. Minimum: idle; **started**, for a
-  condition that has begun and not yet been satisfied; ongoing; fired; completed; and canceled, for
-  a started condition abandoned before it ever fired.
+  condition that has begun and not yet been satisfied; **building**, for the same condition on every
+  tick after that while it still has not; fired; **firing**, for the same action on every tick after
+  that while it is still active; completed; and canceled, for a started or building condition
+  abandoned before it ever fired.
 
-  _(**Six states, where the Unreal model above has five.** The one added is **started**, which is an
-  edge where `ongoing` is a level: the tick a condition began, versus every tick after it while the
-  condition is still running. Unreal has only the second, so a hold pressed this instant and a hold
-  charging for half a second are one state, and showing a charge meter the moment it appears means
-  detecting the edge yourself. Canceled is only meaningful against started: what distinguishes it
-  from completed is whether the action ever actually happened.)_
+  _(**Seven states, where the Unreal model above has five.** A past participle is an edge, true for
+  one tick only (`started`, `fired`, `completed`, `canceled`); a gerund or adjective is a level,
+  still true next tick (`idle`, `building`, `firing`). Unreal collapses both levels into one
+  `ongoing`, so a hold pressed this instant and a hold charging for half a second are one state, and
+  a button pressed this instant and one still held are another — either pair needs the edge
+  detected by hand to tell apart. Canceled is only meaningful against started or building: what
+  distinguishes it from completed is whether the action ever actually happened.)_
 - **R3.2 (MUST)** Both polling and event/observer access to state. Polling is required for
   `FixedUpdate` simulation code (§9); events are required for UI and for one-shot commands. Event
   delivery must be attachable **declaratively**, not only from imperative setup code — a scene

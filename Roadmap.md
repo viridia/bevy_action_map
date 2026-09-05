@@ -41,14 +41,8 @@ in `docs/decisions.md`, where each says what reversing it would cost.
   game to opt out. The generic form is in the deferred table.
 - **The prelude exports sixteen bare English nouns** that a glob import drops into a template beside
   Bevy's own — chunk 48.
-- **`Phase::Ongoing` means two things**, told apart by reading the action's value: still firing, and
-  still building toward firing. Every consumer in tree either does that value test or wants both
-  halves — chunk 79.
 - **A refused capture is silent on Disasteroids' screen.** Wrong shape, wrong scheme, or reserved,
   and the session simply keeps listening with nothing said about why the press did not take.
-- **`cancel_in_flight` may leave an action `Started` rather than `Canceled`.** It matches
-  `Fired | Ongoing` and omits `Started`, so deactivating on the tick a hold began appears to
-  contradict R7.4. Not traced to a reachable case; chunk 79 is where it gets an answer either way.
 - **`R23.2` is unenforced.** No allocation and no synchronization on the per-tick path is a rule
   with no tooling behind it. Two violations have reached that path and both were caught by reading.
 
@@ -156,6 +150,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 85  | A dead zone at full deflection                    |
 | 86  | `active` and `is_active`, told apart               |
 | 93  | A shared toggle ignored the hold setting          |
+| 79  | `Phase` tells building from firing                |
 
 ---
 
@@ -327,21 +322,6 @@ contexts independently; `context.rs` alone holds 53 `App::new()`.
   `binding.rs` is 2,361 lines of code. The "quarter of the crate" this chunk used to cite was
   counting a 2,759-line test module, which is 77's problem.
 - **Ground rule 3 applies literally:** `examples/` must not change.
-
-### 79. `Phase` tells building from firing
-
-Split `Phase::Ongoing` into `Firing` and `Building`.
-
-- **Nobody wants the union.** Every consumer either re-reads the value immediately or deliberately
-  wants both halves. `update_action_state`'s two guards stop inspecting the value at all.
-- **It completes the rule R3.1 already states.** A gerund or adjective is a level (`Idle`,
-  `Building`, `Firing`); a past participle is an edge (`Started`, `Fired`, `Completed`, `Canceled`).
-  `Ongoing` is the one variant carrying both.
-- **`Phase` is not `#[non_exhaustive]`**, so this breaks any exhaustive match — the same shelf life
-  as 48, which is why the two are last in this phase.
-- **It owns the `cancel_in_flight` defect** in "Known wrong" above.
-- **Not doing:** `Active` for the firing half. It collides with context activation, and "an `Active`
-  action in an inactive context" is a sentence this crate can produce.
 
 ### 48. Names that survive a glob import
 

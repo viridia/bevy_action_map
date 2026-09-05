@@ -102,11 +102,11 @@
 //! changed; observing suits a one-shot reaction, such as a UI confirm or a sound effect, that
 //! would otherwise mean remembering last tick's value just to detect the edge.
 //!
-//! Every action has a [`Phase`](action::Phase) each tick (`Idle`, `Started`, `Ongoing`, `Fired`,
-//! `Completed`, `Canceled`), so a hold that has just begun and a hold that is still charging are
-//! never confused with each other, and a UI can show a charge meter the instant it appears rather
-//! than reconstructing that edge from a boolean. When an action does not fire and it is not
-//! obvious why, [`why_not`](context::Actions::why_not) answers with the specific
+//! Every action has a [`Phase`](action::Phase) each tick (`Idle`, `Started`, `Building`, `Fired`,
+//! `Firing`, `Completed`, `Canceled`), so a hold that has just begun and a hold that is still
+//! charging are never confused with each other, and a UI can show a charge meter the instant it
+//! appears rather than reconstructing that edge from a boolean. When an action does not fire and
+//! it is not obvious why, [`why_not`](context::Actions::why_not) answers with the specific
 //! [`Obstacle`](context::Obstacle): an inactive context, a higher-priority consumer, a longer
 //! chord winning, an unmet condition, or a device that is not this player's.
 //!

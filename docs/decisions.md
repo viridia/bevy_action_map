@@ -236,6 +236,33 @@ wants one sample per simulation tick.
 unreadable from `Update`, but Bevy gives a `SystemParam` no way to know its own schedule. What
 stands in is a plugin-time validation pass and a debug assertion.
 
+### D62 — `Phase::Ongoing` splits into `Building` and `Firing`, named by part of speech
+
+**Decided.** `Ongoing` becomes two variants: `Building`, a condition still short of firing, and
+`Firing`, an action still active. The split follows a rule now stated in R3.1: a gerund or adjective
+names a level, true again next tick; a past participle names an edge, true for one tick only.
+
+**Rules out.** Reading a phase and then re-reading the action's *value* to tell the two apart, which
+`update_action_state`, `why_not_id`, and Disasteroids' exhaust flame each did — the value test is
+gone from all three, not just moved.
+
+**Reversal.** Re-merging the two brings the value test back to every call site it was removed from,
+in this crate and in any app that has since matched on `Building` or `Firing` separately — `Phase`
+is not `#[non_exhaustive]`, so those matches would stop compiling rather than silently misbehave.
+
+### D63 — `cancel_in_flight` also cancels `Started`
+
+**Decided.** Deactivating or shadowing a context cancels `Started` alongside `Fired`/`Firing`/
+`Building`.
+
+**Rules out.** The narrower match kept until now, `Fired | Ongoing`, which left a hold canceled on
+the very tick it began sitting at `Started` rather than `Canceled`.
+
+**Reversal.** `Started` stops being canceled again, and a hold interrupted on its first tick reads
+as still building for as long as the context stays inactive — R7.4's "never left stuck as held
+forever" holds everywhere except this one-tick window, which is exactly narrow enough to have gone
+unnoticed until read rather than run.
+
 ---
 
 ## Plan and evaluation

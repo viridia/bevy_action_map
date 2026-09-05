@@ -289,14 +289,17 @@ pub enum Phase {
     /// yet a jump. If they let go too soon it becomes [`Canceled`](Phase::Canceled) instead of
     /// [`Fired`](Phase::Fired).
     Started,
-    /// The action is continuing to do whatever it was doing last tick.
+    /// A condition is still building toward firing, on a tick after the one it began.
     ///
-    /// This covers both a held action still firing and a condition still building toward firing.
-    /// The action's **value** tells them apart: an action that is firing has one, and one still
-    /// building is at rest.
-    Ongoing,
+    /// A hold charging toward its threshold is `Building` for as long as it takes: the value stays
+    /// at rest, and nothing has happened yet that a player would call a jump.
+    Building,
     /// The action became active this tick.
     Fired,
+    /// The action is continuing to fire, on a tick after the one it began.
+    ///
+    /// A button held down reads `Firing` every tick until it is let go.
+    Firing,
     /// The action ended this tick after being active.
     Completed,
     /// The action was abandoned before it ever fired.

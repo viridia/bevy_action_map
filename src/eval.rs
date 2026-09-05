@@ -364,7 +364,7 @@ impl<C: InputContext> InputContextState<C> {
             level_changes += 1;
         }
 
-        // Time passes even when nothing arrives: a phase has to reach `Ongoing` from `Fired` on its
+        // Time passes even when nothing arrives: a phase has to reach `Firing` from `Fired` on its
         // own, and without an event to prompt it nothing else would.
         if level_changes == 0 {
             self.fold(threshold, Vec2::ZERO, delta, Fold::Level, consumed, claims);
@@ -791,7 +791,7 @@ impl<C: InputContext> InputContextState<C> {
                     require_reset.set(slot, false);
                 }
 
-                // Compared rather than inferred from the phase: a held stick reports `Ongoing`
+                // Compared rather than inferred from the phase: a held stick reports `Firing`
                 // every tick while its value moves, and an action whose value moved has changed
                 // as surely as one that started or stopped.
                 let before = actions[slot];
@@ -799,7 +799,7 @@ impl<C: InputContext> InputContextState<C> {
                 if actions[slot] != before {
                     dirty.set(slot, true);
                 }
-                // Only the edges. `Idle` and `Ongoing` say that nothing changed, and an observer
+                // Only the edges. The level phases say that nothing changed, and an observer
                 // firing every tick for a held button would be noise rather than information.
                 if matches!(phase, Phase::Fired | Phase::Completed | Phase::Canceled) {
                     transitions.push(Transition { slot, phase, value });
@@ -882,10 +882,8 @@ fn apply_modifiers(
 /// Moves one action's state on by a tick, and reports the edge if there was one.
 ///
 /// The verdict says what the bindings decided; this decides what that means given where the action
-/// already was. Two states are distinguished by the *value* rather than by the phase: an action
-/// that is `Ongoing` with a value is firing, and one that is `Ongoing` at rest is a condition still
-/// building toward firing. That is what makes giving up on a hold a `Canceled` rather than a
-/// `Completed` — the action never actually happened.
+/// already was. That is what makes giving up on a hold a `Canceled` rather than a `Completed` — the
+/// action never actually happened.
 ///
 /// `kind` is `Fold::Interrupted` for a pass forced by a source disappearing rather than an ordinary
 /// release; only there does a firing-then-idle transition become `Canceled` instead of `Completed`.
@@ -895,17 +893,13 @@ fn update_action_state(
     verdict: Verdict,
     kind: Fold,
 ) -> Phase {
-    let was_firing = matches!(
-        action_state.phase,
-        Phase::Fired | Phase::Ongoing if action_state.value.to_bool()
-    );
-    let was_building = matches!(action_state.phase, Phase::Started)
-        || matches!(action_state.phase, Phase::Ongoing if !action_state.value.to_bool());
+    let was_firing = matches!(action_state.phase, Phase::Fired | Phase::Firing);
+    let was_building = matches!(action_state.phase, Phase::Started | Phase::Building);
 
     let phase = match verdict {
         Verdict::Fired => {
             if was_firing {
-                Phase::Ongoing
+                Phase::Firing
             } else {
                 Phase::Fired
             }
@@ -916,7 +910,7 @@ fn update_action_state(
                 // the action ending.
                 Phase::Completed
             } else if was_building {
-                Phase::Ongoing
+                Phase::Building
             } else {
                 Phase::Started
             }
@@ -1892,11 +1886,11 @@ mod tests {
         // Press, and wait it out.
         frame.record(key(ButtonState::Pressed));
         assert_eq!(step(&mut state, &frame), Phase::Started);
-        assert_eq!(step(&mut state, &frame), Phase::Ongoing, "still charging");
+        assert_eq!(step(&mut state, &frame), Phase::Building, "still charging");
         assert!(!state.value::<Jump>(), "and not yet jumping");
         assert_eq!(step(&mut state, &frame), Phase::Fired, "0.3s is past 0.25s");
         assert!(state.value::<Jump>());
-        assert_eq!(step(&mut state, &frame), Phase::Ongoing, "still held");
+        assert_eq!(step(&mut state, &frame), Phase::Firing, "still held");
 
         frame.record(key(ButtonState::Released));
         assert_eq!(step(&mut state, &frame), Phase::Completed);

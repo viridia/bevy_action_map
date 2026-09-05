@@ -92,7 +92,7 @@ pub(crate) fn dispatch_for<A: InputAction>(
         Phase::Completed => commands.trigger(Completed::<A> { entity, value }),
         Phase::Canceled => commands.trigger(Canceled::<A> { entity, value }),
         // Not edges: nothing changed, so there is nothing to tell an observer about.
-        Phase::Idle | Phase::Ongoing => {}
+        Phase::Idle | Phase::Building | Phase::Firing => {}
     }
 }
 

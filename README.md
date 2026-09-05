@@ -172,10 +172,11 @@ fn on_jump(_: On<Fired<Jump>>) {
 }
 ```
 
-Every action has a **phase** each tick — `Idle`, `Started`, `Ongoing`, `Fired`, `Completed`,
-`Canceled` — so a hold that's building, a hold that just fired, and a hold released too early are all
-distinguishable, whether you read it by polling `Actions<C>` or by listening for `Fired<A>` /
-`Started<A>` / `Completed<A>` / `Canceled<A>` as entity events on the context's own entity.
+Every action has a **phase** each tick — `Idle`, `Started`, `Building`, `Fired`, `Firing`,
+`Completed`, `Canceled` — so a hold that's building, a hold that just fired, and a hold released too
+early are all distinguishable, whether you read it by polling `Actions<C>` or by listening for
+`Fired<A>` / `Started<A>` / `Completed<A>` / `Canceled<A>` as entity events on the context's own
+entity.
 
 ### Presentation: mapping and rebinding
 

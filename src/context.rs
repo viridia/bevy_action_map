@@ -313,14 +313,10 @@ impl<C: InputContext> InputContextState<C> {
         if !self.is_active() {
             return Obstacle::ContextInactive;
         }
-        if self.actions[slot].phase == Phase::Fired || self.actions[slot].phase == Phase::Ongoing {
-            if self.actions[slot].value.to_bool() {
-                return Obstacle::None;
-            }
-            return Obstacle::ConditionPending;
-        }
-        if self.actions[slot].phase == Phase::Started {
-            return Obstacle::ConditionPending;
+        match self.actions[slot].phase {
+            Phase::Fired | Phase::Firing => return Obstacle::None,
+            Phase::Started | Phase::Building => return Obstacle::ConditionPending,
+            _ => {}
         }
         // A control someone else holds is the most useful answer available, so both of these
         // outrank the catch-all below even though all three are "the binding read nothing".
@@ -485,11 +481,18 @@ impl<C: InputContext> InputContextState<C> {
         self.require_reset.set_range(.., true);
     }
 
-    /// Reports every `Fired`/`Ongoing` action as `Canceled` rather than left where it was — the one
-    /// piece `deactivate` and `shadow` share.
+    /// Reports every action mid-hold or mid-fire as `Canceled` rather than left where it was — the
+    /// one piece `deactivate` and `shadow` share.
+    ///
+    /// `Started` is included along with `Fired`/`Firing`/`Building`: a hold canceled on the tick it
+    /// began is still in flight, and leaving it at `Started` would strand it there until the
+    /// context reactivates, which is the "held forever" R7.4 forbids.
     fn cancel_in_flight(&mut self) {
         for (slot, state) in self.actions.iter_mut().enumerate() {
-            if !matches!(state.phase, Phase::Fired | Phase::Ongoing) {
+            if !matches!(
+                state.phase,
+                Phase::Started | Phase::Building | Phase::Fired | Phase::Firing
+            ) {
                 continue;
             }
             state.phase = Phase::Canceled;
@@ -1875,7 +1878,7 @@ mod tests {
         assert_eq!(probe.phase, Phase::Fired);
     }
 
-    /// The edges of a press, delivered as events rather than polled. `Ongoing` is deliberately not
+    /// The edges of a press, delivered as events rather than polled. `Firing` is deliberately not
     /// among them — an observer that fired every tick a key was held would be reporting the absence
     /// of news.
     #[cfg(feature = "keyboard")]
@@ -2749,7 +2752,7 @@ mod tests {
         tick(&mut app);
         assert_eq!(
             app.world().resource::<Probe>().phase,
-            Phase::Ongoing,
+            Phase::Firing,
             "held, and nothing has shadowed it yet"
         );
 
@@ -2980,7 +2983,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<Screen>(|context| {
-            // One fire when the key goes down, and nothing but `Ongoing` for as long as it is held.
+            // One fire when the key goes down, and nothing but `Firing` for as long as it is held.
             context
                 .bind::<Navigate>(KeyCode::ArrowUp)
                 .on_change()
@@ -3447,7 +3450,7 @@ mod tests {
         assert!(pull_to(&mut app, 0.9).pressed);
         // Backing off into the band holds the press rather than dropping it.
         assert!(pull_to(&mut app, midband).pressed);
-        assert_eq!(pull_to(&mut app, midband).phase, Phase::Ongoing);
+        assert_eq!(pull_to(&mut app, midband).phase, Phase::Firing);
 
         // Only past the release threshold does it let go, and re-entering the band keeps it let go.
         assert!(!pull_to(&mut app, 0.1).pressed);
@@ -3823,7 +3826,7 @@ mod tests {
         assert_eq!(probe.movement, Vec2::new(0.0, 0.375));
         assert_eq!(probe.turn, -0.5);
         assert!(probe.jump);
-        assert_eq!(probe.jump_phase, Phase::Ongoing);
+        assert_eq!(probe.jump_phase, Phase::Firing);
     }
 
     #[test]
@@ -4124,7 +4127,7 @@ mod tests {
                 .get::<InputContextState<OnFoot>>(first)
                 .unwrap()
                 .phase::<Jump>(),
-            Phase::Ongoing
+            Phase::Firing
         );
         assert!(world.get::<InputContextState<OnFoot>>(second).is_none());
     }
@@ -4356,7 +4359,7 @@ mod tests {
         run_fixed_tick(&mut app);
         assert_eq!(app.world().resource::<Woken>().0, 1, "a press said nothing");
 
-        // Still held. `Fired` becomes `Ongoing`, which is one more change, and then the action is
+        // Still held. `Fired` becomes `Firing`, which is one more change, and then the action is
         // quiet for as long as the key stays down.
         app.update();
         run_fixed_tick(&mut app);

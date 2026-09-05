@@ -180,10 +180,12 @@ fn show_exhaust(
     flame: Query<&MeshMaterial2d<ColorMaterial>, With<Exhaust>>,
 ) {
     let thrust = input.value::<Thrust>();
-    // `Started` means the burn is building but has not opened up yet, so the flame can grow before
-    // the ship actually goes anywhere.
-    let charging = input.phase::<Afterburner>() == Phase::Started
-        || (input.phase::<Afterburner>() == Phase::Ongoing && !input.value::<Afterburner>());
+    // `Started` and `Building` mean the burn is charging but has not opened up yet, so the flame
+    // can grow before the ship actually goes anywhere.
+    let charging = matches!(
+        input.phase::<Afterburner>(),
+        Phase::Started | Phase::Building
+    );
     let boosting = input.value::<Afterburner>();
 
     for mut transform in exhaust {
