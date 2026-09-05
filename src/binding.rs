@@ -2317,13 +2317,34 @@ pub(crate) fn toggle_latch(scratch: &Scratch) -> bool {
 /// combined — never per binding, which is what [`apply_toggle`]'s own doc explains is unsafe here.
 /// `actuated` is the combined reading; `scratch` is the group's one shared cell, carrying the
 /// combined reading from last tick in `prev` the same way a private toggle carries its own.
+///
+/// `active` mirrors [`apply_toggle`]'s own parameter: the bit only moves while the group's tunable
+/// says toggle mode is on, though `prev` is tracked regardless, for the same reason — a hold that
+/// outlasts a switch back to toggle mode must not read as a fresh press.
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-pub(crate) fn resolve_shared_toggle(actuated: bool, scratch: &mut Scratch) {
+pub(crate) fn resolve_shared_toggle(actuated: bool, active: bool, scratch: &mut Scratch) {
     let was = scratch.prev.to_bool();
-    if actuated && !was {
+    if active && actuated && !was {
         scratch.flags ^= TOGGLE_LATCH;
     }
     scratch.prev = ActionValue::Bool(actuated);
+}
+
+/// A shared group's current toggle setting, read off any one member — `hold_or_toggle` and override
+/// application ([`apply_tunable_value`]) keep every sharing binding's own copy in lockstep, so which
+/// one answers does not matter.
+///
+/// Not feature-gated like its neighbours: the fold's per-binding read reaches this unconditionally,
+/// same as [`toggle_latch`], since which device features are enabled cannot change what a slice of
+/// already-compiled modifiers holds.
+pub(crate) fn toggle_active(modifiers: &[BindingModifier]) -> bool {
+    modifiers
+        .iter()
+        .find_map(|modifier| match modifier {
+            BindingModifier::Toggle { active } => Some(*active),
+            _ => None,
+        })
+        .unwrap_or(false)
 }
 
 /// A binding's source, converted to the control [`is_pressed`](crate::eval)-style raw actuation

@@ -155,6 +155,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 82  | A text field beside a live context                |
 | 85  | A dead zone at full deflection                    |
 | 86  | `active` and `is_active`, told apart               |
+| 93  | A shared toggle ignored the hold setting          |
 
 ---
 

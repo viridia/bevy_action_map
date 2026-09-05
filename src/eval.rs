@@ -586,11 +586,18 @@ impl<C: InputContext> InputContextState<C> {
         // loop then runs zero times.
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         for (scratch_index, cell) in tunable_scratch.iter_mut().enumerate() {
-            let actuated = bindings.iter().any(|binding| {
-                binding.tunable_shared == Some(scratch_index)
-                    && crate::binding::as_button_control(&binding.source).is_some_and(&is_pressed)
-            });
-            crate::binding::resolve_shared_toggle(actuated, cell);
+            let mut actuated = false;
+            let mut active = false;
+            for binding in bindings
+                .iter()
+                .filter(|binding| binding.tunable_shared == Some(scratch_index))
+            {
+                active = crate::binding::toggle_active(&binding.modifiers);
+                if crate::binding::as_button_control(&binding.source).is_some_and(&is_pressed) {
+                    actuated = true;
+                }
+            }
+            crate::binding::resolve_shared_toggle(actuated, active, cell);
         }
 
         let mut index = 0;
@@ -703,17 +710,23 @@ impl<C: InputContext> InputContextState<C> {
                     value
                 };
                 // A binding whose tunable is shared (`hold_or_toggle` reaching a primary and a
-                // secondary key, most often) does not run its own modifier chain at all — the
-                // group-wide pre-pass above has already resolved this tick's latch once, from every
-                // sharing binding's raw actuation combined, and every member simply reads that back.
-                // Running each binding's chain independently here, against its own private scratch,
-                // is exactly what let one binding's evaluation order clobber another's edge
-                // detection before the pre-pass existed.
+                // secondary key, most often) does not run its own modifier chain when the group's
+                // toggle is on — the pre-pass above has already resolved this tick's latch once,
+                // from every sharing binding's raw actuation combined, and every member simply reads
+                // that back. Running each binding's chain independently here, against its own
+                // private scratch, is exactly what let one binding's evaluation order clobber
+                // another's edge detection before the pre-pass existed.
+                //
+                // While the group is in hold mode there is nothing to share: each binding is an
+                // ordinary momentary control again, so it falls through to the same modifier chain
+                // an unshared binding runs, whose own `Toggle { active: false }` is identity.
                 let value = match binding.tunable_shared {
-                    Some(scratch_index) => ActionValue::Bool(crate::binding::toggle_latch(
-                        &tunable_scratch[scratch_index],
-                    )),
-                    None => apply_modifiers(value, &binding.modifiers, modifier_scratch, delta),
+                    Some(scratch_index) if crate::binding::toggle_active(&binding.modifiers) => {
+                        ActionValue::Bool(crate::binding::toggle_latch(
+                            &tunable_scratch[scratch_index],
+                        ))
+                    }
+                    _ => apply_modifiers(value, &binding.modifiers, modifier_scratch, delta),
                 };
                 // Where a press comes from something that was not already a press, the threshold
                 // has to settle it here. Reading it later cannot: by then the only question a
@@ -1635,9 +1648,23 @@ mod tests {
         assert_eq!(state.value::<Counted>(), 2.0);
     }
 
+    /// Turns every eligible binding's `hold_or_toggle` modifier on, standing in for the override an
+    /// app would normally apply from a settings screen — the low-level `InputContextBuilder` this
+    /// module tests through has no path from a `TunableValue` to a compiled plan.
+    #[cfg(feature = "keyboard")]
+    fn force_toggle_on(bindings: &mut [crate::binding::BindingSpec]) {
+        for binding in bindings {
+            for modifier in &mut binding.modifiers {
+                if let crate::binding::BindingModifier::Toggle { active } = modifier {
+                    *active = true;
+                }
+            }
+        }
+    }
+
     /// Two bindings sharing a `hold_or_toggle` key — a primary and a secondary, the way
-    /// Disasteroids' `Thrust` is — read one latch rather than two. Pressing either one flips it;
-    /// which one pressed last time is not remembered anywhere.
+    /// Disasteroids' `Thrust` is — read one latch rather than two once a player turns toggle mode
+    /// on. Pressing either one flips it; which one pressed last time is not remembered anywhere.
     #[cfg(feature = "keyboard")]
     #[test]
     fn two_bindings_sharing_a_toggle_share_one_latch() {
@@ -1677,7 +1704,8 @@ mod tests {
         builder.hold_or_toggle::<Jump>("eval_tests.jump.hold_or_toggle");
         let mut state = InputContextState::<Flying>::new(
             Arc::new({
-                let (bindings, class_bindings) = builder.finish();
+                let (mut bindings, class_bindings) = builder.finish();
+                force_toggle_on(&mut bindings);
                 Plan::from_bindings(bindings, class_bindings)
             }),
             None,
@@ -1735,6 +1763,100 @@ mod tests {
             state.value::<Jump>(),
             "and back on again, from whichever key is pressed next"
         );
+    }
+
+    /// Held is the default, and two bindings sharing a `hold_or_toggle` key must not change that:
+    /// before a player ever turns toggle mode on, each key is an ordinary momentary control, exactly
+    /// as if `hold_or_toggle` had never been declared.
+    ///
+    /// The regression this guards: the shared latch used to resolve unconditionally, so a group of
+    /// two or more bindings — the documented primary-and-secondary case, and Disasteroids' `Thrust`
+    /// — read as permanently toggled with no way to turn it off, since nothing checked the tunable's
+    /// own value before reading the latch back.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_shared_toggle_left_at_its_default_behaves_as_an_ordinary_hold() {
+        use bevy_input::keyboard::{Key, KeyCode, KeyboardInput};
+
+        fn key_at(code: KeyCode, state: ButtonState) -> RawEvent {
+            RawEvent::Keyboard(KeyboardInput {
+                key_code: code,
+                logical_key: Key::Space,
+                state,
+                text: None,
+                repeat: false,
+                window: bevy_ecs::entity::Entity::PLACEHOLDER,
+            })
+        }
+
+        fn apply(
+            state: &mut InputContextState<Flying>,
+            frame: &mut InputFrame,
+            threshold: &ButtonThreshold,
+            event: RawEvent,
+        ) {
+            frame.record(event);
+            state.apply_frame(
+                frame,
+                threshold,
+                TICK,
+                &ConsumedControls::default(),
+                &mut Vec::new(),
+                None,
+            );
+        }
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Jump>(KeyCode::KeyW);
+        builder.bind::<Jump>(KeyCode::ArrowUp);
+        builder.hold_or_toggle::<Jump>("eval_tests.jump.hold_or_toggle_default");
+        let mut state = InputContextState::<Flying>::new(
+            Arc::new({
+                let (bindings, class_bindings) = builder.finish();
+                Plan::from_bindings(bindings, class_bindings)
+            }),
+            None,
+        );
+        let threshold = ButtonThreshold::default();
+        let mut frame = InputFrame::default();
+
+        apply(
+            &mut state,
+            &mut frame,
+            &threshold,
+            key_at(KeyCode::KeyW, ButtonState::Pressed),
+        );
+        assert!(
+            state.value::<Jump>(),
+            "pressing W fires it, same as any hold"
+        );
+
+        apply(
+            &mut state,
+            &mut frame,
+            &threshold,
+            key_at(KeyCode::KeyW, ButtonState::Released),
+        );
+        assert!(
+            !state.value::<Jump>(),
+            "and letting go clears it — no latch to hold it on"
+        );
+
+        apply(
+            &mut state,
+            &mut frame,
+            &threshold,
+            key_at(KeyCode::ArrowUp, ButtonState::Pressed),
+        );
+        assert!(state.value::<Jump>(), "the secondary key fires it too");
+
+        apply(
+            &mut state,
+            &mut frame,
+            &threshold,
+            key_at(KeyCode::ArrowUp, ButtonState::Released),
+        );
+        assert!(!state.value::<Jump>(), "and clears the same way on release");
     }
 
     /// A hold, all the way through and then abandoned. The distinction the phases exist for is that
