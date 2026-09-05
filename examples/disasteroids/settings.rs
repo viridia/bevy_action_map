@@ -359,31 +359,39 @@ fn screen(world: &World) -> impl Scene {
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
-            row_gap: Val::Px(22.0),
+            row_gap: Val::Px(14.0),
         }
         Children [
             (
                 Text::new("CONTROLS")
-                TextFont { font_size: 28.0_f32 }
+                TextFont { font_size: 27.0_f32 }
                 TextColor(TITLE)
             ),
             (
-                Node { column_gap: Val::Px(64.0), align_items: AlignItems::Start }
+                Node { column_gap: Val::Px(48.0), align_items: AlignItems::Start }
                 Children [
                     ({table("Keyboard & Mouse", rows(Scheme::KeyboardMouse))}),
                     (
-                        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(10.0) }
+                        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0) }
                         Children [
                             ({table("Gamepad", rows(Scheme::Gamepad))}),
                             ({preset_row(&presets, selected)}),
-                            ({dead_zone_row(dead_zone)}),
-                            ({hold_or_toggle_row(hold_or_toggle)}),
+                            // Two rows' worth of control on one line, for now: the screen is
+                            // already at the height budget the window allows, and neither reads
+                            // worse side by side than stacked.
+                            (
+                                Node { column_gap: Val::Px(24.0) }
+                                Children [
+                                    ({dead_zone_row(dead_zone)}),
+                                    ({hold_or_toggle_row(hold_or_toggle)}),
+                                ]
+                            ),
                         ]
                     ),
                 ]
             ),
             (
-                Node { column_gap: Val::Px(16.0), margin: {UiRect::top(Val::Px(6.0))} }
+                Node { column_gap: Val::Px(16.0), margin: {UiRect::top(Val::Px(4.0))} }
                 Children [
                     // Cancel first in the tree as well as on screen, so that the one the selection
                     // starts on is also the one the eye starts on.
@@ -404,17 +412,17 @@ fn screen(world: &World) -> impl Scene {
                 Node {
                     margin: UiRect::axes(percent(10), px(0))
                 }
-                TextFont { font_size: 14.0_f32 }
+                TextFont { font_size: 13.0_f32 }
                 TextColor(FIXED)
                 Children [
                     (
                         PromptSpan({ToggleSettings::id()})
-                        TextFont { font_size: 14.0_f32 }
+                        TextFont { font_size: 13.0_f32 }
                         TextColor(TITLE)
                     ),
                     (
                         TextSpan::new(" to close.")
-                        TextFont { font_size: 14.0_f32 }
+                        TextFont { font_size: 13.0_f32 }
                         TextColor(FIXED)
                     ),
                 ]
@@ -435,22 +443,22 @@ fn cancel_button() -> impl Scene {
         AutoFocus
         focusable()
         Text::new("Cancel (")
-        TextFont { font_size: 16.0_f32 }
+        TextFont { font_size: 15.0_f32 }
         TextColor(TITLE)
         BorderColor::all(FIXED)
         Node {
             border: {UiRect::all(Val::Px(1.0))},
             border_radius: {BorderRadius::all(Val::Px(4.0))},
-            padding: {UiRect::axes(Val::Px(18.0), Val::Px(5.0))},
+            padding: {UiRect::axes(Val::Px(16.0), Val::Px(4.0))},
         }
         Children [
             (
                 PromptSpan({Back::id()})
                 template_value(PromptScheme(Scheme::Gamepad))
-                TextFont { font_size: 16.0_f32 }
+                TextFont { font_size: 15.0_f32 }
                 TextColor(TITLE)
             ),
-            (TextSpan::new(")") TextFont { font_size: 16.0_f32 } TextColor(TITLE)),
+            (TextSpan::new(")") TextFont { font_size: 15.0_f32 } TextColor(TITLE)),
         ]
     }
 }
@@ -462,22 +470,22 @@ fn confirm_button() -> impl Scene {
         on(confirm_pressed)
         focusable()
         Text::new("Confirm (")
-        TextFont { font_size: 16.0_f32 }
+        TextFont { font_size: 15.0_f32 }
         TextColor(TITLE)
         BorderColor::all(FIXED)
         Node {
             border: {UiRect::all(Val::Px(1.0))},
             border_radius: {BorderRadius::all(Val::Px(4.0))},
-            padding: {UiRect::axes(Val::Px(18.0), Val::Px(5.0))},
+            padding: {UiRect::axes(Val::Px(16.0), Val::Px(4.0))},
         }
         Children [
             (
                 PromptSpan({Confirm::id()})
                 template_value(PromptScheme(Scheme::Gamepad))
-                TextFont { font_size: 16.0_f32 }
+                TextFont { font_size: 15.0_f32 }
                 TextColor(TITLE)
             ),
-            (TextSpan::new(")") TextFont { font_size: 16.0_f32 } TextColor(TITLE)),
+            (TextSpan::new(")") TextFont { font_size: 15.0_f32 } TextColor(TITLE)),
         ]
     }
 }
@@ -529,14 +537,14 @@ fn preset_button(preset: &Preset, selected: bool) -> impl Scene + use<> {
         focusable()
         template_value(PresetButton(name))
         Text::new(label)
-        TextFont { font_size: 15.0_f32 }
+        TextFont { font_size: 14.0_f32 }
         TextColor(TITLE)
         BorderColor::all(border)
         BackgroundColor(background)
         Node {
             border: {UiRect::all(Val::Px(1.0))},
             border_radius: {BorderRadius::all(Val::Px(4.0))},
-            padding: {UiRect::axes(Val::Px(12.0), Val::Px(4.0))},
+            padding: {UiRect::axes(Val::Px(12.0), Val::Px(3.0))},
         }
     }
 }
@@ -549,9 +557,9 @@ fn dead_zone_row(value: TunableValue) -> impl Scene {
         TunableValue::Bool(_) => 0.0,
     };
     bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(4.0) }
+        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(3.0) }
         Children [
-            (Text::new("Turn dead zone") TextFont { font_size: 14.0_f32 } TextColor(HEADING)),
+            (Text::new("Turn dead zone") TextFont { font_size: 13.0_f32 } TextColor(HEADING)),
             ({stepper(value)}),
         ]
     }
@@ -580,18 +588,18 @@ fn stepper(value: f32) -> impl Scene {
             align_items: AlignItems::Center,
             border: {UiRect::all(Val::Px(1.0))},
             border_radius: {BorderRadius::all(Val::Px(4.0))},
-            padding: {UiRect::axes(Val::Px(8.0), Val::Px(4.0))},
+            padding: {UiRect::axes(Val::Px(8.0), Val::Px(3.0))},
         }
         BorderColor::all(CHANGEABLE)
         Children [
-            (Button on(decrement_pressed) Text::new("<") TextFont { font_size: 16.0_f32 } TextColor(TITLE)),
+            (Button on(decrement_pressed) Text::new("<") TextFont { font_size: 15.0_f32 } TextColor(TITLE)),
             (
                 DeadZoneValue
                 Text::new(dead_zone_label(value))
-                TextFont { font_size: 15.0_f32 }
+                TextFont { font_size: 14.0_f32 }
                 TextColor(TITLE)
             ),
-            (Button on(increment_pressed) Text::new(">") TextFont { font_size: 16.0_f32 } TextColor(TITLE)),
+            (Button on(increment_pressed) Text::new(">") TextFont { font_size: 15.0_f32 } TextColor(TITLE)),
         ]
     }
 }
@@ -667,9 +675,9 @@ fn effective_tunable(tunable: &Tunable, pending: &Overrides) -> TunableValue {
 /// since unlike the deadzone stepper this one really does apply on Confirm.
 fn hold_or_toggle_row(active: bool) -> impl Scene {
     bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(4.0) }
+        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(3.0) }
         Children [
-            (Text::new("Thrust") TextFont { font_size: 14.0_f32 } TextColor(HEADING)),
+            (Text::new("Thrust") TextFont { font_size: 13.0_f32 } TextColor(HEADING)),
             (
                 Button
                 on(hold_or_toggle_pressed)
@@ -681,13 +689,13 @@ fn hold_or_toggle_row(active: bool) -> impl Scene {
                     align_items: AlignItems::Center,
                     border: {UiRect::all(Val::Px(1.0))},
                     border_radius: {BorderRadius::all(Val::Px(4.0))},
-                    padding: {UiRect::axes(Val::Px(8.0), Val::Px(4.0))},
+                    padding: {UiRect::axes(Val::Px(8.0), Val::Px(3.0))},
                 }
                 Children [
                     (
                         HoldOrToggleValue
                         Text::new(hold_or_toggle_label(active))
-                        TextFont { font_size: 15.0_f32 }
+                        TextFont { font_size: 14.0_f32 }
                         TextColor(TITLE)
                     ),
                 ]
@@ -924,13 +932,13 @@ fn table(title: &'static str, mut rows: Vec<Mapping>) -> impl Scene {
     }
 
     bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(3.0) }
+        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(2.0) }
         Children [
             (
                 Text::new(title)
-                TextFont { font_size: 18.0_f32 }
+                TextFont { font_size: 17.0_f32 }
                 TextColor(TITLE)
-                Node { margin: {UiRect::bottom(Val::Px(6.0))} }
+                Node { margin: {UiRect::bottom(Val::Px(4.0))} }
             ),
             {lines},
         ]
@@ -1128,14 +1136,14 @@ fn cell(cell: Cell) -> impl Scene {
         {row_tag}
         {follower_tag}
         Text({cell.text})
-        TextFont { font_size: 15.0_f32 }
+        TextFont { font_size: 14.0_f32 }
         TextColor({cell.color})
         BorderColor::all(cell.border)
         Node {
             width: {Val::Px(cell.width)},
             border: {UiRect::all(Val::Px(1.0))},
             border_radius: {BorderRadius::all(Val::Px(3.0))},
-            padding: {UiRect::axes(Val::Px(6.0), Val::Px(2.0))},
+            padding: {UiRect::axes(Val::Px(6.0), Val::Px(1.0))},
         }
     }
 }
