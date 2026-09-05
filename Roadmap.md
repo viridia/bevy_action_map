@@ -154,6 +154,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 88  | The gamepad-settings warning sees the global thresholds |
 | 76  | `Unresolved`, once                                |
 | 70  | Device brand and class                           |
+| 91  | The crate does not do what its own documents say  |
 
 ---
 
@@ -196,28 +197,6 @@ happening" is blind to the likeliest cause of it.
 - **It owes a sentence to `docs/design.md` §7.1.** R22.14's MUST — spawning must be sufficient,
   including from a scene — holds only for a type that was *also* declared imperatively, and no
   document says so today.
-
-### 91. The crate does not do what its own documents say
-
-Two one-line defects that share nothing but a cause: both are invisible to reading, and to
-`cargo check`.
-
-- **`ActionMapPlugin` panics on its first update in the no-devices build.** `InputFramePlugin` is
-  gated on `any(keyboard, mouse, gamepad)` and is the only caller of `init_resource::<InputFrame>`,
-  while `run_captures` and `evaluate_context` take `Res<InputFrame>` unconditionally. All three
-  single-feature builds pass; only the zero-feature one fails, and it is on `CLAUDE.md`'s
-  Verification list — which runs `check` and `clippy` for it, neither of which can see this.
-- **The smoke test is the durable half.** An `App::update` in that configuration, because the whole
-  class of defect is invisible to a type check and will recur otherwise.
-- **`KeyCode` is not in the prelude**, so `docs/design.md` §7.1's opening line —
-  `controls.bind::<Jump>(KeyCode::Space)` — does not compile after a glob import. `lib.rs`'s quick
-  start works only because it also globs `bevy::prelude`. It is the first thing anyone types.
-- **Re-exporting is the fix, and it is safe against a double glob**: it is the same item as
-  `bevy::prelude`'s, so both globs resolve to one thing. What the chunk decides is how far the
-  re-export goes — `KeyCode` alone, or the control vocabulary a binding names. Chunk 48 is
-  rethinking the prelude and inherits whatever this settles.
-- **Chunk 28 owns the general class** — the design's examples actually running — and this does
-  not wait for it.
 
 ---
 

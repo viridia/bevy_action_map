@@ -255,6 +255,9 @@ impl bevy_app::Plugin for ActionMapPlugin {
         if !app.is_plugin_added::<frame::InputFramePlugin>() {
             app.add_plugins(frame::InputFramePlugin);
         }
+        // `InputFramePlugin` only exists to sample devices, so a build with none of them never adds
+        // it — but `run_captures` and context evaluation read `InputFrame` regardless.
+        app.init_resource::<frame::InputFrame>();
 
         app.init_resource::<binding::ButtonThreshold>();
         app.init_resource::<eval::ConsumedControls>();
@@ -325,8 +328,12 @@ pub mod prelude {
     // type is inferred and never written. Import it from `binding` to name it in a signature.
     #[cfg(feature = "gamepad")]
     pub use crate::binding::Stick;
+    // Also in `bevy::prelude`, so a glob import of both resolves to the same item. Without this,
+    // `bind::<Jump>(KeyCode::Space)` — the crate's own quick start — does not compile on its own.
     #[cfg(any(feature = "keyboard", feature = "gamepad"))]
     pub use crate::binding::{AxisButtons, DirectionalButtons};
+    #[cfg(feature = "keyboard")]
+    pub use bevy_input::keyboard::KeyCode;
     // `MouseMove` is ungated because `BindingSource::MouseMotion` is.
     pub use crate::binding::{ButtonThreshold, CompassPoints, Control, DeadZone, MouseMove, Part};
     pub use crate::capture::{

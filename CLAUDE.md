@@ -149,7 +149,8 @@ otherwise have decided, or where the author wrote the code and the model reviewe
 cargo fmt --check
 cargo test --all-features
 cargo clippy --all-features --all-targets
-cargo clippy --no-default-features --features libm     # the no-devices build
+cargo clippy --no-default-features --features libm      # the no-devices build
+cargo test --no-default-features --features libm --test no_devices
 ```
 
 Whenever a `cfg` group changes, build all eight device-feature combinations — a configuration nobody
@@ -164,6 +165,8 @@ done
 **Known, not regressions:** doctests compile but fail to *run* (`dynamic_linking` on the `bevy`
 dev-dependency — chunk 28 owns the fix). Everything else is warning-free in every configuration
 above, so a warning is a regression — treat one as such rather than assuming it was already there.
+The unit tests under `src/` assume a keyboard is available and do not build in the no-devices
+configuration, so `tests/no_devices.rs` is run on its own rather than as part of the full suite.
 
 ## Context, and what not to economize on
 
