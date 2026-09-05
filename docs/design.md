@@ -464,6 +464,28 @@ one device.
 `ConsumedControls` and `ExclusionCeiling` are computed once per context type and are not scoped by
 owner.
 
+**Which device is "the" one for a prompt is the app's call**, on the same terms as `PromptDevice`
+(§9.2): a player with two gamepads paired is an edge case nothing in this crate ranks, and a game
+that cares reaches for `Paired`'s own devices and its own notion of which is current.
+
+### 7.5 Brand resolution
+
+```rust
+pub enum GamepadBrand { Xbox, PlayStation, Nintendo, Generic }
+pub struct GamepadBrands { /* vendor_id -> GamepadBrand */ }
+```
+
+A device's brand is a fact about that one gamepad, resolved from its `vendor_id` — which is
+`Option` and often absent, so `Generic` is the ordinary answer for an unrecognized or unreported
+pad, not an error. `GamepadBrands` is a resource seeded with the three current-generation console
+makers' USB vendor ids and `init_resource`'d by `InputFramePlugin`; `insert` is the app-overridable
+mapping for hardware this crate does not ship pre-resolved.
+
+Current-generation controllers only: DualSense, the Xbox Series pad, the Switch Pro Controller and
+Joy-Con. A brand alone cannot tell one console generation from another — Xbox 360's "Back"/"Start"
+became Xbox One's "View"/"Menu", and PS4's "Share" became PS5's "Create" — so nothing here tracks
+an older pad's own labels.
+
 ---
 
 ## 8. Bindings
@@ -654,6 +676,11 @@ A trait rather than a function, because this crate's tables are not always the a
 is a `ControlOrigin` rather than a `Control` for the same reason, and both variants answer `name()`
 and `fallback_label()`. `BindingTable` is the implementation that answers from this crate's own
 plans.
+
+**`Control::fallback_label_for_brand(GamepadBrand)`** (§7.5) answers the way `fallback_label` does,
+except a gamepad's face buttons, bumpers, triggers, Select/Start and Mode read in that brand's own
+words — "Cross" rather than "South Button" on a PlayStation pad. Sticks and the D-pad read the
+same either way, and `GamepadBrand::Generic` falls through to the positional answer.
 
 **A prompt is not a row of the settings screen.** `mappings` is what the game declared and is
 static; a prompt is what would fire now, so it is empty for a context nobody is carrying or that is
@@ -873,7 +900,7 @@ The macro crate is re-exported, so nothing names it.
 
 ```
 src/
-  device.rs      L0  device handles, pairing sets, gamepad calibration
+  device.rs      L0  device handles, pairing sets, gamepad calibration and brand resolution
   frame.rs       L1  the event queue, sampling, retirement
   action.rs          identity, intent, channel shape, value, phase, scratch
   binding.rs         controls, sources, composites, modifiers, the context builder

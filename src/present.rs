@@ -505,6 +505,84 @@ impl Control {
             Self::MouseMotion => Cow::Borrowed("Mouse"),
         }
     }
+
+    /// Like [`fallback_label`](Self::fallback_label), but a gamepad's face buttons, bumpers,
+    /// triggers, Select/Start and Mode read in `brand`'s own words — "Cross" rather than "South
+    /// Button" for a PlayStation pad. Everything else, including [`GamepadBrand::Generic`], answers
+    /// exactly as [`fallback_label`](Self::fallback_label) does.
+    ///
+    /// Current-generation controllers only (R11.6): DualSense, the Xbox Series pad, and the Switch
+    /// Pro Controller / Joy-Con. An older pad's own labels (Xbox 360's "Back"/"Start", PS4's
+    /// "Share") are not tracked, since brand alone cannot tell one console generation from another.
+    #[cfg(feature = "gamepad")]
+    pub fn fallback_label_for_brand(
+        self,
+        brand: crate::device::GamepadBrand,
+    ) -> alloc::borrow::Cow<'static, str> {
+        if let Self::GamepadButton(button) = self
+            && let Some(label) = branded_button_label(button, brand)
+        {
+            return alloc::borrow::Cow::Borrowed(label);
+        }
+        self.fallback_label()
+    }
+}
+
+/// The current-generation, brand-specific name for one gamepad button, where one exists.
+///
+/// `None` for `GamepadBrand::Generic` and for every button whose word is the same regardless of
+/// brand (sticks, D-pad) or would need a console generation rather than just a brand to get right
+/// (see [`fallback_label_for_brand`](Control::fallback_label_for_brand)).
+#[cfg(feature = "gamepad")]
+fn branded_button_label(
+    button: GamepadButton,
+    brand: crate::device::GamepadBrand,
+) -> Option<&'static str> {
+    use crate::device::GamepadBrand::{Generic, Nintendo, PlayStation, Xbox};
+    use GamepadButton::{
+        East, LeftTrigger, LeftTrigger2, Mode, North, RightTrigger, RightTrigger2, Select, South,
+        Start, West,
+    };
+
+    Some(match (brand, button) {
+        (Generic, _) => return None,
+        (Xbox, South) => "A",
+        (Xbox, East) => "B",
+        (Xbox, North) => "Y",
+        (Xbox, West) => "X",
+        (Xbox, LeftTrigger) => "LB",
+        (Xbox, RightTrigger) => "RB",
+        (Xbox, LeftTrigger2) => "LT",
+        (Xbox, RightTrigger2) => "RT",
+        (Xbox, Select) => "View",
+        (Xbox, Start) => "Menu",
+        (Xbox, Mode) => "Xbox Button",
+        (PlayStation, South) => "Cross",
+        (PlayStation, East) => "Circle",
+        (PlayStation, North) => "Triangle",
+        (PlayStation, West) => "Square",
+        (PlayStation, LeftTrigger) => "L1",
+        (PlayStation, RightTrigger) => "R1",
+        (PlayStation, LeftTrigger2) => "L2",
+        (PlayStation, RightTrigger2) => "R2",
+        (PlayStation, Select) => "Create",
+        (PlayStation, Start) => "Options",
+        (PlayStation, Mode) => "PS Button",
+        // Nintendo's face buttons sit mirrored relative to Xbox/PlayStation: physical South is B,
+        // not A, and so on around the diamond.
+        (Nintendo, South) => "B",
+        (Nintendo, East) => "A",
+        (Nintendo, North) => "X",
+        (Nintendo, West) => "Y",
+        (Nintendo, LeftTrigger) => "L",
+        (Nintendo, RightTrigger) => "R",
+        (Nintendo, LeftTrigger2) => "ZL",
+        (Nintendo, RightTrigger2) => "ZR",
+        (Nintendo, Select) => "Minus",
+        (Nintendo, Start) => "Plus",
+        (Nintendo, Mode) => "Home Button",
+        _ => return None,
+    })
 }
 
 /// One physical control a prompt can name.
@@ -1004,6 +1082,53 @@ mod tests {
             "Left Stick X"
         );
         assert_eq!(Control::MouseMotion.fallback_label().to_string(), "Mouse");
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn fallback_label_for_brand_names_face_buttons_in_the_brand_s_own_words() {
+        use crate::device::GamepadBrand;
+
+        let south = Control::GamepadButton(GamepadButton::South);
+        assert_eq!(south.fallback_label_for_brand(GamepadBrand::Xbox), "A");
+        assert_eq!(
+            south.fallback_label_for_brand(GamepadBrand::PlayStation),
+            "Cross"
+        );
+        // Nintendo's face buttons sit mirrored: physical South is B, not A.
+        assert_eq!(south.fallback_label_for_brand(GamepadBrand::Nintendo), "B");
+
+        assert_eq!(
+            Control::GamepadButton(GamepadButton::LeftTrigger2)
+                .fallback_label_for_brand(GamepadBrand::PlayStation),
+            "L2"
+        );
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn fallback_label_for_brand_falls_through_when_there_is_nothing_brand_specific_to_say() {
+        use crate::device::GamepadBrand;
+
+        // Generic never overrides the positional answer, brand or no brand.
+        assert_eq!(
+            Control::GamepadButton(GamepadButton::South)
+                .fallback_label_for_brand(GamepadBrand::Generic),
+            "South Button"
+        );
+        // Sticks read the same regardless of brand.
+        assert_eq!(
+            Control::GamepadAxis(GamepadAxis::LeftStickX)
+                .fallback_label_for_brand(GamepadBrand::Xbox),
+            "Left Stick X"
+        );
+        // A control with no gamepad brand to speak of at all.
+        assert_eq!(
+            Control::MouseMotion
+                .fallback_label_for_brand(GamepadBrand::Xbox)
+                .to_string(),
+            "Mouse"
+        );
     }
 
     /// Every control has something to show. A label nobody wrote would surface as a blank row.

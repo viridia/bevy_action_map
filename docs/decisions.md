@@ -1177,6 +1177,27 @@ counts, which is what stops two waiting slots racing for it.
 it: no game pairs two different-priority contexts to different devices where one's consumption would
 wrongly reach the other.
 
+### D64 — Brand is a fact about one pad, resolved by vendor id, current generation only
+
+**Decided.** `GamepadBrand` (Xbox / PlayStation / Nintendo / Generic) is resolved from a connected
+gamepad's `vendor_id` alone, through `GamepadBrands` — a resource seeded with the three current
+console makers' USB vendor ids and extended with `insert` for hardware this crate does not ship
+pre-resolved. `Control::fallback_label_for_brand` reads face buttons, bumpers, triggers,
+Select/Start and Mode in that brand's own current-generation words; sticks and the D-pad are
+unaffected.
+
+**Rules out.** Keying the override by device entity instead of vendor id; tracking which of a
+player's several paired gamepads is "the" one a prompt speaks for; and spanning more than one
+console generation's naming per brand.
+
+**Reversal.** A per-entity override would handle a pad that misreports its own vendor id — a rarer
+case than an unlisted vendor, and not one anything in tree hits. Which device a prompt speaks for
+is D36's refusal already, extended to a new axis: an occupant with two gamepads paired is an edge
+case nothing here ranks, on the same terms as `PromptDevice` never being defaulted. Spanning
+generations would need a fourth axis — Xbox 360's "Back"/"Start" became Xbox One's "View"/"Menu",
+PS4's "Share" became PS5's "Create" — that R11.6 does not ask for and brand alone cannot resolve;
+committing to current-generation-only sidesteps guessing at it.
+
 ---
 
 ## What the crate refuses to own

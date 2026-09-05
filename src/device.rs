@@ -267,6 +267,75 @@ impl CalibrationSampling {
     }
 }
 
+/// Which manufacturer's conventions a connected gamepad follows (R11.6), for prompts and glyphs
+/// that want to say "A" on an Xbox pad and "Cross" on a PlayStation one rather than "South Button"
+/// on both.
+///
+/// `vendor_id` is `Option` and often absent — wasm, some Linux setups — so `Generic` is the
+/// ordinary answer for an unrecognized or unreported pad, not an error.
+#[cfg(feature = "gamepad")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GamepadBrand {
+    /// An Xbox controller.
+    Xbox,
+    /// A PlayStation controller.
+    PlayStation,
+    /// A Nintendo controller — a Switch Pro Controller or Joy-Con.
+    Nintendo,
+    /// Every other pad, and one Bevy could not identify.
+    Generic,
+}
+
+#[cfg(feature = "gamepad")]
+impl core::fmt::Display for GamepadBrand {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Xbox => "Xbox",
+            Self::PlayStation => "PlayStation",
+            Self::Nintendo => "Nintendo",
+            Self::Generic => "Generic",
+        })
+    }
+}
+
+/// Resolves a connected gamepad's [`GamepadBrand`] from its `vendor_id`.
+///
+/// Seeded with the three current-generation console makers' USB vendor ids, not
+/// SDL_GameControllerDB's full device list — a small table proves the seam, and
+/// [`insert`](Self::insert) is the app-overridable mapping R11.6 asks for, for hardware this crate
+/// does not ship pre-resolved.
+#[cfg(feature = "gamepad")]
+#[derive(Resource, Debug)]
+pub struct GamepadBrands {
+    by_vendor: HashMap<u16, GamepadBrand>,
+}
+
+#[cfg(feature = "gamepad")]
+impl Default for GamepadBrands {
+    fn default() -> Self {
+        let mut by_vendor = HashMap::new();
+        by_vendor.insert(0x045E, GamepadBrand::Xbox); // Microsoft
+        by_vendor.insert(0x054C, GamepadBrand::PlayStation); // Sony
+        by_vendor.insert(0x057E, GamepadBrand::Nintendo); // Nintendo
+        Self { by_vendor }
+    }
+}
+
+#[cfg(feature = "gamepad")]
+impl GamepadBrands {
+    /// Adds or replaces which brand a vendor id resolves to.
+    pub fn insert(&mut self, vendor_id: u16, brand: GamepadBrand) {
+        self.by_vendor.insert(vendor_id, brand);
+    }
+
+    /// Resolves a brand from a gamepad's vendor id, `Generic` if it is unknown or absent.
+    pub fn resolve(&self, vendor_id: Option<u16>) -> GamepadBrand {
+        vendor_id
+            .and_then(|id| self.by_vendor.get(&id).copied())
+            .unwrap_or(GamepadBrand::Generic)
+    }
+}
+
 /// Warns about gamepad settings this crate does not honour.
 ///
 /// Bevy's own `GamepadSettings` deadzones and thresholds are applied when it converts a raw gamepad
@@ -476,5 +545,35 @@ mod tests {
             set.owner_for(crate::mapping::Scheme::KeyboardMouse),
             Some(DeviceHandle::KeyboardMouse)
         );
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn brand_resolves_from_the_seeded_vendor_ids() {
+        let brands = GamepadBrands::default();
+        assert_eq!(brands.resolve(Some(0x045E)), GamepadBrand::Xbox);
+        assert_eq!(brands.resolve(Some(0x054C)), GamepadBrand::PlayStation);
+        assert_eq!(brands.resolve(Some(0x057E)), GamepadBrand::Nintendo);
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn brand_is_generic_when_the_vendor_id_is_unknown_or_absent() {
+        let brands = GamepadBrands::default();
+        assert_eq!(brands.resolve(Some(0x1234)), GamepadBrand::Generic);
+        assert_eq!(brands.resolve(None), GamepadBrand::Generic);
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn an_app_can_override_or_extend_the_seeded_table() {
+        let mut brands = GamepadBrands::default();
+        // A pad this crate does not ship pre-resolved.
+        brands.insert(0x2DC8, GamepadBrand::PlayStation); // 8BitDo, playing PlayStation-style
+        assert_eq!(brands.resolve(Some(0x2DC8)), GamepadBrand::PlayStation);
+
+        // The seeded table is a default, not a fixture — an app can also correct it.
+        brands.insert(0x045E, GamepadBrand::Generic);
+        assert_eq!(brands.resolve(Some(0x045E)), GamepadBrand::Generic);
     }
 }
