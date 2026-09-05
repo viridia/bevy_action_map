@@ -490,6 +490,46 @@ second implementer and the real one cannot live here.
 - **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
   look at the module pages the way a stranger would.
 
+### 94a. A binding can name the logical key, not only the physical one
+
+R12.1: a binding must be able to target physical position (`KeyCode`) or logical character (`Key`),
+and the choice must be explicit. Only `KeyCode` is bindable today, so `Ctrl+Z` can only be spelled
+physically — `Ctrl+KeyCode::KeyZ`, the position that shows `W` on an AZERTY keyboard — which arms
+on the wrong key for anyone using one.
+
+- **The frame already carries what this needs.** `RawEvent::Keyboard` records the whole
+  `KeyboardInput`, `logical_key` included; nothing downstream reads it. This is a new bindable
+  control and its plumbing through capture, admissibility, and naming — not a frame change.
+- **Narrows R12.2's gap rather than closing it.** A logical binding's on-screen label is exactly
+  the key it was declared with — no per-layout guess needed — so this fixes the mislabeling for
+  bindings a game chooses to make logical. A physical binding still shows the US-layout letter;
+  that half of R12.2 stays the documented, unfixable-alone limitation in `present.rs` and
+  `docs/decisions.md`.
+- **Not doing: composition.** `Key::Character` under an active IME composes across several key
+  events before it means anything (R12.6), which is the deferred text-input row and stays there.
+  This chunk's `Key` binding is for single, already-resolved characters like `z`.
+- **`docs/issues.md` 3.3** names this alongside 94b and 94c; only this one is the AZERTY fix people
+  keep being told is coming.
+
+### 94b. Either modifier
+
+R12.3: a chord's modifier should be able to say "either Ctrl", as one binding rather than two.
+`with` takes a single `ButtonControl`, so a game wanting either `LeftCtrl` or `RightCtrl` to arm a
+chord writes both bindings by hand today. R4.10 already assigns this to the chord mechanism by name,
+so the requirement has a destination in `Requirements.md` and, until this chunk, none in the plan.
+
+- **Self-contained**, and independent of 94a and 94c — a different corner of the same requirements
+  section, not a shared mechanism.
+
+### 94c. A platform modifier
+
+R12.4: `Cmd` on macOS should be usable as `Ctrl` everywhere else, as a named modifier resolved at
+binding time rather than something every cross-platform game re-derives by hand.
+
+- **Resolved at binding time, not read time.** The name a game binds does not change per platform;
+  what it expands to does, once, when the plan is built — not on every frame the control is read.
+- **Self-contained**, and independent of 94a and 94b.
+
 ---
 
 ## Deliberately deferred
@@ -518,8 +558,11 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **R16.3's suspend/resume** (mobile, console) | a platform target that needs it. Nothing in this crate's supported platforms emits a suspend signal or has a device re-enumeration step to hook |
 | **Split Friction's monsters, spawners and missiles** | a mechanic that would exercise input this crate has not already proven. Kept as a row rather than deleted because the sprites, the dungeon's region aspects and a `Fire`-shaped action all exist, so changing our mind is cheap |
 | **Guardian migration** | porting it from Bevy 0.16.1 with `bevy_enhanced_input` 0.12 to 0.20-dev — four versions, and a port plus a rewrite. Doing both at once would confuse "action_map is wrong" with "0.20 moved this" |
+| **A physical binding's label matching the current layout** (R12.2, R12.7) | winit exposing a physical-to-logical query and a layout-change signal, requested as [winit#4606][] and tracked by the broader [winit#2678][], open since February 2023 and unimplemented. A workaround was scoped and set aside: `run_captures` already sees the logical key at capture time, but keeping it means a new field on `Captured`, a session table `present.rs` consults ahead of the static fallback, and an honest answer on whether it survives a save — which drags in the same deferred binding-definition serialization as 17c (R17.6, R22.16) for a fix that only covers controls a player has personally rebound. A landed query supersedes it outright, for every physical binding rather than only captured ones, so the workaround is not worth building ahead of it |
 
 ---
 
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
+[winit#4606]: https://github.com/rust-windowing/winit/issues/4606
+[winit#2678]: https://github.com/rust-windowing/winit/issues/2678

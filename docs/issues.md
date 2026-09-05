@@ -342,7 +342,13 @@ are unbuilt:
 - **R12.4** — `Cmd` on macOS ≡ `Ctrl` elsewhere, as a named modifier resolved at binding time.
   Nothing. Every cross-platform game needs this and writes it itself.
 
-R12.2 and R12.7 are presentation; R12.6 is the deferred text-input row; R12.5 is met.
+R12.6 is the deferred text-input row; R12.5 is met.
+
+*Fix:* **chunk 94a** for R12.1, **94b** for R12.3, **94c** for R12.4. R12.2 and R12.7 are the
+deferred table's layout-query row, gated on upstream winit
+([winit#4606](https://github.com/rust-windowing/winit/issues/4606),
+[winit#2678](https://github.com/rust-windowing/winit/issues/2678)) rather than a chunk — a local
+workaround was scoped and set aside as disproportionate to what it would cover.
 
 ### 3.4 `Reflect` reaches two modules, and nothing anywhere registers a type
 

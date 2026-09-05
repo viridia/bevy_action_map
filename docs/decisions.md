@@ -850,6 +850,13 @@ an AZERTY player the wrong letter. Nothing in Bevy reports what a physical key p
 current layout outside an event that has already happened, so the crate cannot fix this alone; an
 app supplies the control half of its catalogue per layout.
 
+**Checked upstream rather than assumed.** winit already builds the per-key table this would need —
+`ToUnicodeEx`/`MapVirtualKeyEx` on Windows, `UCKeyTranslate` on macOS, libxkbcommon state on
+Linux — but only to fill in a `KeyEvent`'s own fields, and none of it is public. Requesting the
+query is [rust-windowing/winit#4606](https://github.com/rust-windowing/winit/issues/4606); the
+broader tracking issue, [#2678](https://github.com/rust-windowing/winit/issues/2678), has been open
+since February 2023, assigned, and unimplemented. Not a gap to plan around closing soon.
+
 ---
 
 ## Capture
