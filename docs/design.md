@@ -854,10 +854,10 @@ TOML table by name can put `SavedOverrides`'s fields beside an unrelated struct'
 likely to collide with something else's is the namespaced one.
 
 **`save_overrides`/`resolve_saved` are the pure functions** in and out of this shape.
-`resolve_saved` resolves a saved mapping name against what the game currently declares — a
-`MappingKey` can only ever be one already declared — and reports an `UnresolvedMapping` or
-`UnresolvedTunable` rather than dropping either in silence. A renamed action's row is dropped on the
-next save rather than preserved unresolved.
+`resolve_saved` resolves a saved mapping or tunable name against what the game currently declares —
+a `MappingKey` or a tunable key can only ever be one already declared — and reports an `Unresolved`
+row rather than dropping either kind in silence. A renamed action's row is dropped on the next save
+rather than preserved unresolved.
 
 `action_map_version` is checked before any row is read: a `SavedOverrides` naming a version this
 build never shipped is refused as a whole (`UnsupportedVersion`) rather than resolved as the one

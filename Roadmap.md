@@ -152,6 +152,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 93  | A shared toggle ignored the hold setting          |
 | 79  | `Phase` tells building from firing                |
 | 88  | The gamepad-settings warning sees the global thresholds |
+| 76  | `Unresolved`, once                                |
 
 ---
 
@@ -268,14 +269,6 @@ that clears what accumulated under the old rule.
   other document defers to, where dropping a load-bearing clause is invisible in a diff.
 - **Review surface:** whether anything moved landed somewhere a reader would find it. Text moved out
   of the constitution and into a section nobody opens has been deleted with extra steps.
-
-### 76. `Unresolved`, once
-
-`UnresolvedMapping` and `UnresolvedTunable` are the same struct — `{ scheme, name }` — each
-documented as being for the same reason as the other. One type with a field saying which kind of row
-it was, and `resolve_saved`'s `ResolvedOverrides` four-tuple becomes a struct with three fields.
-
-- **Not doing:** anything to `OverrideProblem`. That is a different report at a different time.
 
 ### 77. A test fixture the crate shares
 

@@ -493,36 +493,35 @@ pub fn save_overrides(overrides: &Overrides) -> SavedOverrides {
     }
 }
 
-/// A row a saved file named that this build cannot turn into a [`MappingKey`] at all.
-///
-/// Distinct from [`OverrideProblem`]: every `OverrideProblem` names a mapping this build has, and
-/// this one specifically does not. A [`MappingKey`] can only ever be one the game's own
-/// [`declared_mappings`](crate::mapping::declared_mappings) already holds — it is derived from
-/// `&'static` strings the game compiled in, not manufactured from a loaded one — so a name a save
-/// wrote for an action since renamed or removed has nothing to become. It is reported rather than
-/// dropped in silence, which is what carrying the raw text here does; a rewritten save simply omits
-/// it.
+/// Which table an [`Unresolved`] row was read from.
 #[cfg(feature = "serialize")]
-#[derive(Clone, Debug, PartialEq)]
-pub struct UnresolvedMapping {
-    /// The scheme table the row was filed under.
-    pub scheme: Scheme,
-    /// The mapping name exactly as the file spelled it.
-    pub name: String,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnresolvedKind {
+    /// A `bindings` row.
+    Mapping,
+    /// A `tunables` row.
+    Tunable,
 }
 
-/// A tunable row a saved file named that this build cannot use, either because no declared tunable
-/// answers to the name or because the value on file is the wrong shape for it — a bool where the
-/// declared tunable wants a number, most likely a save written against an older declaration.
-/// Reported rather than dropped in silence, exactly as [`UnresolvedMapping`] is; a rewritten save
-/// simply omits it.
+/// A row a saved file named that this build cannot place at all.
+///
+/// Distinct from [`OverrideProblem`]: every `OverrideProblem` names a mapping this build has, and
+/// this one specifically does not. A [`MappingKey`] or a tunable's key can only ever be one the
+/// game's own declarations already hold — each is derived from a `&'static` string the game
+/// compiled in, not manufactured from a loaded one — so a name a save wrote for an action or tunable
+/// since renamed or removed has nothing to become. A tunable row lands here too when the value on
+/// file is the wrong shape for it, a bool where the declared tunable wants a number, most likely a
+/// save written against an older declaration. Reported rather than dropped in silence, which is what
+/// carrying the raw text here does; a rewritten save simply omits it.
 #[cfg(feature = "serialize")]
 #[derive(Clone, Debug, PartialEq)]
-pub struct UnresolvedTunable {
+pub struct Unresolved {
     /// The scheme table the row was filed under.
     pub scheme: Scheme,
-    /// The tunable name exactly as the file spelled it.
+    /// The name exactly as the file spelled it.
     pub name: String,
+    /// Which table it came from.
+    pub kind: UnresolvedKind,
 }
 
 /// A [`SavedOverrides`] named a persistence-format version this build never shipped.
@@ -543,20 +542,15 @@ pub struct UnsupportedVersion {
 /// What resolving a [`SavedOverrides`] against a game's current declarations produces: the usable
 /// diff, plus a problem list per way a row could fail to carry over.
 #[cfg(feature = "serialize")]
-pub type ResolvedOverrides = (
-    Overrides,
-    Vec<OverrideProblem>,
-    Vec<UnresolvedMapping>,
-    Vec<UnresolvedTunable>,
-);
+pub type ResolvedOverrides = (Overrides, Vec<OverrideProblem>, Vec<Unresolved>);
 
 /// Turns a loaded [`SavedOverrides`] into what this build can use.
 ///
-/// Each row's mapping name is matched against `declared`, since a `MappingKey` can only ever be one
-/// the game already has. A name that matches nothing comes back in the returned `UnresolvedMapping`
-/// list rather than being dropped in silence; a control name that does not parse becomes an
-/// `OverrideProblem` instead, because by that point the mapping *did* resolve and there is a row to
-/// file the problem against.
+/// Each row's mapping or tunable name is matched against what the game declares, since a
+/// `MappingKey` or a tunable key can only ever be one it already has. A name that matches nothing
+/// comes back in the returned [`Unresolved`] list rather than being dropped in silence; a control
+/// name that does not parse becomes an `OverrideProblem` instead, because by that point the mapping
+/// *did* resolve and there is a row to file the problem against.
 ///
 /// A version this build never shipped refuses the whole set at once, rather than resolving whatever
 /// rows happen to look familiar (D58) — see [`UnsupportedVersion`].
@@ -564,7 +558,7 @@ pub type ResolvedOverrides = (
 /// ```ignore
 /// let declared = declared_mappings(world);
 /// let declared_tunables = mapping::declared_tunables(world);
-/// let (overrides, problems, unresolved, unresolved_tunables) =
+/// let (overrides, problems, unresolved) =
 ///     resolve_saved(&saved, &declared, &declared_tunables)?;
 /// ```
 #[cfg(feature = "serialize")]
@@ -589,7 +583,6 @@ pub fn resolve_saved(
     let mut overrides = Overrides::new();
     let mut problems = Vec::new();
     let mut unresolved = Vec::new();
-    let mut unresolved_tunables = Vec::new();
 
     for (scheme_text, rows) in bindings {
         // Not one of ours — a foreign or future scheme name. Nothing typed to report this
@@ -602,7 +595,11 @@ pub fn resolve_saved(
                 .iter()
                 .find(|candidate| candidate.scheme == scheme && candidate.key.to_string() == name)
             else {
-                unresolved.push(UnresolvedMapping { scheme, name });
+                unresolved.push(Unresolved {
+                    scheme,
+                    name,
+                    kind: UnresolvedKind::Mapping,
+                });
                 continue;
             };
 
@@ -650,7 +647,11 @@ pub fn resolve_saved(
                 .iter()
                 .find(|candidate| candidate.scheme == scheme && candidate.key == name)
             else {
-                unresolved_tunables.push(UnresolvedTunable { scheme, name });
+                unresolved.push(Unresolved {
+                    scheme,
+                    name,
+                    kind: UnresolvedKind::Tunable,
+                });
                 continue;
             };
 
@@ -669,7 +670,11 @@ pub fn resolve_saved(
                 // most likely a save written against an older declaration. Reported the same as a
                 // name that resolves to nothing, since either way there is nothing usable here.
                 _ => {
-                    unresolved_tunables.push(UnresolvedTunable { scheme, name });
+                    unresolved.push(Unresolved {
+                        scheme,
+                        name,
+                        kind: UnresolvedKind::Tunable,
+                    });
                     continue;
                 }
             };
@@ -677,7 +682,7 @@ pub fn resolve_saved(
         }
     }
 
-    Ok((overrides, problems, unresolved, unresolved_tunables))
+    Ok((overrides, problems, unresolved))
 }
 
 /// Makes a running game agree with an override set.
@@ -2066,11 +2071,10 @@ mod tests {
                 <SavedOverrides as FromReflect>::from_reflect(&*reflected).expect("round-trips");
             assert_eq!(loaded_saved, saved);
 
-            let (loaded, problems, unresolved, unresolved_tunables) =
+            let (loaded, problems, unresolved) =
                 resolve_saved(&loaded_saved, &declared, &[]).expect("a version this build wrote");
             assert!(problems.is_empty(), "{problems:?}");
             assert!(unresolved.is_empty(), "{unresolved:?}");
-            assert!(unresolved_tunables.is_empty(), "{unresolved_tunables:?}");
             assert_eq!(loaded, overrides);
         }
 
@@ -2127,11 +2131,10 @@ mod tests {
                 tunables: BTreeMap::new(),
             };
 
-            let (loaded, problems, unresolved, unresolved_tunables) =
+            let (loaded, problems, unresolved) =
                 resolve_saved(&saved, &declared, &[]).expect("a version this build wrote");
 
             assert!(unresolved.is_empty(), "{unresolved:?}");
-            assert!(unresolved_tunables.is_empty(), "{unresolved_tunables:?}");
             assert_eq!(
                 problems
                     .iter()
@@ -2178,17 +2181,17 @@ mod tests {
                 tunables: BTreeMap::new(),
             };
 
-            let (loaded, problems, unresolved, unresolved_tunables) =
+            let (loaded, problems, unresolved) =
                 resolve_saved(&saved, &declared, &[]).expect("a version this build wrote");
 
             assert!(problems.is_empty(), "{problems:?}");
-            assert!(unresolved_tunables.is_empty(), "{unresolved_tunables:?}");
             assert!(loaded.is_empty());
             assert_eq!(
                 unresolved,
-                [UnresolvedMapping {
+                [Unresolved {
                     scheme: Scheme::KeyboardMouse,
-                    name: "persist_tests.no_such_action".into()
+                    name: "persist_tests.no_such_action".into(),
+                    kind: UnresolvedKind::Mapping,
                 }]
             );
         }
@@ -2218,12 +2221,11 @@ mod tests {
             );
             let saved = save_overrides(&overrides);
 
-            let (loaded, problems, unresolved, unresolved_tunables) =
+            let (loaded, problems, unresolved) =
                 resolve_saved(&saved, &declared, &tunables).expect("a version this build wrote");
 
             assert!(problems.is_empty(), "{problems:?}");
             assert!(unresolved.is_empty(), "{unresolved:?}");
-            assert!(unresolved_tunables.is_empty(), "{unresolved_tunables:?}");
             assert_eq!(loaded, overrides);
         }
 
@@ -2244,17 +2246,17 @@ mod tests {
                 )]),
             };
 
-            let (loaded, problems, unresolved, unresolved_tunables) =
+            let (loaded, problems, unresolved) =
                 resolve_saved(&saved, &declared, &[]).expect("a version this build wrote");
 
             assert!(problems.is_empty(), "{problems:?}");
-            assert!(unresolved.is_empty(), "{unresolved:?}");
             assert!(loaded.is_empty());
             assert_eq!(
-                unresolved_tunables,
-                [UnresolvedTunable {
+                unresolved,
+                [Unresolved {
                     scheme: Scheme::KeyboardMouse,
-                    name: "persist_tests.no_such_tunable".into()
+                    name: "persist_tests.no_such_tunable".into(),
+                    kind: UnresolvedKind::Tunable,
                 }]
             );
         }
@@ -2286,12 +2288,11 @@ mod tests {
                 )]),
             };
 
-            let (loaded, problems, unresolved, unresolved_tunables) =
+            let (loaded, problems, unresolved) =
                 resolve_saved(&saved, &[], &tunables).expect("a version this build wrote");
 
             assert!(problems.is_empty(), "{problems:?}");
             assert!(unresolved.is_empty(), "{unresolved:?}");
-            assert!(unresolved_tunables.is_empty(), "{unresolved_tunables:?}");
             assert_eq!(
                 loaded.get_tunable(Scheme::Gamepad, "persist_tests.move.stick_deadzone"),
                 Some(TunableValue::Range {

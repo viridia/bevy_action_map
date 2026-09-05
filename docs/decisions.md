@@ -1079,12 +1079,12 @@ shape.
 **Accepted.** A save from a build that came later — a rollback, a second machine on a newer patch, a
 Steam beta branch — is rejected outright rather than partially salvaged. That is a stricter tolerance
 than R17.2 gives an unresolved row, and deliberately so: a resolved row from the wrong version's
-default is a mismatch the game cannot see the way it can see an `UnresolvedMapping`.
+default is a mismatch the game cannot see the way it can see an `Unresolved`.
 
 **What forces a bump, and what doesn't.** Growing the vocabulary never does: a new `Control` name, a
 new scheme, a new mapping or tunable name, or a third row-state word all fail safely on an older
 build, because unknown text in any of those positions is already reported rather than guessed at —
-an `UnknownControl`, an `UnresolvedMapping`, a skipped scheme table. A new row-state word is safe
+an `UnknownControl`, an `Unresolved`, a skipped scheme table. A new row-state word is safe
 only because it cannot be mistaken for a control name (every real one carries a `/`); the two words
 that exist and the control-name table are exactly the vocabulary this crate must never redefine.
 What forces a bump is reusing one of those with a new meaning, or changing a row's shape rather than
