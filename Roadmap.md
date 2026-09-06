@@ -39,10 +39,9 @@ in `docs/decisions.md`, where each says what reversing it would cost.
   capability: a context per widget kind answers it, and Disasteroids ships that way, disabling the
   plugin outright. What is wrong is that `DefaultPlugins` brings the collision and nothing tells a
   game to opt out. The generic form is in the deferred table.
-- **The prelude exports sixteen bare English nouns** that a glob import drops into a template beside
-  Bevy's own — chunk 48.
-- **A refused capture is silent on Disasteroids' screen.** Wrong shape, wrong scheme, or reserved,
-  and the session simply keeps listening with nothing said about why the press did not take.
+- **A refused capture is silent on Disasteroids' screen.** Wrong shape, wrong device family, or
+  reserved, and the session simply keeps listening with nothing said about why the press did not
+  take.
 - **`R23.2` is unenforced.** No allocation and no synchronization on the per-tick path is a rule
   with no tooling behind it. Two violations have reached that path and both were caught by reading.
 
@@ -63,8 +62,8 @@ here is built on the assumption that it will be. The rule is that the possibilit
 *shape* and the *order* of what gets built, but no work happens that a third-party crate would not
 want anyway. What that changes today:
 
-- **The extensibility mechanism and the prelude names are public API**, cheap now and breaking
-  later, upstream or not — chunk 48.
+- **The extensibility mechanism is public API**, cheap to change now and breaking later, upstream
+  or not.
 - **The presentation-crate row names this as its own gate**, so if it happens, that split is decided
   as part of the plan rather than discovered in the middle of it.
 
@@ -150,13 +149,14 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 85  | A dead zone at full deflection                    |
 | 86  | `active` and `is_active`, told apart               |
 | 93  | A shared toggle ignored the hold setting          |
-| 79  | `Phase` tells building from firing                |
+| 79  | `ActionPhase` tells building from firing           |
 | 88  | The gamepad-settings warning sees the global thresholds |
 | 76  | `Unresolved`, once                                |
 | 70  | Device brand and class                           |
 | 91  | The crate does not do what its own documents say  |
 | 17c | The two normalizes                                |
 | 89  | `why_not` can see the pairing                     |
+| 48  | Names that survive a glob import                  |
 
 ---
 
@@ -246,33 +246,6 @@ contexts independently; `context.rs` alone holds 53 `App::new()`.
   `binding.rs` is 2,361 lines of code. The "quarter of the crate" this chunk used to cite was
   counting a 2,759-line test module, which is 77's problem.
 - **Ground rule 3 applies literally:** `examples/` must not change.
-
-### 48. Names that survive a glob import
-
-The prelude exports sixteen bare English nouns — `Scheme`, `Mapping`, `Capacity`, `Conflict`,
-`Overlap`, `Captured`, `Refused`, `Condition`, `Verdict`, `Part`, `Intent`, `Phase`, `Obstacle`,
-`Timestamp`, `Rebinding`, `Actions` — plus the four transition events, and a game glob-imports it
-beside Bevy's own.
-
-- **The criterion, so the pass is not taste.** A name earns its bareness if a reader who knows Bevy
-  but not this crate would guess right. `Control` and `Prompt` pass. `Phase` and `Part` do not.
-  `CompassPoints` passes, being named after `bevy_math`'s own `CompassOctant`.
-- **`Verdict` needs it most**, and becomes `ConditionState`, joining the family already there. Its
-  variants go with it: `Idle`/`Ongoing`/`Fired` becomes `Idle`/`Building`/`Satisfied`, which is
-  level-shaped throughout — a `Down` condition answers on every tick the control is held, so a past
-  participle read as an edge. Depends on 79, which claims `Firing` for `Phase`. The objection,
-  recorded rather than resolved: `ActionState` and `InputContextState` are storage, and a
-  condition's storage is `Scratch`.
-- **Why it is not cosmetic.** BSN templates are where it bites: a scene lists components from
-  several preludes with nothing saying which crate each came from.
-- **A prelude that grows before this lands needs checking as it grows**, rather than re-enumerating
-  at the end.
-- **Not doing:** deprecation shims. Nothing outside this repository depends on the crate yet, and
-  the moment that stops being true this chunk gets more expensive than it is worth — a shelf life
-  rather than a chunk that can wait indefinitely.
-- **Review surface:** whether the renames read as prefixes bolted on. `PromptScope` reads as one
-  thing; `InputActionPhase` would not, and where that happens the answer is a better word rather
-  than a longer one.
 
 ---
 
@@ -550,7 +523,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Netcode injection and reconciliation** | a networked target. Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. What is left here needs a remote player to inject a frame for and an authority to disagree with |
 | **Consumption-aware `FocusedInput` dispatch** (R8.2a) | **a game wanting `bevy_ui_widgets`' own widgets working generically, unmodified, without a context per widget kind.** A context per kind is the path to reach for first, and Disasteroids ships that way. A design for the filter was built and set aside: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline rather than a second raw-message read — keyboard only, since every keyboard-driven widget observer at the pinned commit gates on `ButtonState::Pressed` and none reacts to a release |
 | **Promoting `WidgetKind` and the per-kind context into the crate** | [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native widget-kind id. Promoting a shape this crate invented first, ahead of that conversation, risks committing to the wrong one |
-| **A context-level exclusion from the mapping list** | a second screen needing the same filter and duplicating it. `Mapping::context` already carries the data, and one call site filtering on it costs one line — at two, the crate is the one paying for the repetition |
+| **A context-level exclusion from the mapping list** | a second screen needing the same filter and duplicating it. `ActionMapping::context` already carries the data, and one call site filtering on it costs one line — at two, the crate is the one paying for the repetition |
 | **An initial delay distinct from the repeat rate** (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both. Two numbers is a small change; what is missing is a case where equal is wrong, and a two-table settings screen is not it |
 | **Free-form mutually-exclusive context sets** (R7.7 remainder) | nothing in tree needs two independently-exclusive contexts to coexist rather than one dominating the other by priority |
 | **Owner-scoped `ConsumedControls`/exclusion ceiling** (R15.3 remainder, and D13's own remainder) | a real in-tree case with a per-player exclusive context, or a binding consumed across two players' devices. Design if built: a claim visible only if made globally or by the viewer's own paired device; an exclusive context's shadow implicit in its own pairing rather than a separate flag |
@@ -562,7 +535,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **R16.3's suspend/resume** (mobile, console) | a platform target that needs it. Nothing in this crate's supported platforms emits a suspend signal or has a device re-enumeration step to hook |
 | **Split Friction's monsters, spawners and missiles** | a mechanic that would exercise input this crate has not already proven. Kept as a row rather than deleted because the sprites, the dungeon's region aspects and a `Fire`-shaped action all exist, so changing our mind is cheap |
 | **Guardian migration** | porting it from Bevy 0.16.1 with `bevy_enhanced_input` 0.12 to 0.20-dev — four versions, and a port plus a rewrite. Doing both at once would confuse "action_map is wrong" with "0.20 moved this" |
-| **A physical binding's label matching the current layout** (R12.2, R12.7) | winit exposing a physical-to-logical query and a layout-change signal, requested as [winit#4606][] and tracked by the broader [winit#2678][], open since February 2023 and unimplemented. A workaround was scoped and set aside: `run_captures` already sees the logical key at capture time, but keeping it means a new field on `Captured`, a session table `present.rs` consults ahead of the static fallback, and an honest answer on whether it survives a save — which drags in the still-deferred binding-definition serialization (R17.6, R22.16) for a fix that only covers controls a player has personally rebound. A landed query supersedes it outright, for every physical binding rather than only captured ones, so the workaround is not worth building ahead of it |
+| **A physical binding's label matching the current layout** (R12.2, R12.7) | winit exposing a physical-to-logical query and a layout-change signal, requested as [winit#4606][] and tracked by the broader [winit#2678][], open since February 2023 and unimplemented. A workaround was scoped and set aside: `run_captures` already sees the logical key at capture time, but keeping it means a new field on `ControlCaptured`, a session table `present.rs` consults ahead of the static fallback, and an honest answer on whether it survives a save — which drags in the still-deferred binding-definition serialization (R17.6, R22.16) for a fix that only covers controls a player has personally rebound. A landed query supersedes it outright, for every physical binding rather than only captured ones, so the workaround is not worth building ahead of it |
 
 ---
 

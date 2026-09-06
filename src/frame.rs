@@ -49,12 +49,12 @@ use bevy_input::mouse::{MouseButtonInput, MouseMotion};
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Timestamp {
+pub struct FrameTimestamp {
     frame: u64,
     order: u32,
 }
 
-impl Timestamp {
+impl FrameTimestamp {
     /// Creates a timestamp for a specific sampled frame and event order.
     pub const fn new(frame: u64, order: u32) -> Self {
         Self { frame, order }
@@ -154,7 +154,7 @@ impl RawEvent {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimedRawEvent {
     /// When this event was sampled.
-    pub timestamp: Timestamp,
+    pub timestamp: FrameTimestamp,
     /// The raw event itself.
     pub event: RawEvent,
 }
@@ -232,7 +232,7 @@ impl InputFrame {
     ///
     /// This is how a consumer reads its own window: pass the timestamp you last saw, and you get
     /// what has happened since, exactly once.
-    pub fn events_after(&self, cursor: Option<Timestamp>) -> &[TimedRawEvent] {
+    pub fn events_after(&self, cursor: Option<FrameTimestamp>) -> &[TimedRawEvent] {
         match cursor {
             Some(cursor) => {
                 let consumed = self
@@ -245,7 +245,7 @@ impl InputFrame {
     }
 
     /// Returns the timestamp of the most recently sampled event.
-    pub fn latest(&self) -> Option<Timestamp> {
+    pub fn latest(&self) -> Option<FrameTimestamp> {
         self.events.last().map(|event| event.timestamp)
     }
 
@@ -271,8 +271,8 @@ impl InputFrame {
     }
 
     /// Records a raw event in the current sampled frame.
-    pub fn record(&mut self, event: RawEvent) -> Timestamp {
-        let timestamp = Timestamp::new(self.frame, self.next_order);
+    pub fn record(&mut self, event: RawEvent) -> FrameTimestamp {
+        let timestamp = FrameTimestamp::new(self.frame, self.next_order);
         self.next_order = self
             .next_order
             .checked_add(1)
@@ -428,8 +428,8 @@ mod tests {
             window: bevy_ecs::entity::Entity::PLACEHOLDER,
         }));
 
-        assert_eq!(first, Timestamp::new(1, 0));
-        assert_eq!(second, Timestamp::new(1, 1));
+        assert_eq!(first, FrameTimestamp::new(1, 0));
+        assert_eq!(second, FrameTimestamp::new(1, 1));
         assert_eq!(frame.events().len(), 2);
         assert_eq!(frame.events()[0].timestamp, first);
         assert_eq!(frame.events()[1].timestamp, second);
@@ -442,7 +442,7 @@ mod tests {
 
         let timestamp = frame.record(RawEvent::MouseMotion(Vec2::new(2.0, -3.0)));
 
-        assert_eq!(timestamp, Timestamp::new(1, 0));
+        assert_eq!(timestamp, FrameTimestamp::new(1, 0));
         assert!(
             matches!(frame.events()[0].event, RawEvent::MouseMotion(delta) if delta == Vec2::new(2.0, -3.0))
         );
@@ -490,9 +490,9 @@ mod tests {
 
         let frame = app.world().resource::<InputFrame>();
         assert_eq!(frame.events().len(), first_frame_events);
-        assert_eq!(frame.events()[0].timestamp, Timestamp::new(1, 0));
+        assert_eq!(frame.events()[0].timestamp, FrameTimestamp::new(1, 0));
         #[cfg(any(feature = "keyboard", feature = "gamepad"))]
-        assert_eq!(frame.events()[1].timestamp, Timestamp::new(1, 1));
+        assert_eq!(frame.events()[1].timestamp, FrameTimestamp::new(1, 1));
 
         #[cfg(feature = "keyboard")]
         {
@@ -518,11 +518,11 @@ mod tests {
         #[cfg(feature = "keyboard")]
         assert_eq!(
             frame.events()[first_frame_events].timestamp,
-            Timestamp::new(2, 0)
+            FrameTimestamp::new(2, 0)
         );
 
         // A consumer that read the first frame is offered only what came after it.
-        let boundary = Timestamp::new(1, first_frame_events as u32 - 1);
+        let boundary = FrameTimestamp::new(1, first_frame_events as u32 - 1);
         assert_eq!(frame.events_after(Some(boundary)).len(), keyboard_events);
         assert_eq!(frame.events_after(frame.latest()).len(), 0);
         assert_eq!(frame.events_after(None).len(), frame.events().len());
@@ -540,6 +540,6 @@ mod tests {
         assert_eq!(frame.events().len(), CAPACITY);
         assert_eq!(frame.dropped(), 10);
         // The survivors are the newest, so what is lost is the input nobody got to in time.
-        assert_eq!(frame.events()[0].timestamp, Timestamp::new(1, 10));
+        assert_eq!(frame.events()[0].timestamp, FrameTimestamp::new(1, 10));
     }
 }

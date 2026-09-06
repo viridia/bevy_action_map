@@ -18,13 +18,13 @@ use bevy_input::keyboard::KeyboardInput;
 use bevy_input::mouse::MouseButtonInput;
 use bevy_math::{Vec2, Vec3};
 
-use crate::action::{ActionValue, InputContext, Intent, Phase};
+use crate::action::{ActionIntent, ActionPhase, ActionValue, InputContext};
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 use crate::binding::ButtonControl;
 #[cfg(feature = "gamepad")]
 use crate::binding::Stick;
 use crate::binding::{BindingSource, ButtonThreshold, Control};
-use crate::condition::Verdict;
+use crate::condition::ConditionState;
 use crate::context::InputContextState;
 use crate::frame::{InputFrame, RawEvent, TimedRawEvent};
 
@@ -144,7 +144,7 @@ pub fn release_consumed_in<S: bevy_ecs::schedule::ScheduleLabel>(
 /// current phase cannot express that.
 pub(crate) struct Transition {
     pub(crate) slot: usize,
-    pub(crate) phase: Phase,
+    pub(crate) phase: ActionPhase,
     pub(crate) value: ActionValue,
 }
 
@@ -605,12 +605,12 @@ impl<C: InputContext> InputContextState<C> {
             let slot = bindings[index].slot;
             let intent = plan.intent_for_slot(slot);
 
-            // A slot belongs to exactly one half, and `Intent::accepts` is what guarantees it: a
-            // `Delta2` action admits only delta-shaped sources and every other intent admits none,
-            // so no slot can want both passes.
+            // A slot belongs to exactly one half, and `ActionIntent::accepts` is what guarantees
+            // it: a `Delta2` action admits only delta-shaped sources and every other intent admits
+            // none, so no slot can want both passes.
             let wanted = match kind {
-                Fold::Delta => intent == Intent::Delta2,
-                Fold::Level | Fold::Interrupted => intent != Intent::Delta2,
+                Fold::Delta => intent == ActionIntent::Delta2,
+                Fold::Level | Fold::Interrupted => intent != ActionIntent::Delta2,
             };
             if !wanted {
                 while index < bindings.len() && bindings[index].slot == slot {
@@ -620,7 +620,7 @@ impl<C: InputContext> InputContextState<C> {
             }
 
             let mut combined = None;
-            let mut best = Verdict::Idle;
+            let mut best = ConditionState::Idle;
 
             // Bindings are grouped by slot, so this inner walk is one action's contributions.
             while index < bindings.len() && bindings[index].slot == slot {
@@ -676,7 +676,7 @@ impl<C: InputContext> InputContextState<C> {
                             .copied()
                             .unwrap_or_default();
                         match intent {
-                            Intent::Button => ActionValue::Bool(reading.pressed),
+                            ActionIntent::Button => ActionValue::Bool(reading.pressed),
                             _ => ActionValue::Axis1(reading.value),
                         }
                     }
@@ -737,8 +737,8 @@ impl<C: InputContext> InputContextState<C> {
                 // than per control: the value here was assembled from a deadzone, a composite, or
                 // whatever else the chain did, and no single control owns the answer.
                 let value = match (intent, value) {
-                    (Intent::Button, ActionValue::Bool(_)) => value,
-                    (Intent::Button, _) => {
+                    (ActionIntent::Button, ActionValue::Bool(_)) => value,
+                    (ActionIntent::Button, _) => {
                         let memory = &mut press_scratch[0];
                         let pressed = threshold.pressed(magnitude(value), memory.prev.to_bool());
                         memory.prev = ActionValue::Bool(pressed);
@@ -748,10 +748,10 @@ impl<C: InputContext> InputContextState<C> {
                 };
                 // Conditions decide *whether* this binding is firing; the value it contributes is
                 // rest until it is. A hold half-finished must not move the ship.
-                let verdict =
+                let condition_state =
                     crate::condition::combine(&binding.conditions, value, condition_scratch, delta);
-                if verdict > best {
-                    best = verdict;
+                if condition_state > best {
+                    best = condition_state;
                 }
                 // Claimed while the binding has something to say, so a binding that is merely bound
                 // to a control does not hold it against everyone else all the time — but one whose
@@ -759,10 +759,10 @@ impl<C: InputContext> InputContextState<C> {
                 // that fires once per direction entered would hand the stick back to the game
                 // between two crossings, and a charging hold would leak its key to whatever is
                 // underneath until it completed.
-                if binding.consume && verdict >= Verdict::Ongoing {
+                if binding.consume && condition_state >= ConditionState::Building {
                     claims.extend(binding.source.controls());
                 }
-                let value = if verdict == Verdict::Fired {
+                let value = if condition_state == ConditionState::Satisfied {
                     value
                 } else {
                     ActionValue::Bool(false)
@@ -784,7 +784,7 @@ impl<C: InputContext> InputContextState<C> {
                 // value simply resumes. Holding one back until it reads exactly rest can wedge it
                 // forever, because an axis is not obliged to ever read rest: a drifting stick whose
                 // deadzone the player has taken to zero never does, and the action never recovers.
-                if require_reset[slot] && intent == Intent::Button {
+                if require_reset[slot] && intent == ActionIntent::Button {
                     if value.to_bool() {
                         continue;
                     }
@@ -801,7 +801,10 @@ impl<C: InputContext> InputContextState<C> {
                 }
                 // Only the edges. The level phases say that nothing changed, and an observer
                 // firing every tick for a held button would be noise rather than information.
-                if matches!(phase, Phase::Fired | Phase::Completed | Phase::Canceled) {
+                if matches!(
+                    phase,
+                    ActionPhase::Fired | ActionPhase::Completed | ActionPhase::Canceled
+                ) {
                     transitions.push(Transition { slot, phase, value });
                 }
             }
@@ -814,10 +817,14 @@ impl<C: InputContext> InputContextState<C> {
 /// A delta is a displacement, so two of them add. Everything else is a position or a press, where
 /// adding would be a units error: the strongest contribution wins instead, and ties keep the
 /// earlier one so that declaration order decides.
-fn combine(accumulated: ActionValue, contribution: ActionValue, intent: Intent) -> ActionValue {
+fn combine(
+    accumulated: ActionValue,
+    contribution: ActionValue,
+    intent: ActionIntent,
+) -> ActionValue {
     match intent {
-        Intent::Delta2 => sum(accumulated, contribution),
-        Intent::Button | Intent::Analog1 | Intent::Directional2 => {
+        ActionIntent::Delta2 => sum(accumulated, contribution),
+        ActionIntent::Button | ActionIntent::Analog1 | ActionIntent::Directional2 => {
             if magnitude(contribution) > magnitude(accumulated) {
                 contribution
             } else {
@@ -881,51 +888,54 @@ fn apply_modifiers(
 
 /// Moves one action's state on by a tick, and reports the edge if there was one.
 ///
-/// The verdict says what the bindings decided; this decides what that means given where the action
-/// already was. That is what makes giving up on a hold a `Canceled` rather than a `Completed` — the
-/// action never actually happened.
+/// `condition_state` says what the bindings decided; this decides what that means given where the
+/// action already was. That is what makes giving up on a hold a `Canceled` rather than a
+/// `Completed` — the action never actually happened.
 ///
 /// `kind` is `Fold::Interrupted` for a pass forced by a source disappearing rather than an ordinary
 /// release; only there does a firing-then-idle transition become `Canceled` instead of `Completed`.
 fn update_action_state(
     action_state: &mut crate::action::ActionState,
     value: ActionValue,
-    verdict: Verdict,
+    condition_state: ConditionState,
     kind: Fold,
-) -> Phase {
-    let was_firing = matches!(action_state.phase, Phase::Fired | Phase::Firing);
-    let was_building = matches!(action_state.phase, Phase::Started | Phase::Building);
+) -> ActionPhase {
+    let was_firing = matches!(action_state.phase, ActionPhase::Fired | ActionPhase::Firing);
+    let was_building = matches!(
+        action_state.phase,
+        ActionPhase::Started | ActionPhase::Building
+    );
 
-    let phase = match verdict {
-        Verdict::Fired => {
+    let phase = match condition_state {
+        ConditionState::Satisfied => {
             if was_firing {
-                Phase::Firing
+                ActionPhase::Firing
             } else {
-                Phase::Fired
+                ActionPhase::Fired
             }
         }
-        Verdict::Ongoing => {
+        ConditionState::Building => {
             if was_firing {
                 // It was firing and has fallen back to merely building, which from the outside is
                 // the action ending.
-                Phase::Completed
+                ActionPhase::Completed
             } else if was_building {
-                Phase::Building
+                ActionPhase::Building
             } else {
-                Phase::Started
+                ActionPhase::Started
             }
         }
-        Verdict::Idle => {
+        ConditionState::Idle => {
             if was_firing {
                 if kind == Fold::Interrupted {
-                    Phase::Canceled
+                    ActionPhase::Canceled
                 } else {
-                    Phase::Completed
+                    ActionPhase::Completed
                 }
             } else if was_building {
-                Phase::Canceled
+                ActionPhase::Canceled
             } else {
-                Phase::Idle
+                ActionPhase::Idle
             }
         }
     };
@@ -969,7 +979,7 @@ mod tests {
     impl InputAction for Jump {
         type Output = bool;
 
-        const INTENT: Intent = Intent::Button;
+        const INTENT: ActionIntent = ActionIntent::Button;
         const PATH: &'static str = "eval_tests.jump";
     }
 
@@ -1029,7 +1039,7 @@ mod tests {
             None,
         );
         assert_eq!(state.transitions.len(), 1);
-        assert_eq!(state.transitions[0].phase, Phase::Fired);
+        assert_eq!(state.transitions[0].phase, ActionPhase::Fired);
 
         // Dispatch would have drained it by now.
         state.transitions.clear();
@@ -1063,14 +1073,14 @@ mod tests {
             None,
         );
         assert_eq!(state.transitions.len(), 1);
-        assert_eq!(state.transitions[0].phase, Phase::Completed);
+        assert_eq!(state.transitions[0].phase, ActionPhase::Completed);
     }
 
     /// A player who taps faster than the tick rate still tapped, and collapsing the window to its
     /// final state loses the whole event: press and release cancel in the held state, and a single
     /// fold afterwards sees nothing happen at all.
     ///
-    /// Polling cannot express this — one `Phase` per read — which is why the log exists.
+    /// Polling cannot express this — one `ActionPhase` per read — which is why the log exists.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_tap_inside_one_window_is_two_transitions() {
@@ -1091,10 +1101,10 @@ mod tests {
         );
 
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
-        assert_eq!(phases, [Phase::Fired, Phase::Completed]);
+        assert_eq!(phases, [ActionPhase::Fired, ActionPhase::Completed]);
 
         // And the poll agrees with where the tick ended, which is the key back up.
-        assert_eq!(state.phase::<Jump>(), Phase::Completed);
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Completed);
         assert!(!state.value::<Jump>());
     }
 
@@ -1107,7 +1117,7 @@ mod tests {
         impl InputAction for Look {
             type Output = Vec2;
 
-            const INTENT: Intent = Intent::Delta2;
+            const INTENT: ActionIntent = ActionIntent::Delta2;
             const PATH: &'static str = "eval_tests.look";
         }
 
@@ -1134,7 +1144,7 @@ mod tests {
         );
 
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
-        assert_eq!(phases, [Phase::Fired], "one movement, one transition");
+        assert_eq!(phases, [ActionPhase::Fired], "one movement, one transition");
         assert_eq!(state.value::<Look>(), Vec2::new(4.0, -2.0), "summed");
     }
 
@@ -1162,7 +1172,7 @@ mod tests {
         );
         assert_eq!(
             state.phase::<Jump>(),
-            Phase::Idle,
+            ActionPhase::Idle,
             "inactive contexts do not fire"
         );
 
@@ -1177,7 +1187,7 @@ mod tests {
         );
         assert_eq!(
             state.phase::<Jump>(),
-            Phase::Idle,
+            ActionPhase::Idle,
             "a key held across activation is not a press"
         );
         assert!(state.transitions.is_empty());
@@ -1192,7 +1202,7 @@ mod tests {
             &mut Vec::new(),
             None,
         );
-        assert_eq!(state.phase::<Jump>(), Phase::Idle);
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Idle);
         assert!(state.transitions.is_empty());
 
         // And now a real press is a real press.
@@ -1205,7 +1215,7 @@ mod tests {
             &mut Vec::new(),
             None,
         );
-        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Fired);
     }
 
     /// The opt-out, for a context taking over from one that was already driving the same control.
@@ -1236,7 +1246,7 @@ mod tests {
             &mut Vec::new(),
             None,
         );
-        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Fired);
     }
 
     /// An action interrupted by a context going away has to resolve: left as it was, a hold would
@@ -1257,14 +1267,14 @@ mod tests {
             &mut Vec::new(),
             None,
         );
-        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Fired);
         state.transitions.clear();
 
         state.deactivate();
 
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
-        assert_eq!(phases, [Phase::Canceled]);
-        assert_eq!(state.phase::<Jump>(), Phase::Canceled);
+        assert_eq!(phases, [ActionPhase::Canceled]);
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Canceled);
         assert!(!state.value::<Jump>(), "and it is no longer held");
     }
 
@@ -1297,7 +1307,7 @@ mod tests {
             &mut Vec::new(),
             None,
         );
-        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Fired);
         state.transitions.clear();
 
         frame.record(RawEvent::FocusLost);
@@ -1313,7 +1323,7 @@ mod tests {
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
         assert_eq!(
             phases,
-            [Phase::Canceled],
+            [ActionPhase::Canceled],
             "not Completed: nothing was let go"
         );
         assert!(!state.value::<Jump>());
@@ -1375,7 +1385,7 @@ mod tests {
             &mut Vec::new(),
             None,
         );
-        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Fired);
     }
 
     /// The gamepad half of the same policy: a disconnect leaves no release event to correct a stale
@@ -1411,7 +1421,7 @@ mod tests {
             &mut Vec::new(),
             None,
         );
-        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Fired);
         state.transitions.clear();
 
         frame.record(RawEvent::Gamepad(RawGamepadEvent::Connection(
@@ -1430,7 +1440,7 @@ mod tests {
         );
 
         let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
-        assert_eq!(phases, [Phase::Canceled]);
+        assert_eq!(phases, [ActionPhase::Canceled]);
         assert!(!state.value::<Jump>());
     }
 
@@ -1463,7 +1473,7 @@ mod tests {
             &mut Vec::new(),
             None,
         );
-        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Fired);
         state.transitions.clear();
 
         // The pad going away must not touch it: nothing was ever held there.
@@ -1500,7 +1510,7 @@ mod tests {
         impl InputAction for Look {
             type Output = Vec2;
 
-            const INTENT: Intent = Intent::Delta2;
+            const INTENT: ActionIntent = ActionIntent::Delta2;
             const PATH: &'static str = "eval_tests.rate_look";
         }
 
@@ -1560,7 +1570,7 @@ mod tests {
         impl InputAction for Look {
             type Output = Vec2;
 
-            const INTENT: Intent = Intent::Delta2;
+            const INTENT: ActionIntent = ActionIntent::Delta2;
             const PATH: &'static str = "eval_tests.double_integrated";
         }
 
@@ -1603,7 +1613,7 @@ mod tests {
         impl InputAction for Counted {
             type Output = f32;
 
-            const INTENT: Intent = Intent::Analog1;
+            const INTENT: ActionIntent = ActionIntent::Analog1;
             const PATH: &'static str = "eval_tests.counted";
         }
 
@@ -1885,23 +1895,31 @@ mod tests {
 
         // Press, and wait it out.
         frame.record(key(ButtonState::Pressed));
-        assert_eq!(step(&mut state, &frame), Phase::Started);
-        assert_eq!(step(&mut state, &frame), Phase::Building, "still charging");
+        assert_eq!(step(&mut state, &frame), ActionPhase::Started);
+        assert_eq!(
+            step(&mut state, &frame),
+            ActionPhase::Building,
+            "still charging"
+        );
         assert!(!state.value::<Jump>(), "and not yet jumping");
-        assert_eq!(step(&mut state, &frame), Phase::Fired, "0.3s is past 0.25s");
+        assert_eq!(
+            step(&mut state, &frame),
+            ActionPhase::Fired,
+            "0.3s is past 0.25s"
+        );
         assert!(state.value::<Jump>());
-        assert_eq!(step(&mut state, &frame), Phase::Firing, "still held");
+        assert_eq!(step(&mut state, &frame), ActionPhase::Firing, "still held");
 
         frame.record(key(ButtonState::Released));
-        assert_eq!(step(&mut state, &frame), Phase::Completed);
+        assert_eq!(step(&mut state, &frame), ActionPhase::Completed);
 
         // Now the same press, given up on early.
         frame.record(key(ButtonState::Pressed));
-        assert_eq!(step(&mut state, &frame), Phase::Started);
+        assert_eq!(step(&mut state, &frame), ActionPhase::Started);
         frame.record(key(ButtonState::Released));
         assert_eq!(
             step(&mut state, &frame),
-            Phase::Canceled,
+            ActionPhase::Canceled,
             "abandoned before it ever fired"
         );
         assert!(!state.value::<Jump>());
@@ -1936,7 +1954,7 @@ mod tests {
             &mut Vec::new(),
             None,
         );
-        assert_eq!(state.phase::<Jump>(), Phase::Started);
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Started);
 
         // The pad has no condition, so it fires outright and the action goes with it.
         frame.record(RawEvent::Gamepad(
@@ -1956,7 +1974,7 @@ mod tests {
             &mut Vec::new(),
             None,
         );
-        assert_eq!(state.phase::<Jump>(), Phase::Fired);
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Fired);
         assert!(state.value::<Jump>());
     }
 

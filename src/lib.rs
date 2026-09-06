@@ -24,7 +24,7 @@
 //! #[context(path = "gameplay.on_foot", tick = Render)]
 //! struct OnFoot;
 //!
-//! fn read_jump(input: Actions<OnFoot>) {
+//! fn read_jump(input: ContextActions<OnFoot>) {
 //!     if input.fired::<Jump>() {
 //!         // ...
 //!     }
@@ -43,20 +43,20 @@
 //! ## Actions and contexts
 //!
 //! An [action] is a type, not a value. `#[derive(InputAction)]` gives it the Rust type your
-//! gameplay reads (`bool`, `f32`, `Vec2`, …) and an [`Intent`](action::Intent) saying what that
-//! value means: a button, a continuous axis, a direction to keep moving, or a delta that already
-//! happened this frame. A mouse delta and a stick position are both `Vec2`, but one already
-//! happened and the other tells you which way to keep moving. Intent is what keeps a binding from
-//! mixing the two up. Every action also declares a stable `path` such as `"gameplay.jump"`, which
-//! is what a settings file stores; it does not have to match the Rust type name, and should not
-//! change when the type is renamed.
+//! gameplay reads (`bool`, `f32`, `Vec2`, …) and an [`ActionIntent`](action::ActionIntent) saying
+//! what that value means: a button, a continuous axis, a direction to keep moving, or a delta that
+//! already happened this frame. A mouse delta and a stick position are both `Vec2`, but one
+//! already happened and the other tells you which way to keep moving. `ActionIntent` is what keeps
+//! a binding from mixing the two up. Every action also declares a stable `path` such as
+//! `"gameplay.jump"`, which is what a settings file stores; it does not have to match the Rust
+//! type name, and should not change when the type is renamed.
 //!
 //! A [context] groups the actions that are active together: on foot, in a vehicle, in a menu.
 //! [`add_context`](context::ActionMapAppExt::add_context) declares one and assigns it to an
 //! entity, and that entity carries the live state for every action in it. Local multiplayer
 //! follows directly: give each player's entity its own context instance, and query them with
-//! [`ActionsQuery`](context::ActionsQuery) instead of [`Actions`](context::Actions) when there may
-//! be more than one live at a time.
+//! [`ActionsQuery`](context::ActionsQuery) instead of
+//! [`ContextActions`](context::ContextActions) when there may be more than one live at a time.
 //!
 //! A context can be always active, or gated with
 //! [`active_in_state`](binding::InputContextBuilder::active_in_state) or
@@ -93,7 +93,7 @@
 //!
 //! ## Reading actions
 //!
-//! Read an action by polling [`Actions`](context::Actions) or
+//! Read an action by polling [`ContextActions`](context::ContextActions) or
 //! [`ActionsQuery`](context::ActionsQuery) in a system (`input.value::<Move>()`,
 //! `input.fired::<Jump>()`, `input.phase::<Jump>()`), or by observing a transition [event] such as
 //! [`Fired`](event::Fired), [`Started`](event::Started), [`Completed`](event::Completed), or
@@ -102,13 +102,14 @@
 //! changed; observing suits a one-shot reaction, such as a UI confirm or a sound effect, that
 //! would otherwise mean remembering last tick's value just to detect the edge.
 //!
-//! Every action has a [`Phase`](action::Phase) each tick (`Idle`, `Started`, `Building`, `Fired`,
-//! `Firing`, `Completed`, `Canceled`), so a hold that has just begun and a hold that is still
-//! charging are never confused with each other, and a UI can show a charge meter the instant it
-//! appears rather than reconstructing that edge from a boolean. When an action does not fire and
-//! it is not obvious why, [`why_not`](context::Actions::why_not) answers with the specific
-//! [`Obstacle`](context::Obstacle): an inactive context, a higher-priority consumer, a longer
-//! chord winning, an unmet condition, or a device that is not this player's.
+//! Every action has an [`ActionPhase`](action::ActionPhase) each tick (`Idle`, `Started`,
+//! `Building`, `Fired`, `Firing`, `Completed`, `Canceled`), so a hold that has just begun and a
+//! hold that is still charging are never confused with each other, and a UI can show a charge
+//! meter the instant it appears rather than reconstructing that edge from a boolean. When an
+//! action does not fire and it is not obvious why,
+//! [`why_not`](context::ContextActions::why_not) answers with the specific
+//! [`ActionObstacle`](context::ActionObstacle): an inactive context, a higher-priority consumer,
+//! a longer chord winning, an unmet condition, or a device that is not this player's.
 //!
 //! ## Tick domains
 //!
@@ -153,7 +154,7 @@
 //! (with conflict detection against everything else in the context, and reserved controls a game
 //! never wants handed out), and apply the result as a live [override](overrides) that cancels
 //! whatever was in flight and takes effect immediately. [Presets](preset) apply a whole named
-//! arrangement of mappings at once, for a game that ships alternate control schemes (`Southpaw`,
+//! arrangement of mappings at once, for a game that ships alternate control families (`Southpaw`,
 //! `Classic`) rather than leaving a player to rebind every row by hand.
 //!
 //! An on-screen [prompt](present) ("Press W") stays correct across a rebind because it is derived
@@ -320,8 +321,8 @@ impl bevy_app::Plugin for ActionMapPlugin {
 /// This includes the most common types in this crate, re-exported for your convenience.
 pub mod prelude {
     pub use crate::action::{
-        ActionId, ActionOutput, ActionState, ActionValue, ChannelShape, InputAction, InputContext,
-        Intent, Phase, TickDomain,
+        ActionId, ActionIntent, ActionOutput, ActionPhase, ActionState, ActionValue, ChannelShape,
+        InputAction, InputContext, TickDomain,
     };
     pub use crate::{ActionMapPlugin, ActionMapSystems};
     // `InputContextBuilder` is deliberately absent: `add_context` hands one to a closure, so its
@@ -335,18 +336,22 @@ pub mod prelude {
     #[cfg(feature = "keyboard")]
     pub use bevy_input::keyboard::KeyCode;
     // `MouseMove` is ungated because `BindingSource::MouseMotion` is.
-    pub use crate::binding::{ButtonThreshold, CompassPoints, Control, DeadZone, MouseMove, Part};
-    pub use crate::capture::{
-        CaptureSession, Captured, Conflict, ControlClass, Overlap, Refused, RefusedReason,
-        ReservedControls, conflicts, conflicts_pending,
+    pub use crate::binding::{
+        BindingPart, ButtonThreshold, CompassPoints, Control, DeadZone, MouseMove,
     };
-    pub use crate::condition::{Condition, ConditionDescriptor, ConditionKind, Verdict};
-    pub use crate::context::{ActionMapAppExt, Actions, ActionsQuery, InputContextState, Obstacle};
+    pub use crate::capture::{
+        CaptureRefused, CaptureSession, ConflictOverlap, ControlCaptured, ControlClass,
+        MappingConflict, RefusedReason, ReservedControls, conflicts, conflicts_pending,
+    };
+    pub use crate::condition::{Condition, ConditionDescriptor, ConditionKind, ConditionState};
+    pub use crate::context::{
+        ActionMapAppExt, ActionObstacle, ActionsQuery, ContextActions, InputContextState,
+    };
     pub use crate::event::{Canceled, ClassBinding, ClassFired, Completed, Fired, Started};
-    pub use crate::frame::{InputFrame, RawEvent, TimedRawEvent, Timestamp};
+    pub use crate::frame::{FrameTimestamp, InputFrame, RawEvent, TimedRawEvent};
     pub use crate::join::is_claimed;
     pub use crate::mapping::{
-        Capacity, Follower, Mapping, MappingKey, Rebinding, Scheme, Tunable, TunableValue,
+        ActionMapping, DeviceFamily, Follower, MappingKey, RebindPolicy, Tunable, TunableValue,
         declared_mappings, declared_tunables, mappings, tunables,
     };
     pub use crate::present::{

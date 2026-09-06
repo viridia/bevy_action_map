@@ -27,7 +27,7 @@ here, so there is one `D`-numbering in the project.
 | **D4**  | Timestamps order events; they do not time them                                | design §2       |
 | **D5**  | An action is a type                                                           | design §3       |
 | **D6**  | Serialized identity is a declared path, not the Rust type path                | design §3.3     |
-| **D7**  | Intent is separate from output shape and from channel shape                   | design §3.1     |
+| **D7**  | ActionIntent is separate from output shape and from channel shape                   | design §3.1     |
 | **D8**  | Action state is two dense tables; actions are not entities                    | design §6       |
 | **D9**  | A context declares one tick domain and is evaluated once                      | design §1, §3   |
 | **D10** | Bindings compile once into an immutable, shared plan                          | design §4       |
@@ -35,7 +35,7 @@ here, so there is one `D`-numbering in the project.
 | **D12** | Consumption is recorded per schedule and flows forward                        | design §5.2     |
 | **D13** | Exclusivity is a ceiling, not a third context state                           | design §5.3     |
 | **D14** | A class binding is a second list, not an expanded set of controls             | design §5.4     |
-| **D15** | Intent decides how several bindings fold into one action                      | design §5.5     |
+| **D15** | ActionIntent decides how several bindings fold into one action                      | design §5.5     |
 | **D16** | Nothing user-defined runs inside the evaluator                                | design §5.6     |
 | **D17** | Transitions are generic entity events on the context entity                   | design §5.6     |
 | **D18** | Require-reset holds back buttons only                                         | design §7.2     |
@@ -65,7 +65,7 @@ here, so there is one `D`-numbering in the project.
 | **D42** | Reserved before shape, and excluded is a silent guard                         | design §9.3     |
 | **D43** | Conflicts are detected, never resolved                                        | design §9.3     |
 | **D44** | Two general combinators, not a navigation path                                | design §8.3     |
-| **D45** | An override is a diff keyed by mapping and scheme, holding controls only      | design §10      |
+| **D45** | An override is a diff keyed by mapping and family, holding controls only      | design §10      |
 | **D46** | Three row states, not two                                                     | design §10      |
 | **D47** | Applying is the only path in, and overrides do not compose                    | design §10.1    |
 | **D48** | Applying rewrites the authored bindings; a variant keeps the declared slots   | design §10.1    |
@@ -110,8 +110,9 @@ per-frame snapshot of which controls are down.
 virtue that this crate gives up.
 
 **Reversal.** A press and release inside one rendered frame collapse to nothing, so a fixed tick
-spanning them sees neither. `InputFrame`, `RawEvent`, `Timestamp` and the whole capture path go with
-it, and the frame stops being the serializable per-tick record that replay and rollback need.
+spanning them sees neither. `InputFrame`, `RawEvent`, `FrameTimestamp` and the whole capture path
+go with it, and the frame stops being the serializable per-tick record that replay and rollback
+need.
 
 ### D3 — Each context reads by cursor; retirement is separate and later
 
@@ -133,8 +134,8 @@ reading the frame from `Update` sees contents that depend on whether the simulat
 
 ### D4 — Timestamps order events; they do not time them
 
-**Decided.** A `Timestamp` is a frame counter and an order within that frame, stamped as the event
-is sampled.
+**Decided.** A `FrameTimestamp` is a frame counter and an order within that frame, stamped as the
+event is sampled.
 
 **Rules out.** Attributing an event to the instant it truly occurred, and therefore attributing it
 to the fixed tick it truly fell in. Bevy's input events carry no time of their own, so there is
@@ -184,10 +185,10 @@ path for the same reason, which is why it is not the reflect type registry.
 **Accepted cost.** A second name to keep straight, and no compiler check that it is unique. The
 naming convention in design §3.3 is what stands in for one.
 
-### D7 — Intent is separate from output shape and from channel shape
+### D7 — ActionIntent is separate from output shape and from channel shape
 
-**Decided.** Three properties, not one. The output is the Rust type; the `Intent` is what the value
-means; the `ChannelShape` is what the control reports. They do not have to agree, and on real
+**Decided.** Three properties, not one. The output is the Rust type; the `ActionIntent` is what the
+value means; the `ChannelShape` is what the control reports. They do not have to agree, and on real
 hardware they frequently do not.
 
 **Rules out.** Inferring meaning from the Rust type. A stick deflection and a mouse delta are both
@@ -195,8 +196,8 @@ hardware they frequently do not.
 happened.
 
 **Reversal.** The fold in D15 has nothing to key on, and binding admissibility has nothing to check,
-so summing a stick position into a mouse delta becomes expressible. Intent is also what a rebinding
-UI filters candidate controls on, so the capture path loses its constraint.
+so summing a stick position into a mouse delta becomes expressible. `ActionIntent` is also what a
+rebinding UI filters candidate controls on, so the capture path loses its constraint.
 
 ### D8 — Action state is two dense tables; actions are not entities
 
@@ -232,11 +233,11 @@ the domain, so reading a fixed-rate action from a render-rate system stops being
 falls where the semantics already differ — a camera wants the newest delta every frame, movement
 wants one sample per simulation tick.
 
-**Still open.** Enforcement is not airtight. `Actions<OnFoot>` where `OnFoot` is `Fixed` should be
-unreadable from `Update`, but Bevy gives a `SystemParam` no way to know its own schedule. What
-stands in is a plugin-time validation pass and a debug assertion.
+**Still open.** Enforcement is not airtight. `ContextActions<OnFoot>` where `OnFoot` is `Fixed`
+should be unreadable from `Update`, but Bevy gives a `SystemParam` no way to know its own schedule.
+What stands in is a plugin-time validation pass and a debug assertion.
 
-### D62 — `Phase::Ongoing` splits into `Building` and `Firing`, named by part of speech
+### D62 — `ActionPhase::Ongoing` splits into `Building` and `Firing`, named by part of speech
 
 **Decided.** `Ongoing` becomes two variants: `Building`, a condition still short of firing, and
 `Firing`, an action still active. The split follows a rule now stated in R3.1: a gerund or adjective
@@ -247,8 +248,9 @@ names a level, true again next tick; a past participle names an edge, true for o
 gone from all three, not just moved.
 
 **Reversal.** Re-merging the two brings the value test back to every call site it was removed from,
-in this crate and in any app that has since matched on `Building` or `Firing` separately — `Phase`
-is not `#[non_exhaustive]`, so those matches would stop compiling rather than silently misbehave.
+in this crate and in any app that has since matched on `Building` or `Firing` separately —
+`ActionPhase` is not `#[non_exhaustive]`, so those matches would stop compiling rather than
+silently misbehave.
 
 ### D63 — `cancel_in_flight` also cancels `Started`
 
@@ -355,7 +357,7 @@ against it: a plain `W` bound in the same context beats "any character key", and
 class binding never wins by specificity — only by sitting in a higher-priority context, which is
 exactly how a text field is meant to claim the keyboard.
 
-### D15 — Intent decides how several bindings fold into one action
+### D15 — ActionIntent decides how several bindings fold into one action
 
 **Decided.** State is allocated per action, so several bindings feeding one action are folded into
 one value. `Button`, `Analog1` and `Directional2` take the strongest contribution; `Delta2` sums.
@@ -427,8 +429,8 @@ analog action has none to synthesize.
 **Decided.** Three tiers. The compiler catches a wrong output shape. Plan build catches an unknown
 control, a duplicate binding, a shape mismatch no conversion can fix, contradictory consume flags
 and the rest, and `add_context` refuses the context rather than installing a plan that cannot work.
-A runtime query answers everything situational: `why_not` returns an `Obstacle` naming which of the
-several possible reasons applies.
+A runtime query answers everything situational: `why_not` returns an `ActionObstacle` naming which
+of the several possible reasons applies.
 
 **Rules out.** Deferring everything to run time, and failing silently at any tier.
 
@@ -436,7 +438,8 @@ several possible reasons applies.
 "Why didn't my action fire" has at least six causes that are indistinguishable from the call site —
 inactive context, a higher-priority consumer, a longer chord winning the clash, a condition part way
 through, a control nothing has touched, and an action simply not bound here — and the plan already
-holds everything needed to tell them apart. Removing `Obstacle` leaves a developer with a printf.
+holds everything needed to tell them apart. Removing `ActionObstacle` leaves a developer with a
+printf.
 
 **Why the tiers are separate passes.** Diagnosis is a distinct pass from compilation, not a step
 inside it. That is what lets a rebinding UI ask whether a set of bindings is admissible without
@@ -540,7 +543,7 @@ the Steam client, not something a game can query or toggle. What suppression at 
 comes down to for the Steam case is device-identity filtering: an emulated pad enumerates under
 Valve's own vendor id, distinct from the hardware underneath it, and that is the same primitive D64
 already built for `GamepadBrand`. No second mechanism is needed, only a policy — drop raw events from
-a Valve-vendor device while a Steam authority is active for that scheme — and the exact id wants
+a Valve-vendor device while a Steam authority is active for that family — and the exact id wants
 confirming against a running client before a real backend ships, the same way R14's gamepad findings
 were measured rather than assumed.
 
@@ -655,13 +658,13 @@ design decision; seeing the controls is the player's business, and the default b
 **`mappable` takes no arguments, and both halves of that are decisions.** The parts of a composite
 name themselves, so the key derives as `gameplay.move.up` and a catalogue is where `up` becomes
 "Move Forward" — an author supplying "forward" would be naming the same part twice, in a place no
-translator will look. The scheme is inferred from the controls, because declaring it would be a
+translator will look. The family is inferred from the controls, because declaring it would be a
 third chance to disagree with what is actually bound.
 
 ### D29 — A mapping is an ordered list of slots, and capacity is inferred
 
 **Decided.** A *mapping* is the named thing a player rebinds; a *slot* is one position in it holding
-one control; a screen draws one cell per slot. Capacity is `UpTo(n)` or `Any`, widened by whatever
+one control; a screen draws one cell per slot. Capacity is `Some(n)` or `None`, widened by whatever
 the defaults ask for and never narrowed below them.
 
 **Rules out.** One control per mapping, and a fixed two.
@@ -753,7 +756,7 @@ is something a screen can *compute*, by comparing what is bound against each reg
 is a design decision the player's own screen must not override — is wrong for a preset, whose whole
 reason to exist is moving rows a capture screen never offers a button for. Every gamepad binding in
 a typical game is such a row. `apply_overrides_with_preset` exempts exactly the rows that preset
-names, and no others; a third `Rebinding` state would have forced every already-correct `Fixed`
+names, and no others; a third `RebindPolicy` state would have forced every already-correct `Fixed`
 declaration in every game to be revisited for a fact that has not changed.
 
 ---
@@ -904,7 +907,7 @@ one reached from a pause menu.
 ### D42 — Reserved before shape, and excluded is a silent guard
 
 **Decided.** Three refusals that look alike and are not. *Reserved* is declared on a binding and is
-loud. *Shape* and *scheme* are the mapping's own constraints. *Excluded* is the screen's own
+loud. *Shape* and *family* are the mapping's own constraints. *Excluded* is the screen's own
 controls and is silent. Reserved is asked first, and one shared predicate answers for both a live
 capture and a control loaded from a file.
 
@@ -917,7 +920,7 @@ getting two different reasons depending on which direction it arrived from; befo
 merged they genuinely disagreed, and no test noticed.
 
 **Reserving has two halves and the second is the one that matters.** A reserved binding takes no
-mapping *and* its controls are refused by capture across the scheme. Without the second half a
+mapping *and* its controls are refused by capture across the family. Without the second half a
 player cannot rebind the settings key away but can still bind something else over it, which is the
 same trap through another door.
 
@@ -980,9 +983,9 @@ game underneath for exactly the ticks the player was still holding it.
 
 ## Overrides and persistence
 
-### D45 — An override is a diff keyed by mapping and scheme, holding controls only
+### D45 — An override is a diff keyed by mapping and family, holding controls only
 
-**Decided.** Rows are keyed by `(scheme, mapping)` and hold controls. Not by action, not by binding.
+**Decided.** Rows are keyed by `(family, mapping)` and hold controls. Not by action, not by binding.
 Nothing in an override names a device.
 
 **Rules out.** One row per action, and any device identity in the file.
@@ -990,7 +993,7 @@ Nothing in an override names a device.
 **Reversal.** An action has several bindings, so `Jump` is Space *and* South; the unit of rebinding
 is the mapping, since the player rebinds "move forward" and never `Move`; and only the source
 belongs to the player, because modifiers, conditions and chord structure are developer data (D27)
-and the knobs a player does get are tunables (D32). Per-scheme separation is what keeps a keyboard
+and the knobs a player does get are tunables (D32). Per-family separation is what keeps a keyboard
 remap from disturbing the gamepad layout.
 
 **No device identity.** A row names a control on a device *class*. Which physical unit drives which
@@ -1051,7 +1054,7 @@ composite is refused a slot the defaults did not ship.
 ### D49 — The control encoding is a format we own
 
 **Decided.** `key/Space`, `pad/South`, `key/ControlLeft+key/KeyS`. Written by hand rather than
-derived, with one table per scheme, a scalar accepted and written where a row holds one control, and
+derived, with one table per family, a scalar accepted and written where a row holds one control, and
 the three row states spelled as words no control name could collide with.
 
 **Rules out.** Deriving the wire format from Bevy's type names, and a shape that is unpleasant to
@@ -1099,9 +1102,9 @@ than R17.2 gives an unresolved row, and deliberately so: a resolved row from the
 default is a mismatch the game cannot see the way it can see an `Unresolved`.
 
 **What forces a bump, and what doesn't.** Growing the vocabulary never does: a new `Control` name, a
-new scheme, a new mapping or tunable name, or a third row-state word all fail safely on an older
+new family, a new mapping or tunable name, or a third row-state word all fail safely on an older
 build, because unknown text in any of those positions is already reported rather than guessed at —
-an `UnknownControl`, an `Unresolved`, a skipped scheme table. A new row-state word is safe
+an `UnknownControl`, an `Unresolved`, a skipped family table. A new row-state word is safe
 only because it cannot be mistaken for a control name (every real one carries a `/`); the two words
 that exist and the control-name table are exactly the vocabulary this crate must never redefine.
 What forces a bump is reusing one of those with a new meaning, or changing a row's shape rather than
@@ -1134,9 +1137,9 @@ both wanting one named `bindings`, which is why only the generic name is renamed
 **Accepted.** `bindings` and `tunables` are themselves unprefixed field names and carry the same
 collision risk in principle — accepted as unlikely rather than eliminated, since prefixing every field
 this crate ever writes would cost legibility for a risk this small. Structural reflection also costs
-two things a hand-rolled encoding controlled: `bindings`' scheme tables sort alphabetically by name
-rather than in `Scheme`'s own declared order, and an empty `tunables` table still gets written rather
-than omitted.
+two things a hand-rolled encoding controlled: `bindings`' family tables sort alphabetically by name
+rather than in `DeviceFamily`'s own declared order, and an empty `tunables` table still gets written
+rather than omitted.
 
 ---
 
@@ -1153,10 +1156,10 @@ them from.
 **Rules out.** A second write path into action state.
 
 **Reversal.** Steam returns a level, sampled when asked, with no edge and no timestamp, so this
-crate's timing is unsatisfiable from it — but `fired()` and `Phase` have to keep working or the
-promise that a consumer need not know which backend produced a value is false. A second write path
-would have to reimplement the state machine, and two implementations of the lifecycle is exactly the
-drift that promise forbids.
+crate's timing is unsatisfiable from it — but `fired()` and `ActionPhase` have to keep working or
+the promise that a consumer need not know which backend produced a value is false. A second write
+path would have to reimplement the state machine, and two implementations of the lifecycle is
+exactly the drift that promise forbids.
 
 **A condition on a backend-owned action is a plan-build error.** The backend has its own activators
 and will not deliver a hold or a multi-tap, so the game asked for behaviour it will not get and

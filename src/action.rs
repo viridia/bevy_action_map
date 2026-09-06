@@ -13,7 +13,7 @@
 //! #[action(path = "gameplay.jump", output = bool, intent = Button)]
 //! struct Jump;
 //!
-//! assert_eq!(Jump::INTENT, Intent::Button);
+//! assert_eq!(Jump::INTENT, ActionIntent::Button);
 //! ```
 //!
 //! # Choosing a path
@@ -30,7 +30,7 @@
 //! Use at least two segments. The first names the area the action belongs to — `gameplay`, `menu`,
 //! `vehicle` for a game; your crate's own name if you are a library contributing actions other
 //! crates will use alongside their own. Add intermediate segments to group as you see fit. Contexts
-//! follow the same scheme and share the namespace of the actions they bind.
+//! follow the same family and share the namespace of the actions they bind.
 //!
 //! Two consequences to plan for:
 //!
@@ -135,7 +135,7 @@ impl fmt::Debug for ActionId {
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Intent {
+pub enum ActionIntent {
     /// A digital press or release.
     Button,
     /// A 1D analog control, such as a trigger.
@@ -148,18 +148,18 @@ pub enum Intent {
 
 /// The kind of channel a control reports on.
 ///
-/// This is a property of the **control**, and it is independent of both the [`Intent`] of any
+/// This is a property of the **control**, and it is independent of both the [`ActionIntent`] of any
 /// action you bind it to and the shape of that action's value. The three do not have to agree, and
 /// on real hardware they frequently do not:
 ///
 /// - An analog trigger arrives on a [`Button`](ChannelShape::Button) channel carrying a fraction,
-///   so it can drive an [`Analog1`](Intent::Analog1) action without a special case.
+///   so it can drive an [`Analog1`](ActionIntent::Analog1) action without a special case.
 /// - A D-pad arrives as four separate buttons rather than as an axis pair, so it reaches a
-///   [`Directional2`](Intent::Directional2) action through the same composite that turns four
+///   [`Directional2`](ActionIntent::Directional2) action through the same composite that turns four
 ///   keyboard keys into a direction.
 ///
-/// You rarely name this type directly. It is what [`Intent::accepts`] consults to decide whether a
-/// binding makes sense, and what a rebinding UI filters candidate controls on.
+/// You rarely name this type directly. It is what [`ActionIntent::accepts`] consults to decide
+/// whether a binding makes sense, and what a rebinding UI filters candidate controls on.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -184,7 +184,7 @@ pub enum ChannelShape {
     Delta2,
 }
 
-impl Intent {
+impl ActionIntent {
     /// Returns whether this intent is a match for the given output shape.
     pub const fn supports_output<O: ActionOutput>(self) -> bool {
         self.is_one_of(O::INTENTS)
@@ -195,7 +195,7 @@ impl Intent {
     /// This is a `const fn` because the derive calls it in a compile-time assertion, which is what
     /// turns a mismatched `output` and `intent` into a build error rather than a surprise at run
     /// time.
-    pub const fn is_one_of(self, intents: &[Intent]) -> bool {
+    pub const fn is_one_of(self, intents: &[ActionIntent]) -> bool {
         let mut index = 0;
         while index < intents.len() {
             if intents[index] as u8 == self as u8 {
@@ -232,16 +232,18 @@ impl Intent {
     pub const fn accepts(self, shape: ChannelShape) -> bool {
         match (self, shape) {
             // A press is a press however it arrives; an axis presses by crossing a threshold.
-            (Intent::Button, ChannelShape::Button | ChannelShape::Axis1 | ChannelShape::Axis2) => {
-                true
-            }
+            (
+                ActionIntent::Button,
+                ChannelShape::Button | ChannelShape::Axis1 | ChannelShape::Axis2,
+            ) => true,
             // A button is an analog control with two positions, which is why a key can stand in
             // for a trigger.
-            (Intent::Analog1, ChannelShape::Button | ChannelShape::Axis1 | ChannelShape::Axis2) => {
-                true
-            }
-            (Intent::Directional2, ChannelShape::Axis2) => true,
-            (Intent::Delta2, ChannelShape::Delta2) => true,
+            (
+                ActionIntent::Analog1,
+                ChannelShape::Button | ChannelShape::Axis1 | ChannelShape::Axis2,
+            ) => true,
+            (ActionIntent::Directional2, ChannelShape::Axis2) => true,
+            (ActionIntent::Delta2, ChannelShape::Delta2) => true,
             _ => false,
         }
     }
@@ -279,15 +281,15 @@ pub enum TickDomain {
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum Phase {
+pub enum ActionPhase {
     /// The action is inactive.
     #[default]
     Idle,
     /// A condition on this action began this tick, but has not been satisfied yet.
     ///
-    /// A hold that the player has just pressed is `Started`: something is happening, and it is not
-    /// yet a jump. If they let go too soon it becomes [`Canceled`](Phase::Canceled) instead of
-    /// [`Fired`](Phase::Fired).
+    /// A hold that the player has just pressed is `Started`: something is happening, and it is
+    /// not yet a jump. If they let go too soon it becomes [`Canceled`](ActionPhase::Canceled)
+    /// instead of [`Fired`](ActionPhase::Fired).
     Started,
     /// A condition is still building toward firing, on a tick after the one it began.
     ///
@@ -305,7 +307,7 @@ pub enum Phase {
     /// The action was abandoned before it ever fired.
     ///
     /// A hold released early, or a context deactivating mid-press. The distinction from
-    /// [`Completed`](Phase::Completed) is whether the action ever actually happened.
+    /// [`Completed`](ActionPhase::Completed) is whether the action ever actually happened.
     Canceled,
 }
 
@@ -353,14 +355,14 @@ pub struct ActionState {
     /// The current value for the action.
     pub value: ActionValue,
     /// The current phase for the action.
-    pub phase: Phase,
+    pub phase: ActionPhase,
 }
 
 impl Default for ActionState {
     fn default() -> Self {
         Self {
             value: ActionValue::Bool(false),
-            phase: Phase::Idle,
+            phase: ActionPhase::Idle,
         }
     }
 }
@@ -368,7 +370,7 @@ impl Default for ActionState {
 impl ActionState {
     /// A state built directly rather than through the evaluator's own transitions, for a test or
     /// anything else constructing one from outside the normal frame.
-    pub const fn new(value: ActionValue, phase: Phase) -> Self {
+    pub const fn new(value: ActionValue, phase: ActionPhase) -> Self {
         Self { value, phase }
     }
 }
@@ -477,7 +479,7 @@ impl From<Vec3> for ActionValue {
 /// matter when you read a value in a different shape than the one it was written in.
 pub trait ActionOutput: Copy + Send + Sync + 'static {
     /// Intents that can consume this output shape.
-    const INTENTS: &'static [Intent];
+    const INTENTS: &'static [ActionIntent];
 
     /// The value this shape has when nobody is touching the control.
     const REST: Self;
@@ -528,7 +530,7 @@ pub trait InputContext: Send + Sync + 'static {
 }
 
 impl ActionOutput for bool {
-    const INTENTS: &'static [Intent] = &[Intent::Button];
+    const INTENTS: &'static [ActionIntent] = &[ActionIntent::Button];
     const REST: Self = false;
 
     fn into_action_value(self) -> ActionValue {
@@ -541,7 +543,7 @@ impl ActionOutput for bool {
 }
 
 impl ActionOutput for f32 {
-    const INTENTS: &'static [Intent] = &[Intent::Button, Intent::Analog1];
+    const INTENTS: &'static [ActionIntent] = &[ActionIntent::Button, ActionIntent::Analog1];
     const REST: Self = 0.0;
 
     fn into_action_value(self) -> ActionValue {
@@ -554,7 +556,7 @@ impl ActionOutput for f32 {
 }
 
 impl ActionOutput for Vec2 {
-    const INTENTS: &'static [Intent] = &[Intent::Directional2, Intent::Delta2];
+    const INTENTS: &'static [ActionIntent] = &[ActionIntent::Directional2, ActionIntent::Delta2];
     const REST: Self = Vec2::ZERO;
 
     fn into_action_value(self) -> ActionValue {
@@ -567,7 +569,7 @@ impl ActionOutput for Vec2 {
 }
 
 impl ActionOutput for Vec3 {
-    const INTENTS: &'static [Intent] = &[Intent::Directional2, Intent::Delta2];
+    const INTENTS: &'static [ActionIntent] = &[ActionIntent::Directional2, ActionIntent::Delta2];
     const REST: Self = Vec3::ZERO;
 
     fn into_action_value(self) -> ActionValue {
@@ -588,7 +590,7 @@ pub trait InputAction: Send + Sync + 'static {
     type Output: ActionOutput;
 
     /// The kind of control that should drive this action.
-    const INTENT: Intent;
+    const INTENT: ActionIntent;
 
     /// Stable path used to identify the action across runs.
     const PATH: &'static str;
@@ -633,7 +635,7 @@ pub struct ActionInfo {
     /// What to group it under in a rebinding screen, if the game says.
     pub category: Option<&'static str>,
     /// The kind of control that should drive it.
-    pub intent: Intent,
+    pub intent: ActionIntent,
 }
 
 impl ActionInfo {
@@ -697,13 +699,13 @@ fn with_registry<T>(read: impl FnOnce(&ActionRegistry) -> T) -> T {
 /// one:
 ///
 /// ```rust
-/// use bevy_action_map::action::{ActionId, ActionIdCache, InputAction, Intent};
+/// use bevy_action_map::action::{ActionId, ActionIdCache, InputAction, ActionIntent};
 ///
 /// struct Jump;
 ///
 /// impl InputAction for Jump {
 ///     type Output = bool;
-///     const INTENT: Intent = Intent::Button;
+///     const INTENT: ActionIntent = ActionIntent::Button;
 ///     const PATH: &'static str = "gameplay.jump";
 ///
 ///     fn id() -> ActionId {
@@ -752,7 +754,7 @@ mod tests {
     impl InputAction for Jump {
         type Output = bool;
 
-        const INTENT: Intent = Intent::Button;
+        const INTENT: ActionIntent = ActionIntent::Button;
         const PATH: &'static str = "tests::Jump";
     }
 
@@ -762,7 +764,7 @@ mod tests {
     impl InputAction for Look {
         type Output = Vec2;
 
-        const INTENT: Intent = Intent::Delta2;
+        const INTENT: ActionIntent = ActionIntent::Delta2;
         const PATH: &'static str = "tests::Look";
     }
 
@@ -770,8 +772,8 @@ mod tests {
     /// change to any cell should have to be made here as well as in the code.
     #[test]
     fn every_intent_and_channel_pair_is_decided() {
+        use ActionIntent::{Analog1, Button, Delta2, Directional2};
         use ChannelShape::{Axis1, Axis2, Button as ButtonChannel, Delta2 as Delta2Channel};
-        use Intent::{Analog1, Button, Delta2, Directional2};
 
         let expected = [
             //                     Button  Axis1  Axis2  Delta2
@@ -859,7 +861,7 @@ mod tests {
         let info = id.info().expect("a registered action knows itself");
         assert_eq!(info.path, "tests.registered_move");
         assert_eq!(info.category, Some("tests.movement"));
-        assert_eq!(info.intent, Intent::Directional2);
+        assert_eq!(info.intent, ActionIntent::Directional2);
 
         assert!(registered_actions().contains(&info));
     }
@@ -884,12 +886,12 @@ mod tests {
 
     #[test]
     fn intent_matrix_matches_output_shapes() {
-        assert!(Intent::Button.supports_output::<bool>());
-        assert!(Intent::Button.supports_output::<f32>());
-        assert!(!Intent::Button.supports_output::<Vec2>());
-        assert!(Intent::Analog1.supports_output::<f32>());
-        assert!(Intent::Directional2.supports_output::<Vec2>());
-        assert!(Intent::Delta2.supports_output::<Vec2>());
+        assert!(ActionIntent::Button.supports_output::<bool>());
+        assert!(ActionIntent::Button.supports_output::<f32>());
+        assert!(!ActionIntent::Button.supports_output::<Vec2>());
+        assert!(ActionIntent::Analog1.supports_output::<f32>());
+        assert!(ActionIntent::Directional2.supports_output::<Vec2>());
+        assert!(ActionIntent::Delta2.supports_output::<Vec2>());
     }
 
     /// Every cell of the shape conversion table, written out, so a change to any cell has to be
@@ -972,15 +974,15 @@ mod tests {
     fn an_output_shape_admits_only_the_intents_it_can_serve() {
         // A 3D value is a direction or a displacement. It was previously claimed by every intent
         // including `Button`, which would have let a jump action declare itself as a `Vec3`.
-        assert!(!Intent::Button.supports_output::<Vec3>());
-        assert!(!Intent::Analog1.supports_output::<Vec3>());
-        assert!(Intent::Directional2.supports_output::<Vec3>());
-        assert!(Intent::Delta2.supports_output::<Vec3>());
+        assert!(!ActionIntent::Button.supports_output::<Vec3>());
+        assert!(!ActionIntent::Analog1.supports_output::<Vec3>());
+        assert!(ActionIntent::Directional2.supports_output::<Vec3>());
+        assert!(ActionIntent::Delta2.supports_output::<Vec3>());
 
         // A press is a press; a number can be either a press or a reading.
-        assert!(Intent::Button.supports_output::<bool>());
-        assert!(!Intent::Analog1.supports_output::<bool>());
-        assert!(Intent::Button.supports_output::<f32>());
-        assert!(Intent::Analog1.supports_output::<f32>());
+        assert!(ActionIntent::Button.supports_output::<bool>());
+        assert!(!ActionIntent::Analog1.supports_output::<bool>());
+        assert!(ActionIntent::Button.supports_output::<f32>());
+        assert!(ActionIntent::Analog1.supports_output::<f32>());
     }
 }

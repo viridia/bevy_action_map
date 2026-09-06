@@ -41,7 +41,7 @@ initializes `ButtonThreshold`, `ConsumedControls`, `ExclusionCeiling`, `Reserved
 `InputFrame` is a resource holding one ordered queue of raw events.
 
 ```rust
-pub struct Timestamp { frame: u64, order: u32 }
+pub struct FrameTimestamp { frame: u64, order: u32 }
 
 pub enum RawEvent {
     Keyboard(KeyboardInput),
@@ -85,7 +85,7 @@ An action is a type, not a value.
 ```rust
 pub trait InputAction: Send + Sync + 'static {
     type Output: ActionOutput;      // bool, f32, Vec2, Vec3
-    const INTENT: Intent;
+    const INTENT: ActionIntent;
     const PATH: &'static str;       // "gameplay.jump"
     fn id() -> ActionId;
     // plus CATEGORY and CONSUME, with defaults
@@ -121,13 +121,14 @@ Three related properties, deliberately distinct.
 | | Belongs to | Values |
 | --- | --- | --- |
 | **Output** | the action's Rust type | `bool`, `f32`, `Vec2`, `Vec3` |
-| **`Intent`** | the action's meaning | `Button`, `Analog1`, `Directional2`, `Delta2` |
+| **`ActionIntent`** | the action's meaning | `Button`, `Analog1`, `Directional2`, `Delta2` |
 | **`ChannelShape`** | the control's report | `Button`, `Axis1`, `Axis2`, `Delta2` |
 
 A stick deflection and a mouse delta are both `Vec2`; `Directional2` is a position implying a rate,
-and `Delta2` is a displacement that already happened. `Intent::accepts` decides which channel shapes
-can serve which intent, and a binding whose channel cannot serve its action's intent is refused when
-the context is declared. The derive checks output against intent in a compile-time assertion.
+and `Delta2` is a displacement that already happened. `ActionIntent::accepts` decides which channel
+shapes can serve which intent, and a binding whose channel cannot serve its action's intent is
+refused when the context is declared. The derive checks output against intent in a compile-time
+assertion.
 
 A directional composite's `Axis2` is still four buttons read together; a gamepad stick's is the one
 exception, a single `Control::GamepadStick` reporting a position the same way `MouseMotion` reports a
@@ -138,9 +139,9 @@ displacement.
 ```rust
 pub enum ActionValue { Bool(bool), Axis1(f32), Axis2(Vec2), Axis3(Vec3) }
 
-pub enum Phase { Idle, Started, Building, Fired, Firing, Completed, Canceled }
+pub enum ActionPhase { Idle, Started, Building, Fired, Firing, Completed, Canceled }
 
-pub struct ActionState { pub value: ActionValue, pub phase: Phase }
+pub struct ActionState { pub value: ActionValue, pub phase: ActionPhase }
 ```
 
 A gerund or adjective is a level, still true next tick (`Idle`, `Building`, `Firing`); a past
@@ -299,7 +300,7 @@ entity.
 ### 5.5 Folding several bindings into one action
 
 State is allocated per action, so several bindings feeding one action have to be folded into one
-value. The action's `Intent` decides the rule:
+value. The action's `ActionIntent` decides the rule:
 
 | Intent | Fold |
 | --- | --- |
@@ -417,20 +418,20 @@ driving the same controls wants. Deactivation cancels whatever is in flight.
 ### 7.3 Reading
 
 ```rust
-fn movement(input: Actions<OnFoot>) {
+fn movement(input: ContextActions<OnFoot>) {
     let dir = input.value::<Move>();     // Vec2, checked at compile time
     if input.fired::<Jump>() { .. }
 }
 ```
 
-`Actions<C>` is for a context with exactly one instance; a system taking it is skipped when there is
-no instance or several, following Bevy's `Single`. `ActionsQuery<C>` is the per-player form — `get`,
-`iter`, `len`. Both expose `value`, `try_value`, `phase`, `fired` and `why_not`.
+`ContextActions<C>` is for a context with exactly one instance; a system taking it is skipped when
+there is no instance or several, following Bevy's `Single`. `ActionsQuery<C>` is the per-player form
+— `get`, `iter`, `len`. Both expose `value`, `try_value`, `phase`, `fired` and `why_not`.
 
 `why_not` answers the question a call site cannot:
 
 ```rust
-pub enum Obstacle {
+pub enum ActionObstacle {
     None, Unbound, ContextInactive, AwaitingRelease,
     Consumed { control: Control, by: &'static str },
     Outranked { control: Control, chord: u8 },
@@ -501,22 +502,23 @@ pub enum Control { Key(KeyCode), MouseButton(MouseButton), GamepadButton(Gamepad
                    GamepadAxis(GamepadAxis), GamepadStick(Stick), MouseMotion }
 ```
 
-A `BindingSource` is one control or an arrangement of them. Composites carry a `Part` naming which
-piece of the whole a control drives:
+A `BindingSource` is one control or an arrangement of them. Composites carry a `BindingPart` naming
+which piece of the whole a control drives:
 
 ```rust
-pub enum Part { Whole, Negative, Positive, Up, Down, Left, Right }
+pub enum BindingPart { Whole, Negative, Positive, Up, Down, Left, Right }
 ```
 
 `AxisButtons` makes a bipolar axis from two buttons; `DirectionalButtons` makes a direction from
 four (`DirectionalButtons::wasd()` is the named case); `Stick` and `MouseMove` are the analog
-sources, and both read as `Part::Whole` — a stick has no part a player rebinds one of. `GamepadStick`
-is `Control`'s only member naming what another one of its members names in part: a whole stick, for
-presentation, override application and capture, reporting `ChannelShape::Axis2` the way `MouseMotion`
-reports `Delta2`. Consumption does not follow it — `BindingSource::for_each_control` still decomposes
-a stick binding into its two `GamepadAxis` atoms, which is the granularity `ConsumedControls` and
-reservation key on. `Control::scheme()` and `Control::shape()` classify one control, and
-`BindingSource::channel_shape` classifies an arrangement.
+sources, and both read as `BindingPart::Whole` — a stick has no part a player rebinds one of.
+`GamepadStick` is `Control`'s only member naming what another one of its members names in part: a
+whole stick, for presentation, override application and capture, reporting `ChannelShape::Axis2` the
+way `MouseMotion` reports `Delta2`. Consumption does not follow it —
+`BindingSource::for_each_control` still decomposes a stick binding into its two `GamepadAxis` atoms,
+which is the granularity `ConsumedControls` and reservation key on. `Control::family()` and
+`Control::shape()` classify one control, and `BindingSource::channel_shape` classifies an
+arrangement.
 
 ### 8.2 The builder
 
@@ -535,7 +537,8 @@ evaluation order, which is the order the plan stores them.
 `Custom` variant holding an `Arc`, so built-ins dispatch statically and stay exhaustively matchable
 while extensions work. The boxes are allocated at compile time, never per tick.
 
-A condition returns a `Verdict` of `Idle`, `Ongoing` or `Fired`, and has a `ConditionKind`:
+A condition returns a `ConditionState` of `Idle`, `Building` or `Satisfied`, and has a
+`ConditionKind`:
 
 | Kind | Rule |
 | --- | --- |
@@ -600,16 +603,16 @@ A **mapping** is the named thing a player rebinds; a **slot** is one position in
 control. A screen draws one cell per slot.
 
 ```rust
-pub struct Mapping {
+pub struct ActionMapping {
     pub key: MappingKey,             // "gameplay.move.up" — a localization key
     pub action: ActionId,
     pub action_path: &'static str,
     pub category: Option<&'static str>,
-    pub scheme: Scheme,              // KeyboardMouse | Gamepad
+    pub family: DeviceFamily,        // KeyboardMouse | Gamepad
     pub accepts: ChannelShape,
     pub slots: Vec<Control>,         // ordered; slot 0 is the primary
-    pub capacity: Capacity,          // UpTo(n) | Any — how many columns to draw
-    pub rebinding: Rebinding,        // Here | Fixed
+    pub capacity: Option<usize>,     // Some(n) | None — how many columns to draw, or unlimited
+    pub rebind_policy: RebindPolicy, // Here | Fixed
     pub context: &'static str,
     pub followers: Vec<Follower>,
 }
@@ -626,16 +629,16 @@ otherwise:
 | `follow::<F, L>()` | on `L`'s row, as a subordinate line | with `L`'s row |
 
 `mappable` takes no arguments. The parts of a composite name themselves, so a key derives as
-`gameplay.move.up`; the scheme is inferred from the controls, and a binding whose parts span both
-schemes is refused. `mappable_as` replaces the derived key where one is needed.
+`gameplay.move.up`; the family is inferred from the controls, and a binding whose parts span both
+families is refused. `mappable_as` replaces the derived key where one is needed.
 
 **Capacity is inferred and raised, never lowered.** A plain `mappable` asks for one slot; several
 bindings feeding one mapping take the widest anything asked for; and no mapping ends up narrower
-than the defaults it already holds. Declaring two mappable bindings of one action in one scheme is
+than the defaults it already holds. Declaring two mappable bindings of one action in one family is
 how a game ships a default primary *and* secondary — they merge into one row with two slots, not two
 rows. `mappable_upto(n)` ships one control and leaves the rest for the player.
 
-Uniqueness is per scheme, and two mappable bindings collide only when they name different actions.
+Uniqueness is per family, and two mappable bindings collide only when they name different actions.
 
 **Tunables** are named, typed values a player adjusts:
 
@@ -651,7 +654,7 @@ UI render a slider or a checkbox without knowing what it drives.
 defaults, for a reset preview. `tunables` and `declared_tunables` are the same pair. Both lists are
 flat across every context, and nothing in them names an action type or a context type, so a screen
 written against them works for a game it was not compiled with. Grouping is the caller's: by
-`category` for headings, by `scheme` for which device's worth to show.
+`category` for headings, by `family` for which device's worth to show.
 
 ### 9.2 Prompts
 
@@ -665,14 +668,16 @@ pub trait Prompts {
 pub struct Prompt {
     pub origin: ControlOrigin,
     pub with: Vec<ControlOrigin>,       // what else is held — `Ctrl+S` reads as "S" without it
-    pub part: Part,
+    pub part: BindingPart,
     pub condition: ConditionDescriptor, // None | Hold { duration } | MultiTap { count }
     pub context: Option<&'static str>,
 }
 
 pub enum ControlOrigin {
     Ours(Control),
-    Foreign { name: String, label: String, scheme: Option<Scheme>, class: Option<ControlClass> },
+    Foreign {
+        name: String, label: String, family: Option<DeviceFamily>, class: Option<ControlClass>,
+    },
 }
 ```
 
@@ -694,7 +699,7 @@ filtering the mapping list.
 **Ranking.** Contexts come back in the order they get to claim a control — render tick before fixed
 tick, then by priority, then declaration order — and within a context, in declaration order.
 Nothing ranks one device above another; the device is a scope the caller supplies through
-`PromptScope`, which narrows by context path, scheme and control class. `PromptDevice` is the
+`PromptScope`, which narrows by context path, family and control class. `PromptDevice` is the
 game-wide setting for which device a bare prompt speaks for, and the crate never defaults it.
 
 **Consumption is read from the declarations, not from the frame** — the standing fact that a control
@@ -720,12 +725,12 @@ button the player activated, so "which cell is listening" is answered by where t
 CaptureSession::for_mapping(&mapping)        // first slot
 CaptureSession::for_slot(&mapping, 1)        // the secondary
 CaptureSession::accepting(ControlClass::AnyButton)
-    .within(Scheme::KeyboardMouse)
+    .within(DeviceFamily::KeyboardMouse)
     .excluding([Control::Key(KeyCode::Escape)])
 ```
 
-The crate answers with a `Captured` or `Refused` event on that same entity and removes the
-component; removing it yourself cancels. It never touches the player or context entities.
+The crate answers with a `ControlCaptured` or `CaptureRefused` event on that same entity and removes
+the component; removing it yourself cancels. It never touches the player or context entities.
 
 A session skips whatever is already queued on its first run, so the press that opened it is not what
 it binds. A slot past the mapping's capacity, or more than one past what it currently holds, is
@@ -738,7 +743,7 @@ secondary mean.
 | --- | --- |
 | `RefusedReason::Reserved` | declared on a binding; loud, because the player meant to bind it |
 | `RefusedReason::Shape` | the mapping cannot hold that kind of control |
-| `RefusedReason::Scheme` | the control belongs to the other scheme |
+| `RefusedReason::Family` | the control belongs to the other device family |
 | *excluded* | the screen's own controls; silent, so the key that cancels a capture still cancels it |
 
 Reserved is asked before shape, so pressing the settings key hears that it is spoken for rather than
@@ -749,10 +754,11 @@ A deliberate press is refused out loud; a continuous reading past its threshold 
 **Conflicts are detected, not resolved.** `conflicts(world, control, target)` is a pure query over
 the mapping list, answerable before anything is committed; `conflicts_pending` asks the same of a
 working copy of overrides, which is what lets a screen with unconfirmed choices tell whether two of
-them clash. `Overlap` says whether the clash is `SameContext` or `OtherContext` — a clash across two
-contexts is *possible* rather than certain, since whether they are ever live together is the game's
-own question. Comparison is at control granularity, so two bindings differing only in their chords
-are reported as overlapping. The whole target mapping is excluded rather than the one slot.
+them clash. `ConflictOverlap` says whether the clash is `SameContext` or `OtherContext` — a clash
+across two contexts is *possible* rather than certain, since whether they are ever live together is
+the game's own question. Comparison is at control granularity, so two bindings differing only in
+their chords are reported as overlapping. The whole target mapping is excluded rather than the one
+slot.
 
 ---
 
@@ -769,9 +775,9 @@ pub enum Override {
 }
 ```
 
-Rows are keyed by `(Scheme, MappingKey)` and tunables by `(Scheme, key)`. Nothing in an `Overrides`
-names a device: what a player bound is a control on a device *class*, and which physical unit drives
-which player is a separate question.
+Rows are keyed by `(DeviceFamily, MappingKey)` and tunables by `(DeviceFamily, key)`. Nothing in an
+`Overrides` names a device: what a player bound is a control on a device *class*, and which physical
+unit drives which player is a separate question.
 
 `Overrides` has `bind`, `set`, `get`, `iter`, `tune`, `get_tunable`, `iter_tunables`, and the family
 of resets: `reset` for one row, `reset_tunable`, `reset_action`, `reset_context`, `reset_all`.
@@ -818,9 +824,9 @@ pub enum OverrideProblemKind {
 ### 10.2 Presets
 
 A `Preset` is a name paired with an `Overrides`. `Preset::build(world, name, |p| ..)` gives it the
-builder's own ergonomics — `p.bind::<A>(scheme, controls)` resolves `A`'s declared mapping in that
-scheme and writes the row, so an app never derives a key by hand. It panics rather than guessing
-when an action has no mapping in that scheme or more than one.
+builder's own ergonomics — `p.bind::<A>(family, controls)` resolves `A`'s declared mapping in that
+family and writes the row, so an app never derives a key by hand. It panics rather than guessing
+when an action has no mapping in that family or more than one.
 
 Passing a preset to `apply_overrides_with_preset` exempts exactly the rows that preset names from
 the `NotRebindable` refusal — which is what lets a preset move a `Fixed` row a capture screen never
@@ -841,7 +847,7 @@ that stands in for it — plain, owned strings, needing no context to construct:
 ```rust
 pub struct SavedOverrides {
     pub action_map_version: u32,
-    pub bindings: BTreeMap<String, BTreeMap<String, SavedRow>>,   // scheme -> mapping -> row
+    pub bindings: BTreeMap<String, BTreeMap<String, SavedRow>>,   // family -> mapping -> row
     pub tunables: BTreeMap<String, BTreeMap<String, SavedTunableValue>>,
 }
 
@@ -875,9 +881,9 @@ list is which slot, so a cleared middle slot needs `"cleared"` rather than a sho
 state words cannot collide with a control name, because the control encoding is a format this crate
 owns rather than `Debug` or serde on Bevy's own types — an upstream rename becomes a compile error in
 an exhaustive match while the stored string stays what it was. `bindings`/`gamepad` sorts ahead of
-`bindings`/`keyboard_mouse` alphabetically rather than in `Scheme`'s own declared order, and an empty
-`tunables` still gets a header — both accepted costs of a plain, structurally reflected type over a
-hand-rolled one.
+`bindings`/`keyboard_mouse` alphabetically rather than in `DeviceFamily`'s own declared order, and
+an empty `tunables` still gets a header — both accepted costs of a plain, structurally reflected
+type over a hand-rolled one.
 
 **`SavedOverrides` claims no field besides `action_map_version`, `bindings` and `tunables`, and none
 of those is a bare `version`** (R17.10, D59). A settings layer that lets several resources share one

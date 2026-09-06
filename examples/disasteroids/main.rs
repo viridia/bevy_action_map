@@ -83,7 +83,7 @@ fn main() {
         // Disasteroids is a desktop game: its prompts name keys even when a pad is plugged in, and
         // the pad's own controls are listed on the settings screen rather than advertised in the
         // corner. Nothing infers this — a crate guessing it would be wrong silently.
-        .insert_resource(PromptDevice(Some(Scheme::KeyboardMouse)))
+        .insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)))
         .add_systems(Startup, (camera.spawn(), hint.spawn()))
         .run();
 }

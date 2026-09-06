@@ -9,7 +9,7 @@ use bevy_action_map::prelude::*;
 #[path = "../examples/common/prompt_ui.rs"]
 mod prompt_ui;
 
-use prompt_ui::{PromptClass, PromptPick, PromptScheme, PromptSpan, PromptUnbound};
+use prompt_ui::{PromptClass, PromptFamily, PromptPick, PromptSpan, PromptUnbound};
 
 #[derive(InputAction)]
 #[action(path = "prompt_ui_tests.jump", output = bool, intent = Button)]
@@ -49,7 +49,7 @@ fn caption(app: &mut App, span: Entity) -> String {
 #[test]
 fn a_span_says_what_fires_the_action() {
     let mut app = app();
-    app.insert_resource(PromptDevice(Some(Scheme::KeyboardMouse)));
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
     app.add_context::<Flying>(|controls| {
         controls.bind::<Jump>(KeyCode::Space);
     });
@@ -64,7 +64,7 @@ fn a_span_says_what_fires_the_action() {
 #[test]
 fn a_scheme_beside_the_span_overrides_the_games_device() {
     let mut app = app();
-    app.insert_resource(PromptDevice(Some(Scheme::KeyboardMouse)));
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
     app.add_context::<Flying>(|controls| {
         controls.bind::<Jump>(KeyCode::Space);
         controls.bind::<Jump>(GamepadButton::South);
@@ -74,7 +74,7 @@ fn a_scheme_beside_the_span_overrides_the_games_device() {
     let keyboard = app.world_mut().spawn(PromptSpan(Jump::id())).id();
     let pad = app
         .world_mut()
-        .spawn((PromptSpan(Jump::id()), PromptScheme(Scheme::Gamepad)))
+        .spawn((PromptSpan(Jump::id()), PromptFamily(DeviceFamily::Gamepad)))
         .id();
 
     assert_eq!(caption(&mut app, keyboard), "Space");
@@ -104,7 +104,7 @@ fn a_class_beside_the_span_narrows_to_one_kind_of_control() {
 #[test]
 fn a_pick_takes_the_one_after_the_first() {
     let mut app = app();
-    app.insert_resource(PromptDevice(Some(Scheme::KeyboardMouse)));
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
     app.add_context::<Flying>(|controls| {
         controls.bind::<Turn>(bevy_action_map::binding::AxisButtons::ad());
     });
@@ -121,7 +121,7 @@ fn a_pick_takes_the_one_after_the_first() {
 #[test]
 fn an_action_nothing_fires_renders_a_placeholder() {
     let mut app = app();
-    app.insert_resource(PromptDevice(Some(Scheme::KeyboardMouse)));
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
 
     let bare = app.world_mut().spawn(PromptSpan(Jump::id())).id();
     let told = app
@@ -139,7 +139,7 @@ fn an_action_nothing_fires_renders_a_placeholder() {
 #[test]
 fn a_held_binding_says_so_in_the_caption() {
     let mut app = app();
-    app.insert_resource(PromptDevice(Some(Scheme::KeyboardMouse)));
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
     app.add_context::<Flying>(|controls| {
         controls.bind::<Jump>(KeyCode::Space).hold(0.5);
     });
@@ -157,7 +157,7 @@ fn a_span_catches_up_when_the_answer_moves() {
     struct Flies;
 
     let mut app = app();
-    app.insert_resource(PromptDevice(Some(Scheme::KeyboardMouse)));
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
     app.add_context::<Flying>(|controls| {
         controls.bind::<Jump>(KeyCode::Space);
         controls.active_if(resource_exists::<Flies>);

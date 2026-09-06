@@ -8,6 +8,6 @@ fn main() {
     let _ = <Jump as bevy_action_map::action::InputAction>::id();
     assert_eq!(
         <Jump as bevy_action_map::action::InputAction>::INTENT,
-        Intent::Button,
+        ActionIntent::Button,
     );
 }

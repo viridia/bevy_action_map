@@ -25,12 +25,12 @@ pub enum DeviceHandle {
 }
 
 impl DeviceHandle {
-    /// Which binding scheme this device's controls belong to.
-    pub const fn scheme(self) -> crate::mapping::Scheme {
+    /// Which binding family this device's controls belong to.
+    pub const fn family(self) -> crate::mapping::DeviceFamily {
         match self {
-            Self::KeyboardMouse => crate::mapping::Scheme::KeyboardMouse,
+            Self::KeyboardMouse => crate::mapping::DeviceFamily::KeyboardMouse,
             #[cfg(feature = "gamepad")]
-            Self::Gamepad(_) => crate::mapping::Scheme::Gamepad,
+            Self::Gamepad(_) => crate::mapping::DeviceFamily::Gamepad,
         }
     }
 }
@@ -71,15 +71,15 @@ impl DeviceHandleSet {
         self.0.iter().copied()
     }
 
-    /// The claimed device belonging to the given scheme, if any.
+    /// The claimed device belonging to the given family, if any.
     ///
-    /// An occupant with one device per scheme has at most one answer; a game that pairs two devices
-    /// of the same scheme to one occupant gets whichever was claimed first.
-    pub fn owner_for(&self, scheme: crate::mapping::Scheme) -> Option<DeviceHandle> {
+    /// An occupant with one device per family has at most one answer; a game that pairs two devices
+    /// of the same family to one occupant gets whichever was claimed first.
+    pub fn owner_for(&self, family: crate::mapping::DeviceFamily) -> Option<DeviceHandle> {
         self.0
             .iter()
             .copied()
-            .find(|device| device.scheme() == scheme)
+            .find(|device| device.family() == family)
     }
 }
 
@@ -533,16 +533,16 @@ mod tests {
 
     #[cfg(feature = "gamepad")]
     #[test]
-    fn owner_for_finds_the_device_in_its_own_scheme() {
+    fn owner_for_finds_the_device_in_its_own_family() {
         let pad = bevy_ecs::entity::Entity::from_bits(1);
         let set =
             DeviceHandleSet::from_iter([DeviceHandle::KeyboardMouse, DeviceHandle::Gamepad(pad)]);
         assert_eq!(
-            set.owner_for(crate::mapping::Scheme::Gamepad),
+            set.owner_for(crate::mapping::DeviceFamily::Gamepad),
             Some(DeviceHandle::Gamepad(pad))
         );
         assert_eq!(
-            set.owner_for(crate::mapping::Scheme::KeyboardMouse),
+            set.owner_for(crate::mapping::DeviceFamily::KeyboardMouse),
             Some(DeviceHandle::KeyboardMouse)
         );
     }

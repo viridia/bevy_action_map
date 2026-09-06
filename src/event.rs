@@ -21,7 +21,7 @@ use core::marker::PhantomData;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::{Commands, EntityEvent};
 
-use crate::action::{ActionOutput, ActionValue, InputAction, Phase};
+use crate::action::{ActionOutput, ActionPhase, ActionValue, InputAction};
 use crate::frame::RawEvent;
 
 /// An action became active this tick.
@@ -77,22 +77,22 @@ pub struct Canceled<A: InputAction> {
 ///
 /// The plan stores one of these per slot. It is the only place the concrete action type survives to
 /// — the evaluator works in `ActionId`s and slots, which cannot name a generic event on their own.
-pub(crate) type Dispatch = fn(&mut Commands<'_, '_>, Entity, Phase, ActionValue);
+pub(crate) type Dispatch = fn(&mut Commands<'_, '_>, Entity, ActionPhase, ActionValue);
 
 pub(crate) fn dispatch_for<A: InputAction>(
     commands: &mut Commands<'_, '_>,
     entity: Entity,
-    phase: Phase,
+    phase: ActionPhase,
     value: ActionValue,
 ) {
     let value = A::Output::from_action_value(value);
     match phase {
-        Phase::Started => commands.trigger(Started::<A> { entity, value }),
-        Phase::Fired => commands.trigger(Fired::<A> { entity, value }),
-        Phase::Completed => commands.trigger(Completed::<A> { entity, value }),
-        Phase::Canceled => commands.trigger(Canceled::<A> { entity, value }),
+        ActionPhase::Started => commands.trigger(Started::<A> { entity, value }),
+        ActionPhase::Fired => commands.trigger(Fired::<A> { entity, value }),
+        ActionPhase::Completed => commands.trigger(Completed::<A> { entity, value }),
+        ActionPhase::Canceled => commands.trigger(Canceled::<A> { entity, value }),
         // Not edges: nothing changed, so there is nothing to tell an observer about.
-        Phase::Idle | Phase::Building | Phase::Firing => {}
+        ActionPhase::Idle | ActionPhase::Building | ActionPhase::Firing => {}
     }
 }
 

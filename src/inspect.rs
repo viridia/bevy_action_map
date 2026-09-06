@@ -32,7 +32,7 @@ use bevy_ecs::prelude::Resource;
 use bevy_ecs::world::World;
 
 use crate::action::{ActionId, ActionState, TickDomain};
-use crate::context::Obstacle;
+use crate::context::ActionObstacle;
 
 /// Everything the input layer currently holds.
 #[derive(Clone, Debug)]
@@ -75,8 +75,8 @@ pub struct ActionDump {
     pub path: &'static str,
     /// Value, phase, elapsed time and progress.
     pub state: ActionState,
-    /// What is in the way, or [`Obstacle::None`] when it is firing.
-    pub obstacle: Obstacle,
+    /// What is in the way, or [`ActionObstacle::None`] when it is firing.
+    pub obstacle: ActionObstacle,
 }
 
 /// Which side of an override a reader wants: the rows in force, or the rows the game shipped.
@@ -100,7 +100,7 @@ pub(crate) struct DeclaredContext {
     // so unlike `read` this one needs no query and no exclusive access. `OverrideStage` picks
     // between the rows in force and the rows the game declared — the latter being what a reset
     // previews, and what an override is a diff against.
-    pub(crate) mappings: fn(&World, OverrideStage) -> Vec<crate::mapping::Mapping>,
+    pub(crate) mappings: fn(&World, OverrideStage) -> Vec<crate::mapping::ActionMapping>,
     // Tunables, on the same terms.
     pub(crate) tunables: fn(&World, OverrideStage) -> Vec<crate::mapping::Tunable>,
     // The same bindings as `mappings` the other way round, for a prompt asking what fires an
@@ -232,7 +232,7 @@ mod tests {
     // overlay actually has.
     #[test]
     fn the_dump_carries_the_obstacle_for_each_action() {
-        use crate::context::{InputContextState, Obstacle};
+        use crate::context::{ActionObstacle, InputContextState};
 
         let mut app = App::new();
         app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
@@ -244,13 +244,13 @@ mod tests {
 
         let obstacle =
             |app: &mut App| dump(app.world_mut()).contexts[0].instances[0].actions[0].obstacle;
-        assert_eq!(obstacle(&mut app), Obstacle::NoInput);
+        assert_eq!(obstacle(&mut app), ActionObstacle::NoInput);
 
         app.world_mut()
             .get_mut::<InputContextState<OnFoot>>(player)
             .unwrap()
             .deactivate();
-        assert_eq!(obstacle(&mut app), Obstacle::ContextInactive);
+        assert_eq!(obstacle(&mut app), ActionObstacle::ContextInactive);
     }
 
     // A world with no contexts declared is not an error, and asking is not a panic.

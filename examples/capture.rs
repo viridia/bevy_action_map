@@ -18,7 +18,7 @@
 //! - press `F1` — refused out loud, because it opens the settings screen and is *reserved*;
 //! - press a key that is already bound — captured, with the clash reported;
 //! - press a **gamepad** button on a keyboard row, or a key on a gamepad row — refused, because a
-//!   mapping is rebound within its own control scheme.
+//!   mapping is rebound within its own device family.
 //!
 //! Two lines print after every rebind, and both are the point. `capture_demo.wall_jump` rides
 //! Jump's row rather than having one of its own, so rebinding Jump moves it too — two actions
@@ -81,7 +81,7 @@ fn main() {
     app.add_context::<Playing>(|controls| {
         controls.bind::<Move>(DirectionalButtons::wasd()).mappable();
 
-        // Two mappable bindings of one action in one scheme are a default primary *and* secondary.
+        // Two mappable bindings of one action in one family are a default primary *and* secondary.
         // They derive the same mapping name on purpose: that is one row holding two controls,
         // not two rows both called Jump, and its capacity grows to fit them without being asked.
         controls.bind::<Jump>(KeyCode::Space).mappable();
@@ -104,7 +104,7 @@ fn main() {
         // The same two actions on the pad, mappable again. Both derive the same mapping name a
         // second time on purpose: `capture_demo.jump` means one thing on the keyboard and another
         // on the gamepad, the two are rebound independently (R19.7), and they are stored in
-        // separate tables. Only a repeat *within* one scheme is a collision.
+        // separate tables. Only a repeat *within* one family is a collision.
         controls.bind::<Move>(DirectionalButtons::dpad()).mappable();
         controls.bind::<Jump>(GamepadButton::South).mappable();
 
@@ -131,11 +131,11 @@ fn main() {
 /// so the walk stops at its empty second slot like any other.
 #[derive(Resource)]
 struct Walk {
-    remaining: Vec<(mapping::Mapping, usize)>,
+    remaining: Vec<(mapping::ActionMapping, usize)>,
     listening: Option<Entity>,
     /// The row the live session is asking about. A settings screen answers this from wherever it
     /// put the session — usually the cell the player activated — rather than keeping it here.
-    asking: Option<(mapping::Mapping, usize)>,
+    asking: Option<(mapping::ActionMapping, usize)>,
 }
 
 /// Everything the player has changed so far.
@@ -148,7 +148,7 @@ struct Chosen(Overrides);
 
 fn begin(world: &mut World) {
     println!("Walking every mappable slot this game declares.");
-    let mut remaining: Vec<(mapping::Mapping, usize)> = mapping::mappings(world)
+    let mut remaining: Vec<(mapping::ActionMapping, usize)> = mapping::mappings(world)
         .into_iter()
         .flat_map(|mapping| slots(&mapping).map(move |slot| (mapping.clone(), slot)))
         .collect();
@@ -168,9 +168,9 @@ fn begin(world: &mut World) {
 ///
 /// The same rule `CaptureSession::for_slot` enforces — it refuses anything else — so a screen that
 /// asks this first never offers a slot that would be turned down.
-fn slots(mapping: &mapping::Mapping) -> std::ops::Range<usize> {
+fn slots(mapping: &mapping::ActionMapping) -> std::ops::Range<usize> {
     let filled = mapping.slots.len();
-    0..if mapping.capacity.has_room_for(filled) {
+    0..if mapping.capacity.is_none_or(|limit| filled < limit) {
         filled + 1
     } else {
         filled
@@ -205,7 +205,7 @@ fn next(world: &mut World) {
     println!(
         "\n{} [{:?}] {} — the row holds {}. Press a control, or Escape to skip.",
         mapping.key.fallback_label(),
-        mapping.scheme,
+        mapping.family,
         column(slot, &mapping),
         bound(&mapping),
     );
@@ -222,12 +222,12 @@ fn next(world: &mut World) {
 
 /// The row `stale` has become, or `stale` itself if this build no longer declares it.
 ///
-/// Matched on scheme as well as name, because one name means one thing on the keyboard and another
+/// Matched on family as well as name, because one name means one thing on the keyboard and another
 /// on the pad — `capture_demo.jump` is two rows, rebound independently.
-fn current(world: &World, stale: &mapping::Mapping) -> mapping::Mapping {
+fn current(world: &World, stale: &mapping::ActionMapping) -> mapping::ActionMapping {
     mapping::mappings(world)
         .into_iter()
-        .find(|row| row.key == stale.key && row.scheme == stale.scheme)
+        .find(|row| row.key == stale.key && row.family == stale.family)
         .unwrap_or_else(|| stale.clone())
 }
 
@@ -235,7 +235,7 @@ fn current(world: &World, stale: &mapping::Mapping) -> mapping::Mapping {
 ///
 /// Joining is the app's business rather than the crate's: `fallback_label` answers for one control,
 /// and how a screen lays several of them out is a layout decision no crate should be making.
-fn bound(mapping: &mapping::Mapping) -> String {
+fn bound(mapping: &mapping::ActionMapping) -> String {
     if mapping.slots.is_empty() {
         return "nothing".into();
     }
@@ -248,8 +248,8 @@ fn bound(mapping: &mapping::Mapping) -> String {
 }
 
 /// Which column of the row this slot is, in the words a table would put at the top of it.
-fn column(slot: usize, mapping: &mapping::Mapping) -> String {
-    match (slot, mapping.capacity.slots()) {
+fn column(slot: usize, mapping: &mapping::ActionMapping) -> String {
+    match (slot, mapping.capacity) {
         (_, Some(1)) => "the only slot".into(),
         (0, _) => "primary".into(),
         (1, _) => "secondary".into(),
@@ -257,7 +257,7 @@ fn column(slot: usize, mapping: &mapping::Mapping) -> String {
     }
 }
 
-fn took(captured: On<Captured>, mut commands: Commands) {
+fn took(captured: On<ControlCaptured>, mut commands: Commands) {
     let control = captured.control;
     let mapping = captured.mapping;
     println!(
@@ -273,10 +273,10 @@ fn took(captured: On<Captured>, mut commands: Commands) {
         // is the caller's question anyway, since what to *do* about a clash is a policy.
         for clash in conflicts(world, control, mapping) {
             let certainty = match clash.overlap {
-                Overlap::SameContext => {
+                ConflictOverlap::SameContext => {
                     "in this same context, so they are certainly in each other's way"
                 }
-                Overlap::OtherContext => {
+                ConflictOverlap::OtherContext => {
                     "in another context, which may never be live at the same time"
                 }
             };
@@ -308,7 +308,7 @@ fn rebind(world: &mut World, control: Control) {
     }
 
     let mut chosen = world.remove_resource::<Chosen>().unwrap_or_default();
-    chosen.0.bind(row.scheme, row.key, controls);
+    chosen.0.bind(row.family, row.key, controls);
     let problems = apply_overrides(world, &chosen.0);
     world.insert_resource(chosen);
 
@@ -338,20 +338,18 @@ fn rebind(world: &mut World, control: Control) {
     // every player who never touched this row.
     let declared = mapping::declared_mappings(world)
         .into_iter()
-        .find(|shipped| shipped.key == row.key && shipped.scheme == row.scheme);
+        .find(|shipped| shipped.key == row.key && shipped.family == row.family);
     if let Some(declared) = declared {
         println!("    the game still ships {}", bound(&declared));
     }
 }
 
-fn would_not_take(refused: On<Refused>) {
+fn would_not_take(refused: On<CaptureRefused>) {
     let why = match refused.reason {
         RefusedReason::Reserved => {
             "reserved — it opens this screen, so nothing may be bound over it"
         }
-        RefusedReason::Scheme => {
-            "wrong device — a mapping is rebound within its own control scheme"
-        }
+        RefusedReason::Family => "wrong device — a mapping is rebound within its own device family",
         RefusedReason::Shape => "wrong kind of control for what this mapping drives",
     };
     println!("  x {} — {why}", refused.control.fallback_label());

@@ -35,16 +35,16 @@ use crate::action::{ActionValue, Scratch};
 /// Ordered, because several bindings can feed one action and the most definite of them decides: a
 /// binding that fired outranks one still building, which outranks one with nothing to say.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Verdict {
+pub enum ConditionState {
     /// Not satisfied, and nothing in progress.
     Idle,
     /// On the way — a hold that has not lasted long enough yet, a tap waiting for its second press.
     ///
     /// Reported so that an action can show a charge meter, and so that giving up part way through
-    /// is [`Canceled`](crate::action::Phase::Canceled) rather than silence.
-    Ongoing,
+    /// is [`Canceled`](crate::action::ActionPhase::Canceled) rather than silence.
+    Building,
     /// Satisfied. The binding fires.
-    Fired,
+    Satisfied,
 }
 
 /// How a condition takes part when a binding has several.
@@ -67,7 +67,7 @@ pub trait Condition: Send + Sync + 'static {
     ///
     /// `scratch` is this condition's own working memory and persists between ticks; `delta` is how
     /// long the owning context's tick was, in its own seconds.
-    fn evaluate(&self, value: ActionValue, scratch: &mut Scratch, delta: f32) -> Verdict;
+    fn evaluate(&self, value: ActionValue, scratch: &mut Scratch, delta: f32) -> ConditionState;
 
     /// How this condition combines with the others on its binding.
     fn kind(&self) -> ConditionKind {
@@ -208,7 +208,12 @@ const DONE: u8 = 1 << 1;
 
 impl BindingCondition {
     /// Decides what this condition makes of the binding's value this tick.
-    pub fn evaluate(&self, value: ActionValue, scratch: &mut Scratch, delta: f32) -> Verdict {
+    pub fn evaluate(
+        &self,
+        value: ActionValue,
+        scratch: &mut Scratch,
+        delta: f32,
+    ) -> ConditionState {
         let actuated = value.to_bool();
         // The whole value rather than whether it was off rest, so that a condition comparing one
         // tick against the last has something to compare. Everything below reads `was`, which is
@@ -218,48 +223,48 @@ impl BindingCondition {
         scratch.prev = value;
 
         match self {
-            Self::Press => verdict(actuated && !was),
-            Self::Release => verdict(!actuated && was),
-            Self::Down => verdict(actuated),
+            Self::Press => condition_state(actuated && !was),
+            Self::Release => condition_state(!actuated && was),
+            Self::Down => condition_state(actuated),
 
             Self::Hold { duration, one_shot } => {
                 if !actuated {
                     scratch.time = 0.0;
                     scratch.flags &= !DONE;
-                    return Verdict::Idle;
+                    return ConditionState::Idle;
                 }
                 scratch.time += delta;
                 if scratch.time < *duration {
-                    return Verdict::Ongoing;
+                    return ConditionState::Building;
                 }
                 if *one_shot {
                     if scratch.flags & DONE != 0 {
-                        return Verdict::Idle;
+                        return ConditionState::Idle;
                     }
                     scratch.flags |= DONE;
                 }
-                Verdict::Fired
+                ConditionState::Satisfied
             }
 
             Self::HoldAndRelease { duration } => {
                 if actuated {
                     scratch.time += delta;
-                    return Verdict::Ongoing;
+                    return ConditionState::Building;
                 }
                 // The release is the fire, so the timer has to be read before it is cleared.
                 let long_enough = was && scratch.time >= *duration;
                 scratch.time = 0.0;
-                verdict(long_enough)
+                condition_state(long_enough)
             }
 
             Self::Tap { max_duration } => {
                 if actuated {
                     scratch.time += delta;
-                    return Verdict::Ongoing;
+                    return ConditionState::Building;
                 }
                 let quick_enough = was && scratch.time <= *max_duration;
                 scratch.time = 0.0;
-                verdict(quick_enough)
+                condition_state(quick_enough)
             }
 
             Self::MultiTap { count, max_gap } => {
@@ -281,14 +286,14 @@ impl BindingCondition {
                     scratch.time = 0.0;
                     if scratch.count >= *count {
                         scratch.count = 0;
-                        return Verdict::Fired;
+                        return ConditionState::Satisfied;
                     }
                 }
 
                 if scratch.count > 0 || actuated {
-                    Verdict::Ongoing
+                    ConditionState::Building
                 } else {
-                    Verdict::Idle
+                    ConditionState::Idle
                 }
             }
 
@@ -299,20 +304,20 @@ impl BindingCondition {
                 if !actuated {
                     scratch.time = 0.0;
                     scratch.flags &= !DONE;
-                    return Verdict::Idle;
+                    return ConditionState::Idle;
                 }
                 if scratch.flags & DONE == 0 {
                     scratch.flags |= DONE;
                     if *immediate {
-                        return Verdict::Fired;
+                        return ConditionState::Satisfied;
                     }
                 }
                 scratch.time += delta;
                 if scratch.time >= *interval {
                     scratch.time -= *interval;
-                    return Verdict::Fired;
+                    return ConditionState::Satisfied;
                 }
-                Verdict::Ongoing
+                ConditionState::Building
             }
 
             Self::Change => {
@@ -320,15 +325,15 @@ impl BindingCondition {
                 // a fresh scratch holds `Bool(false)` and the first tick of a stick reports
                 // `Axis2(ZERO)`, and that is not the player doing anything.
                 if value != previous && (actuated || was) {
-                    Verdict::Fired
+                    ConditionState::Satisfied
                 } else if actuated {
-                    // Unchanged, but the control is still off rest. `Ongoing` rather than `Idle`
+                    // Unchanged, but the control is still off rest. `Building` rather than `Idle`
                     // because a consuming binding claims its controls for as long as it has
                     // something to say, and letting go of the claim between two crossings would
                     // hand the control back to whatever is underneath in the meantime.
-                    Verdict::Ongoing
+                    ConditionState::Building
                 } else {
-                    Verdict::Idle
+                    ConditionState::Idle
                 }
             }
 
@@ -348,8 +353,12 @@ impl BindingCondition {
     }
 }
 
-fn verdict(fired: bool) -> Verdict {
-    if fired { Verdict::Fired } else { Verdict::Idle }
+fn condition_state(satisfied: bool) -> ConditionState {
+    if satisfied {
+        ConditionState::Satisfied
+    } else {
+        ConditionState::Idle
+    }
 }
 
 /// Combines every condition on one binding into a single answer, following the rules described in
@@ -362,15 +371,15 @@ pub(crate) fn combine(
     value: ActionValue,
     scratch: &mut [Scratch],
     delta: f32,
-) -> Verdict {
+) -> ConditionState {
     if conditions.is_empty() {
-        return verdict(value.to_bool());
+        return condition_state(value.to_bool());
     }
 
     let mut explicit = 0usize;
-    let mut explicit_fired = false;
+    let mut explicit_satisfied = false;
     let mut implicit_all = true;
-    let mut ongoing = false;
+    let mut building = false;
     let mut blocked = false;
 
     for (condition, scratch) in conditions.iter().zip(scratch) {
@@ -379,34 +388,34 @@ pub(crate) fn combine(
             ConditionKind::Explicit => {
                 explicit += 1;
                 match outcome {
-                    Verdict::Fired => explicit_fired = true,
-                    Verdict::Ongoing => ongoing = true,
-                    Verdict::Idle => {}
+                    ConditionState::Satisfied => explicit_satisfied = true,
+                    ConditionState::Building => building = true,
+                    ConditionState::Idle => {}
                 }
             }
             ConditionKind::Implicit => {
-                if outcome != Verdict::Fired {
+                if outcome != ConditionState::Satisfied {
                     implicit_all = false;
                 }
-                if outcome == Verdict::Ongoing {
-                    ongoing = true;
+                if outcome == ConditionState::Building {
+                    building = true;
                 }
             }
             // A blocker's own progress is nobody's business; only whether it vetoes.
-            ConditionKind::Blocking => blocked |= outcome == Verdict::Fired,
+            ConditionKind::Blocking => blocked |= outcome == ConditionState::Satisfied,
         }
     }
 
     if blocked {
-        return Verdict::Idle;
+        return ConditionState::Idle;
     }
-    if implicit_all && (explicit == 0 || explicit_fired) {
-        return Verdict::Fired;
+    if implicit_all && (explicit == 0 || explicit_satisfied) {
+        return ConditionState::Satisfied;
     }
-    if ongoing {
-        return Verdict::Ongoing;
+    if building {
+        return ConditionState::Building;
     }
-    Verdict::Idle
+    ConditionState::Idle
 }
 
 #[cfg(test)]
@@ -419,7 +428,7 @@ mod tests {
 
     /// Drives one condition through a script of "is the control down this tick", and reports what
     /// it said each time. Every duration below is a multiple of `TICK`, so the arithmetic is exact.
-    fn run(condition: &BindingCondition, script: &[bool]) -> Vec<Verdict> {
+    fn run(condition: &BindingCondition, script: &[bool]) -> Vec<ConditionState> {
         let mut scratch = Scratch::default();
         script
             .iter()
@@ -429,24 +438,24 @@ mod tests {
 
     #[test]
     fn press_and_release_are_edges() {
-        use Verdict::{Fired, Idle};
+        use ConditionState::{Idle, Satisfied};
 
         assert_eq!(
             run(&BindingCondition::Press, &[false, true, true, false, true]),
-            [Idle, Fired, Idle, Idle, Fired]
+            [Idle, Satisfied, Idle, Idle, Satisfied]
         );
         assert_eq!(
             run(
                 &BindingCondition::Release,
                 &[false, true, true, false, false]
             ),
-            [Idle, Idle, Idle, Fired, Idle]
+            [Idle, Idle, Idle, Satisfied, Idle]
         );
     }
 
     #[test]
     fn a_hold_reports_progress_then_fires_and_keeps_firing() {
-        use Verdict::{Fired, Idle, Ongoing};
+        use ConditionState::{Building, Idle, Satisfied};
 
         let hold = BindingCondition::Hold {
             duration: 0.25,
@@ -455,13 +464,13 @@ mod tests {
         // Down for three ticks reaches 0.3, so the third crosses the line.
         assert_eq!(
             run(&hold, &[true, true, true, true, false]),
-            [Ongoing, Ongoing, Fired, Fired, Idle]
+            [Building, Building, Satisfied, Satisfied, Idle]
         );
     }
 
     #[test]
     fn a_one_shot_hold_fires_exactly_once_per_press() {
-        use Verdict::{Fired, Idle, Ongoing};
+        use ConditionState::{Building, Idle, Satisfied};
 
         let hold = BindingCondition::Hold {
             duration: 0.25,
@@ -469,7 +478,9 @@ mod tests {
         };
         assert_eq!(
             run(&hold, &[true, true, true, true, false, true, true, true]),
-            [Ongoing, Ongoing, Fired, Idle, Idle, Ongoing, Ongoing, Fired]
+            [
+                Building, Building, Satisfied, Idle, Idle, Building, Building, Satisfied
+            ]
         );
     }
 
@@ -477,37 +488,41 @@ mod tests {
     // from letting go late, and neither may look like nothing happened.
     #[test]
     fn hold_and_release_fires_only_when_the_hold_was_long_enough() {
-        use Verdict::{Fired, Idle, Ongoing};
+        use ConditionState::{Building, Idle, Satisfied};
 
         let condition = BindingCondition::HoldAndRelease { duration: 0.25 };
         assert_eq!(
             run(&condition, &[true, true, true, false]),
-            [Ongoing, Ongoing, Ongoing, Fired],
+            [Building, Building, Building, Satisfied],
             "held long enough, then released"
         );
         assert_eq!(
             run(&condition, &[true, false]),
-            [Ongoing, Idle],
+            [Building, Idle],
             "let go too early"
         );
     }
 
     #[test]
     fn a_tap_is_a_press_that_did_not_last() {
-        use Verdict::{Fired, Idle, Ongoing};
+        use ConditionState::{Building, Idle, Satisfied};
 
         let tap = BindingCondition::Tap { max_duration: 0.25 };
-        assert_eq!(run(&tap, &[true, false]), [Ongoing, Fired], "quick enough");
+        assert_eq!(
+            run(&tap, &[true, false]),
+            [Building, Satisfied],
+            "quick enough"
+        );
         assert_eq!(
             run(&tap, &[true, true, true, true, false]),
-            [Ongoing, Ongoing, Ongoing, Ongoing, Idle],
+            [Building, Building, Building, Building, Idle],
             "held far too long to be a tap"
         );
     }
 
     #[test]
     fn a_double_tap_needs_both_taps_inside_the_window() {
-        use Verdict::{Fired, Idle, Ongoing};
+        use ConditionState::{Building, Idle, Satisfied};
 
         let double = BindingCondition::MultiTap {
             count: 2,
@@ -515,15 +530,15 @@ mod tests {
         };
         assert_eq!(
             run(&double, &[true, false, true, false]),
-            [Ongoing, Ongoing, Ongoing, Fired]
+            [Building, Building, Building, Satisfied]
         );
 
         // The same two taps with a long enough wait between them never make a double-tap. The
-        // second one is not wasted — it begins a fresh sequence, which is why the tail is `Ongoing`
+        // second one is not wasted — it begins a fresh sequence, which is why the tail is `Building`
         // rather than `Idle`.
         let dawdled = run(&double, &[true, false, false, false, false, true, false]);
         assert!(
-            !dawdled.contains(&Fired),
+            !dawdled.contains(&Satisfied),
             "two taps a window apart fired anyway: {dawdled:?}"
         );
         assert_eq!(dawdled[4], Idle, "the first sequence lapsed");
@@ -531,7 +546,7 @@ mod tests {
 
     #[test]
     fn a_pulse_repeats_while_the_control_is_held() {
-        use Verdict::{Fired, Idle, Ongoing};
+        use ConditionState::{Building, Idle, Satisfied};
 
         let pulse = BindingCondition::Pulse {
             interval: 0.2,
@@ -539,17 +554,17 @@ mod tests {
         };
         assert_eq!(
             run(&pulse, &[true, true, true, true, true, false]),
-            [Fired, Ongoing, Fired, Ongoing, Fired, Idle]
+            [Satisfied, Building, Satisfied, Building, Satisfied, Idle]
         );
     }
 
     // The three-way split. Each kind is checked for the thing only it can do.
     #[test]
     fn the_three_kinds_compose_as_documented() {
-        struct Always(Verdict, ConditionKind);
+        struct Always(ConditionState, ConditionKind);
 
         impl Condition for Always {
-            fn evaluate(&self, _: ActionValue, _: &mut Scratch, _: f32) -> Verdict {
+            fn evaluate(&self, _: ActionValue, _: &mut Scratch, _: f32) -> ConditionState {
                 self.0
             }
             fn kind(&self) -> ConditionKind {
@@ -557,7 +572,7 @@ mod tests {
             }
         }
 
-        fn verdict_of(conditions: Vec<BindingCondition>) -> Verdict {
+        fn state_of(conditions: Vec<BindingCondition>) -> ConditionState {
             let mut scratch = alloc::vec![Scratch::default(); conditions.len()];
             combine(&conditions, ActionValue::Bool(true), &mut scratch, TICK)
         }
@@ -567,42 +582,42 @@ mod tests {
         let blocking = |v| BindingCondition::Custom(Arc::new(Always(v, ConditionKind::Blocking)));
 
         // No conditions at all: the control being off rest is the whole test.
-        assert_eq!(verdict_of(Vec::new()), Verdict::Fired);
+        assert_eq!(state_of(Vec::new()), ConditionState::Satisfied);
 
         // Explicit: any one is enough.
         assert_eq!(
-            verdict_of(alloc::vec![
-                explicit(Verdict::Idle),
-                explicit(Verdict::Fired)
+            state_of(alloc::vec![
+                explicit(ConditionState::Idle),
+                explicit(ConditionState::Satisfied)
             ]),
-            Verdict::Fired
+            ConditionState::Satisfied
         );
         // Implicit: all of them, or none of it.
         assert_eq!(
-            verdict_of(alloc::vec![
-                implicit(Verdict::Fired),
-                implicit(Verdict::Idle)
+            state_of(alloc::vec![
+                implicit(ConditionState::Satisfied),
+                implicit(ConditionState::Idle)
             ]),
-            Verdict::Idle
+            ConditionState::Idle
         );
         // Blocking: a veto beats everything the others agreed on.
         assert_eq!(
-            verdict_of(alloc::vec![
-                explicit(Verdict::Fired),
-                blocking(Verdict::Fired)
+            state_of(alloc::vec![
+                explicit(ConditionState::Satisfied),
+                blocking(ConditionState::Satisfied)
             ]),
-            Verdict::Idle
+            ConditionState::Idle
         );
         // And progress survives to be reported when nothing has fired yet.
         assert_eq!(
-            verdict_of(alloc::vec![explicit(Verdict::Ongoing)]),
-            Verdict::Ongoing
+            state_of(alloc::vec![explicit(ConditionState::Building)]),
+            ConditionState::Building
         );
     }
 
     // Drives one condition through a script of values, which is what `run` cannot do: a condition
     // that compares one tick against the last needs the value and not only whether it was down.
-    fn run_values(condition: &BindingCondition, script: &[ActionValue]) -> Vec<Verdict> {
+    fn run_values(condition: &BindingCondition, script: &[ActionValue]) -> Vec<ConditionState> {
         let mut scratch = Scratch::default();
         script
             .iter()
@@ -612,7 +627,7 @@ mod tests {
 
     #[test]
     fn a_change_is_a_new_value_rather_than_a_new_press() {
-        use Verdict::{Fired, Idle, Ongoing};
+        use ConditionState::{Building, Idle, Satisfied};
         use bevy_math::Vec2;
 
         let north = ActionValue::Axis2(Vec2::Y);
@@ -621,7 +636,7 @@ mod tests {
 
         assert_eq!(
             run_values(&BindingCondition::Change, &[rest, north, north, east, rest]),
-            [Idle, Fired, Ongoing, Fired, Fired],
+            [Idle, Satisfied, Building, Satisfied, Satisfied],
             "one fire per direction entered, and one more on the way back to rest"
         );
     }
@@ -638,11 +653,11 @@ mod tests {
                 &BindingCondition::Change,
                 &[ActionValue::Axis2(Vec2::ZERO), ActionValue::Axis1(0.0)]
             ),
-            [Verdict::Idle, Verdict::Idle]
+            [ConditionState::Idle, ConditionState::Idle]
         );
     }
 
-    // A held direction has to keep saying something, because consumption follows the verdict: a
+    // A held direction has to keep saying something, because consumption follows this state: a
     // menu that dropped to `Idle` between two crossings would hand the stick back to the game
     // underneath it for those ticks.
     #[test]
@@ -651,10 +666,10 @@ mod tests {
         assert_eq!(
             held,
             [
-                Verdict::Fired,
-                Verdict::Ongoing,
-                Verdict::Ongoing,
-                Verdict::Ongoing
+                ConditionState::Satisfied,
+                ConditionState::Building,
+                ConditionState::Building,
+                ConditionState::Building
             ]
         );
     }
@@ -663,7 +678,7 @@ mod tests {
     // crossing, and the pulse keeps firing while the direction is held.
     #[test]
     fn a_change_and_a_pulse_together_are_auto_repeat() {
-        use Verdict::{Fired, Ongoing};
+        use ConditionState::{Building, Satisfied};
 
         let conditions = alloc::vec![
             BindingCondition::Change,
@@ -675,12 +690,17 @@ mod tests {
         let mut scratch = alloc::vec![Scratch::default(); conditions.len()];
         let held = ActionValue::Axis1(1.0);
 
-        let verdicts: Vec<_> = (0..6)
+        let states: Vec<_> = (0..6)
             .map(|_| combine(&conditions, held, &mut scratch, TICK))
             .collect();
         // The change fires on the crossing; the pulse's clock starts on that same tick, so the
         // first repeat lands one interval after it and every one thereafter is evenly spaced.
-        assert_eq!(verdicts, [Fired, Ongoing, Fired, Ongoing, Ongoing, Fired]);
+        assert_eq!(
+            states,
+            [
+                Satisfied, Building, Satisfied, Building, Building, Satisfied
+            ]
+        );
     }
 
     // Hold and multi-tap, the two conditions that need a caption of their own, and a bare press,

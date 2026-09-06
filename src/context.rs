@@ -14,9 +14,9 @@
 //! run condition, or [`activate`](InputContextState::activate) and
 //! [`deactivate`](InputContextState::deactivate) to drive one instance yourself.
 //!
-//! Read the actions back with [`Actions`] where there is one instance of the context, and with
-//! [`ActionsQuery`] where there may be several — one per player, or none at all because whatever
-//! carried it was destroyed.
+//! Read the actions back with [`ContextActions`] where there is one instance of the context, and
+//! with [`ActionsQuery`] where there may be several — one per player, or none at all because
+//! whatever carried it was destroyed.
 
 #[cfg(feature = "keyboard")]
 use alloc::collections::BTreeSet;
@@ -35,11 +35,12 @@ use bevy_ecs::world::{DeferredWorld, World};
 use bevy_platform::sync::Arc;
 
 use crate::action::{
-    ActionId, ActionOutput, ActionState, InputAction, InputContext, Phase, Scratch, TickDomain,
+    ActionId, ActionOutput, ActionPhase, ActionState, InputAction, InputContext, Scratch,
+    TickDomain,
 };
 use crate::binding::InputContextBuilder;
 use crate::eval::{Transition, dispatch_class_fires, dispatch_transitions, evaluate_context};
-use crate::frame::{InputFrame, Timestamp};
+use crate::frame::{FrameTimestamp, InputFrame};
 use crate::inspect::OverrideStage;
 use crate::plan::Plan;
 use crate::{ActionMapPlugin, ActionMapSystems};
@@ -63,7 +64,7 @@ pub(crate) struct InputContextPlan<C> {
     // Cloned and rewritten per apply rather than mutated, for the reason above.
     bindings: alloc::vec::Vec<crate::binding::BindingSpec>,
     // The presentation view of the same bindings, empty unless some were declared mappable.
-    mappings: alloc::vec::Vec<crate::mapping::Mapping>,
+    mappings: alloc::vec::Vec<crate::mapping::ActionMapping>,
     // The tunables view of the same bindings, empty unless some were declared tunable.
     tunables: alloc::vec::Vec<crate::mapping::Tunable>,
     // Whether an instance is live the moment it is spawned. False for a context whose activation
@@ -80,7 +81,7 @@ pub(crate) struct InputContextPlan<C> {
 #[derive(Resource)]
 pub(crate) struct AppliedPlan<C> {
     pub(crate) plan: Arc<Plan<C>>,
-    pub(crate) mappings: alloc::vec::Vec<crate::mapping::Mapping>,
+    pub(crate) mappings: alloc::vec::Vec<crate::mapping::ActionMapping>,
     pub(crate) tunables: alloc::vec::Vec<crate::mapping::Tunable>,
 }
 
@@ -143,7 +144,7 @@ pub struct InputContextState<C> {
     pub(crate) class_fires: Vec<crate::eval::ClassFire>,
     // The last event this context has read. Seeded at spawn rather than left empty, so a context
     // added mid-session starts from the present instead of replaying whatever is still queued.
-    pub(crate) read_through: Option<Timestamp>,
+    pub(crate) read_through: Option<FrameTimestamp>,
     #[cfg(feature = "keyboard")]
     pub(crate) held_buttons: BTreeSet<bevy_input::keyboard::KeyCode>,
     // A `HashSet` rather than the `BTreeSet` the keys get, because `MouseButton` is `Hash` but not
@@ -158,7 +159,7 @@ pub struct InputContextState<C> {
 }
 
 impl<C: InputContext> InputContextState<C> {
-    pub(crate) fn new(plan: Arc<Plan<C>>, read_through: Option<Timestamp>) -> Self {
+    pub(crate) fn new(plan: Arc<Plan<C>>, read_through: Option<FrameTimestamp>) -> Self {
         let slots = plan.slot_count();
         let scratch_slots = plan.scratch_count();
         let tunable_scratch_slots = plan.tunable_scratch_count();
@@ -239,9 +240,9 @@ impl<C: InputContext> InputContextState<C> {
 
     /// Returns the current phase for an action.
     ///
-    /// An action this context does not bind is always [`Idle`](Phase::Idle), on the same terms as
-    /// [`value`](Self::value).
-    pub fn phase<A>(&self) -> Phase
+    /// An action this context does not bind is always [`Idle`](ActionPhase::Idle), on the same
+    /// terms as [`value`](Self::value).
+    pub fn phase<A>(&self) -> ActionPhase
     where
         A: InputAction,
     {
@@ -249,7 +250,7 @@ impl<C: InputContext> InputContextState<C> {
             Some(state) => state.phase,
             None => {
                 self.warn_unbound::<A>();
-                Phase::Idle
+                ActionPhase::Idle
             }
         }
     }
@@ -259,7 +260,7 @@ impl<C: InputContext> InputContextState<C> {
     where
         A: InputAction<Output = bool>,
     {
-        self.phase::<A>() == Phase::Fired
+        self.phase::<A>() == ActionPhase::Fired
     }
 
     /// Says once that an action was read here but never bound here.
@@ -295,7 +296,7 @@ impl<C: InputContext> InputContextState<C> {
         &self,
         consumed: &crate::eval::ConsumedControls,
         pairing: Option<&crate::player::Paired>,
-    ) -> Obstacle
+    ) -> ActionObstacle
     where
         A: InputAction,
     {
@@ -311,16 +312,18 @@ impl<C: InputContext> InputContextState<C> {
         action: ActionId,
         consumed: &crate::eval::ConsumedControls,
         pairing: Option<&crate::player::Paired>,
-    ) -> Obstacle {
+    ) -> ActionObstacle {
         let Some(slot) = self.plan.slot_for_action(action) else {
-            return Obstacle::Unbound;
+            return ActionObstacle::Unbound;
         };
         if !self.is_active() {
-            return Obstacle::ContextInactive;
+            return ActionObstacle::ContextInactive;
         }
         match self.actions[slot].phase {
-            Phase::Fired | Phase::Firing => return Obstacle::None,
-            Phase::Started | Phase::Building => return Obstacle::ConditionPending,
+            ActionPhase::Fired | ActionPhase::Firing => return ActionObstacle::None,
+            ActionPhase::Started | ActionPhase::Building => {
+                return ActionObstacle::ConditionPending;
+            }
             _ => {}
         }
         // A control someone else holds is the most useful answer available, so both of these
@@ -332,13 +335,13 @@ impl<C: InputContext> InputContextState<C> {
             let mut taken = None;
             let mut outranked = None;
             binding.source.for_each_control(|control| {
-                if pairing.is_some_and(|p| p.owner_for(control.scheme()).is_some()) {
+                if pairing.is_some_and(|p| p.owner_for(control.family()).is_some()) {
                     reachable = true;
                 }
                 if taken.is_none()
                     && let Some(by) = consumed.claimant(control)
                 {
-                    taken = Some(Obstacle::Consumed { control, by });
+                    taken = Some(ActionObstacle::Consumed { control, by });
                 }
                 if outranked.is_none()
                     && let Some(&(_, chord)) = self
@@ -346,7 +349,7 @@ impl<C: InputContext> InputContextState<C> {
                         .iter()
                         .find(|&&(seen, best)| seen == control && best > binding.chord_len)
                 {
-                    outranked = Some(Obstacle::Outranked { control, chord });
+                    outranked = Some(ActionObstacle::Outranked { control, chord });
                 }
             });
             if let Some(obstacle) = taken.or(outranked) {
@@ -357,12 +360,12 @@ impl<C: InputContext> InputContextState<C> {
         // only clear from an event on an owned device, so reporting it here would describe a wait
         // that never ends.
         if !reachable {
-            return Obstacle::Unowned;
+            return ActionObstacle::Unowned;
         }
         if self.require_reset[slot] {
-            return Obstacle::AwaitingRelease;
+            return ActionObstacle::AwaitingRelease;
         }
-        Obstacle::NoInput
+        ActionObstacle::NoInput
     }
 
     /// Walks every action this context binds, without naming any of them.
@@ -462,9 +465,9 @@ impl<C: InputContext> InputContextState<C> {
 
     /// Stops driving actions, canceling anything in flight.
     ///
-    /// Every action currently held is reported as [`Canceled`](Phase::Canceled) rather than left
-    /// where it was, so a hold interrupted by a menu opening resolves instead of staying held for
-    /// as long as the menu is up.
+    /// Every action currently held is reported as [`Canceled`](ActionPhase::Canceled) rather than
+    /// left where it was, so a hold interrupted by a menu opening resolves instead of staying held
+    /// for as long as the menu is up.
     pub fn deactivate(&mut self) {
         if !self.active {
             return;
@@ -508,16 +511,19 @@ impl<C: InputContext> InputContextState<C> {
         for (slot, state) in self.actions.iter_mut().enumerate() {
             if !matches!(
                 state.phase,
-                Phase::Started | Phase::Building | Phase::Fired | Phase::Firing
+                ActionPhase::Started
+                    | ActionPhase::Building
+                    | ActionPhase::Fired
+                    | ActionPhase::Firing
             ) {
                 continue;
             }
-            state.phase = Phase::Canceled;
+            state.phase = ActionPhase::Canceled;
             state.value = rest_like(state.value);
             self.dirty.set(slot, true);
             self.transitions.push(Transition {
                 slot,
-                phase: Phase::Canceled,
+                phase: ActionPhase::Canceled,
                 value: state.value,
             });
         }
@@ -576,7 +582,7 @@ pub struct ActionReading<'a> {
 /// reports is the *first* obstacle found, so clearing one may reveal another.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum Obstacle {
+pub enum ActionObstacle {
     /// Nothing is in the way: the action is firing.
     None,
     /// This action is not bound in this context.
@@ -635,7 +641,7 @@ pub enum Obstacle {
 ///
 /// [`Single`]: bevy_ecs::system::Single
 #[derive(SystemParam)]
-pub struct Actions<'w, 's, C: InputContext + Component> {
+pub struct ContextActions<'w, 's, C: InputContext + Component> {
     state: bevy_ecs::system::Single<
         'w,
         's,
@@ -648,7 +654,7 @@ pub struct Actions<'w, 's, C: InputContext + Component> {
     consumed: bevy_ecs::system::Res<'w, crate::eval::ConsumedControls>,
 }
 
-impl<C: InputContext + Component> Actions<'_, '_, C> {
+impl<C: InputContext + Component> ContextActions<'_, '_, C> {
     /// Returns the entity carrying this context.
     pub fn entity(&self) -> Entity {
         self.state.0
@@ -680,7 +686,7 @@ impl<C: InputContext + Component> Actions<'_, '_, C> {
     }
 
     /// Returns the current phase for an action.
-    pub fn phase<A>(&self) -> Phase
+    pub fn phase<A>(&self) -> ActionPhase
     where
         A: InputAction,
     {
@@ -698,7 +704,7 @@ impl<C: InputContext + Component> Actions<'_, '_, C> {
     /// Explains why an action is not firing.
     ///
     /// See [`InputContextState::why_not`].
-    pub fn why_not<A>(&self) -> Obstacle
+    pub fn why_not<A>(&self) -> ActionObstacle
     where
         A: InputAction,
     {
@@ -709,8 +715,8 @@ impl<C: InputContext + Component> Actions<'_, '_, C> {
 /// System parameter for polling every instance of a context.
 ///
 /// For a context that is per-player, or any other case where there is not exactly one: unlike
-/// [`Actions`], a system taking this runs whether or not any instance exists, and reads them by
-/// entity with [`get`](Self::get) or all at once with [`iter`](Self::iter).
+/// [`ContextActions`], a system taking this runs whether or not any instance exists, and reads
+/// them by entity with [`get`](Self::get) or all at once with [`iter`](Self::iter).
 ///
 /// ```ignore
 /// fn drive(all: ActionsQuery<Piloting>, ships: Query<&mut Transform>) {
@@ -756,18 +762,18 @@ impl<C: InputContext + Component> ActionsQuery<'_, '_, C> {
 
     /// Explains why an action is not firing on one instance.
     ///
-    /// Returns [`Obstacle::Unbound`] when the entity carries no such context, since from the call
-    /// site that is indistinguishable from an action nobody bound.
+    /// Returns [`ActionObstacle::Unbound`] when the entity carries no such context, since from
+    /// the call site that is indistinguishable from an action nobody bound.
     ///
     /// See [`InputContextState::why_not`].
-    pub fn why_not<A>(&self, entity: Entity) -> Obstacle
+    pub fn why_not<A>(&self, entity: Entity) -> ActionObstacle
     where
         A: InputAction,
     {
         self.states
             .get(entity)
             .ok()
-            .map_or(Obstacle::Unbound, |(_, state, pairing)| {
+            .map_or(ActionObstacle::Unbound, |(_, state, pairing)| {
                 state.why_not::<A>(&self.consumed, pairing)
             })
     }
@@ -1155,7 +1161,7 @@ fn declared_others(
 fn read_mappings<C: InputContext + Component>(
     world: &World,
     stage: OverrideStage,
-) -> alloc::vec::Vec<crate::mapping::Mapping> {
+) -> alloc::vec::Vec<crate::mapping::ActionMapping> {
     if stage == OverrideStage::Effective
         && let Some(applied) = world.get_resource::<AppliedPlan<C>>()
     {
@@ -1415,7 +1421,7 @@ fn report_diagnostics<C: InputContext + Component>(builder: &InputContextBuilder
 /// the same key twice. What makes it findable is the registry of what has already been declared.
 fn report_mapping_collisions<C: InputContext + Component>(
     app: &App,
-    mappings: &[crate::mapping::Mapping],
+    mappings: &[crate::mapping::ActionMapping],
 ) {
     let Some(declared) = app
         .world()
@@ -1426,7 +1432,7 @@ fn report_mapping_collisions<C: InputContext + Component>(
 
     for context in &declared.0 {
         for taken in (context.mappings)(app.world(), OverrideStage::Declared) {
-            // Per scheme, like the within-a-context check: one action mappable on both the keyboard
+            // Per family, like the within-a-context check: one action mappable on both the keyboard
             // and the pad is two rows in two tables, not a collision.
             //
             // Unlike the within-a-context check, the *action* is not consulted, and the asymmetry
@@ -1443,8 +1449,9 @@ fn report_mapping_collisions<C: InputContext + Component>(
             // game that offers no rebinding at all.
             if let Some(clash) = mappings.iter().find(|mapping| {
                 mapping.key == taken.key
-                    && mapping.scheme == taken.scheme
-                    && (mapping.rebinding.is_rebindable() || taken.rebinding.is_rebindable())
+                    && mapping.family == taken.family
+                    && (mapping.rebind_policy.is_rebindable()
+                        || taken.rebind_policy.is_rebindable())
             }) {
                 panic!(
                     "context `{}` declares a mapping named `{}`, which context `{}` already \
@@ -1496,7 +1503,7 @@ fn declare_context<C: InputContext + Component>(
     let tunables = builder.tunables(C::PATH);
 
     // Flat and global, unlike mappings: reserving withholds a control from every capture in its
-    // scheme, including captures for mappings declared in other contexts.
+    // family, including captures for mappings declared in other contexts.
     app.world_mut()
         .get_resource_or_insert_with(crate::capture::ReservedControls::default)
         .0
@@ -1633,10 +1640,10 @@ mod tests {
     #[derive(Resource, Default)]
     struct Probe {
         value: bool,
-        phase: Phase,
+        phase: ActionPhase,
     }
 
-    fn probe_jump(input: Actions<OnFoot>, mut probe: bevy_ecs::system::ResMut<'_, Probe>) {
+    fn probe_jump(input: ContextActions<OnFoot>, mut probe: bevy_ecs::system::ResMut<'_, Probe>) {
         probe.value = input.value::<Jump>();
         probe.phase = input.phase::<Jump>();
     }
@@ -1679,7 +1686,7 @@ mod tests {
 
         let probe = app.world().resource::<Probe>();
         assert!(probe.value);
-        assert_eq!(probe.phase, Phase::Fired);
+        assert_eq!(probe.phase, ActionPhase::Fired);
 
         app.world_mut()
             .write_message(press(KeyCode::Space, Key::Space, ButtonState::Released));
@@ -1688,10 +1695,10 @@ mod tests {
 
         let probe = app.world().resource::<Probe>();
         assert!(!probe.value);
-        assert_eq!(probe.phase, Phase::Completed);
+        assert_eq!(probe.phase, ActionPhase::Completed);
     }
 
-    /// The other half of the keyboard-and-mouse scheme, which until now the crate only claimed to
+    /// The other half of the keyboard-and-mouse family, which until now the crate only claimed to
     /// support: a mouse button drives an action exactly as a key does.
     #[cfg(feature = "mouse")]
     #[test]
@@ -1719,7 +1726,7 @@ mod tests {
 
         let probe = app.world().resource::<Probe>();
         assert!(probe.value);
-        assert_eq!(probe.phase, Phase::Fired);
+        assert_eq!(probe.phase, ActionPhase::Fired);
 
         app.world_mut().write_message(click(ButtonState::Released));
         app.update();
@@ -1727,7 +1734,7 @@ mod tests {
 
         let probe = app.world().resource::<Probe>();
         assert!(!probe.value);
-        assert_eq!(probe.phase, Phase::Completed);
+        assert_eq!(probe.phase, ActionPhase::Completed);
     }
 
     /// A mouse button is a button, so it serves as a part of a composite — which is what
@@ -1753,7 +1760,8 @@ mod tests {
         app.init_resource::<LeanProbe>();
         app.add_systems(
             Update,
-            |input: Actions<FreeLook>, mut probe: bevy_ecs::system::ResMut<'_, LeanProbe>| {
+            |input: ContextActions<FreeLook>,
+             mut probe: bevy_ecs::system::ResMut<'_, LeanProbe>| {
                 probe.0 = input.value::<Lean>();
             },
         );
@@ -1799,7 +1807,7 @@ mod tests {
     }
 
     fn probe_motion(
-        input: Actions<FreeLook>,
+        input: ContextActions<FreeLook>,
         mut probe: bevy_ecs::system::ResMut<'_, MotionProbe>,
     ) {
         probe.movement = input.value::<Move>();
@@ -1812,12 +1820,12 @@ mod tests {
         movement: Vec2,
         turn: f32,
         jump: bool,
-        jump_phase: Phase,
+        jump_phase: ActionPhase,
     }
 
     #[cfg(feature = "gamepad")]
     fn probe_gamepad(
-        input: Actions<OnFoot>,
+        input: ContextActions<OnFoot>,
         mut probe: bevy_ecs::system::ResMut<'_, GamepadProbe>,
     ) {
         probe.movement = input.value::<Move>();
@@ -1874,7 +1882,7 @@ mod tests {
     struct TriggerProbe {
         travel: f32,
         pressed: bool,
-        phase: Phase,
+        phase: ActionPhase,
     }
 
     /// One trigger, bound twice: once to an analog action and once to a button action. The two
@@ -1893,7 +1901,8 @@ mod tests {
         app.init_resource::<TriggerProbe>();
         app.add_systems(
             Update,
-            |input: Actions<FreeLook>, mut probe: bevy_ecs::system::ResMut<'_, TriggerProbe>| {
+            |input: ContextActions<FreeLook>,
+             mut probe: bevy_ecs::system::ResMut<'_, TriggerProbe>| {
                 probe.travel = input.value::<Thrust>();
                 probe.pressed = input.value::<Jump>();
                 probe.phase = input.phase::<Jump>();
@@ -1921,7 +1930,7 @@ mod tests {
         let probe = pull_to(&mut app, 0.8);
         assert_eq!(probe.travel, 0.8);
         assert!(probe.pressed);
-        assert_eq!(probe.phase, Phase::Fired);
+        assert_eq!(probe.phase, ActionPhase::Fired);
     }
 
     /// The edges of a press, delivered as events rather than polled. `Firing` is deliberately not
@@ -2268,13 +2277,13 @@ mod tests {
         // Held down before the context has any interest in it.
         key(&mut app, ButtonState::Pressed);
         tick(&mut app);
-        assert_eq!(app.world().resource::<Probe>().phase, Phase::Idle);
+        assert_eq!(app.world().resource::<Probe>().phase, ActionPhase::Idle);
 
         app.world_mut().insert_resource(AtTheControls);
         tick(&mut app);
         assert_eq!(
             app.world().resource::<Probe>().phase,
-            Phase::Idle,
+            ActionPhase::Idle,
             "the key was already down when the condition brought the context up"
         );
 
@@ -2284,7 +2293,7 @@ mod tests {
         tick(&mut app);
         assert_eq!(
             app.world().resource::<Probe>().phase,
-            Phase::Fired,
+            ActionPhase::Fired,
             "released and pressed again, so it counts"
         );
     }
@@ -2426,7 +2435,7 @@ mod tests {
 
         // Reading it is not fatal, and it reads as rest for its own shape.
         assert_eq!(state.value::<NeverBound>(), 0.0);
-        assert_eq!(state.phase::<NeverBound>(), Phase::Idle);
+        assert_eq!(state.phase::<NeverBound>(), ActionPhase::Idle);
 
         // And the difference is available to code that wants it.
         assert_eq!(state.try_value::<NeverBound>(), None);
@@ -2435,7 +2444,7 @@ mod tests {
         // The diagnostic still distinguishes the two, which is what it is for.
         assert_eq!(
             state.why_not::<NeverBound>(app.world().resource(), None),
-            Obstacle::Unbound
+            ActionObstacle::Unbound
         );
     }
 
@@ -2602,7 +2611,7 @@ mod tests {
         app.init_resource::<Seen>();
         app.add_systems(
             Update,
-            |under: Actions<Under>, mut seen: bevy_ecs::system::ResMut<'_, Seen>| {
+            |under: ContextActions<Under>, mut seen: bevy_ecs::system::ResMut<'_, Seen>| {
                 seen.under_saw_escape = under.value::<Jump>();
                 seen.under_saw_backspace = under.value::<Crouch>();
             },
@@ -2674,8 +2683,8 @@ mod tests {
         app.init_resource::<Seen>();
         app.add_systems(
             Update,
-            |menu: Actions<Menu>,
-             behind: Actions<Behind>,
+            |menu: ContextActions<Menu>,
+             behind: ContextActions<Behind>,
              mut seen: bevy_ecs::system::ResMut<'_, Seen>| {
                 seen.dismissed = menu.value::<Dismiss>();
                 seen.behind_saw_escape = behind.value::<Jump>();
@@ -2739,8 +2748,8 @@ mod tests {
         app.init_resource::<Seen>();
         app.add_systems(
             Update,
-            |first: Actions<First>,
-             second: Actions<Second>,
+            |first: ContextActions<First>,
+             second: ContextActions<Second>,
              mut seen: bevy_ecs::system::ResMut<'_, Seen>| {
                 seen.first = first.value::<FirstDismiss>();
                 seen.second = second.value::<SecondDismiss>();
@@ -2794,11 +2803,11 @@ mod tests {
 
         key(&mut app, ButtonState::Pressed);
         tick(&mut app);
-        assert_eq!(app.world().resource::<Probe>().phase, Phase::Fired);
+        assert_eq!(app.world().resource::<Probe>().phase, ActionPhase::Fired);
         tick(&mut app);
         assert_eq!(
             app.world().resource::<Probe>().phase,
-            Phase::Firing,
+            ActionPhase::Firing,
             "held, and nothing has shadowed it yet"
         );
 
@@ -2806,19 +2815,19 @@ mod tests {
         tick(&mut app);
         assert_eq!(
             app.world().resource::<Probe>().phase,
-            Phase::Canceled,
+            ActionPhase::Canceled,
             "the exclusive context shadows it exactly as deactivate would"
         );
 
         // Still held, and the exclusive context is still up — no fresh fire hides behind the cancel.
         tick(&mut app);
-        assert_ne!(app.world().resource::<Probe>().phase, Phase::Fired);
+        assert_ne!(app.world().resource::<Probe>().phase, ActionPhase::Fired);
 
         app.world_mut().despawn(menu);
         tick(&mut app);
         assert_ne!(
             app.world().resource::<Probe>().phase,
-            Phase::Fired,
+            ActionPhase::Fired,
             "the key never left the control, so require-reset (R7.5) holds it back"
         );
 
@@ -2828,7 +2837,7 @@ mod tests {
         tick(&mut app);
         assert_eq!(
             app.world().resource::<Probe>().phase,
-            Phase::Fired,
+            ActionPhase::Fired,
             "released and pressed again, now it fires"
         );
     }
@@ -2867,7 +2876,7 @@ mod tests {
         app.init_resource::<Seen>();
         app.add_systems(
             Update,
-            |system: Actions<System>, mut seen: bevy_ecs::system::ResMut<'_, Seen>| {
+            |system: ContextActions<System>, mut seen: bevy_ecs::system::ResMut<'_, Seen>| {
                 seen.0 = system.value::<Screenshot>();
             },
         );
@@ -3043,8 +3052,8 @@ mod tests {
         app.init_resource::<Seen>();
         app.add_systems(
             Update,
-            |screen: Actions<Screen>,
-             world: Actions<World>,
+            |screen: ContextActions<Screen>,
+             world: ContextActions<World>,
              mut seen: bevy_ecs::system::ResMut<'_, Seen>| {
                 seen.navigated = screen.value::<Navigate>();
                 seen.walked = world.value::<Walk>();
@@ -3090,7 +3099,11 @@ mod tests {
         struct Asker;
 
         #[derive(Resource, Default)]
-        struct Report(Option<Obstacle>, Option<Obstacle>, Option<Obstacle>);
+        struct Report(
+            Option<ActionObstacle>,
+            Option<ActionObstacle>,
+            Option<ActionObstacle>,
+        );
 
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
@@ -3106,7 +3119,7 @@ mod tests {
         app.init_resource::<Report>();
         app.add_systems(
             Update,
-            |asker: Actions<Asker>, mut report: bevy_ecs::system::ResMut<'_, Report>| {
+            |asker: ContextActions<Asker>, mut report: bevy_ecs::system::ResMut<'_, Report>| {
                 report.0 = Some(asker.why_not::<NeverBound>());
                 report.1 = Some(asker.why_not::<Jump>());
                 report.2 = Some(asker.why_not::<Charged>());
@@ -3118,10 +3131,10 @@ mod tests {
         let report = app.world().resource::<Report>();
         assert_eq!(
             report.0,
-            Some(Obstacle::Unbound),
+            Some(ActionObstacle::Unbound),
             "reading the wrong context"
         );
-        assert_eq!(report.1, Some(Obstacle::NoInput), "nobody touched it");
+        assert_eq!(report.1, Some(ActionObstacle::NoInput), "nobody touched it");
 
         // Escape taken by the higher-priority context; space held but nowhere near ten seconds.
         app.world_mut()
@@ -3133,13 +3146,17 @@ mod tests {
         let report = app.world().resource::<Report>();
         assert_eq!(
             report.1,
-            Some(Obstacle::Consumed {
+            Some(ActionObstacle::Consumed {
                 control: Control::Key(KeyCode::Escape),
                 by: "tests.taker",
             }),
             "and it says who took it"
         );
-        assert_eq!(report.2, Some(Obstacle::ConditionPending), "still charging");
+        assert_eq!(
+            report.2,
+            Some(ActionObstacle::ConditionPending),
+            "still charging"
+        );
     }
 
     /// The two obstacles that need a context to change state under them.
@@ -3166,14 +3183,14 @@ mod tests {
             state.deactivate();
             assert_eq!(
                 state.why_not::<Jump>(&nothing_taken, None),
-                Obstacle::ContextInactive
+                ActionObstacle::ContextInactive
             );
             // Coming back while the control is already held is the R7.5 case, and it has its own
             // answer rather than looking like nobody pressed anything.
             state.activate();
             assert_eq!(
                 state.why_not::<Jump>(&nothing_taken, None),
-                Obstacle::AwaitingRelease
+                ActionObstacle::AwaitingRelease
             );
         }
 
@@ -3220,7 +3237,7 @@ mod tests {
         app.init_resource::<Fired>();
         app.add_systems(
             Update,
-            |input: Actions<FreeLook>, mut fired: bevy_ecs::system::ResMut<'_, Fired>| {
+            |input: ContextActions<FreeLook>, mut fired: bevy_ecs::system::ResMut<'_, Fired>| {
                 *fired = Fired {
                     typed: input.value::<TypeS>(),
                     save: input.value::<Save>(),
@@ -3290,7 +3307,7 @@ mod tests {
         let consumed = crate::eval::ConsumedControls::default();
         assert_eq!(
             state.why_not::<TypeS>(&consumed, None),
-            Obstacle::Outranked {
+            ActionObstacle::Outranked {
                 control: crate::binding::Control::Key(KeyCode::KeyS),
                 chord: 3,
             }
@@ -3398,7 +3415,8 @@ mod tests {
         app.init_resource::<TurnProbe>();
         app.add_systems(
             Update,
-            |input: Actions<FreeLook>, mut probe: bevy_ecs::system::ResMut<'_, TurnProbe>| {
+            |input: ContextActions<FreeLook>,
+             mut probe: bevy_ecs::system::ResMut<'_, TurnProbe>| {
                 probe.0 = input.value::<TurnKeys>();
             },
         );
@@ -3435,7 +3453,8 @@ mod tests {
         app.init_resource::<TriggerProbe>();
         app.add_systems(
             Update,
-            |input: Actions<FreeLook>, mut probe: bevy_ecs::system::ResMut<'_, TriggerProbe>| {
+            |input: ContextActions<FreeLook>,
+             mut probe: bevy_ecs::system::ResMut<'_, TriggerProbe>| {
                 probe.pressed = input.value::<Jump>();
             },
         );
@@ -3472,7 +3491,8 @@ mod tests {
         app.init_resource::<TriggerProbe>();
         app.add_systems(
             Update,
-            |input: Actions<FreeLook>, mut probe: bevy_ecs::system::ResMut<'_, TriggerProbe>| {
+            |input: ContextActions<FreeLook>,
+             mut probe: bevy_ecs::system::ResMut<'_, TriggerProbe>| {
                 probe.pressed = input.value::<Jump>();
                 probe.phase = input.phase::<Jump>();
             },
@@ -3496,7 +3516,7 @@ mod tests {
         assert!(pull_to(&mut app, 0.9).pressed);
         // Backing off into the band holds the press rather than dropping it.
         assert!(pull_to(&mut app, midband).pressed);
-        assert_eq!(pull_to(&mut app, midband).phase, Phase::Firing);
+        assert_eq!(pull_to(&mut app, midband).phase, ActionPhase::Firing);
 
         // Only past the release threshold does it let go, and re-entering the band keeps it let go.
         assert!(!pull_to(&mut app, 0.1).pressed);
@@ -3525,7 +3545,8 @@ mod tests {
         app.init_resource::<MotionProbe>();
         app.add_systems(
             Update,
-            |input: Actions<FreeLook>, mut probe: bevy_ecs::system::ResMut<'_, MotionProbe>| {
+            |input: ContextActions<FreeLook>,
+             mut probe: bevy_ecs::system::ResMut<'_, MotionProbe>| {
                 probe.movement = input.value::<Move>();
             },
         );
@@ -3641,7 +3662,7 @@ mod tests {
     #[test]
     fn a_deadzone_turned_all_the_way_down_still_rests_on_calibration() {
         use crate::device::{AxisCalibration, GamepadCalibration};
-        use crate::mapping::{Scheme, TunableValue};
+        use crate::mapping::{DeviceFamily, TunableValue};
         use crate::overrides::{Overrides, apply_overrides};
 
         let pad = bevy_ecs::entity::Entity::PLACEHOLDER;
@@ -3681,7 +3702,7 @@ mod tests {
 
         let mut overrides = Overrides::default();
         overrides.tune(
-            Scheme::Gamepad,
+            DeviceFamily::Gamepad,
             "tests.turn.stick_deadzone",
             TunableValue::Range {
                 value: 0.0,
@@ -3708,7 +3729,7 @@ mod tests {
     #[cfg(feature = "gamepad")]
     #[test]
     fn an_analog_action_survives_an_axis_that_never_rests() {
-        use crate::mapping::{Scheme, TunableValue};
+        use crate::mapping::{DeviceFamily, TunableValue};
         use crate::overrides::{Overrides, apply_overrides};
 
         let pad = bevy_ecs::entity::Entity::PLACEHOLDER;
@@ -3740,7 +3761,7 @@ mod tests {
 
         let mut overrides = Overrides::default();
         overrides.tune(
-            Scheme::Gamepad,
+            DeviceFamily::Gamepad,
             "tests.turn.stick_deadzone",
             TunableValue::Range {
                 value: 0.0,
@@ -3863,7 +3884,7 @@ mod tests {
         assert_eq!(probe.movement, Vec2::new(0.0, 0.375));
         assert_eq!(probe.turn, -0.5);
         assert!(probe.jump);
-        assert_eq!(probe.jump_phase, Phase::Fired);
+        assert_eq!(probe.jump_phase, ActionPhase::Fired);
 
         app.update();
         run_fixed_tick(&mut app);
@@ -3872,7 +3893,7 @@ mod tests {
         assert_eq!(probe.movement, Vec2::new(0.0, 0.375));
         assert_eq!(probe.turn, -0.5);
         assert!(probe.jump);
-        assert_eq!(probe.jump_phase, Phase::Firing);
+        assert_eq!(probe.jump_phase, ActionPhase::Firing);
     }
 
     #[test]
@@ -3894,13 +3915,13 @@ mod tests {
         assert_eq!(app.world().resource::<InputFrame>().events().len(), 1);
         let probe = app.world().resource::<Probe>();
         assert!(!probe.value);
-        assert_eq!(probe.phase, Phase::Idle);
+        assert_eq!(probe.phase, ActionPhase::Idle);
 
         run_fixed_tick(&mut app);
 
         let probe = app.world().resource::<Probe>();
         assert!(probe.value);
-        assert_eq!(probe.phase, Phase::Fired);
+        assert_eq!(probe.phase, ActionPhase::Fired);
     }
 
     #[cfg(feature = "gamepad")]
@@ -3977,7 +3998,7 @@ mod tests {
                 .get::<InputContextState<OnFoot>>(kb_player)
                 .unwrap()
                 .phase::<Jump>(),
-            Phase::Fired,
+            ActionPhase::Fired,
             "the keyboard-paired instance saw its own device"
         );
         assert_eq!(
@@ -3985,7 +4006,7 @@ mod tests {
                 .get::<InputContextState<OnFoot>>(pad_player)
                 .unwrap()
                 .phase::<Jump>(),
-            Phase::Idle,
+            ActionPhase::Idle,
             "the gamepad-paired instance never sees the keyboard"
         );
 
@@ -4002,7 +4023,7 @@ mod tests {
                 .get::<InputContextState<OnFoot>>(pad_player)
                 .unwrap()
                 .phase::<Jump>(),
-            Phase::Fired,
+            ActionPhase::Fired,
             "the gamepad-paired instance saw its own device"
         );
     }
@@ -4046,7 +4067,7 @@ mod tests {
                 .get::<InputContextState<OnFoot>>(player_a)
                 .unwrap()
                 .phase::<Jump>(),
-            Phase::Fired,
+            ActionPhase::Fired,
             "the pad that pressed drives its own paired instance"
         );
         assert_eq!(
@@ -4054,7 +4075,7 @@ mod tests {
                 .get::<InputContextState<OnFoot>>(player_b)
                 .unwrap()
                 .phase::<Jump>(),
-            Phase::Idle,
+            ActionPhase::Idle,
             "a sibling pad's press must not reach an instance paired to a different pad"
         );
     }
@@ -4095,7 +4116,7 @@ mod tests {
         let consumed = ConsumedControls::default();
         assert_eq!(
             state.why_not::<Jump>(&consumed, pairing),
-            Obstacle::Unowned,
+            ActionObstacle::Unowned,
             "the keyboard press happened, it just was never this instance's to see"
         );
     }
@@ -4214,7 +4235,7 @@ mod tests {
                 .get::<InputContextState<OnFoot>>(first)
                 .unwrap()
                 .phase::<Jump>(),
-            Phase::Firing
+            ActionPhase::Firing
         );
         assert!(world.get::<InputContextState<OnFoot>>(second).is_none());
     }
@@ -4250,7 +4271,7 @@ mod tests {
     struct FireCount(u32);
 
     fn count_jump_fires(
-        input: Actions<OnFoot>,
+        input: ContextActions<OnFoot>,
         mut count: bevy_ecs::system::ResMut<'_, FireCount>,
     ) {
         if input.fired::<Jump>() {
@@ -4351,7 +4372,7 @@ mod tests {
                 .get::<InputContextState<OnFoot>>(late)
                 .unwrap()
                 .phase::<Jump>(),
-            Phase::Idle,
+            ActionPhase::Idle,
             "a context should not fire for input that happened before it existed"
         );
     }

@@ -102,9 +102,9 @@ assert_eq!(heard, ["fired", "completed"]);   // two observer calls, in order
 **How much this matters is a real question, not a rhetorical one.** At 60 Hz a lost tap is one under
 16 ms, which most games never notice and a rhythm or fighting game notices immediately. It matters
 more the further the read is from the render frame — see the next section. And it is only half
-recovered by polling even here: `Actions::fired::<A>()` returns one `Phase` per read, so a sub-tick
-tap polls as `Completed`. The two transitions are recoverable through the observer path
-(`On<Fired<A>>` / `On<Completed<A>>`) or the transition log, not through `fired()`.
+recovered by polling even here: `ContextActions::fired::<A>()` returns one `ActionPhase` per read,
+so a sub-tick tap polls as `Completed`. The two transitions are recoverable through the observer
+path (`On<Fired<A>>` / `On<Completed<A>>`) or the transition log, not through `fired()`.
 
 Reading edges is also what makes sections 6 (dead zones), 7 (device routing) and 10 (replay)
 possible in the shape they take here; it is one decision paying for three features, which is why it
@@ -205,9 +205,9 @@ when two contribute at once?
 The reason for the third of those is that shape does not distinguish a stick from a mouse — both are
 `Vec2` — but summing is right for one and wrong for the other. A mouse delta is a displacement that
 already happened, so two devices moving at once should both move you; two half-deflected sticks are
-not a full deflection. Intent also lets the crate *refuse* a binding whose source channel cannot
-serve the action (a stick bound to a `Delta2` look action), which is caught when the context is
-declared rather than felt as camera drift later.
+not a full deflection. `ActionIntent` also lets the crate *refuse* a binding whose source channel
+cannot serve the action (a stick bound to a `Delta2` look action), which is caught when the context
+is declared rather than felt as camera drift later.
 
 The honest cost: intent is a fourth thing to declare, and it makes one case harder rather than
 easier — a single action driven by *both* a mouse and a stick needs an explicit rate-to-delta
@@ -493,7 +493,7 @@ Concept-for-concept, BEI → this crate is close to mechanical:
 | `add_input_context_to::<FixedPreUpdate, C>()` | `#[context(tick = Fixed)]` |
 | `actions!` / `bindings!` at spawn time | `c.bind::<A>(source)` at app build |
 | `Fire<A>` / `Start<A>` / `Complete<A>` / `Cancel<A>` | `Fired<A>` / `Started<A>` / `Completed<A>` / `Canceled<A>` |
-| `Query<&Action<A>>`, `ActionEvents` | `Actions<C>` with `value::<A>()` / `fired::<A>()` |
+| `Query<&Action<A>>`, `ActionEvents` | `ContextActions<C>` with `value::<A>()` / `fired::<A>()` |
 | `ContextPriority<C>` component | `PRIORITY` const on the context type |
 | `ActionSettings { consume_input: true }` | `CONSUMES` on the action, or per binding |
 | `ContextActivity<C>`, `ActiveInStates` | `active_if` / `active_in_state`, or `activate()`/`deactivate()` |

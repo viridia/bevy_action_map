@@ -34,7 +34,7 @@ use bevy_action_map::preset::Preset;
 use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
 use crate::actions::{Back, Confirm, Menu, Navigate, TURN_DEAD_ZONE_KEY, ToggleSettings, Turn};
-use crate::common::prompt_ui::{PromptScheme, PromptSpan};
+use crate::common::prompt_ui::{PromptFamily, PromptSpan};
 use crate::common::widget_focus::{
     Adjusted, ButtonFocused, Stepper, decrement_pressed, increment_pressed,
 };
@@ -253,17 +253,21 @@ fn presets(world: &World) -> Vec<Preset> {
         },
         Preset::build(world, "disasteroids.southpaw", |southpaw| {
             southpaw.bind::<Turn>(
-                Scheme::Gamepad,
+                DeviceFamily::Gamepad,
                 [Control::GamepadAxis(GamepadAxis::RightStickX)],
             );
         }),
     ]
 }
 
-/// The row named `scheme` and `key`, if any mapping in the list is.
-fn row_named(rows: &[Mapping], scheme: Scheme, key: MappingKey) -> Option<&Mapping> {
+/// The row named `family` and `key`, if any mapping in the list is.
+fn row_named(
+    rows: &[ActionMapping],
+    family: DeviceFamily,
+    key: MappingKey,
+) -> Option<&ActionMapping> {
     rows.iter()
-        .find(|row| row.scheme == scheme && row.key == key)
+        .find(|row| row.family == family && row.key == key)
 }
 
 /// Which of `presets` currently matches what is bound, if any.
@@ -275,23 +279,23 @@ fn row_named(rows: &[Mapping], scheme: Scheme, key: MappingKey) -> Option<&Mappi
 /// pending row nobody has touched.
 fn selected_preset(
     presets: &[Preset],
-    declared: &[Mapping],
-    live: &[Mapping],
+    declared: &[ActionMapping],
+    live: &[ActionMapping],
     pending: &Overrides,
 ) -> Option<&'static str> {
-    let touched: Vec<(Scheme, MappingKey)> = presets
+    let touched: Vec<(DeviceFamily, MappingKey)> = presets
         .iter()
-        .flat_map(|preset| preset.rows.iter().map(|(scheme, key, _)| (scheme, key)))
+        .flat_map(|preset| preset.rows.iter().map(|(family, key, _)| (family, key)))
         .collect();
 
     presets
         .iter()
         .find(|preset| {
-            touched.iter().all(|&(scheme, key)| {
-                let Some(declared_row) = row_named(declared, scheme, key) else {
+            touched.iter().all(|&(family, key)| {
+                let Some(declared_row) = row_named(declared, family, key) else {
                     return false;
                 };
-                let Some(live_row) = row_named(live, scheme, key) else {
+                let Some(live_row) = row_named(live, family, key) else {
                     return false;
                 };
                 effective(declared_row, &preset.rows) == effective(live_row, pending)
@@ -313,16 +317,17 @@ fn screen(world: &World) -> impl Scene {
     // `Menu`'s own bindings — the stick, the D-pad and the arrow keys that move the selection on
     // this very screen — are machinery for operating the settings screen, not controls a player
     // thinks of as part of the game. `mappings` cannot tell the two apart on its own, so this is
-    // the one place the screen names a context: everything from here down still reads `Mapping`
-    // alone. `ButtonFocused` is excluded for the same reason — `common::widget_focus`'s bridge, not
-    // a control this screen's own player thinks of as bindable.
-    let all: Vec<Mapping> = mappings(world)
+    // the one place the screen names a context: everything from here down still reads
+    // `ActionMapping` alone. `ButtonFocused` is excluded for the same reason —
+    // `common::widget_focus`'s bridge, not a control this screen's own player thinks of as
+    // bindable.
+    let all: Vec<ActionMapping> = mappings(world)
         .into_iter()
         .filter(|mapping| mapping.context != Menu::PATH && mapping.context != ButtonFocused::PATH)
         .collect();
-    let rows = |scheme| -> Vec<Mapping> {
+    let rows = |family| -> Vec<ActionMapping> {
         all.iter()
-            .filter(|mapping| mapping.scheme == scheme)
+            .filter(|mapping| mapping.family == family)
             .cloned()
             .collect()
     };
@@ -370,11 +375,11 @@ fn screen(world: &World) -> impl Scene {
             (
                 Node { column_gap: Val::Px(48.0), align_items: AlignItems::Start }
                 Children [
-                    ({table("Keyboard & Mouse", rows(Scheme::KeyboardMouse))}),
+                    ({table("Keyboard & Mouse", rows(DeviceFamily::KeyboardMouse))}),
                     (
                         Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0) }
                         Children [
-                            ({table("Gamepad", rows(Scheme::Gamepad))}),
+                            ({table("Gamepad", rows(DeviceFamily::Gamepad))}),
                             ({preset_row(&presets, selected)}),
                             // Two rows' worth of control on one line, for now: the screen is
                             // already at the height budget the window allows, and neither reads
@@ -434,7 +439,7 @@ fn screen(world: &World) -> impl Scene {
 /// Discards the working copy and leaves. Where the selection starts, since it is the one action a
 /// player who opened this screen by accident is guaranteed to want.
 ///
-/// The caption carries its own shortcut — `PromptScheme(Gamepad)` because a keyboard player reads
+/// The caption carries its own shortcut — `PromptFamily(Gamepad)` because a keyboard player reads
 /// [`Back`]'s own binding (`Escape`) off the row it is bound on, and the pad has no such row here.
 fn cancel_button() -> impl Scene {
     bsn! {
@@ -454,7 +459,7 @@ fn cancel_button() -> impl Scene {
         Children [
             (
                 PromptSpan({Back::id()})
-                template_value(PromptScheme(Scheme::Gamepad))
+                template_value(PromptFamily(DeviceFamily::Gamepad))
                 TextFont { font_size: 15.0_f32 }
                 TextColor(TITLE)
             ),
@@ -481,7 +486,7 @@ fn confirm_button() -> impl Scene {
         Children [
             (
                 PromptSpan({Confirm::id()})
-                template_value(PromptScheme(Scheme::Gamepad))
+                template_value(PromptFamily(DeviceFamily::Gamepad))
                 TextFont { font_size: 15.0_f32 }
                 TextColor(TITLE)
             ),
@@ -646,7 +651,7 @@ fn apply_dead_zone_delta(adjusted: On<Adjusted>, mut commands: Commands) {
             return;
         };
         pending.rows.tune(
-            tunable.scheme,
+            tunable.family,
             tunable.key,
             TunableValue::Range {
                 value: (value + delta * DEAD_ZONE_STEP).clamp(min, max),
@@ -666,7 +671,7 @@ const HOLD_OR_TOGGLE_KEY: &str = "disasteroids.thrust.hold_or_toggle";
 /// [`effective`] already does for a mapping row's controls.
 fn effective_tunable(tunable: &Tunable, pending: &Overrides) -> TunableValue {
     pending
-        .get_tunable(tunable.scheme, tunable.key)
+        .get_tunable(tunable.family, tunable.key)
         .unwrap_or(tunable.value)
 }
 
@@ -729,7 +734,7 @@ fn hold_or_toggle_pressed(_: On<Activate>, mut commands: Commands) {
         };
         pending
             .rows
-            .tune(tunable.scheme, tunable.key, TunableValue::Bool(!active));
+            .tune(tunable.family, tunable.key, TunableValue::Bool(!active));
     });
 }
 
@@ -757,17 +762,17 @@ fn preset_pressed(activate: On<Activate>, buttons: Query<&PresetButton>, mut com
         let Some(preset) = presets.iter().find(|preset| preset.name == name) else {
             return;
         };
-        let touched: Vec<(Scheme, MappingKey)> = presets
+        let touched: Vec<(DeviceFamily, MappingKey)> = presets
             .iter()
-            .flat_map(|preset| preset.rows.iter().map(|(scheme, key, _)| (scheme, key)))
+            .flat_map(|preset| preset.rows.iter().map(|(family, key, _)| (family, key)))
             .collect();
 
         let mut pending = world.resource_mut::<PendingOverrides>();
-        for (scheme, key) in touched {
-            pending.rows.reset(scheme, key);
+        for (family, key) in touched {
+            pending.rows.reset(family, key);
         }
-        for (scheme, key, over) in preset.rows.iter() {
-            pending.rows.set(scheme, key, over.clone());
+        for (family, key, over) in preset.rows.iter() {
+            pending.rows.set(family, key, over.clone());
         }
         pending.preset_rows = preset.rows.clone();
     });
@@ -894,7 +899,7 @@ fn acquire_focus_directional(
 /// hold, and the widest row in the table decides how many cells every row draws. That is what makes
 /// the keyboard table three columns wide — name, primary, secondary — and the pad table two, with
 /// nothing here saying so.
-fn table(title: &'static str, mut rows: Vec<Mapping>) -> impl Scene {
+fn table(title: &'static str, mut rows: Vec<ActionMapping>) -> impl Scene {
     let columns = rows.iter().map(slots_in).max().unwrap_or(1);
     // Stable, so rows keep the order the game declared them in within each category.
     rows.sort_by_key(|mapping| (mapping.category.is_none(), mapping.category));
@@ -946,13 +951,13 @@ fn table(title: &'static str, mut rows: Vec<Mapping>) -> impl Scene {
 }
 
 /// How many controls a row can hold, which for a row nobody may change is however many it holds.
-fn slots_in(mapping: &Mapping) -> usize {
-    mapping.capacity.slots().unwrap_or(mapping.slots.len())
+fn slots_in(mapping: &ActionMapping) -> usize {
+    mapping.capacity.unwrap_or(mapping.slots.len())
 }
 
 /// One row: what it is called, then a cell per column.
-fn cells(mapping: &Mapping, columns: usize) -> Vec<Cell> {
-    let changeable = mapping.rebinding.is_rebindable();
+fn cells(mapping: &ActionMapping, columns: usize) -> Vec<Cell> {
+    let changeable = mapping.rebind_policy.is_rebindable();
     let color = if changeable { CHANGEABLE } else { FIXED };
     let mut cells = vec![Cell {
         text: label(mapping.key),
@@ -986,9 +991,9 @@ fn cells(mapping: &Mapping, columns: usize) -> Vec<Cell> {
             role: if !exists {
                 CellRole::Label
             } else if changeable {
-                CellRole::Changeable(mapping.scheme, mapping.key, column)
+                CellRole::Changeable(mapping.family, mapping.key, column)
             } else {
-                CellRole::Fixed(mapping.scheme, mapping.key, column)
+                CellRole::Fixed(mapping.family, mapping.key, column)
             },
         });
     }
@@ -998,7 +1003,7 @@ fn cells(mapping: &Mapping, columns: usize) -> Vec<Cell> {
 /// One follower's line: its own name, then the principal's controls with the follower's own
 /// condition formatted in — "Hold W" under "W", not the bare word "hold". A follower has no slots
 /// of its own to draw; a blank column here is the row above not having filled that slot either.
-fn follower_cells(mapping: &Mapping, follower: &Follower, columns: usize) -> Vec<Cell> {
+fn follower_cells(mapping: &ActionMapping, follower: &Follower, columns: usize) -> Vec<Cell> {
     let mut cells = vec![Cell {
         text: follower.fallback_label(),
         width: NAME_WIDTH,
@@ -1021,7 +1026,7 @@ fn follower_cells(mapping: &Mapping, follower: &Follower, columns: usize) -> Vec
             width: CONTROL_WIDTH,
             color: SUBORDINATE,
             border: Color::NONE,
-            role: CellRole::Follower(mapping.scheme, mapping.key, column, follower.condition),
+            role: CellRole::Follower(mapping.family, mapping.key, column, follower.condition),
         });
     }
     cells
@@ -1057,22 +1062,22 @@ struct Cell {
 ///
 /// `MappingKey` alone does not name a row — the same key is shared by a keyboard mapping and a
 /// gamepad one for the same action (it is derived from the action's path and part, and says nothing
-/// about the scheme), so every role that names a row carries its `Scheme` too.
+/// about the family), so every role that names a row carries its `DeviceFamily` too.
 #[derive(Clone, Copy)]
 enum CellRole {
     /// A heading, a row's name, or a follower's name — read, never pressed, and never moved by
     /// anything this screen does.
     Label,
     /// A control the player may press to capture a new one into this slot.
-    Changeable(Scheme, MappingKey, usize),
+    Changeable(DeviceFamily, MappingKey, usize),
     /// A control filled in but not player-capturable here — every gamepad row, since a preset
     /// rather than this screen's own capture is that table's whole remapping story. Still named,
     /// because a preset can still move it and [`redraw_pending`] has to find it again when one does.
-    Fixed(Scheme, MappingKey, usize),
+    Fixed(DeviceFamily, MappingKey, usize),
     /// A follower's line under one column of the row above it, carrying the condition its caption
     /// is formatted with — a capture on that column has to reformat this cell too, not just the
     /// principal one.
-    Follower(Scheme, MappingKey, usize, ConditionDescriptor),
+    Follower(DeviceFamily, MappingKey, usize, ConditionDescriptor),
 }
 
 /// `indent` is nonzero for exactly a follower's line — the mark of a row that is a fact about the
@@ -1109,8 +1114,8 @@ fn cell(cell: Cell) -> impl Scene {
     // two are plain data tags with no sensible `Default`, and `bsn!`'s own `Type(args)` syntax needs
     // one (it patches a template, which `template_value` sidesteps by handing over an already-built
     // value).
-    let rebind_tag = if let CellRole::Changeable(scheme, key, slot) = cell.role {
-        Some(template_value(RebindCell(scheme, key, slot)))
+    let rebind_tag = if let CellRole::Changeable(family, key, slot) = cell.role {
+        Some(template_value(RebindCell(family, key, slot)))
     } else {
         None
     };
@@ -1118,13 +1123,13 @@ fn cell(cell: Cell) -> impl Scene {
     // row's cells this way regardless of who is allowed to capture into them, since a preset moves
     // a `Fixed` row `RebindCell` was never attached to.
     let row_tag = match cell.role {
-        CellRole::Changeable(scheme, key, slot) | CellRole::Fixed(scheme, key, slot) => {
-            Some(template_value(RowCell(scheme, key, slot)))
+        CellRole::Changeable(family, key, slot) | CellRole::Fixed(family, key, slot) => {
+            Some(template_value(RowCell(family, key, slot)))
         }
         CellRole::Label | CellRole::Follower(..) => None,
     };
-    let follower_tag = if let CellRole::Follower(scheme, key, slot, condition) = cell.role {
-        Some(template_value(FollowerCell(scheme, key, slot, condition)))
+    let follower_tag = if let CellRole::Follower(family, key, slot, condition) = cell.role {
+        Some(template_value(FollowerCell(family, key, slot, condition)))
     } else {
         None
     };
@@ -1151,21 +1156,21 @@ fn cell(cell: Cell) -> impl Scene {
 /// Names the row and slot a boxed cell would capture for, so a press knows what to start and a
 /// result knows which row to write into.
 ///
-/// `Scheme` first because `MappingKey` alone does not name a row — see [`CellRole`].
+/// `DeviceFamily` first because `MappingKey` alone does not name a row — see [`CellRole`].
 #[derive(Component, Clone, Copy)]
-struct RebindCell(Scheme, MappingKey, usize);
+struct RebindCell(DeviceFamily, MappingKey, usize);
 
 /// Names the row and slot a principal cell displays, whether or not it is capturable — the identity
 /// [`redraw_pending`] finds any cell by. Separate from [`RebindCell`], which additionally marks "and
 /// this one is interactive": every `RebindCell` is also a `RowCell`, but a `Fixed` row's cell is a
 /// `RowCell` with no `RebindCell` beside it, since nothing on this screen may capture into one.
 #[derive(Component, Clone, Copy)]
-struct RowCell(Scheme, MappingKey, usize);
+struct RowCell(DeviceFamily, MappingKey, usize);
 
 /// Names the row, column and condition a follower's cell renders, so a capture on that column can
 /// reformat this cell's caption along with the principal's.
 #[derive(Component, Clone, Copy)]
-struct FollowerCell(Scheme, MappingKey, usize, ConditionDescriptor);
+struct FollowerCell(DeviceFamily, MappingKey, usize, ConditionDescriptor);
 
 /// Starts listening for the control that will fill this cell, and paints it [`LISTENING`] so the
 /// player can tell a capture started at all — the only signal on this screen that one has, since a
@@ -1176,14 +1181,14 @@ struct FollowerCell(Scheme, MappingKey, usize, ConditionDescriptor);
 /// works from inside a capture: without this, pressing B here would be captured as this row's new
 /// binding instead of reaching [`back`] and cancelling the capture.
 fn start_capture(activate: On<Activate>, cells: Query<&RebindCell>, mut commands: Commands) {
-    let Ok(&RebindCell(scheme, key, slot)) = cells.get(activate.entity) else {
+    let Ok(&RebindCell(family, key, slot)) = cells.get(activate.entity) else {
         return;
     };
     let entity = activate.entity;
     commands.queue(move |world: &mut World| {
         let Some(mapping) = mappings(world)
             .into_iter()
-            .find(|row| row.scheme == scheme && row.key == key)
+            .find(|row| row.family == family && row.key == key)
         else {
             return;
         };
@@ -1203,8 +1208,8 @@ fn start_capture(activate: On<Activate>, cells: Query<&RebindCell>, mut commands
 /// Writes what was captured into the working copy, stealing the control from whatever else already
 /// held it, patches every cell either row's change touched, and clears [`LISTENING`] off the cell
 /// that was — the crate has already removed `CaptureSession` itself by the time this runs.
-fn captured(captured: On<Captured>, cells: Query<&RebindCell>, mut commands: Commands) {
-    let Ok(&RebindCell(scheme, key, slot)) = cells.get(captured.entity) else {
+fn captured(captured: On<ControlCaptured>, cells: Query<&RebindCell>, mut commands: Commands) {
+    let Ok(&RebindCell(family, key, slot)) = cells.get(captured.entity) else {
         return;
     };
     let control = captured.control;
@@ -1213,15 +1218,15 @@ fn captured(captured: On<Captured>, cells: Query<&RebindCell>, mut commands: Com
         world
             .entity_mut(entity)
             .insert(BackgroundColor(Color::NONE));
-        resolve_capture(world, scheme, key, slot, control);
+        resolve_capture(world, family, key, slot, control);
     });
 }
 
 /// What a mapping currently holds, the working copy laid over its declared slots — [`Overrides`]'s
 /// own three-state rule, read the same way [`apply_overrides_with_preset`] and `conflicts_pending`
 /// both do.
-fn effective(mapping: &Mapping, pending: &Overrides) -> Vec<Control> {
-    match pending.get(mapping.scheme, mapping.key) {
+fn effective(mapping: &ActionMapping, pending: &Overrides) -> Vec<Control> {
+    match pending.get(mapping.family, mapping.key) {
         Some(Override::Controls(controls)) => controls.clone(),
         Some(Override::Cleared) => Vec::new(),
         Some(Override::NotOurs) | None => mapping.slots.clone(),
@@ -1234,14 +1239,14 @@ fn effective(mapping: &Mapping, pending: &Overrides) -> Vec<Control> {
 /// Writes into [`PendingOverrides`] and nothing else — no cell is touched from here; see
 /// [`redraw_pending`], which notices the change and repaints whatever it finds moved.
 ///
-/// Every row a steal can find is guaranteed to share `scheme` with the row captured into: `control`
-/// is itself scheme-specific (a key can never sit in a gamepad row's slots), so nothing outside this
-/// scheme can ever hold it. That is what makes looking `clash.mapping` back up against `scheme`
-/// rather than a bare key search safe, and it is also why `conflicts_pending` needs no scheme
-/// parameter of its own.
+/// Every row a steal can find is guaranteed to share `family` with the row captured into: `control`
+/// is itself family-specific (a key can never sit in a gamepad row's slots), so nothing outside
+/// this family can ever hold it. That is what makes looking `clash.mapping` back up against
+/// `family` rather than a bare key search safe, and it is also why `conflicts_pending` needs no
+/// family parameter of its own.
 fn resolve_capture(
     world: &mut World,
-    scheme: Scheme,
+    family: DeviceFamily,
     key: MappingKey,
     slot: usize,
     control: Control,
@@ -1249,7 +1254,7 @@ fn resolve_capture(
     let all = mappings(world);
     let Some(target) = all
         .iter()
-        .find(|row| row.scheme == scheme && row.key == key)
+        .find(|row| row.family == family && row.key == key)
         .cloned()
     else {
         return;
@@ -1259,13 +1264,13 @@ fn resolve_capture(
     for clash in conflicts_pending(&all, &pending.rows, control, Some(key)) {
         let Some(other) = all
             .iter()
-            .find(|row| row.scheme == scheme && row.key == clash.mapping)
+            .find(|row| row.family == family && row.key == clash.mapping)
         else {
             continue;
         };
         let mut controls = effective(other, &pending.rows);
         controls.retain(|&held| held != control);
-        pending.rows.bind(other.scheme, other.key, controls);
+        pending.rows.bind(other.family, other.key, controls);
     }
 
     let mut controls = effective(&target, &pending.rows);
@@ -1274,5 +1279,5 @@ fn resolve_capture(
     } else {
         controls.push(control);
     }
-    pending.rows.bind(target.scheme, target.key, controls);
+    pending.rows.bind(target.family, target.key, controls);
 }

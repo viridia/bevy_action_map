@@ -7,7 +7,7 @@
 //!
 //! A mapping holds an ordered list of **slots**, each holding one control, because a rebinding row
 //! usually has more than one — "Primary" and "Secondary" is the arrangement almost every game ships.
-//! Declaring one action mappable twice in one scheme is how you ship both defaults, and the mapping
+//! Declaring one action mappable twice in one family is how you ship both defaults, and the mapping
 //! grows to fit them.
 //!
 //! A mapping is not a binding. For anything composite the binding has no single control to show: a
@@ -53,7 +53,7 @@ use alloc::vec::Vec;
 use bevy_ecs::world::World;
 
 use crate::action::{ActionId, ChannelShape};
-use crate::binding::{Control, Part};
+use crate::binding::{BindingPart, Control};
 use crate::condition::ConditionDescriptor;
 use crate::inspect::OverrideStage;
 
@@ -61,9 +61,9 @@ use crate::inspect::OverrideStage;
 ///
 /// Keyboard bindings and gamepad bindings are alternatives rather than competitors: a player is
 /// using one or the other at any moment, so the two never conflict with each other and are remapped
-/// independently. A rebinding screen shows one scheme at a time for the same reason.
+/// independently. A rebinding screen shows one family at a time for the same reason.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Scheme {
+pub enum DeviceFamily {
     /// Keyboard and mouse.
     KeyboardMouse,
     /// A gamepad.
@@ -83,16 +83,16 @@ pub enum Scheme {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MappingKey {
     prefix: &'static str,
-    part: Part,
+    part: BindingPart,
 }
 
 impl MappingKey {
-    pub(crate) const fn new(prefix: &'static str, part: Part) -> Self {
+    pub(crate) const fn new(prefix: &'static str, part: BindingPart) -> Self {
         Self { prefix, part }
     }
 
     /// Which part of its binding this mapping addresses.
-    pub const fn part(self) -> Part {
+    pub const fn part(self) -> BindingPart {
         self.part
     }
 
@@ -110,9 +110,9 @@ impl MappingKey {
 
 /// Readable text for a localization key, for a game with no translation catalogue.
 ///
-/// A mapping's [`category`](Mapping::category) is a key on the same terms as its name, and a screen
-/// that groups rows under headings has to render it. `gameplay.flight` reads as "Flight". Use it as
-/// the fallback when a catalogue lookup misses, not in place of one.
+/// A mapping's [`category`](ActionMapping::category) is a key on the same terms as its name, and
+/// a screen that groups rows under headings has to render it. `gameplay.flight` reads as
+/// "Flight". Use it as the fallback when a catalogue lookup misses, not in place of one.
 pub fn fallback_label(key: &str) -> String {
     words_of(last_segment(key).split('_'))
 }
@@ -148,44 +148,6 @@ impl core::fmt::Display for MappingKey {
     }
 }
 
-/// How many slots a mapping has, and so how many controls a player may put in it.
-///
-/// A shipped game's rebinding screen is a table with a fixed shape, so the developer says how wide a
-/// row is and the screen draws a cell per slot. The common commercial arrangement is two —
-/// "primary" and "secondary" — and one is the default because that is what a binding declares
-/// without saying anything.
-///
-/// [`Any`](Capacity::Any) exists for the other kind of program: a tool whose command set is large
-/// and open, where the shortcuts cannot be laid out in advance and the screen grows an "add" button
-/// instead. Blender and VS Code work this way; games do not.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Capacity {
-    /// At most this many slots. Never zero.
-    UpTo(usize),
-    /// Any number of them, added and removed by the player.
-    Any,
-}
-
-impl Capacity {
-    /// Whether a mapping whose first `count` slots are filled has room for another.
-    pub const fn has_room_for(self, count: usize) -> bool {
-        match self {
-            Self::UpTo(limit) => count < limit,
-            Self::Any => true,
-        }
-    }
-
-    /// How many slots there are, or `None` if the mapping grows without limit.
-    ///
-    /// A fixed-width table draws one cell per slot, so this is its column count.
-    pub const fn slots(self) -> Option<usize> {
-        match self {
-            Self::UpTo(limit) => Some(limit),
-            Self::Any => None,
-        }
-    }
-}
-
 /// Whether the player may change what a mapping holds.
 ///
 /// Appearing on a controls screen and being changeable there are two different things, and a great
@@ -197,7 +159,7 @@ impl Capacity {
 /// boundary: a game that does not want a control changed simply does not offer it. It says nothing
 /// about whether the binding *works*.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Rebinding {
+pub enum RebindPolicy {
     /// The player may change it, in this game's own screen.
     ///
     /// What [`mappable`](crate::binding::BindingHandle::mappable) declares.
@@ -210,7 +172,7 @@ pub enum Rebinding {
     Fixed,
 }
 
-impl Rebinding {
+impl RebindPolicy {
     /// Whether a capture may fill this mapping's slots.
     pub const fn is_rebindable(self) -> bool {
         matches!(self, Self::Here)
@@ -222,7 +184,7 @@ impl Rebinding {
 /// Everything a screen needs to draw a row and file it under a heading, and nothing about how the
 /// binding it came from is put together.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Mapping {
+pub struct ActionMapping {
     /// What this mapping is called, as a key to look up.
     pub key: MappingKey,
     /// The action it drives.
@@ -231,27 +193,28 @@ pub struct Mapping {
     pub action_path: &'static str,
     /// What to file it under, if the action said.
     pub category: Option<&'static str>,
-    /// Which set of devices it belongs to. A screen shows one scheme at a time.
-    pub scheme: Scheme,
+    /// Which set of devices it belongs to. A screen shows one family at a time.
+    pub family: DeviceFamily,
     /// The kind of control it can hold, which is what a capture may accept for it.
     pub accepts: ChannelShape,
     /// The controls bound to it now, one per slot, in the order they were declared.
     ///
-    /// Usually one. Two mappable bindings of the same action in the same scheme are the ordinary
+    /// Usually one. Two mappable bindings of the same action in the same family are the ordinary
     /// way to ship a default primary *and* secondary, and they arrive here as one row with two
     /// slots filled rather than as two rows.
     pub slots: Vec<Control>,
-    /// How many slots this mapping has.
+    /// How many slots this mapping has, or `None` if it grows without limit.
     ///
-    /// Meaningful only where [`rebinding`](Self::rebinding) is
-    /// [`Here`](Rebinding::Here): a mapping the player cannot change has exactly the slots its
-    /// defaults fill, since nothing can ever add another.
-    pub capacity: Capacity,
+    /// A fixed-width table draws one cell per slot, so this is its column count. Meaningful only
+    /// where [`rebind_policy`](Self::rebind_policy) is [`Here`](RebindPolicy::Here): a mapping the
+    /// player cannot change has exactly the slots its defaults fill, since nothing can ever add
+    /// another.
+    pub capacity: Option<usize>,
     /// Whether the player may change what is in those slots.
     ///
-    /// A screen draws a row of buttons for [`Here`](Rebinding::Here) and a row of labels for
-    /// [`Fixed`](Rebinding::Fixed).
-    pub rebinding: Rebinding,
+    /// A screen draws a row of buttons for [`Here`](RebindPolicy::Here) and a row of labels for
+    /// [`Fixed`](RebindPolicy::Fixed).
+    pub rebind_policy: RebindPolicy,
     /// The path of the context the binding lives in.
     pub context: &'static str,
     /// Other actions riding this row's controls, declared with
@@ -274,7 +237,7 @@ pub struct Follower {
     /// The action riding this row.
     pub action: ActionId,
     /// That action's declared path, mirroring the `action`/`action_path` pair
-    /// [`Mapping`] itself carries. A localization key, so a catalogue answers it and
+    /// [`ActionMapping`] itself carries. A localization key, so a catalogue answers it and
     /// [`fallback_label`](Self::fallback_label) derives "Afterburner" for a game without one.
     pub action_path: &'static str,
     /// What distinguishes this action's firing from a bare press of the row's controls, most often
@@ -303,11 +266,11 @@ impl Follower {
 /// what a "reset to default" offers and what an override set is a diff against. With nothing
 /// overridden the two are the same list, which is why the difference is easy to miss.
 ///
-/// Sorting is the caller's: group by [`category`](Mapping::category) to draw headings, and filter by
-/// [`scheme`](Mapping::scheme) to show one device's worth at a time. Filter by
-/// [`context`](Mapping::context) for a screen that covers part of the game rather than all of it —
-/// a vehicle's controls on their own, or everything except a debug context.
-pub fn mappings(world: &World) -> Vec<Mapping> {
+/// Sorting is the caller's: group by [`category`](ActionMapping::category) to draw headings, and
+/// filter by [`family`](ActionMapping::family) to show one device's worth at a time. Filter by
+/// [`context`](ActionMapping::context) for a screen that covers part of the game rather than all
+/// of it — a vehicle's controls on their own, or everything except a debug context.
+pub fn mappings(world: &World) -> Vec<ActionMapping> {
     gather_mappings(world, OverrideStage::Effective)
 }
 
@@ -337,7 +300,8 @@ pub enum TunableValue {
 /// [`tunable_dead_zone`](crate::binding::BindingHandle::tunable_dead_zone) and
 /// [`hold_or_toggle`](crate::binding::InputContextBuilder::hold_or_toggle) are what declares one.
 /// [`key`](Self::key) is a localization key rather than text to show, the same courtesy
-/// [`Mapping::key`] gets — render it through [`fallback_label`] for a game with no catalogue.
+/// [`ActionMapping::key`] gets — render it through [`fallback_label`] for a game with no
+/// catalogue.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tunable {
     /// What this tunable is called, as a key to look up. Chosen by the game rather than derived —
@@ -350,7 +314,7 @@ pub struct Tunable {
     /// What to file it under, if the action said.
     pub category: Option<&'static str>,
     /// Which set of devices the binding it adjusts belongs to.
-    pub scheme: Scheme,
+    pub family: DeviceFamily,
     /// The path of the context the binding lives in.
     pub context: &'static str,
     /// The current value — the game's own default, or what a player has set it to.
@@ -378,7 +342,7 @@ pub fn declared_tunables(world: &World) -> Vec<Tunable> {
 /// [`mappings`] with anything the player changed left out — the same rows, in the same order, with
 /// the shipped controls in their slots. What "reset to default" would produce, and what a screen
 /// compares against to show which rows have been changed.
-pub fn declared_mappings(world: &World) -> Vec<Mapping> {
+pub fn declared_mappings(world: &World) -> Vec<ActionMapping> {
     gather_mappings(world, OverrideStage::Declared)
 }
 
@@ -387,7 +351,7 @@ pub fn declared_mappings(world: &World) -> Vec<Mapping> {
 /// Four names rather than one name and a flag, because two names read better at a call site than
 /// `mappings(world, OverrideStage::Declared)` does — but the four questions are two, and walking
 /// every declared context is the same walk regardless of which was asked.
-fn gather_mappings(world: &World, stage: OverrideStage) -> Vec<Mapping> {
+fn gather_mappings(world: &World, stage: OverrideStage) -> Vec<ActionMapping> {
     let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
         return Vec::new();
     };
@@ -474,11 +438,7 @@ mod tests {
         // shows. One apiece here: nothing declared a second mappable binding.
         assert_eq!(mappings[0].slots, [Control::Key(KeyCode::KeyW)]);
         assert_eq!(mappings[4].slots, [Control::Key(KeyCode::Space)]);
-        assert_eq!(
-            mappings[4].capacity,
-            Capacity::UpTo(1),
-            "one default, one slot"
-        );
+        assert_eq!(mappings[4].capacity, Some(1), "one default, one slot");
 
         // The category comes from the action, so the four movement rows file together.
         assert_eq!(mappings[0].category, Some("mapping_tests.movement"));
@@ -486,7 +446,7 @@ mod tests {
 
         // A part of a composite holds a button whatever the composite reports as a whole.
         assert_eq!(mappings[0].accepts, ChannelShape::Button);
-        assert_eq!(mappings[0].scheme, Scheme::KeyboardMouse);
+        assert_eq!(mappings[0].family, DeviceFamily::KeyboardMouse);
     }
 
     /// A tunable is enumerable the same way a mapping is, and starts at the value its own
@@ -504,7 +464,7 @@ mod tests {
         assert_eq!(tunables.len(), 1);
         assert_eq!(tunables[0].key, "mapping_tests.jump.hold_or_toggle");
         assert_eq!(tunables[0].action_path, "mapping_tests.jump");
-        assert_eq!(tunables[0].scheme, Scheme::KeyboardMouse);
+        assert_eq!(tunables[0].family, DeviceFamily::KeyboardMouse);
         assert_eq!(tunables[0].value, TunableValue::Bool(false));
     }
 
@@ -539,7 +499,7 @@ mod tests {
 
         let mut overrides = Overrides::new();
         overrides.tune(
-            Scheme::KeyboardMouse,
+            DeviceFamily::KeyboardMouse,
             "mapping_tests.jump.hold_or_toggle",
             TunableValue::Bool(true),
         );
@@ -572,8 +532,8 @@ mod tests {
         let mappings = mappings(app.world());
         assert_eq!(mappings.len(), 1);
         assert_eq!(mappings[0].slots, [Control::Key(KeyCode::Space)]);
-        assert_eq!(mappings[0].rebinding, Rebinding::Fixed);
-        assert!(!mappings[0].rebinding.is_rebindable());
+        assert_eq!(mappings[0].rebind_policy, RebindPolicy::Fixed);
+        assert!(!mappings[0].rebind_policy.is_rebindable());
     }
 
     /// `private` is the way out of the list, and the only way: a game with an internal binding it
@@ -631,15 +591,24 @@ mod tests {
     fn a_key_reads_sensibly_without_a_catalogue() {
         let label = |key: MappingKey| key.fallback_label();
 
-        assert_eq!(label(MappingKey::new("gameplay.jump", Part::Whole)), "Jump");
-        assert_eq!(label(MappingKey::new("gameplay.move", Part::Up)), "Move Up");
         assert_eq!(
-            label(MappingKey::new("disasteroids.toggle_overlay", Part::Whole)),
+            label(MappingKey::new("gameplay.jump", BindingPart::Whole)),
+            "Jump"
+        );
+        assert_eq!(
+            label(MappingKey::new("gameplay.move", BindingPart::Up)),
+            "Move Up"
+        );
+        assert_eq!(
+            label(MappingKey::new(
+                "disasteroids.toggle_overlay",
+                BindingPart::Whole
+            )),
             "Toggle Overlay",
             "the namespace is for keeping keys apart, not for reading"
         );
         assert_eq!(
-            label(MappingKey::new("gameplay.lean", Part::Negative)),
+            label(MappingKey::new("gameplay.lean", BindingPart::Negative)),
             "Lean Negative"
         );
     }
@@ -654,7 +623,7 @@ mod tests {
         assert_eq!(fallback_label(""), "");
     }
 
-    /// Two mappable bindings of one action in one scheme are a default primary and secondary, which
+    /// Two mappable bindings of one action in one family are a default primary and secondary, which
     /// is how a shipped game writes that — so they merge into one row holding two controls rather
     /// than becoming two rows both called Jump.
     #[test]
@@ -679,7 +648,7 @@ mod tests {
         );
         // Nobody said "2". A mapping is never narrower than the defaults it already holds, so
         // declaring two of them is enough on its own to make a two-slot row.
-        assert_eq!(mappings[0].capacity, Capacity::UpTo(2));
+        assert_eq!(mappings[0].capacity, Some(2));
     }
 
     /// The collision that survives the merge above: *different* actions answering to one name, where
@@ -720,19 +689,13 @@ mod tests {
 
         let mappings = mappings(app.world());
         assert_eq!(mappings[0].slots, [Control::Key(KeyCode::Space)]);
-        assert_eq!(
-            mappings[0].capacity,
-            Capacity::UpTo(2),
-            "one default, two slots"
-        );
-        assert_eq!(mappings[1].capacity, Capacity::Any);
+        assert_eq!(mappings[0].capacity, Some(2), "one default, two slots");
+        assert_eq!(mappings[1].capacity, None);
 
-        // What a table lays out, and what an "add" button asks before offering itself.
-        assert_eq!(mappings[0].capacity.slots(), Some(2));
-        assert_eq!(mappings[1].capacity.slots(), None);
-        assert!(mappings[0].capacity.has_room_for(1));
-        assert!(!mappings[0].capacity.has_room_for(2));
-        assert!(mappings[1].capacity.has_room_for(2));
+        // What an "add" button asks before offering itself.
+        assert!(mappings[0].capacity.is_none_or(|limit| 1 < limit));
+        assert!(mappings[0].capacity.is_some_and(|limit| 2 >= limit));
+        assert!(mappings[1].capacity.is_none_or(|limit| 2 < limit));
     }
 
     /// The widest declaration wins, and the defaults widen it further — because a narrower word
@@ -753,7 +716,7 @@ mod tests {
 
         let mappings = mappings(app.world());
         assert_eq!(mappings.len(), 1);
-        assert_eq!(mappings[0].capacity, Capacity::UpTo(3));
+        assert_eq!(mappings[0].capacity, Some(3));
     }
 
     /// A mapping with no room is a binding that is not mappable, which is what leaving `mappable`
@@ -772,12 +735,12 @@ mod tests {
         });
     }
 
-    /// The same name in two schemes is not a collision, and this is the ordinary way to write a
+    /// The same name in two families is not a collision, and this is the ordinary way to write a
     /// game that offers rebinding on both devices: one key and one button, both mappable, both
     /// called `jump`. They land in separate tables, so nothing can be confused for anything.
     #[cfg(feature = "gamepad")]
     #[test]
-    fn one_name_in_two_schemes_is_two_rows_rather_than_a_collision() {
+    fn one_name_in_two_families_is_two_rows_rather_than_a_collision() {
         use bevy_input::gamepad::GamepadButton;
 
         #[derive(InputContext)]
@@ -794,8 +757,8 @@ mod tests {
         let mappings = mappings(app.world());
         assert_eq!(mappings.len(), 2);
         assert_eq!(mappings[0].key, mappings[1].key, "one name…");
-        assert_eq!(mappings[0].scheme, Scheme::KeyboardMouse);
-        assert_eq!(mappings[1].scheme, Scheme::Gamepad, "…two schemes");
+        assert_eq!(mappings[0].family, DeviceFamily::KeyboardMouse);
+        assert_eq!(mappings[1].family, DeviceFamily::Gamepad, "…two families");
     }
 
     /// A name and a capacity are separate things to say, so saying both must work in either order
@@ -821,9 +784,9 @@ mod tests {
 
         let mappings = mappings(app.world());
         assert_eq!(mappings[0].key.to_string(), "mapping_tests.leap");
-        assert_eq!(mappings[0].capacity, Capacity::UpTo(2));
+        assert_eq!(mappings[0].capacity, Some(2));
         assert_eq!(mappings[1].key.to_string(), "mapping_tests.peek");
-        assert_eq!(mappings[1].capacity, Capacity::UpTo(3));
+        assert_eq!(mappings[1].capacity, Some(3));
     }
 
     /// And the same collision across two contexts, which no single plan can see.
@@ -906,7 +869,7 @@ mod tests {
         assert_eq!(mappings[0].slots, [Control::Key(KeyCode::Space)]);
         assert_eq!(
             mappings[0].capacity,
-            Capacity::UpTo(1),
+            Some(1),
             "a follower contributes no slots, so it cannot widen the row it rides"
         );
 
@@ -958,11 +921,11 @@ mod tests {
             controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));
         });
 
-        // Two rows, one per scheme, and neither of them is Lunge's.
+        // Two rows, one per family, and neither of them is Lunge's.
         let mappings = mappings(app.world());
         assert_eq!(mappings.len(), 2);
-        assert_eq!(mappings[0].scheme, Scheme::KeyboardMouse);
-        assert_eq!(mappings[1].scheme, Scheme::Gamepad);
+        assert_eq!(mappings[0].family, DeviceFamily::KeyboardMouse);
+        assert_eq!(mappings[1].family, DeviceFamily::Gamepad);
         assert!(
             mappings
                 .iter()
@@ -1012,7 +975,7 @@ mod tests {
 
         let mappings = mappings(app.world());
         assert_eq!(mappings.len(), 1);
-        assert_eq!(mappings[0].rebinding, Rebinding::Fixed);
+        assert_eq!(mappings[0].rebind_policy, RebindPolicy::Fixed);
     }
 
     /// `follow` runs against whatever the leader has declared *so far*, not its final shape — the

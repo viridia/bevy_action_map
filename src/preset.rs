@@ -2,7 +2,7 @@
 //!
 //! ```ignore
 //! let southpaw = Preset::build(world, "southpaw", |preset| {
-//!     preset.bind::<Turn>(Scheme::Gamepad, [Control::GamepadAxis(GamepadAxis::RightStickX)]);
+//!     preset.bind::<Turn>(DeviceFamily::Gamepad, [Control::GamepadAxis(GamepadAxis::RightStickX)]);
 //! });
 //!
 //! apply_overrides_with_preset(world, &southpaw.rows, &southpaw.rows);
@@ -22,7 +22,7 @@ use bevy_ecs::world::World;
 
 use crate::action::InputAction;
 use crate::binding::Control;
-use crate::mapping::{Scheme, mappings};
+use crate::mapping::{DeviceFamily, mappings};
 use crate::overrides::Overrides;
 
 /// A named set of mapping assignments a player selects as a unit.
@@ -32,7 +32,7 @@ use crate::overrides::Overrides;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preset {
     /// The preset's name, as a localization key, using the same convention as
-    /// [`Mapping::category`](crate::mapping::Mapping::category).
+    /// [`ActionMapping::category`](crate::mapping::ActionMapping::category).
     pub name: &'static str,
     /// What this preset assigns, as a diff against the game's declared bindings.
     pub rows: Overrides,
@@ -66,35 +66,35 @@ pub struct PresetBuilder<'w> {
 }
 
 impl PresetBuilder<'_> {
-    /// Puts `controls` in whatever mapping `A` has in `scheme`.
+    /// Puts `controls` in whatever mapping `A` has in `family`.
     ///
     /// # Panics
     ///
-    /// If `A` has no mapping in `scheme`, or more than one. A composite has one mapping per part
-    /// (`Move` has four), and naming the action and scheme alone cannot say which of them a
+    /// If `A` has no mapping in `family`, or more than one. A composite has one mapping per part
+    /// (`Move` has four), and naming the action and family alone cannot say which of them a
     /// preset means; bind a composite's part directly instead. This runs while building the app,
     /// not during play.
     pub fn bind<A: InputAction>(
         &mut self,
-        scheme: Scheme,
+        family: DeviceFamily,
         controls: impl IntoIterator<Item = Control>,
     ) -> &mut Self {
         let mut found = mappings(self.world)
             .into_iter()
-            .filter(|mapping| mapping.action == A::id() && mapping.scheme == scheme);
+            .filter(|mapping| mapping.action == A::id() && mapping.family == family);
         let Some(mapping) = found.next() else {
             panic!(
-                "preset names `{}` in {scheme:?}, but nothing binds it there",
+                "preset names `{}` in {family:?}, but nothing binds it there",
                 A::PATH
             );
         };
         assert!(
             found.next().is_none(),
-            "preset names `{}` in {scheme:?}, which has more than one mapping there — bind the \
+            "preset names `{}` in {family:?}, which has more than one mapping there — bind the \
              part a composite action's row belongs to instead",
             A::PATH
         );
-        self.rows.bind(scheme, mapping.key, controls);
+        self.rows.bind(family, mapping.key, controls);
         self
     }
 }

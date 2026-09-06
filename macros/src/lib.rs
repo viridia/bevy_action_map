@@ -88,7 +88,7 @@ fn expand_input_action(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
 
     Ok(quote! {
         const _: () = ::core::assert!(
-            ::bevy_action_map::action::Intent::#intent.is_one_of(
+            ::bevy_action_map::action::ActionIntent::#intent.is_one_of(
                 <#output as ::bevy_action_map::action::ActionOutput>::INTENTS
             ),
             #mismatch
@@ -96,7 +96,7 @@ fn expand_input_action(input: DeriveInput) -> Result<proc_macro2::TokenStream> {
 
         impl ::bevy_action_map::action::InputAction for #ident {
             type Output = #output;
-            const INTENT: ::bevy_action_map::action::Intent = ::bevy_action_map::action::Intent::#intent;
+            const INTENT: ::bevy_action_map::action::ActionIntent = ::bevy_action_map::action::ActionIntent::#intent;
             const PATH: &'static str = #path;
             const CATEGORY: ::core::option::Option<&'static str> = #category;
             const CONSUMES: bool = #consume;

@@ -6,7 +6,7 @@
 //!
 //! ```ignore
 //! let mut overrides = Overrides::new();
-//! overrides.bind(Scheme::KeyboardMouse, forward.key, [Control::Key(KeyCode::KeyE)]);
+//! overrides.bind(DeviceFamily::KeyboardMouse, forward.key, [Control::Key(KeyCode::KeyE)]);
 //!
 //! // Every context, every instance, effective immediately.
 //! let problems = apply_overrides(world, &overrides);
@@ -50,7 +50,7 @@ use bevy_reflect::{Reflect, ReflectDeserialize, ReflectSerialize};
 use crate::action::ChannelShape;
 use crate::binding::{BindingSpec, Control, MappedPart, apply_tunable_value, mapped_parts};
 use crate::capture::{ControlClass, RefusedReason, admissible};
-use crate::mapping::{Capacity, Mapping, MappingKey, Scheme, Tunable, TunableValue};
+use crate::mapping::{ActionMapping, DeviceFamily, MappingKey, Tunable, TunableValue};
 
 /// What a player did to one mapping.
 ///
@@ -79,18 +79,18 @@ pub enum Override {
 
 /// Everything a player has changed, as a diff against what the game declared.
 ///
-/// Rows are keyed by mapping and by scheme, because a mapping name is unique within a scheme and a
+/// Rows are keyed by mapping and by family, because a mapping name is unique within a family and a
 /// keyboard remap must not disturb the gamepad layout. Nothing here names a device: what a player
 /// bound is a control on a device *class*, and which physical unit drives which player is a separate
 /// question with a separate answer.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Overrides {
-    rows: BTreeMap<(Scheme, MappingKey), Override>,
+    rows: BTreeMap<(DeviceFamily, MappingKey), Override>,
     // Keyed by the tunable's own declared key, resolved to the `&'static str` a running game holds
     // rather than kept as the owned `String` a save file loads — the same reason `rows` is keyed by
     // `MappingKey` rather than by name. Unlike a mapping row, a tunable has no "cleared" state: there
     // is nothing between "this value" and "no row, use the default", so a bare value is enough.
-    tunables: BTreeMap<(Scheme, &'static str), TunableValue>,
+    tunables: BTreeMap<(DeviceFamily, &'static str), TunableValue>,
 }
 
 impl Overrides {
@@ -110,13 +110,13 @@ impl Overrides {
     /// since a row holding nothing and a row that is not there mean different things.
     pub fn bind(
         &mut self,
-        scheme: Scheme,
+        family: DeviceFamily,
         mapping: MappingKey,
         controls: impl IntoIterator<Item = Control>,
     ) {
         let controls: Vec<Control> = controls.into_iter().collect();
         self.set(
-            scheme,
+            family,
             mapping,
             if controls.is_empty() {
                 Override::Cleared
@@ -127,49 +127,51 @@ impl Overrides {
     }
 
     /// Sets a row directly, for the two states [`bind`](Self::bind) cannot express.
-    pub fn set(&mut self, scheme: Scheme, mapping: MappingKey, value: Override) {
-        self.rows.insert((scheme, mapping), value);
+    pub fn set(&mut self, family: DeviceFamily, mapping: MappingKey, value: Override) {
+        self.rows.insert((family, mapping), value);
     }
 
     /// What the player did to one mapping, or `None` where they left it alone.
-    pub fn get(&self, scheme: Scheme, mapping: MappingKey) -> Option<&Override> {
-        self.rows.get(&(scheme, mapping))
+    pub fn get(&self, family: DeviceFamily, mapping: MappingKey) -> Option<&Override> {
+        self.rows.get(&(family, mapping))
     }
 
     /// Every row, in a stable order.
-    pub fn iter(&self) -> impl Iterator<Item = (Scheme, MappingKey, &Override)> {
+    pub fn iter(&self) -> impl Iterator<Item = (DeviceFamily, MappingKey, &Override)> {
         self.rows
             .iter()
-            .map(|(&(scheme, key), value)| (scheme, key, value))
+            .map(|(&(family, key), value)| (family, key, value))
     }
 
     /// Sets a tunable to `value`.
-    pub fn tune(&mut self, scheme: Scheme, key: &'static str, value: TunableValue) {
-        self.tunables.insert((scheme, key), value);
+    pub fn tune(&mut self, family: DeviceFamily, key: &'static str, value: TunableValue) {
+        self.tunables.insert((family, key), value);
     }
 
     /// What the player set one tunable to, or `None` where they left it alone.
-    pub fn get_tunable(&self, scheme: Scheme, key: &'static str) -> Option<TunableValue> {
-        self.tunables.get(&(scheme, key)).copied()
+    pub fn get_tunable(&self, family: DeviceFamily, key: &'static str) -> Option<TunableValue> {
+        self.tunables.get(&(family, key)).copied()
     }
 
     /// Every tunable row, in a stable order.
-    pub fn iter_tunables(&self) -> impl Iterator<Item = (Scheme, &'static str, TunableValue)> {
+    pub fn iter_tunables(
+        &self,
+    ) -> impl Iterator<Item = (DeviceFamily, &'static str, TunableValue)> {
         self.tunables
             .iter()
-            .map(|(&(scheme, key), &value)| (scheme, key, value))
+            .map(|(&(family, key), &value)| (family, key, value))
     }
 
     /// Puts one tunable back to what the game declared.
-    pub fn reset_tunable(&mut self, scheme: Scheme, key: &'static str) {
-        self.tunables.remove(&(scheme, key));
+    pub fn reset_tunable(&mut self, family: DeviceFamily, key: &'static str) {
+        self.tunables.remove(&(family, key));
     }
 
     /// Puts one mapping back to what the game declared.
     ///
     /// Removing the row *is* the reset, which is the whole benefit of storing a diff.
-    pub fn reset(&mut self, scheme: Scheme, mapping: MappingKey) {
-        self.rows.remove(&(scheme, mapping));
+    pub fn reset(&mut self, family: DeviceFamily, mapping: MappingKey) {
+        self.rows.remove(&(family, mapping));
     }
 
     /// Puts every mapping of one action back to what the game declared.
@@ -177,15 +179,15 @@ impl Overrides {
     /// Takes the mapping list because a row is keyed by mapping alone, and which mappings belong to
     /// an action is a fact about the declaration rather than about the diff. An action bound to a
     /// composite has one row per direction, and this resets all of them.
-    pub fn reset_action(&mut self, mappings: &[Mapping], action: crate::action::ActionId) {
+    pub fn reset_action(&mut self, mappings: &[ActionMapping], action: crate::action::ActionId) {
         self.reset_matching(mappings, |mapping| mapping.action == action);
     }
 
     /// Puts every mapping declared in one context back to what the game declared.
     ///
     /// `context` is the path the context declared, which is what
-    /// [`Mapping::context`](crate::mapping::Mapping::context) carries.
-    pub fn reset_context(&mut self, mappings: &[Mapping], context: &str) {
+    /// [`ActionMapping::context`](crate::mapping::ActionMapping::context) carries.
+    pub fn reset_context(&mut self, mappings: &[ActionMapping], context: &str) {
         self.reset_matching(mappings, |mapping| mapping.context == context);
     }
 
@@ -195,9 +197,13 @@ impl Overrides {
         self.tunables.clear();
     }
 
-    fn reset_matching(&mut self, mappings: &[Mapping], keep: impl Fn(&Mapping) -> bool) {
+    fn reset_matching(
+        &mut self,
+        mappings: &[ActionMapping],
+        keep: impl Fn(&ActionMapping) -> bool,
+    ) {
         for mapping in mappings.iter().filter(|mapping| keep(mapping)) {
-            self.reset(mapping.scheme, mapping.key);
+            self.reset(mapping.family, mapping.key);
         }
     }
 }
@@ -208,8 +214,8 @@ impl Overrides {
 /// binding quietly vanished is owed better than silence.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OverrideProblem {
-    /// The scheme the row was filed under.
-    pub scheme: Scheme,
+    /// The family the row was filed under.
+    pub family: DeviceFamily,
     /// The mapping the row named.
     pub mapping: MappingKey,
     /// What was wrong with it.
@@ -223,16 +229,16 @@ pub struct OverrideProblem {
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum OverrideProblemKind {
-    /// No mapping of that name in that scheme is declared any more.
+    /// No mapping of that name in that family is declared any more.
     ///
     /// What a renamed or removed binding looks like from inside a file written by an older build.
     NoSuchMapping,
     /// The mapping exists and the player may not change it.
     NotRebindable,
-    /// A control belongs to the other control scheme.
+    /// A control belongs to the other device family.
     ///
-    /// A mapping is rebound within its own scheme, so a gamepad button cannot fill a keyboard row.
-    WrongScheme {
+    /// A mapping is rebound within its own family, so a gamepad button cannot fill a keyboard row.
+    WrongFamily {
         /// The control that does not belong.
         control: Control,
     },
@@ -251,7 +257,7 @@ pub enum OverrideProblemKind {
     /// More controls than the mapping has slots for.
     TooManyControls {
         /// How many the mapping holds.
-        capacity: Capacity,
+        capacity: Option<usize>,
         /// How many the row named.
         given: usize,
     },
@@ -266,7 +272,7 @@ pub enum OverrideProblemKind {
     /// A saved control name this build does not recognize.
     ///
     /// What a control renamed or removed since the file was written looks like. Distinct from
-    /// [`WrongScheme`](Self::WrongScheme) and [`WrongShape`](Self::WrongShape), which both name an
+    /// [`WrongFamily`](Self::WrongFamily) and [`WrongShape`](Self::WrongShape), which both name an
     /// actual [`Control`] — this one has none, because the text a loaded row held did not resolve
     /// to one at all.
     #[cfg(feature = "serialize")]
@@ -283,20 +289,21 @@ pub enum OverrideProblemKind {
 #[cfg(feature = "serialize")]
 const FORMAT_VERSION: u32 = 1;
 
-/// The name a saved file uses for a scheme, stable independent of [`Scheme`]'s own variant names.
+/// The name a saved file uses for a device family, stable independent of [`DeviceFamily`]'s own variant
+/// names.
 #[cfg(feature = "serialize")]
-const fn scheme_name(scheme: Scheme) -> &'static str {
-    match scheme {
-        Scheme::KeyboardMouse => "keyboard_mouse",
-        Scheme::Gamepad => "gamepad",
+const fn family_name(family: DeviceFamily) -> &'static str {
+    match family {
+        DeviceFamily::KeyboardMouse => "keyboard_mouse",
+        DeviceFamily::Gamepad => "gamepad",
     }
 }
 
 #[cfg(feature = "serialize")]
-fn scheme_from_name(name: &str) -> Option<Scheme> {
+fn family_from_name(name: &str) -> Option<DeviceFamily> {
     match name {
-        "keyboard_mouse" => Some(Scheme::KeyboardMouse),
-        "gamepad" => Some(Scheme::Gamepad),
+        "keyboard_mouse" => Some(DeviceFamily::KeyboardMouse),
+        "gamepad" => Some(DeviceFamily::Gamepad),
         _ => None,
     }
 }
@@ -446,9 +453,9 @@ impl<'de> serde::Deserialize<'de> for SavedTunableValue {
 pub struct SavedOverrides {
     /// This build's persistence-format version. See [`resolve_saved`].
     pub action_map_version: u32,
-    /// One table per scheme, each a map from a mapping's declared path to its saved row.
+    /// One table per family, each a map from a mapping's declared path to its saved row.
     pub bindings: BTreeMap<String, BTreeMap<String, SavedRow>>,
-    /// One table per scheme, each a map from a tunable's declared key to its saved value.
+    /// One table per family, each a map from a tunable's declared key to its saved value.
     pub tunables: BTreeMap<String, BTreeMap<String, SavedTunableValue>>,
 }
 
@@ -457,7 +464,7 @@ pub struct SavedOverrides {
 #[cfg(feature = "serialize")]
 pub fn save_overrides(overrides: &Overrides) -> SavedOverrides {
     let mut bindings: BTreeMap<String, BTreeMap<String, SavedRow>> = BTreeMap::new();
-    for (scheme, key, value) in overrides.iter() {
+    for (family, key, value) in overrides.iter() {
         let row = match value {
             Override::Controls(controls) => SavedRow::Controls(
                 controls
@@ -469,19 +476,19 @@ pub fn save_overrides(overrides: &Overrides) -> SavedOverrides {
             Override::NotOurs => SavedRow::NotOurs,
         };
         bindings
-            .entry(scheme_name(scheme).to_string())
+            .entry(family_name(family).to_string())
             .or_default()
             .insert(key.to_string(), row);
     }
 
     let mut tunables: BTreeMap<String, BTreeMap<String, SavedTunableValue>> = BTreeMap::new();
-    for (scheme, key, value) in overrides.iter_tunables() {
+    for (family, key, value) in overrides.iter_tunables() {
         let saved = match value {
             TunableValue::Range { value, .. } => SavedTunableValue::Number(value),
             TunableValue::Bool(value) => SavedTunableValue::Bool(value),
         };
         tunables
-            .entry(scheme_name(scheme).to_string())
+            .entry(family_name(family).to_string())
             .or_default()
             .insert(key.to_string(), saved);
     }
@@ -516,8 +523,8 @@ pub enum UnresolvedKind {
 #[cfg(feature = "serialize")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Unresolved {
-    /// The scheme table the row was filed under.
-    pub scheme: Scheme,
+    /// The family table the row was filed under.
+    pub family: DeviceFamily,
     /// The name exactly as the file spelled it.
     pub name: String,
     /// Which table it came from.
@@ -564,7 +571,7 @@ pub type ResolvedOverrides = (Overrides, Vec<OverrideProblem>, Vec<Unresolved>);
 #[cfg(feature = "serialize")]
 pub fn resolve_saved(
     data: &SavedOverrides,
-    declared: &[Mapping],
+    declared: &[ActionMapping],
     declared_tunables: &[Tunable],
 ) -> Result<ResolvedOverrides, UnsupportedVersion> {
     if data.action_map_version != FORMAT_VERSION {
@@ -584,19 +591,19 @@ pub fn resolve_saved(
     let mut problems = Vec::new();
     let mut unresolved = Vec::new();
 
-    for (scheme_text, rows) in bindings {
-        // Not one of ours — a foreign or future scheme name. Nothing typed to report this
+    for (family_text, rows) in bindings {
+        // Not one of ours — a foreign or future family name. Nothing typed to report this
         // against, so R17.2's tolerance is all this can be: skip the table, keep the rest.
-        let Some(scheme) = scheme_from_name(&scheme_text) else {
+        let Some(family) = family_from_name(&family_text) else {
             continue;
         };
         for (name, row) in rows {
             let Some(mapping) = declared
                 .iter()
-                .find(|candidate| candidate.scheme == scheme && candidate.key.to_string() == name)
+                .find(|candidate| candidate.family == family && candidate.key.to_string() == name)
             else {
                 unresolved.push(Unresolved {
-                    scheme,
+                    family,
                     name,
                     kind: UnresolvedKind::Mapping,
                 });
@@ -605,11 +612,11 @@ pub fn resolve_saved(
 
             let names = match row {
                 SavedRow::Cleared => {
-                    overrides.set(scheme, mapping.key, Override::Cleared);
+                    overrides.set(family, mapping.key, Override::Cleared);
                     continue;
                 }
                 SavedRow::NotOurs => {
-                    overrides.set(scheme, mapping.key, Override::NotOurs);
+                    overrides.set(family, mapping.key, Override::NotOurs);
                     continue;
                 }
                 SavedRow::Controls(names) => names,
@@ -623,7 +630,7 @@ pub fn resolve_saved(
                     None => {
                         all_known = false;
                         problems.push(OverrideProblem {
-                            scheme,
+                            family,
                             mapping: mapping.key,
                             kind: OverrideProblemKind::UnknownControl { name: name.clone() },
                         });
@@ -633,22 +640,22 @@ pub fn resolve_saved(
             if all_known {
                 // An empty list and `Cleared` mean the same thing (§10.1); `bind` already folds one
                 // into the other, so a hand-edited `[]` reads exactly like the dedicated word does.
-                overrides.bind(scheme, mapping.key, controls);
+                overrides.bind(family, mapping.key, controls);
             }
         }
     }
 
-    for (scheme_text, rows) in tunables {
-        let Some(scheme) = scheme_from_name(&scheme_text) else {
+    for (family_text, rows) in tunables {
+        let Some(family) = family_from_name(&family_text) else {
             continue;
         };
         for (name, saved_value) in rows {
             let Some(tunable) = declared_tunables
                 .iter()
-                .find(|candidate| candidate.scheme == scheme && candidate.key == name)
+                .find(|candidate| candidate.family == family && candidate.key == name)
             else {
                 unresolved.push(Unresolved {
-                    scheme,
+                    family,
                     name,
                     kind: UnresolvedKind::Tunable,
                 });
@@ -671,14 +678,14 @@ pub fn resolve_saved(
                 // name that resolves to nothing, since either way there is nothing usable here.
                 _ => {
                     unresolved.push(Unresolved {
-                        scheme,
+                        family,
                         name,
                         kind: UnresolvedKind::Tunable,
                     });
                     continue;
                 }
             };
-            overrides.tune(scheme, tunable.key, value);
+            overrides.tune(family, tunable.key, value);
         }
     }
 
@@ -775,13 +782,13 @@ fn apply_for_entity_with(
     problems.extend(
         overrides
             .iter()
-            .filter(|&(scheme, key, _)| {
+            .filter(|&(family, key, _)| {
                 !declared
                     .iter()
-                    .any(|row| row.key == key && row.scheme == scheme)
+                    .any(|row| row.key == key && row.family == family)
             })
-            .map(|(scheme, mapping, _)| OverrideProblem {
-                scheme,
+            .map(|(family, mapping, _)| OverrideProblem {
+                family,
                 mapping,
                 kind: OverrideProblemKind::NoSuchMapping,
             }),
@@ -815,13 +822,13 @@ fn apply_with(
     problems.extend(
         overrides
             .iter()
-            .filter(|&(scheme, key, _)| {
+            .filter(|&(family, key, _)| {
                 !declared
                     .iter()
-                    .any(|row| row.key == key && row.scheme == scheme)
+                    .any(|row| row.key == key && row.family == family)
             })
-            .map(|(scheme, mapping, _)| OverrideProblem {
-                scheme,
+            .map(|(family, mapping, _)| OverrideProblem {
+                family,
                 mapping,
                 kind: OverrideProblemKind::NoSuchMapping,
             }),
@@ -838,7 +845,7 @@ fn apply_with(
 /// Separate from the ECS work so that it can be reasoned about and tested without a `World`.
 pub(crate) fn rewrite(
     declared: &[BindingSpec],
-    rows: &[Mapping],
+    rows: &[ActionMapping],
     tunables: &[Tunable],
     overrides: &Overrides,
     preset: Option<&Overrides>,
@@ -846,7 +853,7 @@ pub(crate) fn rewrite(
     context: &'static str,
 ) -> (
     Vec<BindingSpec>,
-    Vec<Mapping>,
+    Vec<ActionMapping>,
     Vec<Tunable>,
     Vec<OverrideProblem>,
 ) {
@@ -864,7 +871,7 @@ pub(crate) fn rewrite(
         .collect();
 
     for row in rows {
-        let Some(over) = overrides.get(row.scheme, row.key) else {
+        let Some(over) = overrides.get(row.family, row.key) else {
             continue;
         };
         let wanted: &[Control] = match over {
@@ -879,13 +886,13 @@ pub(crate) fn rewrite(
             .iter()
             .filter(|part| {
                 part.key == row.key
-                    && part.scheme == row.scheme
+                    && part.family == row.family
                     && declared[part.binding].action == row.action
             })
             .collect();
 
         let preset_authorized =
-            preset.is_some_and(|preset| preset.get(row.scheme, row.key).is_some());
+            preset.is_some_and(|preset| preset.get(row.family, row.key).is_some());
         if let Some(kind) = refusal(
             row,
             wanted,
@@ -895,7 +902,7 @@ pub(crate) fn rewrite(
             preset_authorized,
         ) {
             problems.push(OverrideProblem {
-                scheme: row.scheme,
+                family: row.family,
                 mapping: row.key,
                 kind,
             });
@@ -947,18 +954,18 @@ pub(crate) fn rewrite(
     // Tunables never add or drop a binding — only a field on a modifier already there — so this
     // runs after the control rewrite above rather than interleaved with it.
     for tunable in tunables {
-        let Some(value) = overrides.get_tunable(tunable.scheme, tunable.key) else {
+        let Some(value) = overrides.get_tunable(tunable.family, tunable.key) else {
             continue;
         };
         for binding in &mut variant {
             let Some(decl) = &binding.tunable else {
                 continue;
             };
-            // Scheme as well as key: sharing is scoped to one scheme (`hold_or_toggle` reaching a
+            // DeviceFamily as well as key: sharing is scoped to one family (`hold_or_toggle` reaching a
             // keyboard row shares nothing with a same-named gamepad tunable), and a key match alone
             // would move a keyboard override onto a gamepad binding that only happens to share text.
             if decl.key != tunable.key
-                || crate::binding::binding_scheme(&binding.source) != Some(tunable.scheme)
+                || crate::binding::binding_family(&binding.source) != Some(tunable.family)
             {
                 continue;
             }
@@ -977,19 +984,19 @@ pub(crate) fn rewrite(
 /// player still has the default. `preset_authorized` is the one exception to the rebindable-only
 /// rule below it: a preset moves a `Fixed` row on purpose, which is the whole point of one.
 fn refusal(
-    row: &Mapping,
+    row: &ActionMapping,
     wanted: &[Control],
     reserved: &[Control],
     contributors: &[&MappedPart],
     declared: &[BindingSpec],
     preset_authorized: bool,
 ) -> Option<OverrideProblemKind> {
-    if !row.rebinding.is_rebindable() && !preset_authorized {
+    if !row.rebind_policy.is_rebindable() && !preset_authorized {
         return Some(OverrideProblemKind::NotRebindable);
     }
     // Capacity first: "this row has one slot" is both simpler and truer than anything below it
     // about why a second control has nowhere to go.
-    if let Capacity::UpTo(limit) = row.capacity
+    if let Some(limit) = row.capacity
         && wanted.len() > limit
     {
         return Some(OverrideProblemKind::TooManyControls {
@@ -1012,13 +1019,13 @@ fn refusal(
         // depending on whether it arrived from a press or from a file.
         match admissible(
             control,
-            Some(row.scheme),
+            Some(row.family),
             accepts,
             reserved.contains(&control),
         ) {
             Ok(()) => {}
-            Err(RefusedReason::Scheme) => {
-                return Some(OverrideProblemKind::WrongScheme { control });
+            Err(RefusedReason::Family) => {
+                return Some(OverrideProblemKind::WrongFamily { control });
             }
             Err(RefusedReason::Reserved) => return Some(OverrideProblemKind::Reserved { control }),
             Err(RefusedReason::Shape) => {
@@ -1075,7 +1082,11 @@ fn rewrite_followers(
 }
 
 /// A copy of `binding` reading `control` in place of the control at `part`.
-fn clone_onto(binding: &BindingSpec, part: crate::binding::Part, control: Control) -> BindingSpec {
+fn clone_onto(
+    binding: &BindingSpec,
+    part: crate::binding::BindingPart,
+    control: Control,
+) -> BindingSpec {
     let mut grown = binding.clone();
     grown.source.set_part(part, control);
     grown
@@ -1092,9 +1103,9 @@ fn clone_onto(binding: &BindingSpec, part: crate::binding::Part, control: Contro
 /// second slot a rebind just vacated could never be filled again.
 fn current_rows(
     variant: &[BindingSpec],
-    declared: &[Mapping],
+    declared: &[ActionMapping],
     context: &'static str,
-) -> Vec<Mapping> {
+) -> Vec<ActionMapping> {
     let derived = crate::binding::mappings_of(variant, context);
     declared
         .iter()
@@ -1103,14 +1114,14 @@ fn current_rows(
                 .iter()
                 .find(|current| {
                     current.key == row.key
-                        && current.scheme == row.scheme
+                        && current.family == row.family
                         && current.action == row.action
                 })
-                .map(|current| Mapping {
+                .map(|current| ActionMapping {
                     capacity: crate::binding::widest(current.capacity, row.capacity),
                     ..current.clone()
                 })
-                .unwrap_or_else(|| Mapping {
+                .unwrap_or_else(|| ActionMapping {
                     slots: Vec::new(),
                     followers: row.followers.clone(),
                     ..row.clone()
@@ -1128,10 +1139,10 @@ mod tests {
     use bevy_ecs::entity::Entity;
     use bevy_input::keyboard::KeyCode;
 
-    use crate::action::{InputAction as _, Phase};
+    use crate::action::{ActionPhase, InputAction as _};
     use crate::binding::DirectionalButtons;
     use crate::context::{ActionMapAppExt, InputContextState};
-    use crate::mapping::{Rebinding, declared_mappings, mappings};
+    use crate::mapping::{RebindPolicy, declared_mappings, mappings};
     use crate::present::{BindingTable, PromptScope, Prompts as _};
     use crate::{ActionMapPlugin, InputAction, InputContext};
 
@@ -1174,7 +1185,7 @@ mod tests {
         app
     }
 
-    fn row(app: &App, name: &str) -> Mapping {
+    fn row(app: &App, name: &str) -> ActionMapping {
         mappings(app.world())
             .into_iter()
             .find(|mapping| mapping.key.to_string() == name)
@@ -1188,7 +1199,7 @@ mod tests {
     fn bind(app: &App, name: &str, controls: &[Control]) -> Overrides {
         let target = row(app, name);
         let mut overrides = Overrides::new();
-        overrides.bind(target.scheme, target.key, controls.iter().copied());
+        overrides.bind(target.family, target.key, controls.iter().copied());
         overrides
     }
 
@@ -1282,14 +1293,14 @@ mod tests {
         let mut app = app();
         let target = row(&app, "override_tests.jump");
         let mut overrides = Overrides::new();
-        overrides.set(target.scheme, target.key, Override::Cleared);
+        overrides.set(target.family, target.key, Override::Cleared);
         apply_overrides(app.world_mut(), &overrides);
 
         // The row is still on the screen, holding nothing — or there would be nowhere to bind it
         // back from.
         let jump = row(&app, "override_tests.jump");
         assert!(jump.slots.is_empty());
-        assert_eq!(jump.rebinding, Rebinding::Here);
+        assert_eq!(jump.rebind_policy, RebindPolicy::Here);
 
         // And the action still has a slot, so reading it is a rest value rather than the "not bound
         // in this context" warning, which is a typo diagnostic and not what happened.
@@ -1397,7 +1408,7 @@ mod tests {
                 .get::<InputContextState<Playing>>(entity)
                 .unwrap()
                 .phase::<Jump>(),
-            Phase::Fired
+            ActionPhase::Fired
         );
 
         let overrides = bind(&app, "override_tests.jump", &[Control::Key(KeyCode::KeyK)]);
@@ -1407,7 +1418,7 @@ mod tests {
             .world()
             .get::<InputContextState<Playing>>(entity)
             .unwrap();
-        assert_eq!(state.phase::<Jump>(), Phase::Canceled);
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Canceled);
         assert!(
             state.is_active(),
             "cancelling is not switching the context off"
@@ -1472,7 +1483,7 @@ mod tests {
                 .get::<InputContextState<Playing>>(player_a)
                 .unwrap()
                 .phase::<Jump>(),
-            Phase::Fired,
+            ActionPhase::Fired,
             "the named entity was remapped to K"
         );
         assert_eq!(
@@ -1480,7 +1491,7 @@ mod tests {
                 .get::<InputContextState<Playing>>(player_b)
                 .unwrap()
                 .phase::<Jump>(),
-            Phase::Idle,
+            ActionPhase::Idle,
             "a sibling instance never asked for K and is still listening on Space"
         );
         assert_eq!(
@@ -1488,7 +1499,7 @@ mod tests {
                 .get::<InputContextState<Playing>>(player_c)
                 .unwrap()
                 .phase::<Jump>(),
-            Phase::Idle,
+            ActionPhase::Idle,
             "spawned after the apply, and still the world's unmodified default"
         );
 
@@ -1530,14 +1541,21 @@ mod tests {
         let jump = row(&app, "override_tests.jump");
         let up = row(&app, "override_tests.move.up");
         let look = row(&app, "override_tests.look");
-        let gone = MappingKey::new("override_tests.no_such_action", crate::binding::Part::Whole);
+        let gone = MappingKey::new(
+            "override_tests.no_such_action",
+            crate::binding::BindingPart::Whole,
+        );
 
         let mut overrides = Overrides::new();
-        overrides.bind(Scheme::KeyboardMouse, gone, [Control::Key(KeyCode::KeyZ)]);
-        overrides.bind(look.scheme, look.key, [Control::MouseMotion]);
-        overrides.bind(jump.scheme, jump.key, [Control::Key(KeyCode::F1)]);
         overrides.bind(
-            up.scheme,
+            DeviceFamily::KeyboardMouse,
+            gone,
+            [Control::Key(KeyCode::KeyZ)],
+        );
+        overrides.bind(look.family, look.key, [Control::MouseMotion]);
+        overrides.bind(jump.family, jump.key, [Control::Key(KeyCode::F1)]);
+        overrides.bind(
+            up.family,
             up.key,
             [Control::Key(KeyCode::KeyI), Control::Key(KeyCode::KeyO)],
         );
@@ -1557,7 +1575,7 @@ mod tests {
             control: Control::Key(KeyCode::F1)
         }));
         assert!(kinds.contains(&OverrideProblemKind::TooManyControls {
-            capacity: Capacity::UpTo(1),
+            capacity: Some(1),
             given: 2
         }));
 
@@ -1622,12 +1640,12 @@ mod tests {
         let move_row = row(&app, "override_tests.stick.move");
         let look_row = row(&app, "override_tests.stick.look");
         southpaw.bind(
-            move_row.scheme,
+            move_row.family,
             move_row.key,
             [Control::GamepadStick(Stick::Right)],
         );
         southpaw.bind(
-            look_row.scheme,
+            look_row.family,
             look_row.key,
             [Control::GamepadStick(Stick::Left)],
         );
@@ -1652,15 +1670,15 @@ mod tests {
         let rows = mappings(app.world());
         let mut overrides = Overrides::new();
         for target in &rows {
-            if target.rebinding.is_rebindable() {
-                overrides.bind(target.scheme, target.key, [Control::Key(KeyCode::KeyZ)]);
+            if target.rebind_policy.is_rebindable() {
+                overrides.bind(target.family, target.key, [Control::Key(KeyCode::KeyZ)]);
             }
         }
 
         // One row.
         let up = row(&app, "override_tests.move.up");
-        overrides.reset(up.scheme, up.key);
-        assert!(overrides.get(up.scheme, up.key).is_none());
+        overrides.reset(up.family, up.key);
+        assert!(overrides.get(up.family, up.key).is_none());
 
         // Every row of one action, which for a composite is all four directions.
         overrides.reset_action(&rows, Move::id());
@@ -1668,14 +1686,14 @@ mod tests {
             !rows
                 .iter()
                 .filter(|r| r.action == Move::id())
-                .any(|r| { overrides.get(r.scheme, r.key).is_some() })
+                .any(|r| { overrides.get(r.family, r.key).is_some() })
         );
 
         // Every row of one context, and then the lot.
         overrides.reset_context(&rows, "override_tests.playing");
         assert!(overrides.is_empty());
 
-        overrides.bind(up.scheme, up.key, [Control::Key(KeyCode::KeyZ)]);
+        overrides.bind(up.family, up.key, [Control::Key(KeyCode::KeyZ)]);
         overrides.reset_all();
         assert!(overrides.is_empty());
 
@@ -1692,10 +1710,10 @@ mod tests {
     fn a_preset_moves_a_fixed_row_a_capture_cannot() {
         let mut app = app();
         let target = row(&app, "override_tests.settings");
-        assert_eq!(target.rebinding, Rebinding::Fixed);
+        assert_eq!(target.rebind_policy, RebindPolicy::Fixed);
 
         let mut preset = Overrides::new();
-        preset.bind(target.scheme, target.key, [Control::Key(KeyCode::F2)]);
+        preset.bind(target.family, target.key, [Control::Key(KeyCode::F2)]);
 
         // Refused without a preset: a bare `apply_overrides` treats this row exactly as a capture
         // screen would.
@@ -1728,7 +1746,7 @@ mod tests {
         let mut app = app();
         let target = row(&app, "override_tests.jump");
         let mut overrides = Overrides::new();
-        overrides.set(target.scheme, target.key, Override::NotOurs);
+        overrides.set(target.family, target.key, Override::NotOurs);
 
         let problems = apply_overrides(app.world_mut(), &overrides);
         assert!(problems.is_empty());
@@ -1760,7 +1778,7 @@ mod tests {
         let up = row(&app, "override_tests.move.up");
         let mut overrides = Overrides::new();
         overrides.bind(
-            up.scheme,
+            up.family,
             up.key,
             [Control::Key(KeyCode::KeyW), Control::Key(KeyCode::KeyI)],
         );
@@ -1810,7 +1828,7 @@ mod tests {
         let up = row(&app, "override_tests.move.up");
         let mut overrides = Overrides::new();
         overrides.bind(
-            up.scheme,
+            up.family,
             up.key,
             [Control::Key(KeyCode::KeyW), Control::Key(KeyCode::KeyI)],
         );
@@ -1852,7 +1870,7 @@ mod tests {
         let jump = row(&app, "override_tests.jump");
         assert_eq!(
             jump.capacity,
-            Capacity::UpTo(2),
+            Some(2),
             "two mappable bindings merge into one two-slot row"
         );
 
@@ -1864,7 +1882,7 @@ mod tests {
         assert_eq!(jump.slots, [Control::Key(KeyCode::Space)]);
         assert_eq!(
             jump.capacity,
-            Capacity::UpTo(2),
+            Some(2),
             "the vacated secondary must stay fillable"
         );
     }
@@ -1887,21 +1905,21 @@ mod tests {
 
         let jump = row(&app, "override_tests.jump");
         let mut overrides = Overrides::new();
-        overrides.set(jump.scheme, jump.key, Override::Cleared);
+        overrides.set(jump.family, jump.key, Override::Cleared);
         let problems = apply_overrides(app.world_mut(), &overrides);
         assert!(problems.is_empty(), "{problems:?}");
 
         let jump = row(&app, "override_tests.jump");
         assert!(jump.slots.is_empty());
-        assert_eq!(jump.capacity, Capacity::UpTo(2));
+        assert_eq!(jump.capacity, Some(2));
     }
 
-    /// A key match alone must not move an override across schemes: `hold_or_toggle` reaching both
+    /// A key match alone must not move an override across families: `hold_or_toggle` reaching both
     /// a keyboard and a gamepad binding under one name declares two independent tunables, one per
-    /// scheme's own table, not one shared across devices.
+    /// family's own table, not one shared across devices.
     #[cfg(feature = "gamepad")]
     #[test]
-    fn a_tunable_override_does_not_cross_schemes() {
+    fn a_tunable_override_does_not_cross_families() {
         use bevy_input::gamepad::GamepadButton;
 
         #[derive(InputAction)]
@@ -1909,12 +1927,12 @@ mod tests {
         struct Thrust;
 
         #[derive(InputContext)]
-        #[context(path = "override_tests.cross_scheme", tick = Render)]
-        struct CrossScheme;
+        #[context(path = "override_tests.cross_family", tick = Render)]
+        struct CrossFamily;
 
         let mut app = App::new();
         app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
-        app.add_context::<CrossScheme>(|controls| {
+        app.add_context::<CrossFamily>(|controls| {
             controls.bind::<Thrust>(KeyCode::Space);
             controls.bind::<Thrust>(GamepadButton::South);
             controls.hold_or_toggle::<Thrust>("override_tests.thrust.hold_or_toggle");
@@ -1922,7 +1940,7 @@ mod tests {
 
         let mut overrides = Overrides::new();
         overrides.tune(
-            Scheme::KeyboardMouse,
+            DeviceFamily::KeyboardMouse,
             "override_tests.thrust.hold_or_toggle",
             TunableValue::Bool(true),
         );
@@ -1932,11 +1950,11 @@ mod tests {
         let tunables = crate::mapping::tunables(app.world());
         let keyboard = tunables
             .iter()
-            .find(|t| t.scheme == Scheme::KeyboardMouse)
+            .find(|t| t.family == DeviceFamily::KeyboardMouse)
             .expect("a keyboard row");
         let gamepad = tunables
             .iter()
-            .find(|t| t.scheme == Scheme::Gamepad)
+            .find(|t| t.family == DeviceFamily::Gamepad)
             .expect("a gamepad row");
         assert_eq!(keyboard.value, TunableValue::Bool(true));
         assert_eq!(
@@ -1976,7 +1994,7 @@ mod tests {
         /// `Move` on WASD (four keyboard rows, none of them overridden below), `Jump` on Space with
         /// room for a secondary and on the pad's South button, and a settings key an external
         /// backend will claim.
-        fn declared() -> Vec<Mapping> {
+        fn declared() -> Vec<ActionMapping> {
             let mut app = App::new();
             app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
             app.add_context::<Playing>(|controls| {
@@ -1988,11 +2006,11 @@ mod tests {
             declared_mappings(app.world())
         }
 
-        fn mapping_key(declared: &[Mapping], scheme: Scheme, name: &str) -> MappingKey {
+        fn mapping_key(declared: &[ActionMapping], family: DeviceFamily, name: &str) -> MappingKey {
             declared
                 .iter()
-                .find(|mapping| mapping.scheme == scheme && mapping.key.to_string() == name)
-                .unwrap_or_else(|| panic!("no mapping named {name} in {scheme:?}"))
+                .find(|mapping| mapping.family == family && mapping.key.to_string() == name)
+                .unwrap_or_else(|| panic!("no mapping named {name} in {family:?}"))
                 .key
         }
 
@@ -2035,23 +2053,31 @@ mod tests {
             let types = types();
             let mut overrides = Overrides::new();
             overrides.bind(
-                Scheme::KeyboardMouse,
-                mapping_key(&declared, Scheme::KeyboardMouse, "persist_tests.move.up"),
+                DeviceFamily::KeyboardMouse,
+                mapping_key(
+                    &declared,
+                    DeviceFamily::KeyboardMouse,
+                    "persist_tests.move.up",
+                ),
                 [Control::Key(KeyCode::KeyI)],
             );
             overrides.bind(
-                Scheme::KeyboardMouse,
-                mapping_key(&declared, Scheme::KeyboardMouse, "persist_tests.jump"),
+                DeviceFamily::KeyboardMouse,
+                mapping_key(&declared, DeviceFamily::KeyboardMouse, "persist_tests.jump"),
                 [Control::Key(KeyCode::Space), Control::Key(KeyCode::KeyJ)],
             );
             overrides.set(
-                Scheme::KeyboardMouse,
-                mapping_key(&declared, Scheme::KeyboardMouse, "persist_tests.settings"),
+                DeviceFamily::KeyboardMouse,
+                mapping_key(
+                    &declared,
+                    DeviceFamily::KeyboardMouse,
+                    "persist_tests.settings",
+                ),
                 Override::NotOurs,
             );
             overrides.set(
-                Scheme::Gamepad,
-                mapping_key(&declared, Scheme::Gamepad, "persist_tests.jump"),
+                DeviceFamily::Gamepad,
+                mapping_key(&declared, DeviceFamily::Gamepad, "persist_tests.jump"),
                 Override::Cleared,
             );
 
@@ -2147,16 +2173,20 @@ mod tests {
             // Refused whole: the row that named it holds nothing rather than half a rebind.
             assert_eq!(
                 loaded.get(
-                    Scheme::KeyboardMouse,
-                    mapping_key(&declared, Scheme::KeyboardMouse, "persist_tests.move.up")
+                    DeviceFamily::KeyboardMouse,
+                    mapping_key(
+                        &declared,
+                        DeviceFamily::KeyboardMouse,
+                        "persist_tests.move.up"
+                    )
                 ),
                 None
             );
             // And the row after it in the set still resolved.
             assert_eq!(
                 loaded.get(
-                    Scheme::KeyboardMouse,
-                    mapping_key(&declared, Scheme::KeyboardMouse, "persist_tests.jump")
+                    DeviceFamily::KeyboardMouse,
+                    mapping_key(&declared, DeviceFamily::KeyboardMouse, "persist_tests.jump")
                 ),
                 Some(&Override::Controls(alloc::vec![Control::Key(
                     KeyCode::Space
@@ -2189,7 +2219,7 @@ mod tests {
             assert_eq!(
                 unresolved,
                 [Unresolved {
-                    scheme: Scheme::KeyboardMouse,
+                    family: DeviceFamily::KeyboardMouse,
                     name: "persist_tests.no_such_action".into(),
                     kind: UnresolvedKind::Mapping,
                 }]
@@ -2215,7 +2245,7 @@ mod tests {
 
             let mut overrides = Overrides::new();
             overrides.tune(
-                Scheme::KeyboardMouse,
+                DeviceFamily::KeyboardMouse,
                 "persist_tests.jump.hold_or_toggle",
                 TunableValue::Bool(true),
             );
@@ -2254,7 +2284,7 @@ mod tests {
             assert_eq!(
                 unresolved,
                 [Unresolved {
-                    scheme: Scheme::KeyboardMouse,
+                    family: DeviceFamily::KeyboardMouse,
                     name: "persist_tests.no_such_tunable".into(),
                     kind: UnresolvedKind::Tunable,
                 }]
@@ -2294,7 +2324,7 @@ mod tests {
             assert!(problems.is_empty(), "{problems:?}");
             assert!(unresolved.is_empty(), "{unresolved:?}");
             assert_eq!(
-                loaded.get_tunable(Scheme::Gamepad, "persist_tests.move.stick_deadzone"),
+                loaded.get_tunable(DeviceFamily::Gamepad, "persist_tests.move.stick_deadzone"),
                 Some(TunableValue::Range {
                     value: 0.5,
                     min: 0.0,

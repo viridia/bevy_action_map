@@ -181,7 +181,7 @@ fn submit(fired: On<Fired<Submit>>, mut fields: Query<&mut EditableText>) {
     }
 }
 
-fn move_player(input: Actions<OnFoot>, mut position: Local<Vec2>) {
+fn move_player(input: ContextActions<OnFoot>, mut position: Local<Vec2>) {
     let movement = input.value::<Move>();
     if movement != Vec2::ZERO {
         *position += movement;

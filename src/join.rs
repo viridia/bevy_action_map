@@ -29,7 +29,7 @@
 //! ```
 //!
 //! Which slot a newly claimed device fills, how many slots there are, and whether a game wants
-//! "any button" or one particular control per scheme all stay ordinary binding declaration and
+//! "any button" or one particular control per family all stay ordinary binding declaration and
 //! ordinary application logic — not something this crate decides for you.
 
 use crate::device::DeviceHandle;

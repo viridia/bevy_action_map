@@ -88,7 +88,7 @@ fn ship() -> impl Scene {
 
 fn fly(
     time: Res<Time>,
-    input: Actions<Flying>,
+    input: ContextActions<Flying>,
     ships: Query<(&mut Transform, &mut Velocity), With<Ship>>,
 ) {
     let delta = time.delta_secs();
@@ -174,7 +174,7 @@ fn hyperspace(
 }
 
 fn show_exhaust(
-    input: Actions<Flying>,
+    input: ContextActions<Flying>,
     exhaust: Query<&mut Transform, With<Exhaust>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     flame: Query<&MeshMaterial2d<ColorMaterial>, With<Exhaust>>,
@@ -184,7 +184,7 @@ fn show_exhaust(
     // can grow before the ship actually goes anywhere.
     let charging = matches!(
         input.phase::<Afterburner>(),
-        Phase::Started | Phase::Building
+        ActionPhase::Started | ActionPhase::Building
     );
     let boosting = input.value::<Afterburner>();
 

@@ -117,7 +117,7 @@ fn redraw(world: &mut World) {
             .join(", ");
         // Empty slots the player could still fill, so the dump says how wide the row is rather
         // than only what is in it.
-        let room = match mapping.capacity.slots() {
+        let room = match mapping.capacity {
             Some(slots) if slots > mapping.slots.len() => {
                 format!("  (+{} free)", slots - mapping.slots.len())
             }
@@ -130,9 +130,9 @@ fn redraw(world: &mut World) {
             out,
             "    {:<22} {:<9} {bound}{room}",
             mapping.key.fallback_label(),
-            match mapping.rebinding {
-                Rebinding::Here => "[rebind]",
-                Rebinding::Fixed => "[fixed]",
+            match mapping.rebind_policy {
+                RebindPolicy::Here => "[rebind]",
+                RebindPolicy::Fixed => "[fixed]",
             },
         );
     }

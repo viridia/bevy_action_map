@@ -24,7 +24,7 @@ fn main() {
         .run();
 }
 
-fn print_jump(input: Actions<OnFoot>) {
+fn print_jump(input: ContextActions<OnFoot>) {
     if input.fired::<Jump>() {
         println!("Jump fired");
     }

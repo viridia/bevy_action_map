@@ -45,7 +45,7 @@ pub struct PromptSpan(pub ActionId);
 /// What a settings screen's gamepad column wants: those rows name pad controls whatever the rest
 /// of the game's prompts speak for.
 #[derive(Component, Clone, Copy)]
-pub struct PromptScheme(pub Scheme);
+pub struct PromptFamily(pub DeviceFamily);
 
 /// Narrows to one kind of control, for a prompt with room to name a button and not a stick.
 #[derive(Component, Clone, Copy)]
@@ -89,7 +89,7 @@ pub fn plugin(app: &mut App) {
 type PromptQuery = (
     Entity,
     &'static PromptSpan,
-    Option<&'static PromptScheme>,
+    Option<&'static PromptFamily>,
     Option<&'static PromptClass>,
     Option<&'static PromptPick>,
     Option<&'static PromptUnbound>,

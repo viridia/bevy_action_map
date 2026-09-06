@@ -16,7 +16,7 @@ use bevy_input::keyboard::KeyCode;
 use bevy_input::mouse::MouseButton;
 use bevy_math::Vec2;
 
-use crate::action::{ActionId, ActionValue, ChannelShape, InputAction, Intent, Scratch};
+use crate::action::{ActionId, ActionIntent, ActionValue, ChannelShape, InputAction, Scratch};
 use crate::condition::{BindingCondition, Condition};
 use crate::event::{Dispatch, dispatch_for};
 
@@ -205,7 +205,7 @@ pub(crate) struct BindingSpec {
     // Carried from the action type at bind time: the plan keys state by `ActionId`, which does not
     // reach back to the type, and folding several bindings into one action needs the intent. The
     // path is here so plan-build diagnostics can name the action a mistake is in.
-    pub(crate) intent: Intent,
+    pub(crate) intent: ActionIntent,
     pub(crate) path: &'static str,
     pub(crate) category: Option<&'static str>,
     // The only place the concrete action type survives bind time. Everything downstream works in
@@ -224,7 +224,7 @@ pub(crate) struct BindingSpec {
     // What a player may tune on this binding, if anything. At most one — neither worked example
     // this shipped with needs a second, and a `Vec` is the change to make if one ever does.
     pub(crate) tunable: Option<TunableDecl>,
-    // Whether the controls this binding reads are withheld from capture across their scheme.
+    // Whether the controls this binding reads are withheld from capture across their family.
     pub(crate) reserved: bool,
     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
     pub(crate) chord: Vec<ButtonControl>,
@@ -242,19 +242,15 @@ pub(crate) struct ClassBindingSpec {
     pub(crate) dispatch: crate::event::ClassDispatch,
 }
 
-/// The more permissive of two capacities.
+/// The more permissive of two capacities. `None` means unlimited.
 ///
 /// Several bindings can feed one mapping, and each carries whatever its own combinator asked for.
 /// The mapping takes the widest: a narrower declaration on one binding says nothing about the
 /// mapping itself, only about a binding that happens to share the row.
-pub(crate) const fn widest(
-    a: crate::mapping::Capacity,
-    b: crate::mapping::Capacity,
-) -> crate::mapping::Capacity {
-    use crate::mapping::Capacity;
+pub(crate) const fn widest(a: Option<usize>, b: Option<usize>) -> Option<usize> {
     match (a, b) {
-        (Capacity::Any, _) | (_, Capacity::Any) => Capacity::Any,
-        (Capacity::UpTo(a), Capacity::UpTo(b)) if a >= b => Capacity::UpTo(a),
+        (None, _) | (_, None) => None,
+        (Some(a), Some(b)) if a >= b => Some(a),
         (_, b) => b,
     }
 }
@@ -271,11 +267,11 @@ pub(crate) struct MappingDecl {
     ///
     /// Declared per binding but resolved per mapping: several bindings may feed one mapping, and
     /// what the mapping ends up with is the widest thing any of them asked for, never narrower than
-    /// the defaults it already holds. Meaningless unless `rebinding` is `Here`, since nothing can
-    /// add a control to a mapping the player cannot change.
-    pub(crate) capacity: crate::mapping::Capacity,
+    /// the defaults it already holds. Meaningless unless `rebind_policy` is `Here`, since nothing
+    /// can add a control to a mapping the player cannot change. `None` means unlimited.
+    pub(crate) capacity: Option<usize>,
     /// Whether the player may change it, or is only being shown what it does.
-    pub(crate) rebinding: crate::mapping::Rebinding,
+    pub(crate) rebind_policy: crate::mapping::RebindPolicy,
 }
 
 /// What a player may tune on one binding.
@@ -310,7 +306,7 @@ pub(crate) struct FollowsDecl {
 /// The binding whose mapping `bindings[index]` rides, if there is one.
 ///
 /// A follower reads the same controls as the binding it follows, which is what makes matching on the
-/// source the whole of the resolution: it settles the scheme and the controls together, and it picks
+/// source the whole of the resolution: it settles the family and the controls together, and it picks
 /// the right one of several bindings the target action may have. `None` is a plan-build error rather
 /// than a silent no-op — see `DiagnosticKind::FollowsNothing`.
 pub(crate) fn leader_of(bindings: &[BindingSpec], index: usize) -> Option<usize> {
@@ -330,7 +326,7 @@ pub(crate) fn leader_of(bindings: &[BindingSpec], index: usize) -> Option<usize>
 }
 
 /// One control an authored [`BindingSpec`] contributes to one
-/// [`Mapping`](crate::mapping::Mapping) row.
+/// [`ActionMapping`](crate::mapping::ActionMapping) row.
 ///
 /// This is a fact read off an existing binding, produced by [`mapped_parts`] rather than declared
 /// on its own. `binding` and `part` say exactly where it came from: which entry in the binding
@@ -342,17 +338,17 @@ pub(crate) fn leader_of(bindings: &[BindingSpec], index: usize) -> Option<usize>
 #[derive(Clone, Copy)]
 pub(crate) struct MappedPart {
     pub(crate) key: crate::mapping::MappingKey,
-    pub(crate) scheme: crate::mapping::Scheme,
+    pub(crate) family: crate::mapping::DeviceFamily,
     /// Index into the binding list this was read from.
     pub(crate) binding: usize,
-    pub(crate) part: Part,
+    pub(crate) part: BindingPart,
     pub(crate) control: Control,
 }
 
 /// Every mapped part of every listed binding, in slot order.
 ///
 /// Two different passes read this instead of walking `bindings` themselves: [`mappings_of`] turns
-/// it into the [`Mapping`](crate::mapping::Mapping) list a settings screen reads, and
+/// it into the [`ActionMapping`](crate::mapping::ActionMapping) list a settings screen reads, and
 /// [`rewrite`](crate::overrides::rewrite) walks it to find exactly which binding and part to change
 /// when a player's override lands. The two must agree on what each row holds, or the player's new
 /// control ends up in a slot the screen is not showing it in.
@@ -366,7 +362,7 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
         binding.source.for_each_part(|part, control| {
             parts.push(MappedPart {
                 key: crate::mapping::MappingKey::new(prefix, part),
-                scheme: control.scheme(),
+                family: control.family(),
                 binding: index,
                 part,
                 control,
@@ -376,7 +372,7 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
     parts
 }
 
-/// The `Mapping` list for one binding list: one row per mappable part.
+/// The `ActionMapping` list for one binding list: one row per mappable part.
 ///
 /// Called on the bindings a context declares (from `mappings`) and again, unchanged, on the
 /// rewritten bindings a variant plan holds once an override has been applied (from
@@ -385,16 +381,16 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
 ///
 /// Empty for a game that declares none, which is the default and costs nothing.
 ///
-/// Bindings that derive the same key in the same scheme for the same action are merged into one
+/// Bindings that derive the same key in the same family for the same action are merged into one
 /// mapping holding both controls, because that is what a player sees: one row for Jump with a
-/// primary and a secondary, not two rows both called Jump. Merging is keyed by scheme as well as
+/// primary and a secondary, not two rows both called Jump. Merging is keyed by family as well as
 /// by name, so the keyboard and gamepad rows stay separate; and by action, so two different actions
 /// landing on one name is still reported as a collision.
 pub(crate) fn mappings_of(
     bindings: &[BindingSpec],
     context: &'static str,
-) -> Vec<crate::mapping::Mapping> {
-    let mut mappings: Vec<crate::mapping::Mapping> = Vec::new();
+) -> Vec<crate::mapping::ActionMapping> {
+    let mut mappings: Vec<crate::mapping::ActionMapping> = Vec::new();
     for entry in mapped_parts(bindings) {
         let binding = &bindings[entry.binding];
         // `mapped_parts` yields nothing for a binding without one.
@@ -404,7 +400,7 @@ pub(crate) fn mappings_of(
 
         if let Some(mapping) = mappings.iter_mut().find(|mapping| {
             mapping.key == entry.key
-                && mapping.scheme == entry.scheme
+                && mapping.family == entry.family
                 && mapping.action == binding.action
         }) {
             mapping.slots.push(entry.control);
@@ -415,7 +411,7 @@ pub(crate) fn mappings_of(
             continue;
         }
 
-        mappings.push(crate::mapping::Mapping {
+        mappings.push(crate::mapping::ActionMapping {
             key: entry.key,
             action: binding.action,
             action_path: binding.path,
@@ -423,13 +419,13 @@ pub(crate) fn mappings_of(
             // A part of a composite holds a button, whatever the composite as a whole
             // reports; a whole binding holds whatever its own source does.
             accepts: match entry.part {
-                Part::Whole => binding.source.channel_shape(),
+                BindingPart::Whole => binding.source.channel_shape(),
                 _ => ChannelShape::Button,
             },
-            scheme: entry.scheme,
+            family: entry.family,
             slots: alloc::vec![entry.control],
             capacity: declaration.capacity,
-            rebinding: declaration.rebinding,
+            rebind_policy: declaration.rebind_policy,
             context,
             followers: Vec::new(),
         });
@@ -438,10 +434,7 @@ pub(crate) fn mappings_of(
     // A mapping is never narrower than the defaults it already holds, so declaring two
     // bindings is enough on its own to make a two-slot row — nobody has to also say "2".
     for mapping in &mut mappings {
-        mapping.capacity = widest(
-            mapping.capacity,
-            crate::mapping::Capacity::UpTo(mapping.slots.len()),
-        );
+        mapping.capacity = widest(mapping.capacity, Some(mapping.slots.len()));
     }
 
     // A second pass rather than folded into the first: a follower's row is found by the
@@ -464,7 +457,7 @@ pub(crate) fn mappings_of(
             let key = crate::mapping::MappingKey::new(prefix, part);
             if let Some(mapping) = mappings.iter_mut().find(|mapping| {
                 mapping.key == key
-                    && mapping.scheme == control.scheme()
+                    && mapping.family == control.family()
                     && mapping.action == leader.action
             }) {
                 // A row with two slots is two leader bindings, and Disasteroids' `Afterburner`
@@ -504,7 +497,7 @@ pub(crate) fn tunables_of(
         let Some(decl) = &binding.tunable else {
             continue;
         };
-        let scheme = binding_scheme(&binding.source)
+        let family = binding_family(&binding.source)
             .expect("a tunable's binding must resolve to at least one control");
         // Several bindings may declare the same key — `hold_or_toggle` reaching a primary and a
         // secondary key is the ordinary case — and they are one row to the player, not two. Every
@@ -512,7 +505,7 @@ pub(crate) fn tunables_of(
         // the whole group.
         if tunables
             .iter()
-            .any(|tunable| tunable.key == decl.key && tunable.scheme == scheme)
+            .any(|tunable| tunable.key == decl.key && tunable.family == family)
         {
             continue;
         }
@@ -521,7 +514,7 @@ pub(crate) fn tunables_of(
             action: binding.action,
             action_path: binding.path,
             category: binding.category,
-            scheme,
+            family,
             context,
             value: current_tunable_value(&binding.modifiers[decl.modifier_index], decl.default),
         });
@@ -529,12 +522,12 @@ pub(crate) fn tunables_of(
     tunables
 }
 
-/// The scheme a binding's source belongs to, for a binding that resolves to a single control — a
+/// The family a binding's source belongs to, for a binding that resolves to a single control — a
 /// tunable is only ever declared on one of those, never a composite.
-pub(crate) fn binding_scheme(source: &BindingSource) -> Option<crate::mapping::Scheme> {
-    let mut scheme = None;
-    source.for_each_part(|_, control| scheme = Some(control.scheme()));
-    scheme
+pub(crate) fn binding_family(source: &BindingSource) -> Option<crate::mapping::DeviceFamily> {
+    let mut family = None;
+    source.for_each_part(|_, control| family = Some(control.family()));
+    family
 }
 
 /// Whether this binding's raw value is always a plain press — `ActionValue::Bool` every tick, never
@@ -542,11 +535,11 @@ pub(crate) fn binding_scheme(source: &BindingSource) -> Option<crate::mapping::S
 /// carries real analog information would flatten it.
 ///
 /// A key or a mouse button always qualifies — neither has anything but a press to report. A gamepad
-/// button is the interesting case (R2.10): the same control reads as `Bool` when the action wants a
-/// plain press and as a continuous `Axis1` fraction otherwise (see `BindingSource::GamepadButton` in
-/// `eval.rs`), so it qualifies only when `intent` is `Intent::Button`. Every composite, axis or
-/// motion source reports something other than `Bool` outright and never qualifies.
-fn always_reports_bool(source: &BindingSource, intent: Intent) -> bool {
+/// button is the interesting case (R2.10): the same control reads as `Bool` when the action wants
+/// a plain press and as a continuous `Axis1` fraction otherwise (see `BindingSource::GamepadButton`
+/// in `eval.rs`), so it qualifies only when `intent` is `ActionIntent::Button`. Every composite,
+/// axis or motion source reports something other than `Bool` outright and never qualifies.
+fn always_reports_bool(source: &BindingSource, intent: ActionIntent) -> bool {
     #[cfg(not(feature = "gamepad"))]
     let _ = intent;
     match source {
@@ -555,7 +548,7 @@ fn always_reports_bool(source: &BindingSource, intent: Intent) -> bool {
         #[cfg(feature = "mouse")]
         BindingSource::MouseButton(_) => true,
         #[cfg(feature = "gamepad")]
-        BindingSource::GamepadButton(_) => intent == Intent::Button,
+        BindingSource::GamepadButton(_) => intent == ActionIntent::Button,
         _ => false,
     }
 }
@@ -613,8 +606,8 @@ impl MappingDecl {
     const fn listed() -> Self {
         Self {
             prefix: None,
-            capacity: crate::mapping::Capacity::UpTo(1),
-            rebinding: crate::mapping::Rebinding::Fixed,
+            capacity: Some(1),
+            rebind_policy: crate::mapping::RebindPolicy::Fixed,
         }
     }
 }
@@ -626,21 +619,21 @@ impl MappingDecl {
 /// ```
 ///
 /// This reports a displacement that has already happened, so it can only drive an action whose
-/// intent is [`Delta2`](Intent::Delta2). It is named for the movement rather than for the device
-/// so that it does not collide with Bevy's own `MouseMotion` message.
+/// intent is [`Delta2`](ActionIntent::Delta2). It is named for the movement rather than for the
+/// device so that it does not collide with Bevy's own `MouseMotion` message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MouseMove;
 
 /// Which part of a binding's source a control is.
 ///
-/// A single control is the [`Whole`](Part::Whole) of its binding. A composite has parts, named for
-/// what each one does rather than for where it sits: the four keys of a directional composite are
-/// up, down, left and right whichever keys they happen to be.
+/// A single control is the [`Whole`](BindingPart::Whole) of its binding. A composite has parts,
+/// named for what each one does rather than for where it sits: the four keys of a directional
+/// composite are up, down, left and right whichever keys they happen to be.
 ///
 /// This is what a rebinding screen addresses. A player rebinds "move forward", which is one part of
 /// a movement binding — never the movement binding itself, which has no single control to show.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Part {
+pub enum BindingPart {
     /// The binding reads one control, and this is it.
     Whole,
     /// The half of a two-button axis that drives it negative.
@@ -657,7 +650,7 @@ pub enum Part {
     Right,
 }
 
-impl Part {
+impl BindingPart {
     /// The name this part contributes to a mapping key, or `None` for a whole binding.
     ///
     /// Mapping keys are the action's path plus this — `gameplay.move` plus `up` — so a part naming
@@ -710,18 +703,18 @@ pub enum Control {
 impl Control {
     /// Which set of devices this control belongs to.
     ///
-    /// Keyboard and mouse are one scheme because a player uses them together; a gamepad is another.
-    /// Which one a control belongs to is what decides the scheme a mapping is rebound in.
-    pub const fn scheme(self) -> crate::mapping::Scheme {
+    /// Keyboard and mouse are one family because a player uses them together; a gamepad is another.
+    /// Which one a control belongs to is what decides the family a mapping is rebound in.
+    pub const fn family(self) -> crate::mapping::DeviceFamily {
         match self {
             #[cfg(feature = "keyboard")]
-            Self::Key(_) => crate::mapping::Scheme::KeyboardMouse,
+            Self::Key(_) => crate::mapping::DeviceFamily::KeyboardMouse,
             #[cfg(feature = "mouse")]
-            Self::MouseButton(_) => crate::mapping::Scheme::KeyboardMouse,
-            Self::MouseMotion => crate::mapping::Scheme::KeyboardMouse,
+            Self::MouseButton(_) => crate::mapping::DeviceFamily::KeyboardMouse,
+            Self::MouseMotion => crate::mapping::DeviceFamily::KeyboardMouse,
             #[cfg(feature = "gamepad")]
             Self::GamepadButton(_) | Self::GamepadAxis(_) | Self::GamepadStick(_) => {
-                crate::mapping::Scheme::Gamepad
+                crate::mapping::DeviceFamily::Gamepad
             }
         }
     }
@@ -901,34 +894,36 @@ impl BindingSource {
     /// A composite's parts are named for the direction each one pushes rather than for their
     /// position, which is what lets a rebinding screen address one of them — "the key that moves
     /// you forward" — without the four being an ordered list somebody has to keep in step.
-    pub fn for_each_part(&self, mut visit: impl FnMut(Part, Control)) {
+    pub fn for_each_part(&self, mut visit: impl FnMut(BindingPart, Control)) {
         match self {
             #[cfg(feature = "keyboard")]
-            Self::Button(key) => visit(Part::Whole, Control::Key(*key)),
+            Self::Button(key) => visit(BindingPart::Whole, Control::Key(*key)),
             #[cfg(feature = "mouse")]
-            Self::MouseButton(button) => visit(Part::Whole, Control::MouseButton(*button)),
+            Self::MouseButton(button) => visit(BindingPart::Whole, Control::MouseButton(*button)),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             Self::Axis1(parts) => {
-                visit(Part::Negative, parts.negative.into());
-                visit(Part::Positive, parts.positive.into());
+                visit(BindingPart::Negative, parts.negative.into());
+                visit(BindingPart::Positive, parts.positive.into());
             }
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             Self::Directional2(parts) => {
-                visit(Part::Up, parts.up.into());
-                visit(Part::Down, parts.down.into());
-                visit(Part::Left, parts.left.into());
-                visit(Part::Right, parts.right.into());
+                visit(BindingPart::Up, parts.up.into());
+                visit(BindingPart::Down, parts.down.into());
+                visit(BindingPart::Left, parts.left.into());
+                visit(BindingPart::Right, parts.right.into());
             }
             // A stick and a mouse have no parts a player would rebind one of. They are one thing
             // as far as the presentation model is concerned, and what they get instead of
             // per-part rebinding is a tunable.
-            Self::MouseMotion => visit(Part::Whole, Control::MouseMotion),
+            Self::MouseMotion => visit(BindingPart::Whole, Control::MouseMotion),
             #[cfg(feature = "gamepad")]
-            Self::GamepadButton(button) => visit(Part::Whole, Control::GamepadButton(*button)),
+            Self::GamepadButton(button) => {
+                visit(BindingPart::Whole, Control::GamepadButton(*button))
+            }
             #[cfg(feature = "gamepad")]
-            Self::GamepadAxis(axis) => visit(Part::Whole, Control::GamepadAxis(*axis)),
+            Self::GamepadAxis(axis) => visit(BindingPart::Whole, Control::GamepadAxis(*axis)),
             #[cfg(feature = "gamepad")]
-            Self::GamepadStick(stick) => visit(Part::Whole, Control::GamepadStick(*stick)),
+            Self::GamepadStick(stick) => visit(BindingPart::Whole, Control::GamepadStick(*stick)),
         }
     }
 
@@ -942,32 +937,34 @@ impl BindingSource {
     /// **The source's channel shape is invariant.** A whole binding on a key takes another button
     /// and not a stick axis, so applying an override can never turn a plan that compiled into one
     /// that would not — the shape mismatch is caught here even if nothing caught it earlier.
-    pub(crate) fn set_part(&mut self, part: Part, control: Control) -> bool {
+    pub(crate) fn set_part(&mut self, part: BindingPart, control: Control) -> bool {
         match (&mut *self, part) {
             // A whole binding is replaced outright, since the new source is entirely the new
             // control.
-            (Self::MouseMotion, Part::Whole) => self.replace_whole(control),
+            (Self::MouseMotion, BindingPart::Whole) => self.replace_whole(control),
             #[cfg(feature = "keyboard")]
-            (Self::Button(_), Part::Whole) => self.replace_whole(control),
+            (Self::Button(_), BindingPart::Whole) => self.replace_whole(control),
             #[cfg(feature = "mouse")]
-            (Self::MouseButton(_), Part::Whole) => self.replace_whole(control),
+            (Self::MouseButton(_), BindingPart::Whole) => self.replace_whole(control),
             #[cfg(feature = "gamepad")]
             (
                 Self::GamepadButton(_) | Self::GamepadAxis(_) | Self::GamepadStick(_),
-                Part::Whole,
+                BindingPart::Whole,
             ) => self.replace_whole(control),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            (Self::Axis1(parts), Part::Negative) => set_button(&mut parts.negative, control),
+            (Self::Axis1(parts), BindingPart::Negative) => set_button(&mut parts.negative, control),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            (Self::Axis1(parts), Part::Positive) => set_button(&mut parts.positive, control),
+            (Self::Axis1(parts), BindingPart::Positive) => set_button(&mut parts.positive, control),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            (Self::Directional2(parts), Part::Up) => set_button(&mut parts.up, control),
+            (Self::Directional2(parts), BindingPart::Up) => set_button(&mut parts.up, control),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            (Self::Directional2(parts), Part::Down) => set_button(&mut parts.down, control),
+            (Self::Directional2(parts), BindingPart::Down) => set_button(&mut parts.down, control),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            (Self::Directional2(parts), Part::Left) => set_button(&mut parts.left, control),
+            (Self::Directional2(parts), BindingPart::Left) => set_button(&mut parts.left, control),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            (Self::Directional2(parts), Part::Right) => set_button(&mut parts.right, control),
+            (Self::Directional2(parts), BindingPart::Right) => {
+                set_button(&mut parts.right, control)
+            }
             _ => false,
         }
     }
@@ -1051,8 +1048,9 @@ impl Stick {
 ///
 /// Note what this trait does *not* say: which actions the control is good for. A control reports on
 /// a channel of a given [`ChannelShape`] and that is all it knows about itself; whether that suits
-/// a particular action is decided against the action's [`Intent`] when the context is declared.
-/// This is what lets one trigger drive a button action in one game and an analog action in another.
+/// a particular action is decided against the action's [`ActionIntent`] when the context is
+/// declared. This is what lets one trigger drive a button action in one game and an analog action
+/// in another.
 pub trait BindingSourceSpec {
     /// Converts this source value into the internal binding representation.
     fn into_binding_source(self) -> BindingSource;
@@ -1581,7 +1579,7 @@ impl<'a, C> BindingHandle<'a, C> {
     /// localization key rather than text to show. Use [`mappable_as`](Self::mappable_as) where that
     /// name would collide or where a catalogue already calls it something else.
     ///
-    /// **Declaring two of these for one action in one scheme is how you ship a default primary and
+    /// **Declaring two of these for one action in one family is how you ship a default primary and
     /// secondary.** They derive the same key, so they are one row holding two controls rather than
     /// two rows; the mapping's capacity grows to fit them without being asked. Use
     /// [`mappable_upto`](Self::mappable_upto) to leave a slot for a control the player adds that
@@ -1592,7 +1590,7 @@ impl<'a, C> BindingHandle<'a, C> {
     /// controls.bind::<Jump>(KeyCode::KeyJ).mappable();   // the same row, second slot
     /// ```
     pub fn mappable(self) -> Self {
-        self.declare_mapping(None, crate::mapping::Capacity::UpTo(1))
+        self.declare_mapping(None, Some(1))
     }
 
     /// Keeps this binding out of the presentation list entirely.
@@ -1618,7 +1616,7 @@ impl<'a, C> BindingHandle<'a, C> {
         assert!(
             !self.builder.bindings[self.index]
                 .mapping
-                .is_some_and(|decl| decl.rebinding.is_rebindable()),
+                .is_some_and(|decl| decl.rebind_policy.is_rebindable()),
             "a binding cannot be both `mappable` and `private`: one says the player may change it, \
              the other says they may not see it"
         );
@@ -1633,7 +1631,7 @@ impl<'a, C> BindingHandle<'a, C> {
     /// its three neighbours. Use it when two would otherwise derive the same key, which happens
     /// when one action is bound in two contexts.
     pub fn mappable_as(self, key: &'static str) -> Self {
-        self.declare_mapping(Some(key), crate::mapping::Capacity::UpTo(1))
+        self.declare_mapping(Some(key), Some(1))
     }
 
     /// Lets the player rebind this, and put up to `count` controls in the mapping.
@@ -1655,7 +1653,7 @@ impl<'a, C> BindingHandle<'a, C> {
             count > 0,
             "a mapping needs room for at least one control; leave `mappable` off instead"
         );
-        self.declare_mapping(None, crate::mapping::Capacity::UpTo(count))
+        self.declare_mapping(None, Some(count))
     }
 
     /// Lets the player rebind this, with no limit on how many controls the mapping holds.
@@ -1664,14 +1662,10 @@ impl<'a, C> BindingHandle<'a, C> {
     /// out in a table written in advance — an editor or a tool, where the screen grows an "add
     /// shortcut" button. A game almost always wants a fixed number of slots instead.
     pub fn mappable_any(self) -> Self {
-        self.declare_mapping(None, crate::mapping::Capacity::Any)
+        self.declare_mapping(None, None)
     }
 
-    fn declare_mapping(
-        self,
-        prefix: Option<&'static str>,
-        capacity: crate::mapping::Capacity,
-    ) -> Self {
+    fn declare_mapping(self, prefix: Option<&'static str>, capacity: Option<usize>) -> Self {
         let existing = self.builder.bindings[self.index].mapping;
         assert!(
             self.builder.bindings[self.index].follows.is_none(),
@@ -1693,12 +1687,12 @@ impl<'a, C> BindingHandle<'a, C> {
             },
             // Every one of this method's callers is a `mappable*`, so reaching here is the author
             // asking for the upgrade from the listed-but-fixed default.
-            rebinding: crate::mapping::Rebinding::Here,
+            rebind_policy: crate::mapping::RebindPolicy::Here,
         });
         self
     }
 
-    /// Withholds this binding's controls from capture, everywhere in its scheme.
+    /// Withholds this binding's controls from capture, everywhere in its family.
     ///
     /// The control that opens the rebinding screen is the case this exists for. It is not rebindable,
     /// so a player cannot move it away, and no *other* mapping can capture it, so it cannot be
@@ -1715,7 +1709,7 @@ impl<'a, C> BindingHandle<'a, C> {
     /// controls.bind::<OpenSettings>(GamepadButton::Select).reserved();
     /// ```
     ///
-    /// Reserving is per scheme, because that is the scope a control is unambiguous in: reserving
+    /// Reserving is per family, because that is the scope a control is unambiguous in: reserving
     /// `F1` says nothing about the gamepad, and the pad binding above is what reserves `Select`.
     ///
     /// Capture refuses a reserved control out loud, with
@@ -1947,7 +1941,7 @@ impl<C> InputContextBuilder<C> {
     ///
     /// An action may be bound more than once — a keyboard key and a gamepad button, a stick and
     /// the movement keys. Every binding for an action contributes to the same value, combined
-    /// according to the action's [`Intent`]:
+    /// according to the action's [`ActionIntent`]:
     ///
     /// - `Button`, `Analog1` and `Directional2` take the **strongest** contribution, so pushing the
     ///   stick further wins over tapping a key, and either of two buttons fires the action. Equal
@@ -1956,9 +1950,9 @@ impl<C> InputContextBuilder<C> {
     ///   moving at once should move the action by both.
     ///
     /// The control has to be one the action can actually use. A control reports on a channel of a
-    /// particular [`ChannelShape`], the action declares an [`Intent`], and a binding between two
-    /// that do not fit — a single button asked to give a direction, a mouse asked to hold a
-    /// position — is refused when the context is declared. [`Intent::accepts`] has the table.
+    /// particular [`ChannelShape`], the action declares an [`ActionIntent`], and a binding between
+    /// two that do not fit — a single button asked to give a direction, a mouse asked to hold a
+    /// position — is refused when the context is declared. [`ActionIntent::accepts`] has the table.
     ///
     /// ```ignore
     /// context.bind::<Jump>(KeyCode::Space);
@@ -2039,11 +2033,12 @@ impl<C> InputContextBuilder<C> {
     ///
     /// Only a binding whose control is a genuine press, with nothing analog to lose, is eligible —
     /// a key or a mouse button always is; a gamepad button is only when `A`'s own intent is
-    /// [`Button`](crate::action::Intent::Button), since the same control reads as a continuous
-    /// fraction for anything else (a trigger driving an analog action), and toggling that would
-    /// flatten it to on/off. A stick, an axis, mouse motion, or a composite are never eligible —
-    /// there is no single press for any of them to toggle. Every eligible binding shares one latch:
-    /// press any of them, release, press another, and the action reads one consistent state
+    /// [`Button`](crate::action::ActionIntent::Button), since the same control reads as a
+    /// continuous fraction for anything else (a trigger driving an analog action), and toggling
+    /// that would flatten it to on/off. A stick, an axis, mouse motion, or a composite are never
+    /// eligible — there is no single press for any of them to toggle. Every eligible binding
+    /// shares one latch: press any of them, release, press another, and the action reads one
+    /// consistent state
     /// throughout — never one control turning it on while a different one turns it back off.
     ///
     /// Held is the default; nothing changes until a player (or a preset) turns toggle mode on.
@@ -2179,7 +2174,7 @@ impl<C> InputContextBuilder<C> {
     }
 
     /// The presentation view of these bindings: one mapping per mappable part.
-    pub(crate) fn mappings(&self, context: &'static str) -> Vec<crate::mapping::Mapping> {
+    pub(crate) fn mappings(&self, context: &'static str) -> Vec<crate::mapping::ActionMapping> {
         mappings_of(&self.bindings, context)
     }
 
@@ -2190,7 +2185,7 @@ impl<C> InputContextBuilder<C> {
 
     /// The controls this context withholds from capture.
     ///
-    /// Flat rather than per-context, because reserving is global across a scheme: a screen key
+    /// Flat rather than per-context, because reserving is global across a family: a screen key
     /// reserved in one context must be refused while capturing for a mapping declared in another.
     pub(crate) fn reserved(&self, context: &'static str) -> Vec<crate::capture::ReservedControl> {
         let mut reserved = Vec::new();
@@ -2521,7 +2516,7 @@ mod tests {
     impl InputAction for DummyButton {
         type Output = bool;
 
-        const INTENT: crate::action::Intent = crate::action::Intent::Button;
+        const INTENT: crate::action::ActionIntent = crate::action::ActionIntent::Button;
         const PATH: &'static str = "tests::DummyButton";
     }
 
@@ -2530,7 +2525,7 @@ mod tests {
     impl InputAction for DummyVec2 {
         type Output = Vec2;
 
-        const INTENT: crate::action::Intent = crate::action::Intent::Directional2;
+        const INTENT: crate::action::ActionIntent = crate::action::ActionIntent::Directional2;
         const PATH: &'static str = "tests::DummyVec2";
     }
 
@@ -2539,7 +2534,7 @@ mod tests {
     impl InputAction for DummyDelta2 {
         type Output = Vec2;
 
-        const INTENT: crate::action::Intent = crate::action::Intent::Delta2;
+        const INTENT: crate::action::ActionIntent = crate::action::ActionIntent::Delta2;
         const PATH: &'static str = "tests::DummyDelta2";
     }
 
@@ -2758,7 +2753,7 @@ mod tests {
         struct Thrust;
         impl InputAction for Thrust {
             type Output = f32;
-            const INTENT: crate::action::Intent = crate::action::Intent::Analog1;
+            const INTENT: crate::action::ActionIntent = crate::action::ActionIntent::Analog1;
             const PATH: &'static str = "tests::analog_thrust";
         }
 
@@ -2794,7 +2789,7 @@ mod tests {
         struct Thrust;
         impl InputAction for Thrust {
             type Output = f32;
-            const INTENT: crate::action::Intent = crate::action::Intent::Analog1;
+            const INTENT: crate::action::ActionIntent = crate::action::ActionIntent::Analog1;
             const PATH: &'static str = "tests::analog_thrust_only";
         }
 
@@ -2936,7 +2931,7 @@ mod tests {
         impl InputAction for Thrust {
             type Output = f32;
 
-            const INTENT: crate::action::Intent = crate::action::Intent::Analog1;
+            const INTENT: crate::action::ActionIntent = crate::action::ActionIntent::Analog1;
             const PATH: &'static str = "tests::Thrust";
         }
 

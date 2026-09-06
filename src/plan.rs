@@ -5,7 +5,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::marker::PhantomData;
 
-use crate::action::{ActionId, ChannelShape, Intent};
+use crate::action::{ActionId, ActionIntent, ChannelShape};
 use crate::binding::{BindingModifier, BindingSource, BindingSpec, ClassBindingSpec, Control};
 use crate::capture::{ClassFilter, ControlClass};
 use crate::condition::BindingCondition;
@@ -15,13 +15,13 @@ use crate::event::{ClassDispatch, Dispatch};
 ///
 /// Only the two mistakes with a specific remedy get one; the rest are adequately explained by
 /// naming the intent and the channel that cannot serve it.
-fn mismatch_hint(intent: Intent, shape: ChannelShape) -> &'static str {
+fn mismatch_hint(intent: ActionIntent, shape: ChannelShape) -> &'static str {
     match (intent, shape) {
-        (Intent::Directional2, ChannelShape::Button | ChannelShape::Axis1) => {
+        (ActionIntent::Directional2, ChannelShape::Button | ChannelShape::Axis1) => {
             ". A single control carries no direction — bind a directional composite, whose parts \
              can be keyboard keys or D-pad buttons"
         }
-        (Intent::Delta2, _) | (_, ChannelShape::Delta2) => {
+        (ActionIntent::Delta2, _) | (_, ChannelShape::Delta2) => {
             ". A delta is a displacement that has already happened and a position is a rate, so \
              one cannot stand in for the other without an explicit conversion"
         }
@@ -48,7 +48,7 @@ impl BindingDiagnostic {
             DiagnosticKind::IntentMismatch { .. }
             | DiagnosticKind::RateFromDelta { .. }
             | DiagnosticKind::ChainedRescaling { .. } => Severity::Error,
-            DiagnosticKind::MixedSchemeMapping
+            DiagnosticKind::MixedFamilyMapping
             | DiagnosticKind::DuplicateMappingKey { .. }
             | DiagnosticKind::RebindingDisagreement { .. }
             | DiagnosticKind::ReservedAndMappable
@@ -80,7 +80,7 @@ pub enum DiagnosticKind {
     /// The action's intent cannot be served by the channel its control reports on.
     IntentMismatch {
         /// What the action asked for.
-        intent: Intent,
+        intent: ActionIntent,
         /// What the control offers, after any modifier that reshapes it.
         shape: ChannelShape,
     },
@@ -117,7 +117,7 @@ pub enum DiagnosticKind {
         key: crate::mapping::MappingKey,
     },
     /// A mappable binding reads controls from more than one kind of device.
-    MixedSchemeMapping,
+    MixedFamilyMapping,
     /// A binding is declared both rebindable and reserved, which cannot both be true.
     ReservedAndMappable,
     /// A binding follows an action that reads nothing like it in this context.
@@ -136,7 +136,7 @@ pub enum DiagnosticKind {
         /// character-producing keys.
         class: Option<ControlClass>,
     },
-    /// Two different actions declare a tunable under the same name in the same scheme.
+    /// Two different actions declare a tunable under the same name in the same family.
     DuplicateTunableKey {
         /// The name they share.
         key: &'static str,
@@ -203,11 +203,11 @@ impl core::fmt::Display for BindingDiagnostic {
                  both; say the same thing on every binding that feeds it",
                 self.action
             ),
-            DiagnosticKind::MixedSchemeMapping => write!(
+            DiagnosticKind::MixedFamilyMapping => write!(
                 f,
                 "`{}` is mappable but reads controls from more than one kind of device, so there \
-                 is no one scheme to rebind it in. Bind the devices separately, one mappable \
-                 binding each",
+                 is no one device family to rebind it in. Bind the devices separately, one \
+                 mappable binding each",
                 self.action
             ),
             DiagnosticKind::ReservedAndMappable => write!(
@@ -317,20 +317,20 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
     // Mapping keys have to be unique across the whole context, so they are gathered as we go
     // than compared pairwise like the checks below.
     //
-    // Keyed by scheme as well as by name, and remembering *which action* claimed each, because
-    // neither kind of repeat is a mistake on its own. Uniqueness is per scheme (R19.15), so one
+    // Keyed by family as well as by name, and remembering *which action* claimed each, because
+    // neither kind of repeat is a mistake on its own. Uniqueness is per family (R19.15), so one
     // action on a key and on a pad button is two rows in two tables. And one action reaching a name
-    // twice within one scheme is a primary and a secondary, which merge into a single row holding
+    // twice within one family is a primary and a secondary, which merge into a single row holding
     // both. What is left — two *different* actions answering to one name — is the case where a
     // saved rebinding of one would land on the other, and is what R19.15 wants reported.
     let mut keys = alloc::collections::BTreeMap::new();
-    // A tunable's key is unique per scheme for the same reason a mapping's is: two different
+    // A tunable's key is unique per family for the same reason a mapping's is: two different
     // actions sharing one name is a saved change to one landing on the other. Two bindings of the
     // *same* action sharing one name is deliberate — `hold_or_toggle` declares exactly that, so
     // every eligible binding shares one runtime latch — provided they agree about the tunable's
     // shape, which is the one thing sharing a name cannot paper over.
     let mut tunable_keys: alloc::collections::BTreeMap<
-        (crate::mapping::Scheme, &'static str),
+        (crate::mapping::DeviceFamily, &'static str),
         (ActionId, crate::mapping::TunableValue),
     > = alloc::collections::BTreeMap::new();
 
@@ -377,7 +377,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
         if binding.reserved
             && binding
                 .mapping
-                .is_some_and(|decl| decl.rebinding.is_rebindable())
+                .is_some_and(|decl| decl.rebind_policy.is_rebindable())
         {
             found.push(at(DiagnosticKind::ReservedAndMappable));
         }
@@ -404,14 +404,14 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
 
         if let Some(declaration) = binding.mapping {
             let prefix = declaration.prefix.unwrap_or(binding.path);
-            let rebindable = declaration.rebinding.is_rebindable();
-            let mut scheme = None;
+            let rebindable = declaration.rebind_policy.is_rebindable();
+            let mut family = None;
             let mut mixed = false;
             binding.source.for_each_part(|part, control| {
                 let key = crate::mapping::MappingKey::new(prefix, part);
                 let (claimant, claimed_as) = keys
-                    .entry((control.scheme(), key))
-                    .or_insert((binding.action, declaration.rebinding));
+                    .entry((control.family(), key))
+                    .or_insert((binding.action, declaration.rebind_policy));
                 if *claimant != binding.action {
                     // Only where something is rebindable, because the hazard is a *saved* rebind of
                     // one row landing on another and a fixed row is never saved. Two fixed rows
@@ -420,26 +420,26 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
                     if rebindable || claimed_as.is_rebindable() {
                         found.push(at(DiagnosticKind::DuplicateMappingKey { key }));
                     }
-                } else if *claimed_as != declaration.rebinding {
+                } else if *claimed_as != declaration.rebind_policy {
                     found.push(at(DiagnosticKind::RebindingDisagreement { key }));
                 }
-                match scheme {
-                    Some(seen) if seen != control.scheme() => mixed = true,
+                match family {
+                    Some(seen) if seen != control.family() => mixed = true,
                     Some(_) => {}
-                    None => scheme = Some(control.scheme()),
+                    None => family = Some(control.family()),
                 }
             });
-            // A mapping the player cannot change needs no one scheme to change it *in*; it is a row
+            // A mapping the player cannot change needs no one family to change it *in*; it is a row
             // in whichever table its first control belongs to, which is odd but harmless.
             if mixed && rebindable {
-                found.push(at(DiagnosticKind::MixedSchemeMapping));
+                found.push(at(DiagnosticKind::MixedFamilyMapping));
             }
         }
 
         if let Some(decl) = &binding.tunable
-            && let Some(scheme) = crate::binding::binding_scheme(&binding.source)
+            && let Some(family) = crate::binding::binding_family(&binding.source)
         {
-            match tunable_keys.entry((scheme, decl.key)) {
+            match tunable_keys.entry((family, decl.key)) {
                 alloc::collections::btree_map::Entry::Vacant(entry) => {
                     entry.insert((binding.action, decl.default));
                 }
@@ -567,7 +567,7 @@ const UNBOUND: u16 = u16::MAX;
 // action's contributions in a single pass with no per-frame bookkeeping.
 pub struct Plan<C> {
     bindings: Vec<CompiledBinding>,
-    slot_intents: Vec<Intent>,
+    slot_intents: Vec<ActionIntent>,
     // Parallel to `slot_intents`: how a transition on this slot becomes a typed event.
     slot_dispatch: Vec<Dispatch>,
     // Parallel again: the declared path of the action holding this slot, kept for the diagnostics
@@ -646,7 +646,7 @@ impl<C> Plan<C> {
     }
 
     fn compile(bindings: Vec<BindingSpec>, template: Option<&Self>) -> Self {
-        let mut slot_intents: Vec<Intent> = Vec::new();
+        let mut slot_intents: Vec<ActionIntent> = Vec::new();
         let mut slot_dispatch: Vec<Dispatch> = Vec::new();
         let mut slot_paths: Vec<&'static str> = Vec::new();
         let mut slot_actions: Vec<ActionId> = Vec::new();
@@ -661,12 +661,12 @@ impl<C> Plan<C> {
         let mut compiled = Vec::with_capacity(bindings.len());
         let mut scratch_count = 0;
 
-        // Bindings sharing a `Bool`-shaped tunable key, within one scheme, get one shared scratch
+        // Bindings sharing a `Bool`-shaped tunable key, within one family, get one shared scratch
         // cell instead of each keeping its own — see `CompiledBinding::tunable_shared`. Computed up
         // front, against every binding at once, since a group is only a group once every member is
         // known; a `Range` tunable never joins one, because `DeadZone`'s modifier holds no runtime
         // state to share in the first place.
-        let mut tunable_groups: BTreeMap<(crate::mapping::Scheme, &'static str), Vec<usize>> =
+        let mut tunable_groups: BTreeMap<(crate::mapping::DeviceFamily, &'static str), Vec<usize>> =
             BTreeMap::new();
         for (index, binding) in bindings.iter().enumerate() {
             let Some(decl) = &binding.tunable else {
@@ -675,11 +675,11 @@ impl<C> Plan<C> {
             if !matches!(decl.default, crate::mapping::TunableValue::Bool(_)) {
                 continue;
             }
-            let Some(scheme) = crate::binding::binding_scheme(&binding.source) else {
+            let Some(family) = crate::binding::binding_family(&binding.source) else {
                 continue;
             };
             tunable_groups
-                .entry((scheme, decl.key))
+                .entry((family, decl.key))
                 .or_default()
                 .push(index);
         }
@@ -802,7 +802,7 @@ impl<C> Plan<C> {
         self.has_chords
     }
 
-    pub(crate) fn intent_for_slot(&self, slot: usize) -> Intent {
+    pub(crate) fn intent_for_slot(&self, slot: usize) -> ActionIntent {
         self.slot_intents[slot]
     }
 
@@ -918,7 +918,7 @@ mod tests {
         assert_eq!(builder.diagnostics(), &[]);
     }
 
-    // Two different actions sharing one tunable name in one scheme is the tunable half of
+    // Two different actions sharing one tunable name in one family is the tunable half of
     // `DuplicateMappingKey`: a saved change to one would land on the other.
     #[cfg(feature = "keyboard")]
     #[test]

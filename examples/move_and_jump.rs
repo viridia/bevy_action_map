@@ -57,7 +57,7 @@ fn main() {
     app.run();
 }
 
-fn move_player(input: Actions<OnFoot>, mut position: Local<Vec3>) {
+fn move_player(input: ContextActions<OnFoot>, mut position: Local<Vec3>) {
     let movement = input.value::<Move>();
     *position += Vec3::new(movement.x, 0.0, movement.y);
 
@@ -66,7 +66,7 @@ fn move_player(input: Actions<OnFoot>, mut position: Local<Vec3>) {
     }
 }
 
-fn look_camera(input: Actions<FreeLook>) {
+fn look_camera(input: ContextActions<FreeLook>) {
     let delta = input.value::<Look>();
     if delta != Vec2::ZERO {
         info!("Look delta: {delta:?}");

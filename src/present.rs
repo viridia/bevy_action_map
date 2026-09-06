@@ -65,10 +65,10 @@ use alloc::vec::Vec;
 use bevy_ecs::world::World;
 
 use crate::action::ActionId;
-use crate::binding::{Control, Part};
+use crate::binding::{BindingPart, Control};
 use crate::capture::ControlClass;
 use crate::condition::ConditionDescriptor;
-use crate::mapping::Scheme;
+use crate::mapping::DeviceFamily;
 
 #[cfg(feature = "gamepad")]
 use crate::binding::Stick;
@@ -605,7 +605,7 @@ pub enum ControlOrigin {
         label: String,
         /// Which set of devices it belongs to, where the reporter said. `None` where it belongs to
         /// neither — a control on a device family this crate does not model.
-        scheme: Option<Scheme>,
+        family: Option<DeviceFamily>,
         /// What kind of signal it reports, where the reporter said. `None` where it did not, which
         /// is why a caller narrowing by class has to decide whether an unclassified control
         /// belongs in the answer.
@@ -631,10 +631,10 @@ impl ControlOrigin {
     }
 
     /// Which set of devices this control belongs to, where that is known.
-    pub const fn scheme(&self) -> Option<Scheme> {
+    pub const fn family(&self) -> Option<DeviceFamily> {
         match self {
-            Self::Ours(control) => Some(control.scheme()),
-            Self::Foreign { scheme, .. } => *scheme,
+            Self::Ours(control) => Some(control.family()),
+            Self::Foreign { family, .. } => *family,
         }
     }
 
@@ -674,9 +674,9 @@ pub struct Prompt {
     pub with: Vec<ControlOrigin>,
     /// Which part of a composite this control drives.
     ///
-    /// [`Part::Whole`] unless the action is bound to an arrangement of several controls, in which
+    /// [`BindingPart::Whole`] unless the action is bound to an arrangement of several controls, in which
     /// case there is one prompt per part and this is what tells them apart.
-    pub part: Part,
+    pub part: BindingPart,
     /// What besides pressing the control this binding requires — held a while, tapped twice.
     ///
     /// [`ConditionDescriptor::None`] for almost everything, on the same terms as
@@ -698,7 +698,7 @@ pub struct PromptScope {
     /// Only bindings declared in the context with this path.
     pub context: Option<&'static str>,
     /// Only controls belonging to this set of devices.
-    pub scheme: Option<Scheme>,
+    pub family: Option<DeviceFamily>,
     /// Only controls reporting this kind of signal.
     ///
     /// A control whose class is unknown is not in the answer. That happens only to one supplied by
@@ -711,7 +711,7 @@ impl PromptScope {
     /// Everything currently bound, on any device, in any context.
     pub const ANY: Self = Self {
         context: None,
-        scheme: None,
+        family: None,
         class: None,
     };
 
@@ -722,8 +722,8 @@ impl PromptScope {
     }
 
     /// Narrows to one set of devices.
-    pub const fn on(mut self, scheme: Scheme) -> Self {
-        self.scheme = Some(scheme);
+    pub const fn on(mut self, family: DeviceFamily) -> Self {
+        self.family = Some(family);
         self
     }
 
@@ -807,8 +807,8 @@ impl Prompts for BindingTable<'_> {
                     continue;
                 }
                 if scope
-                    .scheme
-                    .is_some_and(|scheme| scheme != entry.control.scheme())
+                    .family
+                    .is_some_and(|family| family != entry.control.family())
                 {
                     continue;
                 }
@@ -874,7 +874,7 @@ impl Prompts for BindingTable<'_> {
 /// say so with [`PromptGeneration::invalidate`], since a resource being written is not something
 /// this crate watches for.
 #[derive(bevy_ecs::resource::Resource, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PromptDevice(pub Option<Scheme>);
+pub struct PromptDevice(pub Option<DeviceFamily>);
 
 /// Counts the times the answer to a prompt lookup may have changed.
 ///
@@ -938,7 +938,7 @@ pub(crate) struct ContextBindings {
 /// One control of one binding, with what the binding requires alongside it.
 pub(crate) struct BoundControl {
     pub(crate) action: ActionId,
-    pub(crate) part: Part,
+    pub(crate) part: BindingPart,
     pub(crate) control: Control,
     pub(crate) chord: Vec<Control>,
     pub(crate) condition: ConditionDescriptor,
@@ -1180,7 +1180,7 @@ mod tests {
 
         // A mouse button is keyboard-and-mouse and reports on a button channel, which is what lets
         // it fill a mapping a key could fill.
-        assert_eq!(left.scheme(), crate::mapping::Scheme::KeyboardMouse);
+        assert_eq!(left.family(), crate::mapping::DeviceFamily::KeyboardMouse);
         assert_eq!(left.shape(), crate::action::ChannelShape::Button);
     }
 }
@@ -1248,7 +1248,7 @@ mod prompt_tests {
 
         let prompts = BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY);
         assert_eq!(labels(&prompts), ["Space", "South Button"]);
-        assert_eq!(prompts[0].part, crate::binding::Part::Whole);
+        assert_eq!(prompts[0].part, crate::binding::BindingPart::Whole);
         assert_eq!(prompts[0].context, Some("prompt_tests.shell"));
         assert!(prompts[0].with.is_empty());
         // An origin carries the stored name as well as the readable one, so a game with a
@@ -1322,7 +1322,7 @@ mod prompt_tests {
         assert_eq!(
             labels(&table.prompts(
                 Jump::id(),
-                PromptScope::ANY.on(crate::mapping::Scheme::Gamepad)
+                PromptScope::ANY.on(crate::mapping::DeviceFamily::Gamepad)
             )),
             ["South Button"]
         );
@@ -1358,7 +1358,7 @@ mod prompt_tests {
     /// the presentation model takes, and what lets a caption say which key turns which way.
     #[test]
     fn a_composite_answers_once_per_direction() {
-        use crate::binding::Part;
+        use crate::binding::BindingPart;
 
         let mut app = app();
         app.add_context::<Flying>(|controls| {
@@ -1368,8 +1368,8 @@ mod prompt_tests {
 
         let prompts = BindingTable::new(app.world()).prompts(Turn::id(), PromptScope::ANY);
         assert_eq!(labels(&prompts), ["A", "D"]);
-        assert_eq!(prompts[0].part, Part::Negative);
-        assert_eq!(prompts[1].part, Part::Positive);
+        assert_eq!(prompts[0].part, BindingPart::Negative);
+        assert_eq!(prompts[1].part, BindingPart::Positive);
     }
 
     /// What has to be held alongside travels with the control, because a prompt that dropped it
@@ -1495,13 +1495,16 @@ mod prompt_tests {
         let foreign = ControlOrigin::Foreign {
             name: "steam/dualsense_touchpad".into(),
             label: "Touchpad".into(),
-            scheme: Some(crate::mapping::Scheme::Gamepad),
+            family: Some(crate::mapping::DeviceFamily::Gamepad),
             class: Some(ControlClass::AnyDelta),
         };
 
         assert_eq!(foreign.name(), "steam/dualsense_touchpad");
         assert_eq!(foreign.fallback_label(), "Touchpad");
-        assert_eq!(foreign.scheme(), Some(crate::mapping::Scheme::Gamepad));
+        assert_eq!(
+            foreign.family(),
+            Some(crate::mapping::DeviceFamily::Gamepad)
+        );
         assert_eq!(foreign.class(), Some(ControlClass::AnyDelta));
         // And the one thing it cannot answer, so that a caller reaching past the name has to say
         // what it does when the control is not ours.
@@ -1516,7 +1519,7 @@ mod prompt_tests {
         let unsaid = ControlOrigin::Foreign {
             name: "steam/mystery".into(),
             label: "Mystery".into(),
-            scheme: None,
+            family: None,
             class: None,
         };
 

@@ -1,4 +1,4 @@
-//! Players, device pairing, and control schemes.
+//! Players, device pairing, and control families.
 //!
 //! This module maps devices to the players that own them, so one player's input never reaches
 //! another, and describes the named device requirements a game can assign players against.
@@ -48,14 +48,14 @@ impl Deref for Paired {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mapping::Scheme;
+    use crate::mapping::DeviceFamily;
 
     #[test]
     fn paired_reads_through_to_the_inner_set() {
         let paired = Paired::to(DeviceHandle::KeyboardMouse);
         assert!(paired.contains(DeviceHandle::KeyboardMouse));
         assert_eq!(
-            paired.owner_for(Scheme::KeyboardMouse),
+            paired.owner_for(DeviceFamily::KeyboardMouse),
             Some(DeviceHandle::KeyboardMouse)
         );
     }
