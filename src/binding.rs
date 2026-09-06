@@ -2499,12 +2499,6 @@ where
     }
 }
 
-impl Modifier for BindingModifier {
-    fn apply(&self, value: ActionValue, _scratch: &mut Scratch, _delta: f32) -> ActionValue {
-        Self::apply(self, value, &mut Scratch::default(), 0.0)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

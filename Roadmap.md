@@ -321,23 +321,25 @@ app on purpose (D53). `bevy_settings` is that destination: register `SavedOverri
 `SettingsGroup` resource and let it merge into the game's one settings file alongside whatever else
 the app declares there.
 
-- **The mechanism is validated, not open.** A scratch test against `bevy_settings::resources_to_toml`
-  / `apply_settings_to_world` confirmed the whole path round-trips correctly: `SavedOverrides`'s own
-  fields are walked structurally (no stutter, no bevy_settings change needed), and its nested
-  `SavedRow`/`SavedTunableValue` fields bridge through `#[reflect(Serialize, Deserialize)]` to their
-  own hand-written encoding rather than bevy_reflect's generic enum shape. This crate's own
+- **The mechanism is validated, not open.** A scratch test against
+  `bevy_settings::resources_to_toml` / `apply_settings_to_world` confirmed the whole path
+  round-trips correctly: `SavedOverrides`'s own fields are walked structurally (no stutter, no
+  bevy_settings change needed), and its nested `SavedRow`/`SavedTunableValue` fields bridge through
+  `#[reflect(Serialize, Deserialize)]` to their own hand-written encoding rather than bevy_reflect's
+  generic enum shape. This crate's own
   `overrides::tests::persistence::a_saved_override_set_round_trips_through_reflect` pins the same
   contract without a `bevy_settings` dependency. This chunk is the remaining wiring, not a risk to
   chase.
 - **Load at startup, save on Confirm.** `apply_and_close` in `settings.rs` already applies a pending
   `Overrides` to the running game; this chunk adds a startup system calling `resolve_saved` against
-  the loaded `SavedOverrides` resource before the first `apply_overrides`, and a `save_overrides` call
-  on Confirm feeding back into it.
+  the loaded `SavedOverrides` resource before the first `apply_overrides`, and a `save_overrides`
+  call on Confirm feeding back into it.
 - **A dev-dependency of the examples, not the crate.** This crate publishes `SavedOverrides` and no
-  opinion about where the bytes go (D53); `bevy_settings` is wired into `examples/disasteroids` only.
-- **Not doing:** per-profile or per-scheme settings groups (R17.4), and anything Split Friction's two
-  protagonists need — chunk 71 owns per-player preset selection once a settings group exists to read
-  and write, this chunk owns getting one player's set to and from disk at all.
+  opinion about where the bytes go (D53); `bevy_settings` is wired into `examples/disasteroids`
+  only.
+- **Not doing:** per-profile or per-scheme settings groups (R17.4), and anything Split Friction's
+  two protagonists need — chunk 71 owns per-player preset selection once a settings group exists to
+  read and write, this chunk owns getting one player's set to and from disk at all.
 - **Retires the "Writing a saved override set to a file" row** in "Never built".
 - **Verified by:** rebinding a control, quitting Disasteroids, relaunching it, and finding the
   binding still applied.
@@ -405,8 +407,9 @@ game per concept, which chunk 42 and chunk 83 would otherwise both have paid for
   that imports this base's modules and swaps in exactly the one thing being demoed. If a variant
   needs to reach past the base's public surface to do that, the base is missing a seam — that is not
   license for the variant to route around it.
-- **Split if it grows.** Aesthetic work is open-ended in a way a mechanism chunk is not; if the court
-  and scoring alone run past a day's reading, ground rule 1 says split before writing, not during.
+- **Split if it grows.** Aesthetic work is open-ended in a way a mechanism chunk is not; if the
+  court and scoring alone run past a day's reading, ground rule 1 says split before writing, not
+  during.
 
 ### 42. The authority backend, faked
 
@@ -491,6 +494,23 @@ binding time rather than something every cross-platform game re-derives by hand.
 - **Resolved at binding time, not read time.** The name a game binds does not change per platform;
   what it expands to does, once, when the plan is built — not on every frame the control is read.
 - **Self-contained**, and independent of 94a and 94b.
+
+### 96. `BindingModifier`'s blanket `Modifier` impl
+
+`docs/issues.md` 1009: `impl Modifier for BindingModifier` forwards to the inherent `apply` with a
+throwaway `Scratch` and `delta = 0.0`, and does not forward `rescales` at all. Reachable only
+through `.custom(BindingModifier::DeadZone(..))` — wrapping a built-in modifier as its own trait
+object — which nothing in tree does, so it is latent rather than live: a stateful or rate modifier
+misbehaves, and a wrapped rescaling one stops tripping D20's chained-rescaling check.
+
+- **Delete the impl.** Nothing needs `BindingModifier` to satisfy `Modifier` generically, and the
+  deletion is a compile-time close of the hole rather than a runtime patch: the unsafe construction
+  no longer type-checks at all.
+- **Not doing:** anything about the built-in modifiers' own correctness, which was never in
+  question — only the second, forwarding path was wrong.
+- **Verified by:** a new test exercising the same seam (`Custom`'s `rescales()` dispatching through
+  the wrapped value's own trait impl) with a hand-written modifier, confirming the mechanism itself
+  is sound now that the one broken implementor of it is gone.
 
 ---
 

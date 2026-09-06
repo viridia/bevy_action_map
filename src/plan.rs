@@ -602,7 +602,6 @@ pub struct Plan<C> {
 
 impl<C> Plan<C> {
     /// Compiles a plan from authored bindings.
-    ///
     // Compilation asks nothing about whether the bindings make sense: `diagnose` owns that, and
     // `add_context` runs it first and refuses the context rather than compiling a plan that cannot
     // work. Keeping the two apart is what lets a rebinding UI ask about bindings it has no
@@ -879,6 +878,45 @@ mod tests {
                 control: Control::Key(KeyCode::Space)
             }
         );
+    }
+
+    // `Custom`'s `rescales()` dispatches through the wrapped modifier's own trait impl rather
+    // than a match arm on `BindingModifier`, which is exactly the seam a stale blanket impl once
+    // broke silently for any built-in modifier routed through it. A hand-written one exercises the
+    // same seam and must still be counted.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_custom_modifier_still_counts_toward_chained_rescaling() {
+        use crate::action::{ActionValue, Scratch};
+        use crate::binding::Modifier;
+        use bevy_input::keyboard::KeyCode;
+
+        struct AlsoRescales;
+
+        impl Modifier for AlsoRescales {
+            fn apply(
+                &self,
+                value: ActionValue,
+                _scratch: &mut Scratch,
+                _delta: f32,
+            ) -> ActionValue {
+                value
+            }
+
+            fn rescales(&self) -> bool {
+                true
+            }
+        }
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder
+            .bind::<Jump>(KeyCode::Space)
+            .rescale(0.0, 1.0)
+            .custom(AlsoRescales);
+
+        let found = builder.diagnostics();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].kind, DiagnosticKind::ChainedRescaling { count: 2 });
     }
 
     // Two bindings on one control where only one consumes it. Whether a lower-priority context
