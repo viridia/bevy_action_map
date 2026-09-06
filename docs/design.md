@@ -434,9 +434,13 @@ pub enum Obstacle {
     None, Unbound, ContextInactive, AwaitingRelease,
     Consumed { control: Control, by: &'static str },
     Outranked { control: Control, chord: u8 },
-    ConditionPending, NoInput,
+    ConditionPending, Unowned, NoInput,
 }
 ```
+
+`why_not` and `why_not_id` also take the instance's `Paired`, if it has one: a binding on a device
+outside that pairing reports `Unowned` rather than `NoInput`, so a context whose pairing is dropping
+every event the player generates says so instead of looking like the player pressed nothing.
 
 `InputContextState::iter` walks every action in a context as `ActionReading`s, and `inspect::dump`
 produces a fully type-erased `InputDump` — contexts, instances and actions by path — for a debug

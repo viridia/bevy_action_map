@@ -156,6 +156,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 70  | Device brand and class                           |
 | 91  | The crate does not do what its own documents say  |
 | 17c | The two normalizes                                |
+| 89  | `why_not` can see the pairing                     |
 
 ---
 
@@ -164,24 +165,6 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 The live tier of [docs/issues.md](./docs/issues.md): no unusual configuration, no feature nobody has
 used, and the answer is still wrong. Six more of its entries are behind this one and not yet
 routed.
-
-### 89. `why_not` can see the pairing
-
-R22.1 names five causes an action might not fire, and `Obstacle` answers three. `why_not_id` takes
-`&ConsumedControls` and no `Paired`, so it cannot see device pairing at all. A context whose
-pairing is dropping every event the player generates answers `Obstacle::NoInput` — "nothing was
-pressed" — when something was pressed and was filtered, which is precisely the confusion R22.1
-exists to end, arriving as the answer.
-
-- **It bites where it is hardest to debug.** Pairing is used only in local multiplayer, and worst
-  during a join flow, when the pairing is the thing under suspicion.
-- **`Obstacle` is `#[non_exhaustive]`**, so the new cause is an addition rather than a break.
-- **Not doing: the fifth cause.** "Condition Z at 40% progress" needs a progress number that
-  `ActionState` does not carry — [docs/issues.md](./docs/issues.md) 3.1, which is R3.4 and R3.5,
-  and has no destination at all. This chunk fixes the answer that is *wrong*; that one adds the
-  answer that is *missing*.
-- **Reasoned from the signature, not probed** — the one finding in the live tier that was not run.
-  Confirming it is the first thing this chunk does, and it may end up smaller than it looks.
 
 ### 90. A context nobody declared says so
 

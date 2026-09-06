@@ -291,11 +291,15 @@ impl<C: InputContext> InputContextState<C> {
     ///
     /// Checked in the order the obstacles apply, so what comes back is the first thing in the way
     /// rather than a list. Clearing it may reveal another.
-    pub fn why_not<A>(&self, consumed: &crate::eval::ConsumedControls) -> Obstacle
+    pub fn why_not<A>(
+        &self,
+        consumed: &crate::eval::ConsumedControls,
+        pairing: Option<&crate::player::Paired>,
+    ) -> Obstacle
     where
         A: InputAction,
     {
-        self.why_not_id(A::id(), consumed)
+        self.why_not_id(A::id(), consumed, pairing)
     }
 
     /// Explains why an action named at run time is not firing.
@@ -306,6 +310,7 @@ impl<C: InputContext> InputContextState<C> {
         &self,
         action: ActionId,
         consumed: &crate::eval::ConsumedControls,
+        pairing: Option<&crate::player::Paired>,
     ) -> Obstacle {
         let Some(slot) = self.plan.slot_for_action(action) else {
             return Obstacle::Unbound;
@@ -320,10 +325,16 @@ impl<C: InputContext> InputContextState<C> {
         }
         // A control someone else holds is the most useful answer available, so both of these
         // outrank the catch-all below even though all three are "the binding read nothing".
+        // No pairing owns every device (R15.3's default), so `reachable` starts true in that case
+        // and the loop below only ever narrows it when there is a `Paired` to narrow it against.
+        let mut reachable = pairing.is_none();
         for binding in self.plan.bindings().iter().filter(|b| b.slot == slot) {
             let mut taken = None;
             let mut outranked = None;
             binding.source.for_each_control(|control| {
+                if pairing.is_some_and(|p| p.owner_for(control.scheme()).is_some()) {
+                    reachable = true;
+                }
                 if taken.is_none()
                     && let Some(by) = consumed.claimant(control)
                 {
@@ -341,6 +352,12 @@ impl<C: InputContext> InputContextState<C> {
             if let Some(obstacle) = taken.or(outranked) {
                 return obstacle;
             }
+        }
+        // A device that can never satisfy the binding beats "awaiting release": that latch can
+        // only clear from an event on an owned device, so reporting it here would describe a wait
+        // that never ends.
+        if !reachable {
+            return Obstacle::Unowned;
         }
         if self.require_reset[slot] {
             return Obstacle::AwaitingRelease;
@@ -592,6 +609,12 @@ pub enum Obstacle {
     },
     /// A condition has begun but has not been satisfied — a hold part way through.
     ConditionPending,
+    /// None of this player's paired devices can reach any binding this action has.
+    ///
+    /// Distinct from [`NoInput`](Self::NoInput): that is an owned device sitting idle, this is no
+    /// owned device able to satisfy the binding at all. See
+    /// [`Paired`](crate::player::Paired).
+    Unowned,
     /// Nothing has touched any control this action is bound to.
     NoInput,
 }
@@ -613,7 +636,15 @@ pub enum Obstacle {
 /// [`Single`]: bevy_ecs::system::Single
 #[derive(SystemParam)]
 pub struct Actions<'w, 's, C: InputContext + Component> {
-    state: bevy_ecs::system::Single<'w, 's, (Entity, &'static InputContextState<C>)>,
+    state: bevy_ecs::system::Single<
+        'w,
+        's,
+        (
+            Entity,
+            &'static InputContextState<C>,
+            Option<&'static crate::player::Paired>,
+        ),
+    >,
     consumed: bevy_ecs::system::Res<'w, crate::eval::ConsumedControls>,
 }
 
@@ -671,7 +702,7 @@ impl<C: InputContext + Component> Actions<'_, '_, C> {
     where
         A: InputAction,
     {
-        self.state().why_not::<A>(&self.consumed)
+        self.state().why_not::<A>(&self.consumed, self.state.2)
     }
 }
 
@@ -690,19 +721,27 @@ impl<C: InputContext + Component> Actions<'_, '_, C> {
 /// ```
 #[derive(SystemParam)]
 pub struct ActionsQuery<'w, 's, C: InputContext + Component> {
-    states: Query<'w, 's, (Entity, &'static InputContextState<C>)>,
+    states: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static InputContextState<C>,
+            Option<&'static crate::player::Paired>,
+        ),
+    >,
     consumed: bevy_ecs::system::Res<'w, crate::eval::ConsumedControls>,
 }
 
 impl<C: InputContext + Component> ActionsQuery<'_, '_, C> {
     /// Returns the instance carried by an entity, if it has one.
     pub fn get(&self, entity: Entity) -> Option<&InputContextState<C>> {
-        self.states.get(entity).ok().map(|(_, state)| state)
+        self.states.get(entity).ok().map(|(_, state, _)| state)
     }
 
     /// Iterates every instance of this context and the entity carrying it.
     pub fn iter(&self) -> impl Iterator<Item = (Entity, &InputContextState<C>)> {
-        self.states.iter()
+        self.states.iter().map(|(entity, state, _)| (entity, state))
     }
 
     /// How many entities carry this context.
@@ -725,9 +764,12 @@ impl<C: InputContext + Component> ActionsQuery<'_, '_, C> {
     where
         A: InputAction,
     {
-        self.get(entity).map_or(Obstacle::Unbound, |state| {
-            state.why_not::<A>(&self.consumed)
-        })
+        self.states
+            .get(entity)
+            .ok()
+            .map_or(Obstacle::Unbound, |(_, state, pairing)| {
+                state.why_not::<A>(&self.consumed, pairing)
+            })
     }
 }
 
@@ -1311,14 +1353,18 @@ fn read_instances<C: InputContext + Component>(
     // world by hand. Held here so the borrow below has something to point at.
     let nothing_consumed = crate::eval::ConsumedControls::default();
 
-    let mut instances = world.query::<(Entity, &InputContextState<C>)>();
+    let mut instances = world.query::<(
+        Entity,
+        &InputContextState<C>,
+        Option<&crate::player::Paired>,
+    )>();
     let consumed = world
         .get_resource::<crate::eval::ConsumedControls>()
         .unwrap_or(&nothing_consumed);
 
     instances
         .iter(world)
-        .map(|(entity, state)| InstanceDump {
+        .map(|(entity, state, pairing)| InstanceDump {
             entity,
             active: state.is_active(),
             actions: state
@@ -1327,7 +1373,7 @@ fn read_instances<C: InputContext + Component>(
                     action: reading.action,
                     path: reading.path,
                     state: *reading.state,
-                    obstacle: state.why_not_id(reading.action, consumed),
+                    obstacle: state.why_not_id(reading.action, consumed, pairing),
                 })
                 .collect(),
         })
@@ -2388,7 +2434,7 @@ mod tests {
 
         // The diagnostic still distinguishes the two, which is what it is for.
         assert_eq!(
-            state.why_not::<NeverBound>(app.world().resource()),
+            state.why_not::<NeverBound>(app.world().resource(), None),
             Obstacle::Unbound
         );
     }
@@ -3119,14 +3165,14 @@ mod tests {
                 .unwrap();
             state.deactivate();
             assert_eq!(
-                state.why_not::<Jump>(&nothing_taken),
+                state.why_not::<Jump>(&nothing_taken, None),
                 Obstacle::ContextInactive
             );
             // Coming back while the control is already held is the R7.5 case, and it has its own
             // answer rather than looking like nobody pressed anything.
             state.activate();
             assert_eq!(
-                state.why_not::<Jump>(&nothing_taken),
+                state.why_not::<Jump>(&nothing_taken, None),
                 Obstacle::AwaitingRelease
             );
         }
@@ -3243,7 +3289,7 @@ mod tests {
         let state = probe.single(app.world()).unwrap();
         let consumed = crate::eval::ConsumedControls::default();
         assert_eq!(
-            state.why_not::<TypeS>(&consumed),
+            state.why_not::<TypeS>(&consumed, None),
             Obstacle::Outranked {
                 control: crate::binding::Control::Key(KeyCode::KeyS),
                 chord: 3,
@@ -4010,6 +4056,47 @@ mod tests {
                 .phase::<Jump>(),
             Phase::Idle,
             "a sibling pad's press must not reach an instance paired to a different pad"
+        );
+    }
+
+    // Chunk 89: `why_not` used to have no `Paired` to check, so a control the player actually
+    // pressed on a device this instance is not paired to came back as `NoInput` — "nothing was
+    // pressed" — rather than naming the pairing as the reason it never arrived.
+    #[cfg(all(feature = "gamepad", feature = "keyboard"))]
+    #[test]
+    fn why_not_blames_the_pairing_rather_than_no_input() {
+        use crate::device::DeviceHandle;
+        use crate::eval::ConsumedControls;
+        use crate::player::Paired;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        let pad_player = app
+            .world_mut()
+            .spawn((
+                OnFoot,
+                Paired::to(DeviceHandle::Gamepad(bevy_ecs::entity::Entity::from_bits(
+                    1,
+                ))),
+            ))
+            .id();
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        let world = app.world();
+        let state = world.get::<InputContextState<OnFoot>>(pad_player).unwrap();
+        let pairing = world.get::<Paired>(pad_player);
+        let consumed = ConsumedControls::default();
+        assert_eq!(
+            state.why_not::<Jump>(&consumed, pairing),
+            Obstacle::Unowned,
+            "the keyboard press happened, it just was never this instance's to see"
         );
     }
 
