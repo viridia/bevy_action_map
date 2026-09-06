@@ -141,6 +141,16 @@ fn expand_input_context(input: DeriveInput) -> Result<proc_macro2::TokenStream> 
             const STORAGE_TYPE: ::bevy_action_map::__macro_exports::StorageType =
                 ::bevy_action_map::__macro_exports::StorageType::Table;
             type Mutability = ::bevy_action_map::__macro_exports::Mutable;
+
+            // `add_context` is the only thing that can give `#ident` an `on_add` hook, and only
+            // once it has been called — so a context nobody declared has no `on_add` hook to catch
+            // it. `on_insert` is a hook slot `add_context` never touches, which lets this run
+            // whether or not `add_context` ever does.
+            fn on_insert() -> ::core::option::Option<::bevy_action_map::__macro_exports::ComponentHook> {
+                ::core::option::Option::Some(
+                    ::bevy_action_map::__macro_exports::warn_if_undeclared::<#ident>,
+                )
+            }
         }
 
         impl ::core::default::Default for #ident {

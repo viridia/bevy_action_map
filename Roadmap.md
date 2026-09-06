@@ -157,6 +157,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 17c | The two normalizes                                |
 | 89  | `why_not` can see the pairing                     |
 | 48  | Names that survive a glob import                  |
+| 90  | A context nobody declared says so                 |
 
 ---
 
@@ -165,22 +166,6 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 The live tier of [docs/issues.md](./docs/issues.md): no unusual configuration, no feature nobody has
 used, and the answer is still wrong. Six more of its entries are behind this one and not yet
 routed.
-
-### 90. A context nobody declared says so
-
-Spawn a `#[derive(InputContext)]` component for a type `add_context` was never called for and
-nothing happens: no `InputContextState` is attached, no diagnostic is logged, and `dump` cannot see
-it either, since `DeclaredContexts` is its only source. The tool built to answer "why is nothing
-happening" is blind to the likeliest cause of it.
-
-- **The mirror case is already handled**, which is what makes this an asymmetry rather than an
-  omission: `ContextDump::instances` documents "declared and nobody has it, which is usually a
-  mistake" and shows it.
-- **The cheap half is a warning from the component's own `on_add` hook** when no plan resource
-  exists for its type.
-- **It owes a sentence to `docs/design.md` §7.1.** R22.14's MUST — spawning must be sufficient,
-  including from a scene — holds only for a type that was *also* declared imperatively, and no
-  document says so today.
 
 ---
 

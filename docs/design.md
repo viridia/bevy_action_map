@@ -403,6 +403,12 @@ while no entity carries the component yet, a context must be declared before any
 it; `add_context` panics if the plugin is missing, if a context is declared twice, or if an entity
 already carries it.
 
+Spawning is sufficient only once a context has reached this point: R22.14's promise that spawning
+alone activates it, even from a scene, assumes `add_context` already ran for that type. A
+`#[derive(InputContext)]` component spawned before that logs a warning instead of silently doing
+nothing, since there is no plan yet to build state from and no other diagnostic — `dump` included —
+can see a context nobody declared.
+
 ### 7.2 Activation
 
 A declared context is live as soon as an entity carries it. `active_if` and `active_in_state` (the

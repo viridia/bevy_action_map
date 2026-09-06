@@ -810,6 +810,32 @@ fn attach_context_state<C: InputContext + Component>(
     world.commands().entity(context.entity).insert(state);
 }
 
+/// Warns when a `#[derive(InputContext)]` component is spawned before `add_context` declared it.
+///
+/// `attach_context_state` cannot catch this by itself: `add_context` is the only thing that
+/// installs it as `C`'s `on_add` hook, so a type nobody declared has no `on_add` hook at all, and
+/// neither does anything log the miss — the symptom is just a control that does nothing, on a
+/// context `dump` cannot see either, since [`DeclaredContexts`](crate::inspect::DeclaredContexts)
+/// is its only source. This runs from `Component::on_insert` instead, which the derive can set at
+/// compile time regardless of whether `add_context` ever runs, and is a no-op once it has.
+#[doc(hidden)]
+pub fn warn_if_undeclared<C: InputContext + Component>(
+    world: DeferredWorld<'_>,
+    context: HookContext,
+) {
+    if world.get_resource::<InputContextPlan<C>>().is_some() {
+        return;
+    }
+    bevy_utils::once!(log::warn!(
+        "entity {} carries context `{}` ({}), but add_context was never called for it — none of \
+         its bindings can fire, and `dump` cannot see this instance either. Call add_context \
+         before spawning it.",
+        context.entity,
+        C::PATH,
+        core::any::type_name::<C>(),
+    ));
+}
+
 /// Says that a prompt naming this context's controls may now say something else.
 ///
 /// Registered on the *state* rather than on `C`, because it is the state that says whether the
@@ -2457,6 +2483,7 @@ mod tests {
         use bevy_platform::sync::atomic::{AtomicUsize, Ordering};
 
         pub(super) static SEEN: AtomicUsize = AtomicUsize::new(0);
+        pub(super) static UNDECLARED: AtomicUsize = AtomicUsize::new(0);
 
         struct Counting;
 
@@ -2466,8 +2493,12 @@ mod tests {
             }
 
             fn log(&self, record: &log::Record<'_>) {
-                if alloc::format!("{}", record.args()).contains("no entity carries it") {
+                let message = alloc::format!("{}", record.args());
+                if message.contains("no entity carries it") {
                     SEEN.fetch_add(1, Ordering::Relaxed);
+                }
+                if message.contains("was never called for it") {
+                    UNDECLARED.fetch_add(1, Ordering::Relaxed);
                 }
             }
 
@@ -2485,6 +2516,10 @@ mod tests {
 
         pub(super) fn seen() -> usize {
             SEEN.load(Ordering::Relaxed)
+        }
+
+        pub(super) fn undeclared_seen() -> usize {
+            UNDECLARED.load(Ordering::Relaxed)
         }
     }
 
@@ -2548,6 +2583,36 @@ mod tests {
             app.update();
         }
         assert_eq!(capture::seen(), before + 1);
+    }
+
+    /// The likelier mistake behind a dead key: nobody called `add_context` at all, so there is no
+    /// `InputContextPlan` to say what `Undeclared` should even do.
+    #[test]
+    fn a_context_nobody_declared_says_so() {
+        #[derive(InputContext)]
+        #[context(path = "tests.undeclared", tick = Render)]
+        struct Undeclared;
+
+        capture::install();
+        let before = capture::undeclared_seen();
+
+        let mut app = App::new();
+        app.add_plugins(ActionMapPlugin);
+        let entity = app.world_mut().spawn(Undeclared).id();
+
+        assert!(
+            app.world()
+                .get::<InputContextState<Undeclared>>(entity)
+                .is_none(),
+            "no add_context call means no plan to build state from"
+        );
+        assert_eq!(capture::undeclared_seen(), before + 1);
+
+        // `on_insert` fired once, on the spawn itself — nothing polls for this per frame.
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(capture::undeclared_seen(), before + 1);
     }
 
     /// The list in that warning is the useful half of it — often a neighbouring action or the

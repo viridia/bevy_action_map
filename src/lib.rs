@@ -372,4 +372,7 @@ pub use bevy_action_map_macros::{InputAction, InputContext};
 #[doc(hidden)]
 pub mod __macro_exports {
     pub use bevy_ecs::component::{Component, Mutable, StorageType};
+    pub use bevy_ecs::lifecycle::ComponentHook;
+
+    pub use crate::context::warn_if_undeclared;
 }
