@@ -534,6 +534,16 @@ owns does not stop us _sampling_ the hardware underneath it — and Steam presen
 as an emulated gamepad, which the platform enumerates and we sample, so every input arrives twice.
 The same capability is what lets a replay backend mute live hardware.
 
+**Checked against `steamworks` 0.13, the Rust binding of the Steamworks SDK.** ISteamInput has no
+call that suppresses the emulated pad — that emulation is a per-title setting the player controls in
+the Steam client, not something a game can query or toggle. What suppression at the source layer
+comes down to for the Steam case is device-identity filtering: an emulated pad enumerates under
+Valve's own vendor id, distinct from the hardware underneath it, and that is the same primitive D64
+already built for `GamepadBrand`. No second mechanism is needed, only a policy — drop raw events from
+a Valve-vendor device while a Steam authority is active for that scheme — and the exact id wants
+confirming against a running client before a real backend ships, the same way R14's gamepad findings
+were measured rather than assumed.
+
 ### D23 — Focus integrates by activation, and interception is static
 
 **Decided.** Focus _type_ activates a context; what a claim does once made is ordinary context
@@ -1158,6 +1168,13 @@ priorities already do, so a backend activates one base set and pushes a layer pe
 and an action bound in several contexts is one action declared once in the base set. Consumption is
 the part layers cannot express: a lower layer's action is shadowed or it is not, and there is no
 equivalent of one context claiming a control for a frame.
+
+**Checked against `steamworks` 0.13.** Layers are real in the Steamworks SDK
+(`ActivateActionSetLayer`/`DeactivateActionSetLayer`), but the safe Rust binding exposes only the
+base set — `activate_action_set_handle` and nothing for layers. The function exists in the SDK a
+real backend links against, so this is a binding gap rather than a platform one: reachable by a
+patch upstream to that crate, or by a direct FFI call past it. Chunk 42's mock does not hit this,
+since it fakes the API the crate exposes rather than Steam's own.
 
 ### D52 — Pairing is a runtime handle; the join gesture reuses class bindings
 

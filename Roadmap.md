@@ -367,6 +367,10 @@ network removed, which was the expensive part.
   disagreeing with the authority about what happened. Those want a network; rewinding does not.
 - **Split if it grows.** Making the state snapshot-able with a differential test is separable from
   the example that rewinds, and ground rule 1 says that split happens before the code, not during.
+- **Depends on chunk 95.** The visible rewind reuses its Pong base rather than a third vehicle — the
+  same paddle-and-ball simulation snapshotted and re-simulated forward, with the recorded and
+  re-simulated transition logs compared. Chunk 42 will already have proven the base can host one
+  grafted concept without disturbing its own.
 
 ### 92. Persisting bindings through `bevy_settings`
 
@@ -438,6 +442,31 @@ control the player was already holding.
 - **Why it exists as its own chunk.** A `MUST` whose only record of a destination was in the log is
   exactly what ground rule 5 forbids.
 
+### 95. Pong, shared across the single-concept demos
+
+A base a single-concept chunk can borrow instead of either bolting its concept onto Disasteroids or
+Split Friction — diluting what those two already demonstrate — or building another bespoke arcade
+game per concept, which chunk 42 and chunk 83 would otherwise both have paid for separately.
+
+- **What ships:** two paddles, a ball, a court, scoring, and aesthetics carried as far as
+  Disasteroids' and Split Friction's were — a reader should see a real game, not programmer art.
+  Fixed tick throughout, since chunk 83's determinism check needs it and nothing here argues for
+  differing.
+- **Pairing is static, not dynamic.** Player one is keyboard and mouse, player two is the first
+  connected gamepad. Split Friction already exercises the join gesture and per-device routing; this
+  chunk has nothing to add there and reads worse for trying.
+- **No rebinding, no presets, no settings screen.** Disasteroids owns that lesson; this chunk binds
+  one scheme per player and stops.
+- **The example this chunk ships plays an ordinary game of Pong**, no concept grafted on, since
+  nothing depends on it yet. A complete, playable rally is the acceptance criterion, verified by
+  playing it.
+- **What keeps a later chunk's diff small.** Each concept-specific chunk adds its own entry point
+  that imports this base's modules and swaps in exactly the one thing being demoed. If a variant
+  needs to reach past the base's public surface to do that, the base is missing a seam — that is not
+  license for the variant to route around it.
+- **Split if it grows.** Aesthetic work is open-ended in a way a mechanism chunk is not; if the court
+  and scoring alone run past a day's reading, ground rule 1 says split before writing, not during.
+
 ### 42. The authority backend, faked
 
 The backend seam made real against something that is not Steam, because the seam is only proven by a
@@ -453,10 +482,15 @@ second implementer and the real one cannot live here.
   flag distinct from a zero value, origins as a type deliberately not `Control`, a glyph as a
   filesystem path, and a binding panel that is ugly on purpose. A mock nicer than Steam proves
   nothing.
-- **The acceptance criterion is a non-diff**, and it is no longer Disasteroids' pad: that is where
-  presets get taught, and a pad the backend owns has no presets of ours to show. The proof still has
-  to be screen code running unchanged against a backend-owned context, but it needs a vehicle that
-  is not already spoken for. Choosing one is part of this chunk.
+- **Depends on chunk 95.** The vehicle is its Pong base: one paddle's pad handed to the mock
+  backend, the other reading normally, so R0.4's per-context split is the game rather than a
+  contrived aside. A pause overlay over an in-progress rally supplies the second modal context the
+  review surface below needs live on the same pad, and a hold-to-charge serve gives the
+  backend-owned action an in-genre reason to carry a `.hold()`. The acceptance criterion is a
+  non-diff: the court, the score, and the pause menu run unchanged, and only which context drives
+  the backend-owned paddle changes. It is no longer Disasteroids' pad for the same reason it was
+  never going to be — that is where presets get taught, and a pad the backend owns has no presets of
+  ours to show.
 - **R0.6, the half that is not about Steam.** A backend suppresses its devices at L0 so their raw
   events never reach the frame. Without it the demo reads the pad twice.
 - **Review surface, and it is the point of the chunk.** Three decisions were written to be
@@ -528,7 +562,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | --- | --- |
 | **Persisting calibration**, keyed to identity (R11.7, R14.11) | R11.5's stable device identity, which chunk 72 builds. Measured calibration lasts as long as the process |
 | **Glyph ids** (R18.4) | asset-pipeline questions, sharper than they looked when this row was written. Kenney's input prompt set covers keyboard, mouse, three pad brands and Steam, CC0 — but its generic set ships blank, unlabeled buttons, so a generic-tier icon is not the self-contained image the brand → generic → text chain assumed; it needs a short text stamp. Chunk 70 closed this for the three named brands — `fallback_label_for_brand` gives a short current-generation word ("A", "Cross", "B") for face buttons, bumpers, triggers, Select/Start and Mode — but deliberately left `GamepadBrand::Generic` falling through to `fallback_label`'s sentence-shaped strings ("East Button"), so the unlabeled-icon problem is exactly as open for the generic tier as it was before. The identifier scheme is the other open half — R18.4 wants a key of (brand, control), chunk 37's stored names are already the control half, and Kenney's real file names are still the way to falsify it. Presentation sketch: `PromptIcon`, standalone in `examples/common/` beside `PromptSpan` rather than a mode of it — `PromptSpan` is `TextSpan`-based for inline prose, and Bevy/parley has no inline-image-in-text-run support, so an icon-capable prompt is necessarily block-level — resolving through R18.9's glyph-source sum type rather than assuming our own identifier is the only shape a backend hands back. The stamp text is a defaults question, not a missing feature: the studio's answer is R19.14's catalogue, the long tail's is a heuristic (leading candidate: the compass name's first letter, "E" for East) that has to be *right* rather than merely present, per "Who this is for"'s standard for a default nobody tests |
-| **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it |
+| **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it. Checked against `steamworks` 0.13: `get_glyph_for_action_origin` resolves to an absolute filesystem path under the Steam client's own install directory (`tenfoot/resource/images/library/controller/api/`), which a Bevy `AssetPath` can carry natively via `from_path_buf` — no string-escaping the drive letter or backslashes. The path is not to be opened as given: a custom `AssetSource` reader must canonicalize it and reject anything outside a known root before reading, rather than trust an external SDK's return value as a bare filesystem path. One scheme, one hard-coded root is the right size while only this one root is confirmed; a second scheme is warranted only if a second root with its own lifecycle surfaces (e.g. something ephemeral, which cannot share a stable root's caching and hot-reload assumptions) — not one scheme per SDK call that happens to return a path |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import |
 | **Netcode injection and reconciliation** | a networked target. Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. What is left here needs a remote player to inject a frame for and an authority to disagree with |
 | **Consumption-aware `FocusedInput` dispatch** (R8.2a) | **a game wanting `bevy_ui_widgets`' own widgets working generically, unmodified, without a context per widget kind.** A context per kind is the path to reach for first, and Disasteroids ships that way. A design for the filter was built and set aside: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline rather than a second raw-message read — keyboard only, since every keyboard-driven widget observer at the pinned commit gates on `ButtonState::Pressed` and none reacts to a release |
