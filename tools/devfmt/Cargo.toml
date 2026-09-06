@@ -1,0 +1,11 @@
+[package]
+name = "devfmt"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Reflows prose in Rust comments and markdown files to a fixed column width, leaving code, tables, links and fenced blocks untouched."
+
+[dependencies]
+
+# Its own workspace root, so it stays detached from the parent when the parent is a workspace.
+[workspace]

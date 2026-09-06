@@ -126,7 +126,19 @@ that"); for project history; for hedges that gate no real exception; and for a c
 em-dash asides, which reads as a fingerprint once noticed. Concise is not thin — cut the padding
 around every parameter, panic and edge case, not the content.
 
-Prose in the markdown documents wraps at 100 columns; tables are exempt.
+Prose in the markdown documents wraps at 100 columns; tables are exempt. The same limit applies to
+Rust comments, `///`/`//!`/`//` alike.
+
+After editing a comment or a doc paragraph — a rename, added prose, anything that could have pushed
+a line over the limit — fix the overflow with `tools/devfmt` rather than by hand:
+
+```sh
+cargo run --manifest-path tools/devfmt/Cargo.toml --quiet -- --diff
+```
+
+`--diff` (default `HEAD`) only touches paragraphs overlapping a line the working tree actually
+changed, so pre-existing debt elsewhere in the file is left alone — add `--check` first to preview
+what it would change. Drop `--diff` and pass paths instead only for a deliberate whole-tree sweep.
 
 ## Commit messages
 
@@ -145,6 +157,9 @@ otherwise have decided, or where the author wrote the code and the model reviewe
 
 ## Verification
 
+`scripts/verify.sh` runs the whole recipe below in one call and is the routine way to do this —
+prefer it to running each command by hand.
+
 ```sh
 cargo fmt --check
 cargo test --all-features
@@ -154,7 +169,7 @@ cargo test --no-default-features --features libm --test no_devices
 ```
 
 Whenever a `cfg` group changes, build all eight device-feature combinations — a configuration nobody
-has ever built is where the breakage hides:
+has ever built is where the breakage hides. `scripts/verify.sh --full` covers this too:
 
 ```sh
 for f in "" keyboard mouse gamepad keyboard,mouse keyboard,gamepad mouse,gamepad keyboard,mouse,gamepad; do
@@ -163,10 +178,11 @@ done
 ```
 
 **Known, not regressions:** doctests compile but fail to *run* (`dynamic_linking` on the `bevy`
-dev-dependency — chunk 28 owns the fix). Everything else is warning-free in every configuration
-above, so a warning is a regression — treat one as such rather than assuming it was already there.
-The unit tests under `src/` assume a keyboard is available and do not build in the no-devices
-configuration, so `tests/no_devices.rs` is run on its own rather than as part of the full suite.
+dev-dependency — chunk 28 owns the fix); `scripts/verify.sh` reports this apart from a real failure.
+Everything else is warning-free in every configuration above, so a warning is a regression — treat
+one as such rather than assuming it was already there. The unit tests under `src/` assume a keyboard
+is available and do not build in the no-devices configuration, so `tests/no_devices.rs` is run on
+its own rather than as part of the full suite.
 
 ## Context, and what not to economize on
 
@@ -181,9 +197,10 @@ separated things disagree, and that is not free — so cut waste, not reading. D
   found things no diff would have shown.
 
 What to scope down is **tool output**: `| head`, `| wc -l`, `git diff` rather than a sweep over four
-files dumped into the transcript to find five long lines. The Verification commands are the biggest
-offender — `cargo test --all-features` alone prints one line per test — so filter rather than let it
-scroll: `| grep -E "FAILED|error|test result"` for a run you expect to pass, and only drop the
+files dumped into the transcript to find five long lines. `scripts/verify.sh` already does this for
+the Verification commands, which used to be the biggest offender — `cargo test --all-features` alone
+prints one line per test. Apply the same filtering by hand only when running one of those commands
+directly: `| grep -E "FAILED|error|test result"` for a run you expect to pass, and only drop the
 filter when something actually fails and you need to see which test. This costs nothing in accuracy;
 it is pure waste to keep paying for it.
 

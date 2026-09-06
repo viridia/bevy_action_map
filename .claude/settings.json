@@ -7,7 +7,17 @@
       "Bash(cargo build *)",
       "Bash(cargo fmt --check)",
       "Bash(cargo fmt --check *)",
-      "Bash(cargo doc *)"
+      "Bash(cargo doc *)",
+      "Bash(cargo run --manifest-path tools/devfmt/Cargo.toml *)",
+      "Bash(cargo fmt --manifest-path tools/devfmt/Cargo.toml)",
+      "Bash(cargo fmt --manifest-path tools/devfmt/Cargo.toml *)",
+      "Bash(cd tools/devfmt && cargo *)",
+      "Bash(./scripts/verify.sh)",
+      "Bash(./scripts/verify.sh *)",
+      "Bash(scripts/verify.sh)",
+      "Bash(scripts/verify.sh *)",
+      "Bash(bash scripts/verify.sh)",
+      "Bash(bash scripts/verify.sh *)"
     ]
   }
 }
