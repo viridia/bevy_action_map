@@ -155,6 +155,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 76  | `Unresolved`, once                                |
 | 70  | Device brand and class                           |
 | 91  | The crate does not do what its own documents say  |
+| 17c | The two normalizes                                |
 
 ---
 
@@ -204,20 +205,6 @@ happening" is blind to the likeliest cause of it.
 
 The long tail cannot verify what it does not own, so mistakes have to be caught rather than
 discovered in QA that nobody is running.
-
-### 17c. Reflect, and the two normalizes
-
-`Reflect` on modifiers and conditions (R5.6, R17.5), plus R5.9's two `normalize` operations, now
-named: `clamp_magnitude` scales a vector down if it exceeds magnitude 1, and `rescale` maps a range
-onto 0..1 and therefore falls under the one-rescaling-stage rule. `rescale` is the word the crate
-already uses for that stage, so this builds the modifier under a name the plan-build check counts
-by.
-
-- **Smaller than when it was written.** R17.5 wanted `Reflect` so third-party modifiers round-trip
-  through persistence, but an override stores *controls*, so a custom modifier never reaches a saved
-  file. What still wants it is serializing whole binding *definitions* (R17.6, R22.16), which is
-  deferred — so this is no longer on the path to anything scheduled.
-- **Not doing:** anything that would make `Modifier` or `Condition` require `Reflect`.
 
 ### 63. Multi-window
 
@@ -558,7 +545,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **R16.3's suspend/resume** (mobile, console) | a platform target that needs it. Nothing in this crate's supported platforms emits a suspend signal or has a device re-enumeration step to hook |
 | **Split Friction's monsters, spawners and missiles** | a mechanic that would exercise input this crate has not already proven. Kept as a row rather than deleted because the sprites, the dungeon's region aspects and a `Fire`-shaped action all exist, so changing our mind is cheap |
 | **Guardian migration** | porting it from Bevy 0.16.1 with `bevy_enhanced_input` 0.12 to 0.20-dev — four versions, and a port plus a rewrite. Doing both at once would confuse "action_map is wrong" with "0.20 moved this" |
-| **A physical binding's label matching the current layout** (R12.2, R12.7) | winit exposing a physical-to-logical query and a layout-change signal, requested as [winit#4606][] and tracked by the broader [winit#2678][], open since February 2023 and unimplemented. A workaround was scoped and set aside: `run_captures` already sees the logical key at capture time, but keeping it means a new field on `Captured`, a session table `present.rs` consults ahead of the static fallback, and an honest answer on whether it survives a save — which drags in the same deferred binding-definition serialization as 17c (R17.6, R22.16) for a fix that only covers controls a player has personally rebound. A landed query supersedes it outright, for every physical binding rather than only captured ones, so the workaround is not worth building ahead of it |
+| **A physical binding's label matching the current layout** (R12.2, R12.7) | winit exposing a physical-to-logical query and a layout-change signal, requested as [winit#4606][] and tracked by the broader [winit#2678][], open since February 2023 and unimplemented. A workaround was scoped and set aside: `run_captures` already sees the logical key at capture time, but keeping it means a new field on `Captured`, a session table `present.rs` consults ahead of the static fallback, and an honest answer on whether it survives a save — which drags in the still-deferred binding-definition serialization (R17.6, R22.16) for a fix that only covers controls a player has personally rebound. A landed query supersedes it outright, for every physical binding rather than only captured ones, so the workaround is not worth building ahead of it |
 
 ---
 

@@ -523,7 +523,7 @@ evaluation order, which is the order the plan stores them.
 | --- | --- |
 | Chord | `with(control)` |
 | Conditions | `press`, `release`, `down`, `hold`, `hold_once`, `hold_and_release`, `tap`, `multi_tap`, `pulse`, `on_change`, `when(custom)` |
-| Modifiers | `scale`, `negate`, `swizzle`, `clamp`, `curve`, `per_second`, `compass`, `dead_zone`, `tunable_dead_zone`, `custom` |
+| Modifiers | `scale`, `negate`, `swizzle`, `clamp`, `clamp_magnitude`, `rescale`, `curve`, `per_second`, `compass`, `dead_zone`, `tunable_dead_zone`, `custom` |
 | Consumption | `consume`, `without_consuming` |
 | Presentation | `mappable`, `mappable_as`, `mappable_upto`, `mappable_any`, `private`, `reserved` |
 

@@ -1294,6 +1294,24 @@ pub enum BindingModifier {
         /// The upper bound.
         max: f32,
     },
+    /// Scales a vector down when it exceeds magnitude 1, and leaves it alone otherwise.
+    ///
+    /// A four-key `DirectionalButtons` reaches its full 1.0 on each axis alone, but 1.414 on a
+    /// diagonal — two keys held together outrun what a single key or a stick can produce. This
+    /// pulls the diagonal back to the same reach as the rest of the circle, without touching
+    /// directions that were never too fast to begin with.
+    ClampMagnitude,
+    /// Maps `min..max` onto `0..1`, clamping anything outside it.
+    ///
+    /// Useful when a control's own range does not start at zero — a trigger whose rest position
+    /// reads `0.1` rather than `0.0`, say. Like a deadzone, this stretches its input over a new
+    /// range, so at most one of it or a rescaling deadzone may appear in the same chain.
+    Rescale {
+        /// The input value mapped to 0.
+        min: f32,
+        /// The input value mapped to 1.
+        max: f32,
+    },
     /// Raises the magnitude to a curve power while preserving sign.
     Curve(f32),
     /// Reads the value as a rate and turns it into the displacement it produced this tick.
@@ -1328,6 +1346,8 @@ impl BindingModifier {
             Self::Negate => apply_negate(value),
             Self::Swizzle => apply_swizzle(value),
             Self::Clamp { min, max } => apply_clamp(value, *min, *max),
+            Self::ClampMagnitude => apply_clamp_magnitude(value),
+            Self::Rescale { min, max } => apply_rescale(value, *min, *max),
             Self::Curve(power) => apply_curve(value, *power),
             Self::PerSecond(scale) => apply_scale(value, scale * delta),
             Self::Compass(points) => apply_compass(value, *points),
@@ -1351,10 +1371,12 @@ impl BindingModifier {
     pub fn rescales(&self) -> bool {
         match self {
             Self::DeadZone(dead_zone) => dead_zone.rescale,
+            Self::Rescale { .. } => true,
             Self::Custom(modifier) => modifier.rescales(),
-            // Not `Compass`, which discards magnitude rather than stretching it. The check exists
-            // so that a later threshold still corresponds to a physical position, and after a
-            // compass there is no magnitude left for one to read whatever came before it — so the
+            // Not `Compass`, which discards magnitude rather than stretching it, or
+            // `ClampMagnitude`, which only pulls in what already overshot. The check exists so
+            // that a later threshold still corresponds to a physical position, and after either of
+            // those there is no stretching for one to read whatever came before it — so the
             // pairing this is built for, a deadzone deciding when the stick counts as deflected
             // and a compass reading which way, is not the stacking the check is looking for.
             _ => false,
@@ -1796,6 +1818,18 @@ impl<'a, C> BindingHandle<'a, C> {
     /// Adds a clamp modifier.
     pub fn clamp(mut self, min: f32, max: f32) -> Self {
         self.push_modifier(BindingModifier::Clamp { min, max });
+        self
+    }
+
+    /// Adds a magnitude-clamp modifier.
+    pub fn clamp_magnitude(mut self) -> Self {
+        self.push_modifier(BindingModifier::ClampMagnitude);
+        self
+    }
+
+    /// Adds a rescale modifier, mapping `min..max` onto `0..1`.
+    pub fn rescale(mut self, min: f32, max: f32) -> Self {
+        self.push_modifier(BindingModifier::Rescale { min, max });
         self
     }
 
@@ -2401,6 +2435,50 @@ fn apply_clamp(value: ActionValue, min: f32, max: f32) -> ActionValue {
     }
 }
 
+fn apply_clamp_magnitude(value: ActionValue) -> ActionValue {
+    match value {
+        ActionValue::Bool(value) => ActionValue::Bool(value),
+        ActionValue::Axis1(value) => ActionValue::Axis1(value.clamp(-1.0, 1.0)),
+        ActionValue::Axis2(value) => {
+            ActionValue::Axis2(clamp_magnitude_radial(value, value.length()))
+        }
+        ActionValue::Axis3(value) => {
+            ActionValue::Axis3(clamp_magnitude_radial(value, value.length()))
+        }
+    }
+}
+
+fn clamp_magnitude_radial<V>(value: V, magnitude: f32) -> V
+where
+    V: core::ops::Mul<f32, Output = V>,
+{
+    if magnitude > 1.0 {
+        value * (1.0 / magnitude)
+    } else {
+        value
+    }
+}
+
+fn apply_rescale(value: ActionValue, min: f32, max: f32) -> ActionValue {
+    match value {
+        ActionValue::Bool(value) => ActionValue::Bool(value),
+        ActionValue::Axis1(value) => ActionValue::Axis1(rescale_scalar(value, min, max)),
+        ActionValue::Axis2(value) => ActionValue::Axis2(Vec2::new(
+            rescale_scalar(value.x, min, max),
+            rescale_scalar(value.y, min, max),
+        )),
+        ActionValue::Axis3(value) => ActionValue::Axis3(bevy_math::Vec3::new(
+            rescale_scalar(value.x, min, max),
+            rescale_scalar(value.y, min, max),
+            rescale_scalar(value.z, min, max),
+        )),
+    }
+}
+
+fn rescale_scalar(value: f32, min: f32, max: f32) -> f32 {
+    ((value - min) / (max - min)).clamp(0.0, 1.0)
+}
+
 // The curve shapes distance from centre, not each axis on its own. Shaping the axes separately
 // bends the direction a stick is pointing: a 45° push has both components raised to the power,
 // which moves the result off the diagonal.
@@ -2511,6 +2589,16 @@ mod tests {
                 BindingModifier::Curve(2.0),
                 ActionValue::Axis1(-0.5),
                 ActionValue::Axis1(-0.25),
+            ),
+            (
+                BindingModifier::ClampMagnitude,
+                ActionValue::Axis1(2.5),
+                ActionValue::Axis1(1.0),
+            ),
+            (
+                BindingModifier::Rescale { min: 0.1, max: 1.0 },
+                ActionValue::Axis1(0.1),
+                ActionValue::Axis1(0.0),
             ),
         ];
 
@@ -3018,6 +3106,56 @@ mod tests {
     #[test]
     fn a_dead_zone_and_a_compass_are_not_two_rescalings() {
         assert!(!BindingModifier::Compass(CompassPoints::Eight).rescales());
+    }
+
+    /// `ClampMagnitude` only pulls in what already overshot, so it stacks with a rescaling
+    /// deadzone the same way a compass does.
+    #[test]
+    fn clamp_magnitude_does_not_rescale_but_rescale_does() {
+        assert!(!BindingModifier::ClampMagnitude.rescales());
+        assert!(BindingModifier::Rescale { min: 0.0, max: 1.0 }.rescales());
+    }
+
+    /// A four-key `DirectionalButtons` reaches 1.414 on a diagonal — two keys held together
+    /// outrunning what a single key or a stick can produce. `clamp_magnitude` pulls that back to
+    /// the same reach as the rest of the circle, without slowing a cardinal direction.
+    #[test]
+    fn clamp_magnitude_reins_in_a_diagonal_but_leaves_a_cardinal_alone() {
+        let diagonal = BindingModifier::ClampMagnitude.apply(
+            ActionValue::Axis2(Vec2::new(1.0, 1.0)),
+            &mut Scratch::default(),
+            0.0,
+        );
+        let ActionValue::Axis2(diagonal) = diagonal else {
+            unreachable!()
+        };
+        assert!((diagonal.length() - 1.0).abs() < 1e-6, "{diagonal:?}");
+
+        assert_eq!(
+            BindingModifier::ClampMagnitude.apply(
+                ActionValue::Axis2(Vec2::new(1.0, 0.0)),
+                &mut Scratch::default(),
+                0.0,
+            ),
+            ActionValue::Axis2(Vec2::new(1.0, 0.0))
+        );
+    }
+
+    /// `rescale` maps its declared range onto 0..1 and clamps whatever falls outside it, the same
+    /// way a trigger whose rest position never quite reaches zero gets corrected.
+    #[test]
+    fn rescale_maps_its_range_onto_zero_to_one_and_clamps_outside_it() {
+        let modifier = BindingModifier::Rescale { min: 0.1, max: 0.9 };
+        let mut scratch = Scratch::default();
+        let mut rescaled = |input| {
+            modifier
+                .apply(ActionValue::Axis1(input), &mut scratch, 0.0)
+                .to_axis1()
+        };
+
+        assert!((rescaled(0.5) - 0.5).abs() < 1e-6);
+        assert_eq!(rescaled(0.0), 0.0, "below the range clamps to 0");
+        assert_eq!(rescaled(1.0), 1.0, "above the range clamps to 1");
     }
 
     #[test]
