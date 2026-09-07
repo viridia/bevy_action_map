@@ -158,6 +158,8 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 89  | `why_not` can see the pairing                     |
 | 48  | Names that survive a glob import                  |
 | 90  | A context nobody declared says so                 |
+| 96  | `BindingModifier`'s blanket `Modifier` impl       |
+| 97  | A binding whose only conditions are blocking fires at rest |
 
 ---
 
@@ -243,7 +245,9 @@ caller a shipped mechanism has ever had, and neither is Split Friction's.
 
 ### 71. Per-player presets
 
-Each protagonist selects its own preset, applied through `apply_overrides_for_with_preset`.
+Each protagonist selects its own preset, applied through `apply_overrides_for_with_preset`. The
+preset is a **southpaw swap** — the real thing players ask local co-op games for, and small enough
+that the point is the per-player selection, not the preset's own content.
 
 - **What it proves.** Chunk 67 built the per-entity apply path ahead of a need and nothing in tree
   has called it since — this is that caller. A preset is the cheapest override to select, so the
@@ -251,6 +255,8 @@ Each protagonist selects its own preset, applied through `apply_overrides_for_wi
 - **It trips a deferred row on purpose.** "Per-entity presentation and prompts" is gated on a
   per-player settings display existing, and a per-pane preset selector is one. Expect it to validate
   that row's sketch or falsify it, and say which.
+- **Not a settings screen.** Selecting a preset is a join-screen or pause-menu affordance — a
+  button per pane, not a rebinding UI. That stays Disasteroids' territory.
 - **Verified by:** playing it — each pane selects independently, and the other pane's bindings do
   not move.
 
@@ -276,7 +282,10 @@ going through a catalogue. The crate's half of R19.14 is done, but the claim tha
 *keys a localized game looks up* has never been exercised.
 
 - **In an example, not the crate.** Rendering is the app's business.
-- **What it is:** one example's renderer reading a catalogue file, a second locale to prove it
+- **Disasteroids, not Split Friction.** The keys being resolved are the settings screen's own
+  binding labels, so the settings screen that already renders them is where a catalogue lookup
+  replaces the unconditional `fallback_label` call — not a new UI.
+- **What it is:** Disasteroids' renderer reading a catalogue file, a second locale to prove it
   switches, and the fallback kept for the key the catalogue misses.
 - **Not fluent.** `bevy_fluent` is pinned to an older Bevy, and fluent's own value — plurals,
   gender, bidi — is orthogonal to whether our keys resolve, since they resolve to nouns. The one
@@ -312,6 +321,11 @@ network removed, which was the expensive part.
   same paddle-and-ball simulation snapshotted and re-simulated forward, with the recorded and
   re-simulated transition logs compared. Chunk 42 will already have proven the base can host one
   grafted concept without disturbing its own.
+- **Check whether `docs/issues.md` 1041 belongs here.** R9.9's pumped sampling mode (stopping
+  `InputFramePlugin` from scheduling its own sampling) was floated as a fit for a rewind demo, on
+  the theory that re-simulating forward wants control over exactly when a frame is sampled. Confirm
+  that before routing it here — if re-simulation does not actually need to suppress live sampling,
+  1041 stays unrouted rather than getting a home it does not need.
 
 ### 92. Persisting bindings through `bevy_settings`
 
@@ -354,10 +368,9 @@ A chord may require another *control* but not another *action*, and `BlockedBy` 
 read a neighbouring slot rather than their own value, which needs the operand evaluated first: slots
 ordered topologically, and a cycle rejected at plan build with a diagnostic naming the loop.
 
-- **Why it waits:** self-contained, and nothing in tree wants it. It carried two motivating cases
-  and the settings screen claimed the first — a modal that blocks an action while it is open turned
-  out to be exclusive contexts, because the block is per-context rather than per-action. What is
-  left is a chord on an action rather than a key.
+- **Depends on chunk 95.** The demo is a Pong variant: serve is blocked while the ball is already in
+  play, one `BlockedBy` condition on the serve action reading the rally's own in-flight state. No
+  new content beyond what the base already has.
 - **Inherited from chunk 44: whether this subsumes `follow`.** An afterburner is genuinely "thrust,
   still held", and a game that could say that in a condition would need no link at all. The two
   answer different questions — `follow` says the mapping is shared, a condition says the value is
@@ -369,6 +382,9 @@ ordered topologically, and a cycle rejected at plan build with a diagnostic nami
 R6.4's ordered sequences — double-tap-dash, motion inputs, cheat codes — arriving in order within a
 time window.
 
+- **Depends on chunk 95.** The demo is a Pong variant: a double-tap on the move control gives that
+  paddle a brief speed boost — a sequence read off the same control the paddle already binds, not a
+  new one.
 - **Fits the scratch record**, so this is a condition, not a redesign.
 - **R6.5's forgiveness windows do not carry here** and are withdrawn. The crossing point in both
   directions is app-domain state the crate cannot see, and events plus elapsed time already give an
@@ -379,6 +395,10 @@ time window.
 R3.7: an action switched off without being unbound, and switched back on without firing for a
 control the player was already holding.
 
+- **Depends on chunk 95.** The demo is a Pong variant: paddle movement is disabled for the serve
+  countdown and switched back on when play resumes, without manufacturing a fire for a key the
+  player was already holding through the countdown — the exact case R3.7 exists for, with no new
+  content beyond the countdown itself.
 - **The mechanism is probably already there.** `require_reset` is per slot and `StateFlags` has
   room; what is missing is the public verb and what it means for a disabled action's in-flight
   state. Cancel, on the same terms as deactivating a context, is the answer to beat.
@@ -426,6 +446,10 @@ second implementer and the real one cannot live here.
   flag distinct from a zero value, origins as a type deliberately not `Control`, a glyph as a
   filesystem path, and a binding panel that is ugly on purpose. A mock nicer than Steam proves
   nothing.
+- **The binding panel is also `docs/issues.md` 1022's demo.** R19.8 wants a backend-owned row to say
+  "not rebindable here, delegate to that backend's own UI" rather than reading as an ordinary fixed
+  one — this chunk's ugly-on-purpose panel is exactly where that distinction has to show up, so it
+  is one more thing the panel renders rather than a separate chunk.
 - **Depends on chunk 95.** The vehicle is its Pong base: one paddle's pad handed to the mock
   backend, the other reading normally, so R0.4's per-context split is the game rather than a
   contrived aside. A pause overlay over an in-progress rally supplies the second modal context the
@@ -495,22 +519,122 @@ binding time rather than something every cross-platform game re-derives by hand.
   what it expands to does, once, when the plan is built — not on every frame the control is read.
 - **Self-contained**, and independent of 94a and 94b.
 
-### 96. `BindingModifier`'s blanket `Modifier` impl
+### 98. Pointer position, and a mouse-controlled paddle
 
-`docs/issues.md` 1009: `impl Modifier for BindingModifier` forwards to the inherent `apply` with a
-throwaway `Scratch` and `delta = 0.0`, and does not forward `rescales` at all. Reachable only
-through `.custom(BindingModifier::DeadZone(..))` — wrapping a built-in modifier as its own trait
-object — which nothing in tree does, so it is latent rather than live: a stateful or rate modifier
-misbehaves, and a wrapped rescaling one stops tripping D20's chained-rescaling check.
+R13.1, R13.4, R13.6 (`docs/issues.md` 1015): the frame carries mouse *motion* and no absolute
+position, so a binding cannot target where the pointer is at all.
 
-- **Delete the impl.** Nothing needs `BindingModifier` to satisfy `Modifier` generically, and the
-  deletion is a compile-time close of the hole rather than a runtime patch: the unsafe construction
-  no longer type-checks at all.
-- **Not doing:** anything about the built-in modifiers' own correctness, which was never in
-  question — only the second, forwarding path was wrong.
-- **Verified by:** a new test exercising the same seam (`Custom`'s `rescales()` dispatching through
-  the wrapped value's own trait impl) with a hand-written modifier, confirming the mechanism itself
-  is sound now that the one broken implementor of it is gone.
+- **Depends on chunk 95.** The demo is a Pong variant, and the simplest one there is: a paddle whose
+  position follows the mouse's Y coordinate directly, rather than reading a delta and integrating
+  it.
+- **Not doing: split-screen viewport mapping (R15.10).** That is Split Friction's problem once this
+  mechanism exists, not this chunk's — a second pointer meaning "position within my own camera's
+  viewport" is a follow-on, not part of proving position exists at all.
+- **Review surface:** whether an absolute position needs the same dead-zone/rescale modifier chain
+  a delta does, or is exempt as a different kind of channel entirely.
+
+### 99. The smart bomb, and a charge meter
+
+R3.4 (MUST) and R3.5 (`docs/issues.md` 1014): an action has no elapsed time and no progress, so
+nothing can draw a charge meter, though both numbers already exist on `Scratch` and
+`BindingCondition::Hold` — this is a read path out, not new state.
+
+- **Disasteroids, not Pong.** A smart bomb: hold to charge, release nothing — it fires itself once
+  `Hold`'s duration is reached, sending out a radial pulse that clears every asteroid within a
+  distance. A progress bar at the bottom of the screen is drawn from the same number R3.5 exposes.
+- **Adds a twelfth row to the settings screen.** See the settings-screen-density note: compress
+  spacing and font size to fit rather than add scrolling or collapsible sections, and pull the
+  screen's sizing values out into named constants while touching this file, so the next row is a
+  one-line change.
+- **Not doing:** charge levels, upgrades, or anything beyond proving the two numbers are real and
+  readable.
+- **Verified by:** playing it — the bar fills while held, the pulse fires unprompted at full charge,
+  and letting go early cancels it, same as any other `Hold`.
+
+### 100. A preset can carry a tunable
+
+R19.12, the tunable half (`docs/issues.md` 1039): `PresetBuilder` has `bind` and no `tune`, though
+`Overrides::tune` already exists and a preset is exactly the same override machinery.
+
+- **Disasteroids.** One of the existing presets (45) also sets a tunable — a dead zone or a
+  sensitivity value — alongside its bindings, proving a preset is not bindings-only.
+- **The smallest item in this document: one builder method.** `Preset::rows` is already public;
+  `PresetBuilder::tune` is the missing door onto the same path `bind` already uses.
+
+### 101. Semantic control aliases for a console confirm swap
+
+R4.4 (SHOULD) (`docs/issues.md` 1040): semantic aliases (`Submit`, `Cancel`, `MenuLeft`) resolving
+per device family, load-bearing for R18.7's console confirm-button swap rather than merely
+convenient.
+
+- **Disasteroids' settings screen**, which already does directional navigation (29): the same screen
+  reads `Cancel` rather than a hard-coded key, so its on-screen prompt says the right thing on
+  keyboard and on a pad without the app hand-rolling the swap itself.
+- **Not doing:** a general aliasing mechanism beyond the three names R4.4 asks for — this proves the
+  concept the requirement names, not a configurable alias table.
+
+### 102. A global timing scale
+
+R20.4 (`docs/issues.md` 1045, split from 1021): every hold duration, tap window and repeat rate
+globally scalable by one user preference, where today only per-mapping tunables exist.
+
+- **Disasteroids' settings screen**, as an accessibility slider — "input timing ×1.5" — applied
+  across every declared hold/tap/repeat value at once rather than one at a time.
+- **Crate work, not only an example.** Scaling every timing by hand from the app side is exactly
+  what R20.4 says a game should not have to do, so the scale factor's application point is a design
+  question for this chunk rather than something the example alone can supply.
+
+### 103. A disconnect signal and a reconnect prompt
+
+R15.5 (MUST) (`docs/issues.md` 1020): on device loss the owning player must be identifiable
+(already true), in-flight actions canceled (already true), **and a signal raised so the app can
+pause and show a reconnect prompt** (nothing today).
+
+- **Split Friction.** A pad disconnects mid-game; the app pauses and shows "player 2, reconnect to
+  resume" until the pad (or another) reappears.
+- **What the signal is** is this chunk's open question: Bevy's own `GamepadConnectionEvent` read
+  directly, or something this crate re-raises so a game does not have to know the pairing's own
+  bookkeeping to react correctly.
+
+### 104. Named device-requirement sets at the join screen
+
+R15.7 (SHOULD) (`docs/issues.md` 1042, split from 1020): named device-requirement sets with required
+and optional devices — nothing exists under this name anywhere in `src/`.
+
+- **Split Friction's join screen**, validating "this player needs a gamepad" versus "keyboard is
+  fine" before a pane is handed a protagonist, rather than silently accepting any device.
+
+### 105. Auto-switching a player's active scheme
+
+R15.8 (SHOULD) (`docs/issues.md` 1043, split from 1020): auto-switching a player's active scheme on
+input, with hysteresis — nothing exists, and R18.6's withdrawal names this as the one thing that
+would revive it.
+
+- **Split Friction.** A player on a pad picks up the keyboard instead; control follows without a
+  menu trip. R18.6 stays withdrawn unless this chunk's hysteresis turns out not to hold up under
+  real play.
+- **`docs/issues.md` 1044 (R15.9, opaque platform-user identity)** stays unrouted alongside this —
+  floated for Split Friction too, but nothing to show without a real platform SDK, and not yet worth
+  a faked stub the way chunk 42 fakes a backend.
+
+### 106. A diagnostic overlay for Split Friction
+
+Chunk 36 built Disasteroids' overlay; nothing else has one. Its own doc comment already says why
+this is cheap: "nothing here names an action or a context... this file would work unchanged in a
+different game with different actions," the debris-count line excepted.
+
+- **Extract first, then wire.** The context/action-agnostic parts — the panel, the redraw loop, the
+  rebindable-mappings dump — move to `examples/common/`, replacing what would otherwise become a
+  second near-identical copy. Split Friction's own `overlay.rs` shrinks to the toggle-action wiring
+  and whatever it wants in place of the debris-count joke.
+- **Verified by:** playing it — `F1` (or Select) toggles the same kind of panel, listing Split
+  Friction's own contexts and actions.
+
+### 107. A diagnostic overlay for Pong
+
+- **Depends on chunks 95 and 106.** Pong needs to exist, and the shared module chunk 106 extracts
+  needs to exist, before this is one line rather than a third copy.
+- **Verified by:** playing it, same as 106.
 
 ---
 

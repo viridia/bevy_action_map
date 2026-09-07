@@ -15,7 +15,7 @@ chunk's own commit, and `docs/design.md` or `docs/decisions.md` where anything a
 are the record. A gap in the sequence below is a retired finding, not an omission. The next
 unassigned number is stated here; keep it up to date when numbering new items.
 
-**Next: 1039.**
+**Next: 1046.**
 
 **The calibration warning, stated up front because it is fair.** Ask a model to find sixty problems
 and it will find sixty. Some of what follows is real and some is a rule nobody would ever violate.
@@ -49,27 +49,6 @@ Every entry this scan filed here has landed (chunks 81, 84, 85, 86, 88, 89, 90, 
 
 ## 2. Latent — the code is wrong and nothing in tree takes the path
 
-### 1009 `BindingModifier`'s trait impl defeats its own inherent one
-
-`binding.rs:2502` · **verified**: `PerSecond(100.0)` at `delta = 0.5` returns `Axis1(0.0)` through
-the trait against `Axis1(50.0)` inherent; `Toggle { active: true }` never latches; `rescales()`
-reports `false` for a rescaling dead zone
-
-`impl Modifier for BindingModifier` forwards to the inherent `apply` with `&mut Scratch::default()`
-and `0.0`, and does not forward `rescales` at all.
-
-The reachable consequence is the third: `.custom(BindingModifier::DeadZone(..))` wraps the enum in
-`Custom(Arc<dyn Modifier>)`, whose `rescales` asks the trait. So **two stacked rescaling dead zones
-are refused as `ChainedRescaling` when both are declared with `.dead_zone`, and accepted when the
-second is wrapped** — the same chain, one spelling caught and the other not. That rule is R5.3 and
-D20.
-
-Nothing in `src/`, `examples/` or the tests calls the impl, so nobody has hit it. It is public API,
-and it is one of the two shapes `docs/design.md` §8.2 asks for.
-
-_Fix:_ **chunk 96** — delete the impl outright, which closes the hole at compile time rather than
-patching it at run time.
-
 ### 1010 Clearing one part of a composite empties the other three
 
 `overrides.rs:941` · **verified** against a headless `App`: four empty rows, no problem reported
@@ -88,20 +67,6 @@ the shape and covers only the growing half.
 _Fix:_ a chunk rather than an edit. Dropping per part instead of per binding and refusing the clear
 outright are both defensible, and which is right is a design question about what clearing one arrow
 of a movement composite means. Unrouted.
-
-### 1012 A binding whose only conditions are blocking fires every tick at rest
-
-`condition.rs:369`, `combine` · **verified** by driving `combine` at `ActionValue::Bool(false)`:
-`Fired`
-
-`combine` tests actuation in the no-conditions case only. Once a binding has any condition, the
-"control is off rest" test is gone and nothing replaces it for a set with no explicit condition that
-reads the value. One blocking condition that is not vetoing leaves `explicit == 0` and
-`implicit_all` vacuously true, so the binding fires with the control at rest.
-
-Unreachable through the built-ins — none of them returns `ConditionKind::Blocking` — but the kind is
-public API through `Condition`, and a `BlockedBy` built-in (1017) would be the first thing to land
-on it. Unrouted.
 
 ### 1013 In a build without `keyboard`, a held mouse button survives alt-tab
 
@@ -134,8 +99,8 @@ no read path out. So this is a plumbing job, not a design one.
 
 It is also R22.1's fifth cause: "condition Z at 40% progress" is the same number.
 
-Neither requirement appears in `Roadmap.md`'s register, the deferred table, or any `Still open`
-remainder. Unrouted.
+_Fix:_ **chunk 99** — a Disasteroids smart bomb, hold-to-charge, with the progress number drawing
+its charge meter.
 
 ### 1015 Nothing can bind to where the pointer is
 
@@ -144,7 +109,10 @@ R13.1, R13.4, R13.6 · `frame.rs`
 The input frame carries mouse _motion_ and no absolute position at all, so position cannot be
 distinguished from motion because only one of the two is there. R13.1 wants both. R13.3's mouse
 wheel is deferred with a gate; these are not, and R15.10's split-screen pointer-to-viewport mapping
-is blocked behind them. Unrouted.
+is blocked behind them.
+
+_Fix:_ **chunk 98** — a Pong variant, a mouse-controlled paddle. R15.10 stays a Split Friction
+follow-on once the mechanism lands here.
 
 ### 1016 A binding can name the logical key, not only the physical one
 
@@ -200,25 +168,39 @@ editor or a scene serializer sees nothing of this crate.
 Chunk 17c owns R5.6 and R17.5 — `Modifier` and `Condition` — and `docs/decisions.md:430`
 deliberately keeps those two bound-free. Neither is R24.3. Unrouted.
 
-### 1020 Local multiplayer: no disconnect signal, no control schemes, no auto-switching
+### 1020 A device disconnecting raises no signal
 
-`Requirements.md` §15 has one cited requirement (R15.3) and four real gaps:
+R15.5 (MUST) — on device loss the owning player must be identifiable, in-flight actions canceled,
+**and a signal raised so the app can pause and show a reconnect prompt**. The first two hold: a
+disconnect clears held state at `eval.rs:422` and the actions fall out of flight; the owner is
+identifiable by querying `Paired`. Nothing is raised. An app can read Bevy's own
+`GamepadConnectionEvent`, but no document says that is the intended answer, and a
+pause-on-disconnect prompt is a console certification item.
 
-- **R15.5** (MUST) — on device loss the owning player must be identifiable, in-flight actions
-  canceled, **and a signal raised so the app can pause and show a reconnect prompt**. The first two
-  hold: a disconnect clears held state at `eval.rs:422` and the actions fall out of flight; the
-  owner is identifiable by querying `Paired`. Nothing is raised. An app can read Bevy's own
-  `GamepadConnectionEvent`, but no document says that is the intended answer, and a pause-on-
-  disconnect prompt is a console certification item.
-- **R15.7** (SHOULD) — named device-requirement sets with required and optional devices. Nothing.
-  The concept does not exist under any name in `src/` — see 1029: `player.rs`'s own module doc
-  claims it anyway.
-- **R15.8** (SHOULD) — auto-switching a player's active scheme on input, with hysteresis. Nothing —
-  and R18.6's _withdrawal_ names this as the one thing that would revive it, so an unbuilt SHOULD is
-  load-bearing for a withdrawn requirement staying withdrawn.
-- **R15.9** (SHOULD) — opaque platform-user identity attached to a player. Nothing.
+R15.6 reaches chunk 72 through R11.5; R15.10 waits on 1015.
 
-R15.6 reaches chunk 72 through R11.5; R15.10 waits on 1015. Unrouted.
+_Fix:_ **chunk 103**.
+
+### 1042 No named device-requirement sets
+
+R15.7 (SHOULD, split from 1020) — named device-requirement sets with required and optional devices.
+Nothing. The concept does not exist under any name in `src/` — see 1029: `player.rs`'s own module
+doc claims it anyway.
+
+_Fix:_ **chunk 104**.
+
+### 1043 No auto-switching a player's active scheme
+
+R15.8 (SHOULD, split from 1020) — auto-switching a player's active scheme on input, with hysteresis.
+Nothing — and R18.6's _withdrawal_ names this as the one thing that would revive it, so an unbuilt
+SHOULD is load-bearing for a withdrawn requirement staying withdrawn.
+
+_Fix:_ **chunk 105**.
+
+### 1044 No opaque platform-user identity
+
+R15.9 (SHOULD, split from 1020) — opaque platform-user identity attached to a player. Nothing to
+show without a real platform SDK behind it, unlike the rest of this group. Unrouted.
 
 ### 1021 Accessibility has no citation anywhere in the project
 
@@ -226,33 +208,52 @@ R15.6 reaches chunk 72 through R11.5; R15.10 waits on 1015. Unrouted.
 and `CLAUDE.md`. The section's own preamble calls these "cheap to accommodate now and expensive to
 retrofit," which is the argument for looking at it before more is built on top.
 
-R20.2 and R20.5 are built (chunk 64) and R20.1 holds by construction. Two have nothing:
-
-- **R20.4** — every hold duration, tap window and repeat rate globally scalable by one user
-  preference. The crate's only scaling is a per-mapping tunable, so a game wanting "all timings
-  ×1.5" sets every one of them by hand. Unrouted.
-- **R20.6** (MAY) — sticky modifiers / one-handed support. **Reviewed and left alone**: no in-tree
-  pressure and no case behind it — not worth a chunk unless one shows up.
+R20.2 and R20.5 are built (chunk 64) and R20.1 holds by construction. R20.4 is 1045. **R20.6** (MAY,
+sticky modifiers / one-handed support) is **reviewed and left alone**: no in-tree pressure and no
+case behind it — not worth a chunk unless one shows up.
 
 R20.3's sequential alternative to chords is 1023 by content and by no other link.
 
-### 1022 Four smaller absences, each with a requirement and no destination
+### 1045 No global timing scale
 
-- **R19.8** (MUST) — a row a backend owns should say "not rebindable here, delegate to that
-  backend's own UI". `RebindPolicy` is `Here | Fixed` and `Override::NotOurs` is a row in the
-  _player's_ diff, so a screen reading `mappings()` cannot tell a backend-owned row from an ordinary
-  fixed one without consulting its own working copy.
-- **R19.12**, the tunable half — "named alternative arrangements of mappings **and tunables**".
-  `PresetBuilder` has `bind` and no `tune`. Reachable by hand (`Preset::rows` is public and
-  `Overrides::tune` applies through the same path), offered by nothing, tested by nothing. The
-  smallest item in this document: one builder method.
-- **R4.4** (SHOULD) — semantic control aliases (`Submit`, `Cancel`, `MenuLeft`) resolving per device
-  class. Nothing in tree. It is load-bearing rather than convenient: R4.4 names it as what makes
-  R18.7's console confirm-button swap tractable.
-- **R9.9** — a pumped sampling mode. `sample_input`, `begin_sample` and `record` are all public, so
-  the pieces exist; what is missing is a way to stop `InputFramePlugin` scheduling sampling at all.
+R20.4 (split from 1021) — every hold duration, tap window and repeat rate globally scalable by one
+user preference. The crate's only scaling is a per-mapping tunable, so a game wanting "all timings
+×1.5" sets every one of them by hand.
 
-Unrouted.
+_Fix:_ **chunk 102**.
+
+### 1022 A backend-owned row cannot be told apart from an ordinary fixed one
+
+R19.8 (MUST) — a row a backend owns should say "not rebindable here, delegate to that backend's own
+UI". `RebindPolicy` is `Here | Fixed` and `Override::NotOurs` is a row in the _player's_ diff, so a
+screen reading `mappings()` cannot tell a backend-owned row from an ordinary fixed one without
+consulting its own working copy.
+
+_Fix:_ **chunk 42** — its binding panel is where this distinction has to render anyway.
+
+### 1039 A preset cannot carry a tunable
+
+R19.12, the tunable half — "named alternative arrangements of mappings **and tunables**".
+`PresetBuilder` has `bind` and no `tune`. Reachable by hand (`Preset::rows` is public and
+`Overrides::tune` applies through the same path), offered by nothing, tested by nothing. The
+smallest item in this document: one builder method.
+
+_Fix:_ **chunk 100**.
+
+### 1040 No semantic control aliases
+
+R4.4 (SHOULD) — semantic control aliases (`Submit`, `Cancel`, `MenuLeft`) resolving per device
+class. Nothing in tree. It is load-bearing rather than convenient: R4.4 names it as what makes
+R18.7's console confirm-button swap tractable.
+
+_Fix:_ **chunk 101**.
+
+### 1041 No way to stop the frame sampling itself
+
+R9.9 — a pumped sampling mode. `sample_input`, `begin_sample` and `record` are all public, so the
+pieces exist; what is missing is a way to stop `InputFramePlugin` scheduling sampling at all.
+Floated as a companion to chunk 83's rewind; chunk 83 says to confirm the need before routing it
+there. Unrouted.
 
 ### 1023 Sequences
 
@@ -264,7 +265,7 @@ time window.
   directions is app-domain state the crate cannot see, and events plus elapsed time already give an
   app what it needs to compose the pattern itself.
 
-Unrouted.
+_Fix:_ **chunk 34** — a Pong variant, a double-tap paddle speed-boost.
 
 ### 1024 The device model is closed, which is a decision nobody wrote down
 
@@ -347,7 +348,7 @@ any one of them is misled about a mechanism.
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `lib.rs:174`                            | the `touch` feature is "Touch input as a binding source"                                                            | no `cfg(feature = "touch")` anywhere in `src/`; design §11 says _reserved_                                                                                                                                                                                                                             |
 | `device.rs` module doc                  | the module has persistent device identity and capability data                                                       | neither (R11.5, R11.3); the `DeviceHandle` doc eight lines below says the first is not built                                                                                                                                                                                                           |
-| `player.rs` module doc                  | the module "describes the named device requirements a game can assign players against"                              | it holds `Paired` and nothing else; that is R15.7, which is 1020. There is no `Scheme`-like type left in the crate at all to even partly answer this — chunk 48 renamed `Scheme` to `DeviceFamily`, which answers a different question (which family a control belongs to, not what a player requires) |
+| `player.rs` module doc                  | the module "describes the named device requirements a game can assign players against"                              | it holds `Paired` and nothing else; that is R15.7, which is 1042. There is no `Scheme`-like type left in the crate at all to even partly answer this — chunk 48 renamed `Scheme` to `DeviceFamily`, which answers a different question (which family a control belongs to, not what a player requires) |
 | `inspect.rs:76`                         | `ActionDump::state` is "Value, phase, elapsed time and progress"                                                    | `ActionState` is `{ value, phase }`; the two extra numbers are 1014                                                                                                                                                                                                                                    |
 | `lib.rs:219`                            | `ActionMapSystems` is "System sets for the two stages of the input pipeline"                                        | four variants; the body names `Sample` and `Evaluate` and says nothing about `Capture` or `Dispatch`, both of which are public ordering targets                                                                                                                                                        |
 | `action.rs:497`                         | write `InputContext` by hand "if you need to configure the component differently; it is three associated constants" | the trait is not what makes the type a component — the derive emits `Component`, `Default`, `Clone` and `Copy` alongside it, and a hand-written impl gets none. `macros/src/lib.rs:131` says "four associated consts" for the same trait; four exist and three are required                            |

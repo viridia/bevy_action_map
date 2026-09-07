@@ -379,6 +379,7 @@ pub(crate) fn combine(
     let mut explicit = 0usize;
     let mut explicit_satisfied = false;
     let mut implicit_all = true;
+    let mut has_value_condition = false;
     let mut building = false;
     let mut blocked = false;
 
@@ -386,6 +387,7 @@ pub(crate) fn combine(
         let outcome = condition.evaluate(value, scratch, delta);
         match condition.kind() {
             ConditionKind::Explicit => {
+                has_value_condition = true;
                 explicit += 1;
                 match outcome {
                     ConditionState::Satisfied => explicit_satisfied = true,
@@ -394,6 +396,7 @@ pub(crate) fn combine(
                 }
             }
             ConditionKind::Implicit => {
+                has_value_condition = true;
                 if outcome != ConditionState::Satisfied {
                     implicit_all = false;
                 }
@@ -408,6 +411,11 @@ pub(crate) fn combine(
 
     if blocked {
         return ConditionState::Idle;
+    }
+    // Blocking conditions alone read nothing off the control's own value, so a binding with only
+    // those falls back to the same at-rest check the no-conditions case uses, past the veto.
+    if !has_value_condition {
+        return condition_state(value.to_bool());
     }
     if implicit_all && (explicit == 0 || explicit_satisfied) {
         return ConditionState::Satisfied;
@@ -613,6 +621,31 @@ mod tests {
             state_of(alloc::vec![explicit(ConditionState::Building)]),
             ConditionState::Building
         );
+    }
+
+    // 1012: a binding with nothing but a non-vetoing blocking condition reads no value at all, so
+    // it must fall back to the same at-rest check the no-conditions case uses, not fire unasked.
+    #[test]
+    fn a_lone_blocking_condition_falls_back_to_the_control_at_rest() {
+        struct NeverVetoes;
+
+        impl Condition for NeverVetoes {
+            fn evaluate(&self, _: ActionValue, _: &mut Scratch, _: f32) -> ConditionState {
+                ConditionState::Idle
+            }
+            fn kind(&self) -> ConditionKind {
+                ConditionKind::Blocking
+            }
+        }
+
+        fn state_of(value: ActionValue) -> ConditionState {
+            let conditions = alloc::vec![BindingCondition::Custom(Arc::new(NeverVetoes))];
+            let mut scratch = alloc::vec![Scratch::default(); conditions.len()];
+            combine(&conditions, value, &mut scratch, TICK)
+        }
+
+        assert_eq!(state_of(ActionValue::Bool(false)), ConditionState::Idle);
+        assert_eq!(state_of(ActionValue::Bool(true)), ConditionState::Satisfied);
     }
 
     // Drives one condition through a script of values, which is what `run` cannot do: a condition
