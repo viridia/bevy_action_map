@@ -160,6 +160,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 90  | A context nobody declared says so                 |
 | 96  | `BindingModifier`'s blanket `Modifier` impl       |
 | 97  | A binding whose only conditions are blocking fires at rest |
+| 95  | Pong, shared across the single-concept demos          |
 
 ---
 
@@ -404,32 +405,6 @@ control the player was already holding.
   state. Cancel, on the same terms as deactivating a context, is the answer to beat.
 - **Why it exists as its own chunk.** A `MUST` whose only record of a destination was in the log is
   exactly what ground rule 5 forbids.
-
-### 95. Pong, shared across the single-concept demos
-
-A base a single-concept chunk can borrow instead of either bolting its concept onto Disasteroids or
-Split Friction — diluting what those two already demonstrate — or building another bespoke arcade
-game per concept, which chunk 42 and chunk 83 would otherwise both have paid for separately.
-
-- **What ships:** two paddles, a ball, a court, scoring, and aesthetics carried as far as
-  Disasteroids' and Split Friction's were — a reader should see a real game, not programmer art.
-  Fixed tick throughout, since chunk 83's determinism check needs it and nothing here argues for
-  differing.
-- **Pairing is static, not dynamic.** Player one is keyboard and mouse, player two is the first
-  connected gamepad. Split Friction already exercises the join gesture and per-device routing; this
-  chunk has nothing to add there and reads worse for trying.
-- **No rebinding, no presets, no settings screen.** Disasteroids owns that lesson; this chunk binds
-  one scheme per player and stops.
-- **The example this chunk ships plays an ordinary game of Pong**, no concept grafted on, since
-  nothing depends on it yet. A complete, playable rally is the acceptance criterion, verified by
-  playing it.
-- **What keeps a later chunk's diff small.** Each concept-specific chunk adds its own entry point
-  that imports this base's modules and swaps in exactly the one thing being demoed. If a variant
-  needs to reach past the base's public surface to do that, the base is missing a seam — that is not
-  license for the variant to route around it.
-- **Split if it grows.** Aesthetic work is open-ended in a way a mechanism chunk is not; if the
-  court and scoring alone run past a day's reading, ground rule 1 says split before writing, not
-  during.
 
 ### 42. The authority backend, faked
 
