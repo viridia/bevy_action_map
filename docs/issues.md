@@ -99,9 +99,25 @@ No requirement currently asks for stick-triggered joining, so nothing in tree ta
 latent: whoever reaches for `AnyStick` on a class binding next, for a join gesture or anything else
 wanting "any analog actuation", hits it with no warning.
 
-_Fix:_ a dead-zone-aware class match, or a documented warning on `bind_class` naming the hazard for
-analog classes specifically — either is a chunk once something in tree actually wants an analog
-class binding; `AnyButton`-only is the working answer until then. Unrouted.
+A dead zone on the _level_ would not actually close this: a dead zone is centered on assumed zero,
+and a stick whose true rest sits at 0.15 reads as "outside it" whether or not anyone is touching the
+stick. What the join gesture wants is movement, not position — a game where escaping a grapple means
+wiggling the stick rapidly is the same shape of control, and it works on hardware whose zero nobody
+calibrated for exactly this reason.
+
+_Fix, sketched:_ not a crate change. `Modifier` (`binding.rs:1256`) is a pure function of a value
+and its own `Scratch` — `scratch.prev` holds last tick's position, `scratch.count`/`scratch.time`
+can track reversals within a window — so a stateful "wiggle" modifier that outputs `Bool(false)`
+until enough movement has accumulated, then passes the real value through, is buildable entirely in
+`examples/` today via `.custom()` (`binding.rs:1885`). It has to ride an ordinary
+`.bind::<Join>(Stick::Left)` rather than the existing `bind_class::<Join>(ControlClass::AnyButton)`,
+since class bindings skip the modifier chain — so `pair_on_join` would need to observe both
+`On<ClassFired<Join>>` (buttons) and `On<Fired<Join>>` (the wiggle-gated stick), claiming through
+the same `is_claimed` check either way. Free parameters — window length, reversal count, how much
+movement counts — are a game's own design question, which is the reason this stays a worked example
+rather than a `BindingModifier` variant: baking in an intensity or a pattern would be guessing at
+what any particular game's grapple-escape or join gesture actually wants. Worth doing once Split
+Friction wants the polish; not routed to a chunk, since nothing here is missing from the crate.
 
 ---
 
