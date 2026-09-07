@@ -451,6 +451,9 @@ second implementer and the real one cannot live here.
   rather than inherit.
 - **The README rewrite** — a user-facing introduction, feature list and quickstart, with examples
   lifted from a real game rather than invented.
+- **`src/lib.rs`'s crate-level docs, alongside it.** The `//!` block largely mirrors the README's
+  Concepts section and has drifted the same way — both were drafted early and neither has kept pace
+  with what the crate grew into since.
 - **Comparison upkeep.** [docs/comparison.md](./docs/comparison.md) is read against BEI 0.26.0 and
   LWIM 0.21.0, which is a claim with a date on it. Both crates move.
 - **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
@@ -593,6 +596,60 @@ would revive it.
 - **`docs/issues.md` 1044 (R15.9, opaque platform-user identity)** stays unrouted alongside this —
   floated for Split Friction too, but nothing to show without a real platform SDK, and not yet worth
   a faked stub the way chunk 42 fakes a backend.
+
+### 108. Focus loss, regated
+
+R16.1 (`docs/issues.md` 1013): `RawEvent::FocusLost` (`frame.rs:93`) exists only under this crate's
+own `keyboard` feature, but the signal behind it — `bevy_input`'s `KeyboardFocusLost` — is unified
+on by `bevy_window`'s own `Cargo.toml` in any build with a real window, independent of what this
+crate requests. A `mouse`-and-`gamepad` build (no `keyboard`) has the event and no code reading it,
+so a mouse button held through alt-tab never clears — R16.1's "all held controls" MUST, unmet in
+exactly the configuration that can reach it.
+
+- **A regate, not new plumbing.** `RawEvent::FocusLost` and its `control()`/`device()` arms in
+  `frame.rs`, the collecting system at `frame.rs:301`, and the three match arms in
+  `eval.rs`/`capture.rs` move from `#[cfg(feature = "keyboard")]` to
+  `#[cfg(any(feature = "keyboard", feature = "mouse"))]`. The two `.clear()` calls inside stay
+  independently gated on their own feature, same as today.
+- **Verification:** a headless `App` built `--no-default-features --features mouse,gamepad,std,...`
+  that fires `KeyboardFocusLost` and confirms a held mouse button comes back unheld — the probe this
+  finding never got. `scripts/verify.sh --full`'s eight-combination sweep only `cargo check`s each
+  shape, so it would not have caught this; this chunk's test is what actually runs the `mouse`-
+  without-`keyboard` case.
+- **Not doing: anything about gamepad.** A gamepad's held state already clears on its own
+  `Connection(Disconnected)` event (`eval.rs:422-426`); focus loss carries no gamepad information
+  and needs none.
+
+### 109. Derive `Reflect`, and turn on auto-registration instead of hand-writing it
+
+R24.3 (`docs/issues.md` 1019): `Control`, `DeviceFamily`, `ActionMapping`, `RebindPolicy`, `Prompt`,
+`ControlOrigin`, `DeviceHandle`, `ActionObstacle` and `Paired` carry no `Reflect`, and nothing calls
+`register_type` for the two types that do (`action.rs`, `frame.rs`). The second half looked like it
+needed a call per type, written once and kept in sync forever after — but
+[bevyengine/bevy#15030][] means it doesn't: a non-generic `#[derive(Reflect)]` type registers itself
+at startup once `bevy_reflect`'s `auto_register_inventory` feature is on, which it isn't here — this
+crate's `bevy_reflect` dependency is `default-features = false` and its own forwarded feature never
+re-adds it.
+
+- **Derive `Reflect`** on the nine types named in 1019, same as `action.rs` and `frame.rs` already
+  do it.
+- **Add `bevy_reflect/auto_register_inventory`** to this crate's own `bevy_reflect` feature
+  (`Cargo.toml:94-101`), so every type above — and every one derived after this chunk — registers
+  itself, rather than adding a `register_type` call this chunk would immediately have to write nine
+  of and the next new type would silently skip.
+- **Check the `no_std` interaction before assuming it holds.** `inventory` lists Linux, macOS, iOS,
+  FreeBSD, Android, Windows and WebAssembly as supported, which says nothing about a `no_std` +
+  `libm` build. Run the `libm` shape through `scripts/verify.sh --full`'s combination sweep with
+  the feature on; if it fails there, `auto_register_static` is the documented fallback, but it
+  "requires additional setup" per `bevy_reflect`'s own docs — scope that setup before promising it
+  rather than after.
+- **Verification:** a headless `App` that builds `ActionMapPlugin` and asserts `AppTypeRegistry`
+  contains `Control`, `ActionMapping` and `Paired` with no `register_type` call anywhere in the
+  test — the probe 1019 never got.
+- **Not doing: `Modifier` or `Condition`.** Chunk 17c owns R5.6 and R17.5, and
+  `docs/decisions.md:430` keeps those two deliberately Reflect-free; this chunk doesn't reopen that.
+
+[bevyengine/bevy#15030]: https://github.com/bevyengine/bevy/pull/15030
 
 ---
 

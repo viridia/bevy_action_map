@@ -41,6 +41,7 @@ here, so there is one `D`-numbering in the project.
 | **D18** | Require-reset holds back buttons only                                         | design §7.2     |
 | **D26** | Failures surface at the earliest tier that can catch them                     | design §4, §7.3 |
 | **D19** | Modifiers and conditions are enums with a `Custom` variant                    | design §8.2     |
+| **D65** | The device model is closed; a third-party kind needs one in hand             | —               |
 | **D20** | We own the whole dead-zone chain, in three stages, with one rescaling         | design §8.4     |
 | **D21** | Calibration is measured by an explicit step, never detected                   | design §8.4     |
 | **D22** | Backends enter at two seams, not one                                          | —               |
@@ -468,6 +469,24 @@ never reach a save file. So `Modifier` and `Condition` carry no `Reflect` bound 
 extensions are not serialized, because nothing asks them to be. The `Arc` rather than a `Box` is for
 an unrelated reason: applying an override clones the authored bindings and rewrites their sources,
 and the originals have to survive that intact.
+
+### D65 — The device model is closed; a third-party device kind needs one in hand to design against
+
+**Decided.** `DeviceHandle`, `Control` and `RawEvent` stay closed — keyboard, mouse, gamepad — with
+no `Custom` variant and no `#[non_exhaustive]`. An unhandled control can still surface as an opaque
+id through `ControlOrigin::Foreign` (R11.9); the binding and evaluation pipeline itself does not
+open to a device kind this crate did not write.
+
+**Rules out.** A `Custom(Arc<dyn Device>)` extension the way D19 opened `Modifier` and `Condition`.
+The difference is that D19's `Custom` had one fixed interface to satisfy — a value and a scratch
+slot, evaluated once a tick — while "a device" has no equivalent fixed point across the candidates
+§11's own Problem statement names: MIDI, a HOTAS, a racing wheel, gyro, eye tracking. Building the
+trait now means guessing which of their shapes it should fit.
+
+**Reversal.** A concrete third-party device, not a hypothetical one. Once one exists to design
+against, the questions that decide the interface — polled or event-driven, does it have held
+state, does it need calibration, does it hot-plug — stop being guesses, and R11.2 (withdrawn) can
+be reproposed against it.
 
 ### D20 — We own the whole dead-zone chain, in three stages, with one rescaling
 

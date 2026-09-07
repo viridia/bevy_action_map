@@ -130,9 +130,9 @@ shapes can serve which intent, and a binding whose channel cannot serve its acti
 refused when the context is declared. The derive checks output against intent in a compile-time
 assertion.
 
-A directional composite's `Axis2` is still four buttons read together; a gamepad stick's is the one
-exception, a single `Control::GamepadStick` reporting a position the same way `MouseMotion` reports a
-displacement.
+A directional **composite** — several controls arranged as one binding (§8.1) — reports `Axis2` as
+four buttons read together; a gamepad stick's is the one exception, a single `Control::GamepadStick`
+reporting a position the same way `MouseMotion` reports a displacement.
 
 ### 3.2 Runtime values
 

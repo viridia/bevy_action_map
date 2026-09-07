@@ -739,8 +739,16 @@ is unmodeled.
 
 - **R11.1 (MUST)** A uniform device model covering keyboard, mouse, gamepad, touch, and
   application-defined virtual devices, each with a runtime handle and an inspectable class.
-- **R11.2 (MUST)** Third-party crates must be able to register new device kinds and controls without
-  forking — including their control identifiers, so bindings and rebinding UI work for them.
+- **R11.2 (WITHDRAWN)** ~~Third-party crates must be able to register new device kinds and controls
+  without forking — including their control identifiers, so bindings and rebinding UI work for
+  them.~~
+
+  Withdrawn because there is no concrete third-party device to design a registration mechanism
+  against, and this section's own Problem statement names the candidates — MIDI, HOTAS, racing
+  wheels, gyro, eye tracking — that share too little shape for one mechanism to fit all of them
+  without guessing (D65). R11.9's opaque id already covers "at least bindable" for a control this
+  crate doesn't know, proven on the presentation side by `ControlOrigin::Foreign`. Reopening this
+  needs a real device in hand, not a second guess.
 - **R11.3 (MUST)** Capability queries: available controls, analog vs digital, rumble, motion/gyro,
   touchpad, battery, LED — used by prompts (§18) and by "can this player play at all" checks.
 - **R11.4 (MUST)** Hot-plug: connect/disconnect events, and a documented policy for the state of

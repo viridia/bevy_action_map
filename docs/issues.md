@@ -15,7 +15,7 @@ chunk's own commit, and `docs/design.md` or `docs/decisions.md` where anything a
 are the record. A gap in the sequence below is a retired finding, not an omission. The next
 unassigned number is stated here; keep it up to date when numbering new items.
 
-**Next: 1047.**
+**Next: 1049.**
 
 **The calibration warning, stated up front because it is fair.** Ask a model to find sixty problems
 and it will find sixty. Some of what follows is real and some is a rule nobody would ever violate.
@@ -70,14 +70,26 @@ of a movement composite means. Unrouted.
 
 ### 1013 In a build without `keyboard`, a held mouse button survives alt-tab
 
-`eval.rs:430` · reasoned from the `cfg` structure, **not probed**
+`frame.rs:93` · reasoned from `bevy_window`'s own `Cargo.toml`, **not probed** against a real
+`--no-default-features --features mouse` build
 
-`KeyboardFocusLost` is behind `bevy_input`'s own `keyboard` feature, so a `mouse`-only build samples
-no focus loss, and `held_mouse_buttons.clear()` compiles out with it. R16.1's MUST — the alt-tab
-stuck-key bug must be impossible — is therefore unimplemented in that configuration.
+`RawEvent::FocusLost` exists only under this crate's own `#[cfg(feature = "keyboard")]`
+(`frame.rs:95`), which `Cargo.toml:88` maps straight onto `bevy_input/keyboard` — reading as though
+a `mouse`-only build has no focus-loss signal to read. It isn't this crate's feature that decides
+whether `bevy_input`'s `KeyboardFocusLost` fires, though: `bevy_window`'s own `Cargo.toml`
+unconditionally depends on `bevy_input` with `features = ["gestures", "keyboard", "mouse"]`, so any
+build using `bevy_window`/`bevy_winit` — the only place alt-tab means anything — has
+`bevy_input/keyboard` unified on regardless of what this crate requests. The event is always there;
+`RawEvent::FocusLost` just isn't compiled to read it.
 
-Not fixable at our layer. `docs/decisions.md` has no entry admitting the gap; it wants a stated
-price rather than silence, which is cheap — a decision, not a chunk. Unrouted.
+The reachable case is real: a mouse-and-gamepad game shipping `--no-default-features --features
+mouse,gamepad,...` to drop a keyboard-binding surface it doesn't use, on an ordinary desktop window.
+`held_mouse_buttons` in that build has no way to clear on focus loss, so alt-tabbing out mid-click
+leaves the button stuck fired on return — R16.1's MUST.
+
+_Fix:_ **chunk 108** — regate `RawEvent::FocusLost` and its handling on
+`any(feature = "keyboard", feature = "mouse")` instead of `keyboard` alone. Fixable at our layer
+after all; an earlier version of this entry said otherwise on the strength of the wrong premise.
 
 ### 1046 A class binding on an analog source has no dead zone
 
@@ -192,21 +204,39 @@ winit — [winit#4606][] and [winit#2678][] — and are the deferred table's row
 
 ### 1019 `Reflect` reaches two modules, and nothing anywhere registers a type
 
-R24.3 (MUST) · `action.rs`, `frame.rs`
+R24.3 (MUST) · `action.rs`, `frame.rs`, `Cargo.toml:38,94-101` · reasoned from the pinned Bevy
+commit's own `Cargo.toml` feature graph, **not probed**
 
 `#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]` appears in `action.rs` and `frame.rs` and
-nowhere else, and **nothing in the crate or the examples calls `register_type`** — so even the types
-that do derive it are absent from the type registry.
+nowhere else, and **nothing in the crate or the examples calls `register_type`**. That reads like a
+gap only manual calls can close, but since [bevyengine/bevy#15030][], landed well before the pinned
+commit, a non-generic `#[derive(Reflect)]` type is registered automatically at app startup — no
+`register_type` needed — unless it opts out with `#[reflect(no_auto_register)]`. A generic type is
+the one case that still needs a manual call, per type parameter, because there is no single
+`TypeId` to register on its behalf.
+
+That mechanism is inert here, though, which is why the finding still holds. It lives behind
+`bevy_reflect`'s own `auto_register_inventory` (or, on platforms `inventory` doesn't support,
+`auto_register_static`) feature, bundled into `bevy_reflect`'s `default` set upstream — but this
+crate's `bevy_reflect` dependency is declared `default-features = false` (`Cargo.toml:38`), and its
+own forwarded `bevy_reflect` feature (`Cargo.toml:94-101`) never re-adds either. So today, deriving
+`Reflect` on `Prompt` or `ActionMapping` would still leave it out of the registry — not because the
+crate has to hand-register everything, but because it never turned on the feature that would do it
+for free.
 
 `Control`, `DeviceFamily`, `ActionMapping`, `RebindPolicy`, `Prompt`, `ControlOrigin`,
-`DeviceHandle`, `ActionObstacle` and `Paired` carry no `Reflect`. `Paired` is a component a scene
-would author, and the five resources `ActionMapPlugin` initializes are unregistered.
-
-`bevy_reflect` is a **default** feature, so this is the shipped configuration: an inspector, an
-editor or a scene serializer sees nothing of this crate.
+`DeviceHandle`, `ActionObstacle` and `Paired` still carry no `Reflect` at all, which
+auto-registration doesn't touch — deriving it is a separate step from registering what's derived.
+`Paired` is a component a scene would author, and the five resources `ActionMapPlugin` initializes
+are unregistered.
 
 Chunk 17c owns R5.6 and R17.5 — `Modifier` and `Condition` — and `docs/decisions.md:430`
-deliberately keeps those two bound-free. Neither is R24.3. Unrouted.
+deliberately keeps those two bound-free. Neither is R24.3.
+
+_Fix:_ **chunk 109** — derive `Reflect` on the missing types and turn on auto-registration, checking
+the `no_std` interaction first rather than assuming it.
+
+[bevyengine/bevy#15030]: https://github.com/bevyengine/bevy/pull/15030
 
 ### 1020 A device disconnecting raises no signal
 
@@ -224,7 +254,7 @@ _Fix:_ **chunk 103**.
 ### 1042 No named device-requirement sets
 
 R15.7 (SHOULD, split from 1020) — named device-requirement sets with required and optional devices.
-Nothing. The concept does not exist under any name in `src/` — see 1029: `player.rs`'s own module
+Nothing. The concept does not exist under any name in `src/` — see 1030: `player.rs`'s own module
 doc claims it anyway.
 
 _Fix:_ **chunk 104**.
@@ -307,15 +337,38 @@ time window.
 
 _Fix:_ **chunk 34** — a Pong variant, a double-tap paddle speed-boost.
 
-### 1024 The device model is closed, which is a decision nobody wrote down
+### 1047 Capability queries are absent for devices the crate already models
 
-R11.1, R11.2, R11.3, R11.8, R11.9 — three of them MUST. `DeviceHandle` has no `Custom` and no
-`#[non_exhaustive]`, and its doc argues for exhaustive matchability — the opposite of D19's choice
-for modifiers and conditions.
+R11.3 (MUST) · `device.rs`
 
-R11.5, R11.6 and R11.7 have destinations, so what is missing is the model's _openness_, not its
-identity half. The closure is a decision by `docs/decisions.md`'s own admission test and that
-document does not carry it. Unrouted.
+The module's own doc claims "capability data" (`device.rs:3`); nothing answers a capability
+question anywhere in the crate — no rumble, motion/gyro, touchpad, battery or LED query, and no way
+to ask what controls a device has beyond matching on `DeviceHandle`'s own closed kind. §18's
+prompts and any "can this player play at all" check — R11.3's own two named callers — have nothing
+to call.
+
+Unlike the device model's closedness (D65), this isn't about admitting an unknown device kind — a
+gamepad's rumble motors and battery level are things `bevy_input`'s own `Gamepad` component already
+reports. Nothing here reads them.
+
+Unrouted.
+
+### 1048 Virtual devices have no first-class support
+
+R11.8 (SHOULD) · no citation anywhere in `src/`
+
+"On-screen touch sticks, AI/bot drivers, and test fixtures must be first-class devices, not special
+cases" — nothing in `DeviceHandle` or the frame models a device that isn't a real keyboard, mouse or
+gamepad. A test fixture or bot driver today has to fake `RawEvent`s attributed to
+`DeviceHandle::KeyboardMouse` or a real gamepad `Entity`, which is exactly the special case R11.8
+asks not to need.
+
+Unlike R11.2 (withdrawn, D65), this doesn't need third-party extensibility — a virtual device can be
+modeled inside the crate's own closed set rather than through an escape hatch for hardware nobody's
+written. What's missing is a variant and an identity for "not a real piece of hardware," not a
+mechanism for hardware this crate has never seen.
+
+Unrouted.
 
 ### 1025 A context instance cannot be driven from outside the crate
 

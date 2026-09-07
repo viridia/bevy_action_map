@@ -159,6 +159,10 @@ it builds so a UI can show a charge meter. Several bindings can feed one action,
 resolves them by specificity, so `Ctrl+S` beats a plain `S` bound in the same context without either
 binding knowing about the other.
 
+A binding's control doesn't have to be a single input: `DirectionalButtons::wasd()` combines four
+keys into one **composite**, so `Move` reads a single `Vec2` instead of four buttons the game code
+would otherwise have to assemble itself.
+
 ### Reading actions: poll or observe
 
 ```rust,ignore
