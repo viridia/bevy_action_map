@@ -9,6 +9,9 @@
 //!
 //! Pass a seed on the command line to see a different layout: `cargo run --example split_friction --
 //! 7`. With none given, the layout is the same every run.
+//!
+//! `F1` opens the debug panel — see [`overlay`] — whether or not either protagonist has been
+//! claimed yet.
 
 #![allow(missing_docs)]
 
@@ -17,9 +20,13 @@ use bevy::prelude::*;
 
 mod collision;
 mod dungeon;
+mod overlay;
 mod protagonist;
 mod split_screen;
 mod tileset;
+
+#[path = "../common/mod.rs"]
+mod common;
 
 const WIDTH: usize = 64;
 const HEIGHT: usize = 64;
@@ -35,7 +42,7 @@ fn main() {
             DefaultPlugins.set(ImagePlugin::default_nearest()),
             bevy_action_map::ActionMapPlugin,
         ))
-        .add_plugins((protagonist::plugin, split_screen::plugin))
+        .add_plugins((protagonist::plugin, split_screen::plugin, overlay::plugin))
         .insert_resource(Seed(seed))
         .add_systems(Startup, setup)
         .run();

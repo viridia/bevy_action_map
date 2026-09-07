@@ -161,6 +161,8 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 96  | `BindingModifier`'s blanket `Modifier` impl       |
 | 97  | A binding whose only conditions are blocking fires at rest |
 | 95  | Pong, shared across the single-concept demos          |
+| 106 | A diagnostic overlay for Split Friction                |
+| 107 | A diagnostic overlay for Pong                          |
 
 ---
 
@@ -591,25 +593,6 @@ would revive it.
 - **`docs/issues.md` 1044 (R15.9, opaque platform-user identity)** stays unrouted alongside this —
   floated for Split Friction too, but nothing to show without a real platform SDK, and not yet worth
   a faked stub the way chunk 42 fakes a backend.
-
-### 106. A diagnostic overlay for Split Friction
-
-Chunk 36 built Disasteroids' overlay; nothing else has one. Its own doc comment already says why
-this is cheap: "nothing here names an action or a context... this file would work unchanged in a
-different game with different actions," the debris-count line excepted.
-
-- **Extract first, then wire.** The context/action-agnostic parts — the panel, the redraw loop, the
-  rebindable-mappings dump — move to `examples/common/`, replacing what would otherwise become a
-  second near-identical copy. Split Friction's own `overlay.rs` shrinks to the toggle-action wiring
-  and whatever it wants in place of the debris-count joke.
-- **Verified by:** playing it — `F1` (or Select) toggles the same kind of panel, listing Split
-  Friction's own contexts and actions.
-
-### 107. A diagnostic overlay for Pong
-
-- **Depends on chunks 95 and 106.** Pong needs to exist, and the shared module chunk 106 extracts
-  needs to exist, before this is one line rather than a third copy.
-- **Verified by:** playing it, same as 106.
 
 ---
 

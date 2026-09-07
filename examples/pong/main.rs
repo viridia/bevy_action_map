@@ -6,6 +6,8 @@
 //! [`pong::paddle`]. Neither rebinds, and there is no settings screen: Disasteroids already owns
 //! that lesson.
 //!
+//! `F1` opens the debug panel — see [`pong::overlay`].
+//!
 //! [`pong`] is the seam a variant reaches through — see its own doc comment for how a
 //! concept-specific chunk imports this base and swaps in the one thing being demoed.
 
@@ -15,6 +17,9 @@ use bevy::prelude::*;
 
 #[path = "mod.rs"]
 mod pong;
+
+#[path = "../common/mod.rs"]
+mod common;
 
 fn main() {
     App::new()

@@ -1,143 +1,67 @@
-//! A debug overlay showing what the input layer thinks is happening.
+//! The F1 debug panel, and the one line beside it that is specific to this game.
 //!
-//! Press `F1` (or Select on a pad) to toggle it. It lists every context, whether it is active, and
-//! every action in it with its phase and — the useful part — what is stopping it firing when it is
-//! not.
-//!
-//! Nothing here names an action or a context. `dump` hands back whatever has been declared, so this
-//! file would work unchanged in a different game with different actions. The debris count at the top
-//! is the one game-specific line, and it is there for the joke.
+//! Press `F1` (or Select on a pad) to toggle it. The panel itself — every context, whether it is
+//! active, and every action in it with its phase and what is stopping it from firing — is
+//! `common::debug_overlay`, shared with every other example; this file is only the toggle wiring
+//! and the debris count in the opposite corner.
 
 use bevy::prelude::*;
-use bevy_action_map::inspect::dump;
-use bevy_action_map::mapping::mappings;
 use bevy_action_map::prelude::*;
-use core::fmt::Write;
 
 use crate::actions::ToggleOverlay;
 use crate::asteroids::Asteroid;
+use crate::common::debug_overlay::{self, Showing};
 
 #[derive(Component, Default, Clone)]
-struct OverlayText;
-
-#[derive(Resource, Default)]
-pub(crate) struct Showing(bool);
+struct DebrisText;
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<Showing>();
-    app.add_systems(Startup, panel.spawn());
-    // Exclusive, because reading contexts whose types are not known here means asking the world to
-    // build the queries. It is a debug overlay; it can have the world for a moment.
-    app.add_systems(Update, redraw);
+    app.add_plugins(debug_overlay::plugin);
+    app.add_systems(Startup, debris_readout.spawn());
+    app.add_systems(Update, redraw_debris);
 }
 
 /// Flips the overlay on and off.
 ///
 /// Attached to the shell context's entity, so it hears the action wherever that lives.
-pub(crate) fn toggle(_: On<Fired<ToggleOverlay>>, mut showing: ResMut<Showing>) {
-    showing.0 = !showing.0;
+pub(crate) fn toggle(_: On<Fired<ToggleOverlay>>, showing: ResMut<Showing>) {
+    debug_overlay::toggle(showing);
 }
 
-fn panel() -> impl Scene {
+/// The opposite corner from the shared panel below it — the two are unrelated text nodes with no
+/// shared layout, so keeping them apart is simpler than making either aware of the other's size.
+fn debris_readout() -> impl Scene {
     bsn! {
-        OverlayText
+        DebrisText
         Text::new("")
         TextFont { font_size: 13.0_f32 }
         TextColor(Color::srgb(0.6, 0.9, 0.7))
         Node {
             position_type: PositionType::Absolute,
             top: Val::Px(8.0),
-            left: Val::Px(8.0),
+            right: Val::Px(8.0),
         }
     }
 }
 
-fn redraw(world: &mut World) {
-    if !world.resource::<Showing>().0 {
-        set_text(world, String::new());
+/// A separate node from the shared panel rather than a line inside it: the debris count is game
+/// state, not input state, and the two do not need to share a string to appear together. Gated on
+/// the same [`Showing`] flag as the panel below it, so the joke only costs screen space while the
+/// panel is up to read it.
+fn redraw_debris(
+    showing: Res<Showing>,
+    rocks: Query<Entity, With<Asteroid>>,
+    mut text: Query<&mut Text, With<DebrisText>>,
+) {
+    let Ok(mut text) = text.single_mut() else {
+        return;
+    };
+    if !showing.0 {
+        text.0.clear();
         return;
     }
-
-    let mut out = String::new();
-
-    let rocks = world
-        .query_filtered::<Entity, With<Asteroid>>()
-        .iter(world)
-        .count();
-    let _ = writeln!(out, "kessler index: {rocks} ({})\n", debris_forecast(rocks));
-
-    for context in dump(world).contexts {
-        let _ = writeln!(
-            out,
-            "{} [{:?} {}]",
-            context.path, context.tick, context.priority
-        );
-
-        if context.instances.is_empty() {
-            out.push_str("  (nobody is carrying this)\n");
-        }
-
-        for instance in context.instances {
-            let _ = writeln!(
-                out,
-                "  {} {}",
-                if instance.active { "on " } else { "off" },
-                instance.entity
-            );
-            for action in instance.actions {
-                // The obstacle is the whole point: an action that is not firing looks identical
-                // from a call site whether its context is asleep, something outranked it, or the
-                // player simply is not pressing anything.
-                let _ = writeln!(
-                    out,
-                    "    {:<26} {:?} {:?}",
-                    action.path, action.state.phase, action.obstacle
-                );
-            }
-        }
-    }
-
-    // What the player would be shown, from the same world. Nothing below names an action: the
-    // mapping list is the whole of what a rebinding screen needs, and this is the smallest thing
-    // that reads it.
-    out.push_str("\nrebindable\n");
-    for mapping in mappings(world) {
-        // Both halves of the row are keys with a fallback, so a game that ships a translation
-        // catalogue swaps in two lookups here and nothing else changes.
-        //
-        // A mapping holds an ordered *list*, so the second half is every control in it — this is a
-        // read-only dump and there is no reason to hide the secondary. A settings screen draws
-        // them as separate cells; here they are joined, and joining is the app's decision rather
-        // than the crate's.
-        let bound = mapping
-            .slots
-            .iter()
-            .map(|control| control.fallback_label())
-            .collect::<Vec<_>>()
-            .join(", ");
-        // Empty slots the player could still fill, so the dump says how wide the row is rather
-        // than only what is in it.
-        let room = match mapping.capacity {
-            Some(slots) if slots > mapping.slots.len() => {
-                format!("  (+{} free)", slots - mapping.slots.len())
-            }
-            Some(_) => String::new(),
-            None => "  (+ more)".into(),
-        };
-        // Whether the row is a button or a label on the real screen. Everything is listed; only
-        // some of it is changeable, which is what `mappable` declares and what this column shows.
-        let _ = writeln!(
-            out,
-            "    {:<22} {:<9} {bound}{room}",
-            mapping.key.fallback_label(),
-            match mapping.rebind_policy {
-                RebindPolicy::Here => "[rebind]",
-                RebindPolicy::Fixed => "[fixed]",
-            },
-        );
-    }
-
-    set_text(world, out);
+    let count = rocks.iter().count();
+    text.0 = format!("kessler index: {count} ({})\n", debris_forecast(count));
 }
 
 /// How alarmed to be about the current debris count.
@@ -152,17 +76,5 @@ fn debris_forecast(rocks: usize) -> &'static str {
         7..=12 => "elevated",
         13..=18 => "cascading",
         _ => "Kessler syndrome",
-    }
-}
-
-fn set_text(world: &mut World, text: String) {
-    let panels: Vec<Entity> = world
-        .query_filtered::<Entity, With<OverlayText>>()
-        .iter(world)
-        .collect();
-    for panel in panels {
-        if let Some(mut target) = world.get_mut::<Text>(panel) {
-            target.0 = text.clone();
-        }
     }
 }

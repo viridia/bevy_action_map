@@ -6,5 +6,6 @@
 //! An example is allowed to use only part of this.
 #![allow(dead_code)]
 
+pub mod debug_overlay;
 pub mod prompt_ui;
 pub mod widget_focus;

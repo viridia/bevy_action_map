@@ -8,16 +8,26 @@
 //!
 //! [`ball`], [`court`], [`paddle`] and [`score`] reach each other with `super::`, not `crate::`,
 //! which is what lets them resolve the same way nested under `pong::` in someone else's crate as
-//! they do at the root of this one.
+//! they do at the root of this one. [`overlay`] is the exception: it reaches `crate::common`,
+//! which every consumer declares at its own crate root rather than inside `pong` — a variant that
+//! keeps [`overlay`] needs its own `#[path = "../common/mod.rs"] mod common;`, the same line
+//! `pong`'s own `main.rs` has.
 
 use bevy::prelude::*;
 
 pub mod ball;
 pub mod court;
+pub mod overlay;
 pub mod paddle;
 pub mod score;
 
 /// Every module, wired up exactly as an ordinary game of Pong wires them.
 pub fn plugin(app: &mut App) {
-    app.add_plugins((court::plugin, paddle::plugin, ball::plugin, score::plugin));
+    app.add_plugins((
+        court::plugin,
+        paddle::plugin,
+        ball::plugin,
+        score::plugin,
+        overlay::plugin,
+    ));
 }

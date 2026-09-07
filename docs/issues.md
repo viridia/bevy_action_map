@@ -15,7 +15,7 @@ chunk's own commit, and `docs/design.md` or `docs/decisions.md` where anything a
 are the record. A gap in the sequence below is a retired finding, not an omission. The next
 unassigned number is stated here; keep it up to date when numbering new items.
 
-**Next: 1046.**
+**Next: 1047.**
 
 **The calibration warning, stated up front because it is fair.** Ask a model to find sixty problems
 and it will find sixty. Some of what follows is real and some is a rule nobody would ever violate.
@@ -78,6 +78,30 @@ stuck-key bug must be impossible — is therefore unimplemented in that configur
 
 Not fixable at our layer. `docs/decisions.md` has no entry admitting the gap; it wants a stated
 price rather than silence, which is cheap — a decision, not a chunk. Unrouted.
+
+### 1046 A class binding on an analog source has no dead zone
+
+`binding.rs`'s own doc for `bind_class` — "it skips modifiers, conditions and the presentation
+mapping list entirely" · reasoned from that doc and from play-testing Split Friction, **not probed
+against a false-fire**
+
+Found reaching for `ControlClass::AnyStick` to fix a real papercut: Split Friction's join gesture
+(`protagonist.rs`, chunk 66) binds `Join` to `ControlClass::AnyButton` only, so a player picking up
+a gamepad and wiggling the stick — the natural first move — does not join; a button has to be found
+first. `AnyStick` looks like the fix, but a class binding's fold skips the modifier chain (§8, no
+dead zone stage), and `class_dispatch`'s own `actuated` check treats any nonzero axis reading as a
+match — so a stick whose rest position sits off true zero, which no calibration step catches before
+a device is paired, would fire `Join` on its own drift. The failure is silent: a device joins that
+nobody touched, and nothing says why.
+
+No requirement currently asks for stick-triggered joining, so nothing in tree takes this path today
+— `AnyButton` alone is what chunk 66 shipped and what Split Friction still binds. The risk is
+latent: whoever reaches for `AnyStick` on a class binding next, for a join gesture or anything else
+wanting "any analog actuation", hits it with no warning.
+
+_Fix:_ a dead-zone-aware class match, or a documented warning on `bind_class` naming the hazard for
+analog classes specifically — either is a chunk once something in tree actually wants an analog
+class binding; `AnyButton`-only is the working answer until then. Unrouted.
 
 ---
 
