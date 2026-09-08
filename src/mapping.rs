@@ -55,20 +55,8 @@ use bevy_ecs::world::World;
 use crate::action::{ActionId, ChannelShape};
 use crate::binding::{BindingPart, Control};
 use crate::condition::ConditionDescriptor;
+use crate::device::DeviceFamily;
 use crate::inspect::OverrideStage;
-
-/// The set of devices a player is using, and the scope a rebinding is made in.
-///
-/// Keyboard bindings and gamepad bindings are alternatives rather than competitors: a player is
-/// using one or the other at any moment, so the two never conflict with each other and are remapped
-/// independently. A rebinding screen shows one family at a time for the same reason.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum DeviceFamily {
-    /// Keyboard and mouse.
-    KeyboardMouse,
-    /// A gamepad.
-    Gamepad,
-}
 
 /// What a mapping is called, in a form a translation catalogue can look up.
 ///

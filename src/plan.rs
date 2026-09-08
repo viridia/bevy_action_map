@@ -330,7 +330,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
     // every eligible binding shares one runtime latch — provided they agree about the tunable's
     // shape, which is the one thing sharing a name cannot paper over.
     let mut tunable_keys: alloc::collections::BTreeMap<
-        (crate::mapping::DeviceFamily, &'static str),
+        (crate::device::DeviceFamily, &'static str),
         (ActionId, crate::mapping::TunableValue),
     > = alloc::collections::BTreeMap::new();
 
@@ -665,7 +665,7 @@ impl<C> Plan<C> {
         // front, against every binding at once, since a group is only a group once every member is
         // known; a `Range` tunable never joins one, because `DeadZone`'s modifier holds no runtime
         // state to share in the first place.
-        let mut tunable_groups: BTreeMap<(crate::mapping::DeviceFamily, &'static str), Vec<usize>> =
+        let mut tunable_groups: BTreeMap<(crate::device::DeviceFamily, &'static str), Vec<usize>> =
             BTreeMap::new();
         for (index, binding) in bindings.iter().enumerate() {
             let Some(decl) = &binding.tunable else {

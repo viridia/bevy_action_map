@@ -1,7 +1,21 @@
-//! Devices: enumeration, identity, capabilities, and calibration.
+//! Devices: families, enumeration, identity, capabilities, and calibration.
 //!
-//! This module models devices with a runtime handle, a persistent identity, and capability data
-//! used by prompts, pairing, and calibration.
+//! This module models devices at two grains: a [`DeviceFamily`] is the class of hardware a binding
+//! is written for, and a [`DeviceHandle`] is one unit of it plugged in right now. Alongside those
+//! are a persistent identity, and the capability data used by prompts, pairing, and calibration.
+
+/// The set of devices a player is using, and the scope a rebinding is made in.
+///
+/// Keyboard bindings and gamepad bindings are alternatives rather than competitors: a player is
+/// using one or the other at any moment, so the two never conflict with each other and are remapped
+/// independently. A rebinding screen shows one family at a time for the same reason.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum DeviceFamily {
+    /// Keyboard and mouse.
+    KeyboardMouse,
+    /// A gamepad.
+    Gamepad,
+}
 
 /// A device as it exists right now, in this running process.
 ///
@@ -26,11 +40,11 @@ pub enum DeviceHandle {
 
 impl DeviceHandle {
     /// Which binding family this device's controls belong to.
-    pub const fn family(self) -> crate::mapping::DeviceFamily {
+    pub const fn family(self) -> DeviceFamily {
         match self {
-            Self::KeyboardMouse => crate::mapping::DeviceFamily::KeyboardMouse,
+            Self::KeyboardMouse => DeviceFamily::KeyboardMouse,
             #[cfg(feature = "gamepad")]
-            Self::Gamepad(_) => crate::mapping::DeviceFamily::Gamepad,
+            Self::Gamepad(_) => DeviceFamily::Gamepad,
         }
     }
 }
@@ -75,7 +89,7 @@ impl DeviceHandleSet {
     ///
     /// An occupant with one device per family has at most one answer; a game that pairs two devices
     /// of the same family to one occupant gets whichever was claimed first.
-    pub fn owner_for(&self, family: crate::mapping::DeviceFamily) -> Option<DeviceHandle> {
+    pub fn owner_for(&self, family: DeviceFamily) -> Option<DeviceHandle> {
         self.0
             .iter()
             .copied()
@@ -538,11 +552,11 @@ mod tests {
         let set =
             DeviceHandleSet::from_iter([DeviceHandle::KeyboardMouse, DeviceHandle::Gamepad(pad)]);
         assert_eq!(
-            set.owner_for(crate::mapping::DeviceFamily::Gamepad),
+            set.owner_for(DeviceFamily::Gamepad),
             Some(DeviceHandle::Gamepad(pad))
         );
         assert_eq!(
-            set.owner_for(crate::mapping::DeviceFamily::KeyboardMouse),
+            set.owner_for(DeviceFamily::KeyboardMouse),
             Some(DeviceHandle::KeyboardMouse)
         );
     }

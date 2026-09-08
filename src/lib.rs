@@ -347,11 +347,12 @@ pub mod prelude {
     pub use crate::context::{
         ActionMapAppExt, ActionObstacle, ActionsQuery, ContextActions, InputContextState,
     };
+    pub use crate::device::DeviceFamily;
     pub use crate::event::{Canceled, ClassBinding, ClassFired, Completed, Fired, Started};
     pub use crate::frame::{FrameTimestamp, InputFrame, RawEvent, TimedRawEvent};
     pub use crate::join::is_claimed;
     pub use crate::mapping::{
-        ActionMapping, DeviceFamily, Follower, MappingKey, RebindPolicy, Tunable, TunableValue,
+        ActionMapping, Follower, MappingKey, RebindPolicy, Tunable, TunableValue,
         declared_mappings, declared_tunables, mappings, tunables,
     };
     pub use crate::present::{

@@ -50,7 +50,8 @@ use bevy_reflect::{Reflect, ReflectDeserialize, ReflectSerialize};
 use crate::action::ChannelShape;
 use crate::binding::{BindingSpec, Control, MappedPart, apply_tunable_value, mapped_parts};
 use crate::capture::{ControlClass, RefusedReason, admissible};
-use crate::mapping::{ActionMapping, DeviceFamily, MappingKey, Tunable, TunableValue};
+use crate::device::DeviceFamily;
+use crate::mapping::{ActionMapping, MappingKey, Tunable, TunableValue};
 
 /// What a player did to one mapping.
 ///

@@ -332,7 +332,7 @@ _Fix:_ **chunk 34** — a Pong variant, a double-tap paddle speed-boost.
 
 R11.3 (MUST) · `device.rs`
 
-The module's own doc claims "capability data" (`device.rs:3`); nothing answers a capability
+The module's own doc claims "capability data" (`device.rs:5`); nothing answers a capability
 question anywhere in the crate — no rumble, motion/gyro, touchpad, battery or LED query, and no way
 to ask what controls a device has beyond matching on `DeviceHandle`'s own closed kind. §18's
 prompts and any "can this player play at all" check — R11.3's own two named callers — have nothing
@@ -607,9 +607,10 @@ Unrouted.
 
 ### 1038 One command the Verification list does not run
 
-`cargo doc --no-deps --all-features` warns — `device.rs:8`, a redundant explicit link target. That
-command is the only one that reads doc comments, so it belongs in `CLAUDE.md`'s Verification list.
-Unrouted.
+`cargo doc --no-deps --all-features` warns twice — `device.rs:22`, a redundant explicit link target,
+and `present.rs:511`, a link to `GamepadBrand::Generic` with nothing importing `GamepadBrand` into
+that scope. That command is the only one that reads doc comments, so it belongs in `CLAUDE.md`'s
+Verification list. Unrouted.
 
 ---
 

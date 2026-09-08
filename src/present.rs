@@ -68,7 +68,7 @@ use crate::action::ActionId;
 use crate::binding::{BindingPart, Control};
 use crate::capture::ControlClass;
 use crate::condition::ConditionDescriptor;
-use crate::mapping::DeviceFamily;
+use crate::device::DeviceFamily;
 
 #[cfg(feature = "gamepad")]
 use crate::binding::Stick;
@@ -1180,7 +1180,7 @@ mod tests {
 
         // A mouse button is keyboard-and-mouse and reports on a button channel, which is what lets
         // it fill a mapping a key could fill.
-        assert_eq!(left.family(), crate::mapping::DeviceFamily::KeyboardMouse);
+        assert_eq!(left.family(), crate::device::DeviceFamily::KeyboardMouse);
         assert_eq!(left.shape(), crate::action::ChannelShape::Button);
     }
 }
@@ -1322,7 +1322,7 @@ mod prompt_tests {
         assert_eq!(
             labels(&table.prompts(
                 Jump::id(),
-                PromptScope::ANY.on(crate::mapping::DeviceFamily::Gamepad)
+                PromptScope::ANY.on(crate::device::DeviceFamily::Gamepad)
             )),
             ["South Button"]
         );
@@ -1495,16 +1495,13 @@ mod prompt_tests {
         let foreign = ControlOrigin::Foreign {
             name: "steam/dualsense_touchpad".into(),
             label: "Touchpad".into(),
-            family: Some(crate::mapping::DeviceFamily::Gamepad),
+            family: Some(crate::device::DeviceFamily::Gamepad),
             class: Some(ControlClass::AnyDelta),
         };
 
         assert_eq!(foreign.name(), "steam/dualsense_touchpad");
         assert_eq!(foreign.fallback_label(), "Touchpad");
-        assert_eq!(
-            foreign.family(),
-            Some(crate::mapping::DeviceFamily::Gamepad)
-        );
+        assert_eq!(foreign.family(), Some(crate::device::DeviceFamily::Gamepad));
         assert_eq!(foreign.class(), Some(ControlClass::AnyDelta));
         // And the one thing it cannot answer, so that a caller reaching past the name has to say
         // what it does when the control is not ours.

@@ -3854,8 +3854,8 @@ mod tests {
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_deadzone_turned_all_the_way_down_still_rests_on_calibration() {
-        use crate::device::{AxisCalibration, GamepadCalibration};
-        use crate::mapping::{DeviceFamily, TunableValue};
+        use crate::device::{AxisCalibration, DeviceFamily, GamepadCalibration};
+        use crate::mapping::TunableValue;
         use crate::overrides::{Overrides, apply_overrides};
 
         let pad = bevy_ecs::entity::Entity::PLACEHOLDER;
@@ -3922,7 +3922,8 @@ mod tests {
     #[cfg(feature = "gamepad")]
     #[test]
     fn an_analog_action_survives_an_axis_that_never_rests() {
-        use crate::mapping::{DeviceFamily, TunableValue};
+        use crate::device::DeviceFamily;
+        use crate::mapping::TunableValue;
         use crate::overrides::{Overrides, apply_overrides};
 
         let pad = bevy_ecs::entity::Entity::PLACEHOLDER;

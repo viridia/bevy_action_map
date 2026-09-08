@@ -15,7 +15,7 @@ Four layers. The structural property everything else rests on is that **L2 reads
 everything downstream of the input frame is a pure function of it.
 
 ```
-L0  device      raw messages from keyboard, mouse and gamepad, plus per-unit calibration
+L0  device      device families, raw messages from keyboard, mouse and gamepad, per-unit calibration
 L1  frame       one timestamped queue of raw events, sampled once per rendered frame
 L2  mapping     compiled plans, evaluation, per-entity action state
 L3  consumers   polling, observers, mappings, prompts, capture, overrides
@@ -927,7 +927,7 @@ The macro crate is re-exported, so nothing names it.
 
 ```
 src/
-  device.rs      L0  device handles, pairing sets, gamepad calibration and brand resolution
+  device.rs      L0  families and handles, pairing sets, gamepad calibration and brand resolution
   frame.rs       L1  the event queue, sampling, retirement
   action.rs          identity, intent, channel shape, value, phase, scratch
   binding.rs         controls, sources, composites, modifiers, the context builder

@@ -22,7 +22,8 @@ use bevy_ecs::world::World;
 
 use crate::action::InputAction;
 use crate::binding::Control;
-use crate::mapping::{DeviceFamily, TunableValue, mappings};
+use crate::device::DeviceFamily;
+use crate::mapping::{TunableValue, mappings};
 use crate::overrides::Overrides;
 
 /// A named set of mapping assignments a player selects as a unit.

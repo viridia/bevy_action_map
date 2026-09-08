@@ -55,8 +55,9 @@ use bevy_input::keyboard::KeyboardInput;
 
 use crate::action::ChannelShape;
 use crate::binding::{ButtonThreshold, Control};
+use crate::device::DeviceFamily;
 use crate::frame::{FrameTimestamp, InputFrame, RawEvent};
-use crate::mapping::{ActionMapping, DeviceFamily, MappingKey};
+use crate::mapping::{ActionMapping, MappingKey};
 use crate::overrides::{Override, Overrides};
 
 /// How far a stick or trigger must be pushed before capture treats it as a choice.

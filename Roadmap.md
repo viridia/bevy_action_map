@@ -165,6 +165,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 100 | A preset can carry a tunable                          |
 | 51  | The constitution, trimmed                             |
 | 77  | `context.rs`'s test fixtures, deduplicated and reordered |
+| 78a | `DeviceFamily` moves to `device.rs`                   |
 
 ---
 
@@ -180,17 +181,30 @@ routed.
 
 Nothing here changes what the crate can do.
 
-### 78. Two files doing several jobs each
+### 78b. `binding.rs` is four files
 
-- **`context.rs` is three:** the live state; declaration and app wiring; and the monomorphization
-  seam — the eight `read_*`/`apply_to_*` functions that are the only reason the file depends on
-  `overrides`, `present`, `mapping` and `inspect`. After 75 that seam is half the size, which is why
-  this follows rather than leads.
-- **`binding.rs` is four**, and is the larger by code: the control vocabulary, the declaration
-  structs and the queries over them, the modifiers, and the builder API.
-- **The measurement chunk 52 corrected.** `context.rs` is 4,318 lines of which 1,559 are code;
-  `binding.rs` is 2,361 lines of code. The "quarter of the crate" this chunk used to cite was
-  counting a 2,759-line test module, which is 77's problem.
+The larger of the two by code: the control vocabulary, the declaration structs and the queries over
+them, the modifiers, and the builder API. 2,501 lines of code and 714 of tests.
+
+- **A directory of private submodules**, `src/binding/{mod,control,decl,modifier,builder}.rs`, each
+  re-exported from `binding`. Public paths and the prelude do not move, which is what lets ground
+  rule 3 be checked by the examples not changing. Decided in 78a; `src/` was flat until then, so the
+  shape is the thing to hold to across both splits.
+- **`InputContextBuilder` is declared here and part-implemented in `context.rs`.** Its
+  `active_if`/`active_in_state` impl block lives with the app wiring because that is what installs
+  the condition. Whether that block moves to `builder.rs` or stays is 78c's to settle, since it is
+  the half that touches `App`.
+- **Ground rule 3 applies literally:** `examples/` must not change.
+
+### 78c. `context.rs` is three files
+
+The live state; declaration and app wiring; and the type-erased boundary — the `read_*`/`apply_to_*`
+functions registered on `DeclaredContext`, which are the only reason the file depends on
+`overrides`, `present`, `mapping` and `inspect`. After 75 there are six of them rather than eight,
+which is why this follows rather than leads. 1,713 lines of code and 3,028 of tests.
+
+- **Same shape as 78b**, `src/context/{mod,state,declare,erased}.rs`.
+- **Carries `InputContextBuilder`'s split from 78b**, and says which way it went.
 - **Ground rule 3 applies literally:** `examples/` must not change.
 
 ---

@@ -338,7 +338,7 @@ pub(crate) fn leader_of(bindings: &[BindingSpec], index: usize) -> Option<usize>
 #[derive(Clone, Copy)]
 pub(crate) struct MappedPart {
     pub(crate) key: crate::mapping::MappingKey,
-    pub(crate) family: crate::mapping::DeviceFamily,
+    pub(crate) family: crate::device::DeviceFamily,
     /// Index into the binding list this was read from.
     pub(crate) binding: usize,
     pub(crate) part: BindingPart,
@@ -524,7 +524,7 @@ pub(crate) fn tunables_of(
 
 /// The family a binding's source belongs to, for a binding that resolves to a single control — a
 /// tunable is only ever declared on one of those, never a composite.
-pub(crate) fn binding_family(source: &BindingSource) -> Option<crate::mapping::DeviceFamily> {
+pub(crate) fn binding_family(source: &BindingSource) -> Option<crate::device::DeviceFamily> {
     let mut family = None;
     source.for_each_part(|_, control| family = Some(control.family()));
     family
@@ -705,16 +705,16 @@ impl Control {
     ///
     /// Keyboard and mouse are one family because a player uses them together; a gamepad is another.
     /// Which one a control belongs to is what decides the family a mapping is rebound in.
-    pub const fn family(self) -> crate::mapping::DeviceFamily {
+    pub const fn family(self) -> crate::device::DeviceFamily {
         match self {
             #[cfg(feature = "keyboard")]
-            Self::Key(_) => crate::mapping::DeviceFamily::KeyboardMouse,
+            Self::Key(_) => crate::device::DeviceFamily::KeyboardMouse,
             #[cfg(feature = "mouse")]
-            Self::MouseButton(_) => crate::mapping::DeviceFamily::KeyboardMouse,
-            Self::MouseMotion => crate::mapping::DeviceFamily::KeyboardMouse,
+            Self::MouseButton(_) => crate::device::DeviceFamily::KeyboardMouse,
+            Self::MouseMotion => crate::device::DeviceFamily::KeyboardMouse,
             #[cfg(feature = "gamepad")]
             Self::GamepadButton(_) | Self::GamepadAxis(_) | Self::GamepadStick(_) => {
-                crate::mapping::DeviceFamily::Gamepad
+                crate::device::DeviceFamily::Gamepad
             }
         }
     }

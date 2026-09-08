@@ -48,7 +48,7 @@ impl Deref for Paired {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mapping::DeviceFamily;
+    use crate::device::DeviceFamily;
 
     #[test]
     fn paired_reads_through_to_the_inner_set() {
