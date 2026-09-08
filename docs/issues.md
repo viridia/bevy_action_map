@@ -166,26 +166,13 @@ is blocked behind them.
 _Fix:_ **chunk 98** — a Pong variant, a mouse-controlled paddle. R15.10 stays a Split Friction
 follow-on once the mechanism lands here.
 
-### 1016 A binding can name the logical key, not only the physical one
-
-R12.1: a binding must be able to target physical position (`KeyCode`) or logical character (`Key`),
-and the choice must be explicit. Only `KeyCode` is bindable today, so `Ctrl+Z` can only be spelled
-physically — `Ctrl+KeyCode::KeyZ`, the position that shows `W` on an AZERTY keyboard — which arms on
-the wrong key for anyone using one. `RawEvent::Keyboard` already carries `logical_key`; nothing
-downstream reads it.
-
-`docs/issues.md`'s own scan grouped this with 1017 and 1018 under one requirements section; only
-this one is the AZERTY fix people keep being told is coming.
-
-_Fix:_ **chunk 94a**.
-
 ### 1017 Either modifier
 
 R12.3: a chord's modifier should be able to say "either Ctrl", as one binding rather than two.
 `with` takes a single `ButtonControl`, so a game wanting either `LeftCtrl` or `RightCtrl` to arm a
 chord writes both bindings by hand today. R4.10 already assigns this to the chord mechanism by name.
 
-Self-contained, independent of 1016 and 1018.
+Self-contained, independent of 1018.
 
 _Fix:_ **chunk 94b**.
 
@@ -194,7 +181,7 @@ _Fix:_ **chunk 94b**.
 R12.4: `Cmd` on macOS should be usable as `Ctrl` everywhere else, as a named modifier resolved at
 binding time rather than something every cross-platform game re-derives by hand.
 
-Self-contained, independent of 1016 and 1017.
+Self-contained, independent of 1017.
 
 _Fix:_ **chunk 94c**. (R12.2 and R12.7, the physical-binding layout-label gap, wait on upstream
 winit — [winit#4606][] and [winit#2678][] — and are the deferred table's row, not a chunk.)

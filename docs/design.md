@@ -512,9 +512,21 @@ an older pad's own labels.
 ### 8.1 Controls and inputs
 
 ```rust
-pub enum Control { PhysicalKey(KeyCode), MouseButton(MouseButton), GamepadButton(GamepadButton),
-                   GamepadAxis(GamepadAxis), GamepadStick(Stick), MouseMotion }
+pub enum Control { PhysicalKey(KeyCode), LogicalKey(char), MouseButton(MouseButton),
+                   GamepadButton(GamepadButton), GamepadAxis(GamepadAxis), GamepadStick(Stick),
+                   MouseMotion }
 ```
+
+A keyboard key is nameable two ways, and the choice is the caller's (R12.1). `PhysicalKey` names a
+position and `LogicalKey(char)` names the character the player's layout produces there, so
+`LogicalKey('z')` is the Z key on QWERTY and the W key on AZERTY. The evaluator keeps a second held
+map, `held_characters`, keyed by `KeyCode` and holding the character each held key reported — keyed
+by position so that a release always finds its press, since pressing shift mid-hold changes the
+character the platform reports. A key qualifies only when its `logical_key` is a `Key::Character` of
+exactly one `char`, which excludes dead keys, IME compositions and the named variants; the character
+is lowercased on the way in, since a capital is shift's doing rather than a key of its own. Case
+folding aside, nothing about a logical control is layout-aware at read time: the frame already
+carries `logical_key`, and this reads it.
 
 A `BindingInput` is one control or an arrangement of them. Composites carry a `BindingPart` naming
 which piece of the whole a control drives:
@@ -746,6 +758,12 @@ CaptureSession::accepting(ControlClass::AnyButton)
 The crate answers with a `ControlCaptured` or `CaptureRefused` event on that same entity and removes
 the component; removing it yourself cancels. It never touches the player or context entities.
 
+A captured key is always a `PhysicalKey`. The player is sitting at a known layout, where the
+position and the character it produces name the same key, so there is no ambiguity left for a
+logical control to resolve — and a press is a position. A logical binding is therefore something a
+game declares, and rebinding one overwrites it with the position captured; resetting to defaults
+brings it back.
+
 A session skips whatever is already queued on its first run, so the press that opened it is not what
 it binds. A slot past the mapping's capacity, or more than one past what it currently holds, is
 refused — which keeps a capture from leaving a hole in a list whose order is what primary and
@@ -896,11 +914,13 @@ action_map_version = 1
 A row holding one control writes as a bare scalar and reads back from either form; position in a
 list is which slot, so a cleared middle slot needs `"cleared"` rather than a shortened list. The two
 state words cannot collide with a control name, because the control encoding is a format this crate
-owns rather than `Debug` or serde on Bevy's own types — an upstream rename becomes a compile error in
-an exhaustive match while the stored string stays what it was. `bindings`/`gamepad` sorts ahead of
-`bindings`/`keyboard_mouse` alphabetically rather than in `DeviceFamily`'s own declared order, and
-an empty `tunables` still gets a header — both accepted costs of a plain, structurally reflected
-type over a hand-rolled one.
+owns rather than `Debug` or serde on Bevy's own types — an upstream rename becomes a compile error
+in an exhaustive match while the stored string stays what it was. A logical key writes as `char/`
+and the character, `char/z`; the remainder is taken whole, so the separator needs no escape, and a
+name carrying anything but one character reads back as no control at all. `bindings`/`gamepad` sorts
+ahead of `bindings`/`keyboard_mouse` alphabetically rather than in `DeviceFamily`'s own declared
+order, and an empty `tunables` still gets a header — both accepted costs of a plain, structurally
+reflected type over a hand-rolled one.
 
 **`SavedOverrides` claims no field besides `action_map_version`, `bindings` and `tunables`, and none
 of those is a bare `version`** (R17.10, D59). A settings layer that lets several resources share one

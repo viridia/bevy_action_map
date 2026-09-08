@@ -168,6 +168,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 78a | `DeviceFamily` moves to `device.rs`                   |
 | 78b | `binding.rs` is three files, and `mapping.rs` gains a library |
 | 78c | `context.rs` is two files, plus a shared test fixture module |
+| 94a | A binding can name the logical key, not only the physical one |
 
 ---
 
@@ -399,27 +400,6 @@ second implementer and the real one cannot live here.
 - **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
   look at the module pages the way a stranger would.
 
-### 94a. A binding can name the logical key, not only the physical one
-
-R12.1: a binding must be able to target physical position (`KeyCode`) or logical character (`Key`),
-and the choice must be explicit. Only `KeyCode` is bindable today, so `Ctrl+Z` can only be spelled
-physically — `Ctrl+KeyCode::KeyZ`, the position that shows `W` on an AZERTY keyboard — which arms
-on the wrong key for anyone using one.
-
-- **The frame already carries what this needs.** `RawEvent::Keyboard` records the whole
-  `KeyboardInput`, `logical_key` included; nothing downstream reads it. This is a new bindable
-  control and its plumbing through capture, admissibility, and naming — not a frame change.
-- **Narrows R12.2's gap rather than closing it.** A logical binding's on-screen label is exactly
-  the key it was declared with — no per-layout guess needed — so this fixes the mislabeling for
-  bindings a game chooses to make logical. A physical binding still shows the US-layout letter;
-  that half of R12.2 stays the documented, unfixable-alone limitation in `present.rs` and
-  `docs/decisions.md`.
-- **Not doing: composition.** `Key::Character` under an active IME composes across several key
-  events before it means anything (R12.6), which is the deferred text-input row and stays there.
-  This chunk's `Key` binding is for single, already-resolved characters like `z`.
-- **`docs/issues.md` 3.3** names this alongside 94b and 94c; only this one is the AZERTY fix people
-  keep being told is coming.
-
 ### 94b. Either modifier
 
 R12.3: a chord's modifier should be able to say "either Ctrl", as one binding rather than two.
@@ -427,7 +407,7 @@ R12.3: a chord's modifier should be able to say "either Ctrl", as one binding ra
 chord writes both bindings by hand today. R4.10 already assigns this to the chord mechanism by name,
 so the requirement has a destination in `Requirements.md` and, until this chunk, none in the plan.
 
-- **Self-contained**, and independent of 94a and 94c — a different corner of the same requirements
+- **Self-contained**, and independent of 94c — a different corner of the same requirements
   section, not a shared mechanism.
 - **Not doing: a mappable either.** The either-ness is declared in the chord's modifier at bind
   time; capture reads one physical keypress and can only ever answer with `LeftCtrl` or `RightCtrl`,
@@ -441,7 +421,7 @@ binding time rather than something every cross-platform game re-derives by hand.
 
 - **Resolved at binding time, not read time.** The name a game binds does not change per platform;
   what it expands to does, once, when the plan is built — not on every frame the control is read.
-- **Self-contained**, and independent of 94a and 94b.
+- **Self-contained**, and independent of 94b.
 
 ### 98. Pointer position, and a mouse-controlled paddle
 

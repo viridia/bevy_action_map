@@ -1426,3 +1426,44 @@ AZERTY, dead keys, and IME wrong and never learns it, because the QA pass that w
 that types Japanese — is exactly what a solo developer does not have (R24.8). Where a mechanism is a
 footgun rather than a convenience, the crate owns it rather than opening it up.
 
+
+### D67 — Capture reports a position, and logical keys are declared
+
+**Decided.** A binding names a keyboard key either by position (`KeyCode`) or by the character the
+player's layout produces (`LogicalKey(char)`), and the choice is the author's (R12.1). Capture
+always answers with a position. Rebinding a logical row overwrites it with the captured control; the
+default, logical binding returns on reset.
+
+**Rules out.** A per-session physical-or-logical flag on `CaptureSession`, and a rule that preserved
+the kind of the row being rebound.
+
+**Reversal.** The distinction exists because an author cannot know the player's layout. The player
+can — they are sitting at it, where the position and the character name the same key — so capture
+has no ambiguity to resolve and gains nothing from being told which kind to record. Where the two
+come apart is a layout change after the rebind, and there position is the better answer twice over:
+a player switching scripts (US to Cyrillic, the common case) keeps working bindings where a logical
+one would break outright, and a captured press *is* a position. Blender resolves letters logically
+and is the case study for the cost: its GHOST layer compiles out the physical mapping for letters,
+keeps it for digits — which AZERTY reaches only with shift — and the result is a long-running bug,
+an add-on written to undo it, and a user population that believes the software does the opposite of
+what it does. What makes that cheap for us to have got wrong is that only the *capture* default is
+at stake: an author wanting the Blender behaviour declares the row logical, which is what R12.1
+buys.
+
+### D68 — One key, two control identities, and the crate does not reconcile them
+
+**Decided.** `Control::PhysicalKey(KeyCode::KeyZ)` and `Control::LogicalKey('z')` are distinct
+values that never compare equal, though on a QWERTY board they are the same key. Consumption,
+conflict detection, chord out-ranking and reservation all key on `Control`, so none of them sees the
+two as one. Documented, not reconciled.
+
+**Rules out.** Normalizing one form to the other, and a layout-aware equality that would make
+`Control`'s `Eq` depend on what keyboard is plugged in.
+
+**Reversal.** What it costs is real: a context claiming the physical key does not suppress a logical
+binding on it, and a rebind onto a position clashing with a logical row is not reported. What it
+would cost to fix is worse. Equality would have to consult the current layout, which makes a `Hash`
+and `Eq` that change under the player's hands — `ConsumedControls` and the plan's index are built on
+those being stable — and the layout is exactly what the crate cannot see (R12.2, and winit#4606).
+The collision needs two bindings on one key declared two different ways in one game, which is a
+shape an author chooses rather than one they fall into.

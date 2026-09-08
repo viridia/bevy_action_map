@@ -1,7 +1,7 @@
 //! One context instance's live state, and the system parameters that read it.
 
 #[cfg(feature = "keyboard")]
-use alloc::collections::BTreeSet;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use fixedbitset::FixedBitSet;
@@ -86,6 +86,12 @@ pub struct InputContextState<C> {
     pub(crate) read_through: Option<FrameTimestamp>,
     #[cfg(feature = "keyboard")]
     pub(crate) held_buttons: BTreeSet<bevy_input::keyboard::KeyCode>,
+    // The character each held key reported, for the logical bindings to read. Keyed by position
+    // rather than by character so that a release always finds its press: holding a key and then
+    // pressing shift changes the character the platform reports, and matching on that would leave
+    // the entry stranded. Empty in the overwhelmingly common plan, which binds nothing logically.
+    #[cfg(feature = "keyboard")]
+    pub(crate) held_characters: BTreeMap<bevy_input::keyboard::KeyCode, char>,
     // A `HashSet` rather than the `BTreeSet` the keys get, because `MouseButton` is `Hash` but not
     // `Ord` upstream.
     #[cfg(feature = "mouse")]
@@ -119,6 +125,8 @@ impl<C: InputContext> InputContextState<C> {
             read_through,
             #[cfg(feature = "keyboard")]
             held_buttons: BTreeSet::new(),
+            #[cfg(feature = "keyboard")]
+            held_characters: BTreeMap::new(),
             #[cfg(feature = "mouse")]
             held_mouse_buttons: HashSet::default(),
             #[cfg(feature = "gamepad")]

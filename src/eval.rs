@@ -298,6 +298,26 @@ fn interruption_kind(event: &RawEvent) -> Fold {
     }
 }
 
+/// The character a logical binding may name this key by, if it has one.
+///
+/// A key qualifies when it produces a character of its own. `Key::Character` carrying more than one
+/// is a composition rather than a key — an IME committing several keystrokes at once, or a Windows
+/// dead key that could not combine and reports both what it held and what followed (R12.6) — and
+/// belongs to text entry, not to a binding. Dead keys themselves have produced nothing yet, and the
+/// named variants are modifiers and the like, which sit in the same place on every layout and are
+/// bound by position.
+#[cfg(feature = "keyboard")]
+fn bound_character(logical_key: &bevy_input::keyboard::Key) -> Option<char> {
+    let bevy_input::keyboard::Key::Character(text) = logical_key else {
+        return None;
+    };
+    let mut characters = text.chars();
+    match (characters.next(), characters.next()) {
+        (Some(single), None) => Some(crate::binding::normalize_character(single)),
+        _ => None,
+    }
+}
+
 impl<C: InputContext> InputContextState<C> {
     pub(crate) fn apply_frame(
         &mut self,
@@ -381,13 +401,20 @@ impl<C: InputContext> InputContextState<C> {
         match event {
             #[cfg(feature = "keyboard")]
             RawEvent::Keyboard(KeyboardInput {
-                key_code, state, ..
+                key_code,
+                logical_key,
+                state,
+                ..
             }) => match state {
                 ButtonState::Pressed => {
                     self.held_buttons.insert(*key_code);
+                    if let Some(character) = bound_character(logical_key) {
+                        self.held_characters.insert(*key_code, character);
+                    }
                 }
                 ButtonState::Released => {
                     self.held_buttons.remove(key_code);
+                    self.held_characters.remove(key_code);
                 }
             },
             #[cfg(feature = "mouse")]
@@ -429,6 +456,7 @@ impl<C: InputContext> InputContextState<C> {
             #[cfg(feature = "keyboard")]
             RawEvent::FocusLost => {
                 self.held_buttons.clear();
+                self.held_characters.clear();
                 #[cfg(feature = "mouse")]
                 self.held_mouse_buttons.clear();
             }
@@ -517,6 +545,8 @@ impl<C: InputContext> InputContextState<C> {
             chord_claims,
             #[cfg(feature = "keyboard")]
             held_buttons,
+            #[cfg(feature = "keyboard")]
+            held_characters,
             #[cfg(feature = "mouse")]
             held_mouse_buttons,
             #[cfg(feature = "gamepad")]
@@ -538,6 +568,10 @@ impl<C: InputContext> InputContextState<C> {
             match control {
                 #[cfg(feature = "keyboard")]
                 ButtonControl::PhysicalKey(key) => held_buttons.contains(&key),
+                #[cfg(feature = "keyboard")]
+                ButtonControl::LogicalKey(character) => {
+                    held_characters.values().any(|&held| held == character)
+                }
                 #[cfg(feature = "mouse")]
                 ButtonControl::MouseButton(button) => held_mouse_buttons.contains(&button),
                 #[cfg(feature = "gamepad")]
@@ -639,6 +673,11 @@ impl<C: InputContext> InputContextState<C> {
                     BindingInput::Button(key_code) => ActionValue::Bool(
                         !consumed.contains(Control::PhysicalKey(key_code))
                             && held_buttons.contains(&key_code),
+                    ),
+                    #[cfg(feature = "keyboard")]
+                    BindingInput::LogicalKey(character) => ActionValue::Bool(
+                        !consumed.contains(Control::LogicalKey(character))
+                            && held_characters.values().any(|&held| held == character),
                     ),
                     #[cfg(feature = "mouse")]
                     BindingInput::MouseButton(button) => ActionValue::Bool(
@@ -2147,5 +2186,167 @@ mod tests {
 
         assert_eq!(state.class_fires.len(), 1, "it still fires");
         assert!(claims.is_empty(), "but claims nothing");
+    }
+
+    /// One keypress, spelled as the two things it is: where the key sits, and what the layout makes
+    /// it say. Every logical-binding test below turns on the two disagreeing.
+    #[cfg(feature = "keyboard")]
+    fn layout_key(
+        key_code: bevy_input::keyboard::KeyCode,
+        character: &str,
+        state: ButtonState,
+    ) -> RawEvent {
+        use bevy_input::keyboard::{Key, KeyboardInput};
+
+        RawEvent::Keyboard(KeyboardInput {
+            key_code,
+            logical_key: Key::Character(character.into()),
+            state,
+            text: Some(character.into()),
+            repeat: false,
+            window: bevy_ecs::entity::Entity::PLACEHOLDER,
+        })
+    }
+
+    #[cfg(feature = "keyboard")]
+    fn context_bound_to(input: impl crate::binding::IntoBindingInput) -> InputContextState<Flying> {
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Jump>(input);
+        InputContextState::<Flying>::new(
+            Arc::new({
+                let (bindings, class_bindings) = builder.finish();
+                Plan::from_bindings(bindings, class_bindings)
+            }),
+            None,
+        )
+    }
+
+    /// One tick: the event arrives on the running frame and the context reads as far as it goes.
+    /// The frame is carried across calls because a context reads only what is new to it.
+    #[cfg(feature = "keyboard")]
+    fn press(state: &mut InputContextState<Flying>, frame: &mut InputFrame, event: RawEvent) {
+        frame.record(event);
+        state.apply_frame(
+            frame,
+            &ButtonThreshold::default(),
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+            None,
+        );
+    }
+
+    /// The chunk's whole reason for existing. On AZERTY the key that says `z` is the one QWERTY
+    /// calls `W`, so a logical binding has to follow the character across the board.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_logical_binding_follows_the_character_not_the_position() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut frame = InputFrame::default();
+        let mut state = context_bound_to(crate::binding::LogicalKey('z'));
+        press(
+            &mut state,
+            &mut frame,
+            layout_key(KeyCode::KeyW, "z", ButtonState::Pressed),
+        );
+
+        assert!(state.value::<Jump>(), "the AZERTY z key fired it");
+    }
+
+    /// The other half of R12.1: the choice is explicit because the two answer differently. The same
+    /// press that satisfies `LogicalKey('z')` above leaves a binding on the Z *position* alone.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_physical_binding_ignores_what_the_layout_prints() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut frame = InputFrame::default();
+        let mut state = context_bound_to(KeyCode::KeyZ);
+        press(
+            &mut state,
+            &mut frame,
+            layout_key(KeyCode::KeyW, "z", ButtonState::Pressed),
+        );
+
+        assert!(!state.value::<Jump>(), "a different position entirely");
+    }
+
+    /// A capital `Z` is the Z key and shift, not a key of its own — and with control held, which of
+    /// the two a platform reports is not something a binding should have to know.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_logical_binding_ignores_the_case_the_platform_reports() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut frame = InputFrame::default();
+        let mut state = context_bound_to(crate::binding::LogicalKey('z'));
+        press(
+            &mut state,
+            &mut frame,
+            layout_key(KeyCode::KeyZ, "Z", ButtonState::Pressed),
+        );
+
+        assert!(state.value::<Jump>());
+    }
+
+    /// Only a key that produces a character of its own is bindable. A dead key has produced nothing
+    /// yet, and the several characters an IME commits at once are a composition — text entry's
+    /// problem (R12.6), not a binding's.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_composition_is_not_a_key_a_binding_can_name() {
+        use bevy_input::keyboard::{Key, KeyCode, KeyboardInput};
+
+        let mut frame = InputFrame::default();
+        let mut state = context_bound_to(crate::binding::LogicalKey('a'));
+
+        press(
+            &mut state,
+            &mut frame,
+            layout_key(KeyCode::KeyA, "ae", ButtonState::Pressed),
+        );
+        assert!(!state.value::<Jump>(), "two characters are not a key");
+
+        press(
+            &mut state,
+            &mut frame,
+            RawEvent::Keyboard(KeyboardInput {
+                key_code: KeyCode::Quote,
+                logical_key: Key::Dead(Some('\u{b4}')),
+                state: ButtonState::Pressed,
+                text: None,
+                repeat: false,
+                window: bevy_ecs::entity::Entity::PLACEHOLDER,
+            }),
+        );
+        assert!(!state.value::<Jump>(), "a dead key has produced nothing");
+    }
+
+    /// Held state is keyed by position, so a release always finds its press. Pressing shift partway
+    /// through a hold changes the character the platform reports, and a release matched on that
+    /// would strand the key down forever.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_release_clears_a_hold_the_shift_key_renamed() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut frame = InputFrame::default();
+        let mut state = context_bound_to(crate::binding::LogicalKey('z'));
+
+        press(
+            &mut state,
+            &mut frame,
+            layout_key(KeyCode::KeyZ, "z", ButtonState::Pressed),
+        );
+        assert!(state.value::<Jump>());
+
+        // Shift goes down mid-hold, and the same physical key now reports itself capitalized.
+        press(
+            &mut state,
+            &mut frame,
+            layout_key(KeyCode::KeyZ, "Z", ButtonState::Released),
+        );
+        assert!(!state.value::<Jump>(), "let go, not stranded");
     }
 }

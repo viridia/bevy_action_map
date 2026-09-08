@@ -374,6 +374,10 @@ impl Control {
             #[cfg(feature = "keyboard")]
             // `KeyCode` has no unnamed variants, so the table covers it exhaustively.
             Self::PhysicalKey(key) => Cow::Borrowed(key_name(key).unwrap_or("key/unknown")),
+            // The character itself, which needs no table and cannot collide with one: every other
+            // name has a prefix, and this one is spelled out so a hand-edited file can carry it.
+            #[cfg(feature = "keyboard")]
+            Self::LogicalKey(character) => Cow::Owned(alloc::format!("char/{character}")),
             #[cfg(feature = "gamepad")]
             Self::GamepadButton(button) => button_name(button).map_or_else(
                 || match button {
@@ -416,6 +420,18 @@ impl Control {
         #[cfg(feature = "keyboard")]
         if let Some(key) = key_from_name(name) {
             return Some(Self::PhysicalKey(key));
+        }
+        #[cfg(feature = "keyboard")]
+        if let Some(character) = name.strip_prefix("char/") {
+            // Exactly one character, so that a corrupt row cannot arrive as a control nothing could
+            // ever press. `/` needs no escape: the remainder is taken whole.
+            let mut characters = character.chars();
+            return match (characters.next(), characters.next()) {
+                (Some(single), None) => Some(Self::LogicalKey(
+                    crate::binding::normalize_character(single),
+                )),
+                _ => None,
+            };
         }
         #[cfg(feature = "gamepad")]
         if let Some(button) = button_from_name(name) {
@@ -473,6 +489,11 @@ impl Control {
         match self {
             #[cfg(feature = "keyboard")]
             Self::PhysicalKey(key) => Cow::Borrowed(key_label(key).unwrap_or("Unknown Key")),
+            // The one label on a keyboard that is not a guess: a logical binding names the
+            // character, so the character is what the player's key produces whatever their layout.
+            // Capitalized to match the keycap rather than the binding.
+            #[cfg(feature = "keyboard")]
+            Self::LogicalKey(character) => Cow::Owned(character.to_uppercase().collect()),
             #[cfg(feature = "gamepad")]
             Self::GamepadButton(button) => button_label(button).map_or_else(
                 || match button {
@@ -989,6 +1010,13 @@ mod tests {
         }
         #[cfg(feature = "mouse")]
         round_trip(Control::MouseButton(MouseButton::Other(9)));
+        // A letter, a character whose layout needs shift to reach it, one outside ASCII, and the
+        // separator the encoding itself uses — which needs no escape, since the name's remainder is
+        // taken whole.
+        #[cfg(feature = "keyboard")]
+        for character in ['z', '+', 'é', '/'] {
+            round_trip(Control::LogicalKey(character));
+        }
     }
 
     /// Two controls sharing a name would mean one binding reading back as another.
@@ -1039,6 +1067,18 @@ mod tests {
         // `mouse/motion` and `mouse/Left` share a prefix and must not be confusable for each other.
         assert_eq!(Control::from_name("mouse/Motion"), None);
         assert_eq!(Control::from_name("mouse/left"), None);
+        // A logical name holds exactly one character. More than one is a corrupt row, not a
+        // control, and reading it as one would leave a binding nothing could ever press.
+        #[cfg(feature = "keyboard")]
+        {
+            assert_eq!(Control::from_name("char/"), None);
+            assert_eq!(Control::from_name("char/ae"), None);
+            assert_eq!(
+                Control::from_name("char/Z"),
+                Some(Control::LogicalKey('z')),
+                "case is not part of the identity, on the way in either"
+            );
+        }
     }
 
     /// The stored name and the shown text are different strings, which is the whole reason there
@@ -1068,6 +1108,13 @@ mod tests {
             Control::PhysicalKey(KeyCode::Backquote).fallback_label(),
             "`"
         );
+
+        // The label a logical binding shows is the only one on a keyboard that is not a guess: the
+        // player's key produces this character whatever their layout does with the position. `W`
+        // above is the US answer and wrong on AZERTY, which is R12.2's standing limitation.
+        let undo = Control::LogicalKey('z');
+        assert_eq!(undo.name(), "char/z");
+        assert_eq!(undo.fallback_label(), "Z", "shown as it is on the keycap");
 
         // Named by position rather than by any one manufacturer's letters, and the two triggers
         // are told apart by what they are rather than by Bevy's numbering.

@@ -14,8 +14,12 @@ pub use control::{
 };
 pub use modifier::{BindingModifier, CompassPoints, DeadZone, DeadZoneShape, Modifier};
 
+#[cfg(feature = "keyboard")]
+pub use control::LogicalKey;
 #[cfg(feature = "gamepad")]
 pub use control::Stick;
+#[cfg(feature = "keyboard")]
+pub(crate) use control::normalize_character;
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 pub use control::{AxisButtons, ButtonControl, DirectionalButtons};
 

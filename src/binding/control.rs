@@ -25,6 +25,9 @@ pub enum ButtonControl {
     /// it.
     #[cfg(feature = "keyboard")]
     PhysicalKey(KeyCode),
+    /// A keyboard key, by the character it produces on the player's own layout.
+    #[cfg(feature = "keyboard")]
+    LogicalKey(char),
     /// A mouse button.
     #[cfg(feature = "mouse")]
     MouseButton(MouseButton),
@@ -37,6 +40,13 @@ pub enum ButtonControl {
 impl From<KeyCode> for ButtonControl {
     fn from(key: KeyCode) -> Self {
         Self::PhysicalKey(key)
+    }
+}
+
+#[cfg(feature = "keyboard")]
+impl From<LogicalKey> for ButtonControl {
+    fn from(key: LogicalKey) -> Self {
+        Self::LogicalKey(key.character())
     }
 }
 
@@ -186,6 +196,65 @@ impl DirectionalButtons {
     }
 }
 
+/// A keyboard key named by the character it produces, rather than by where it sits.
+///
+/// Binding a [`KeyCode`] names a position on the board: `KeyCode::KeyZ` is the key one across from
+/// the left shift, whatever is printed on it. Binding a `LogicalKey` names the character instead,
+/// so it follows the player's layout — `LogicalKey('z')` is the Z key on QWERTY and the W key on
+/// AZERTY, because that is where a French player's `z` lives.
+///
+/// Use it for shortcuts a player thinks of as a letter, which is mostly the ones borrowed from text
+/// editing:
+///
+/// ```ignore
+/// context.bind::<Undo>(LogicalKey('z')).with(KeyCode::ControlLeft);
+/// context.bind::<ZoomIn>(LogicalKey('+'));
+/// ```
+///
+/// Use a [`KeyCode`] for anything the player thinks of as a place — movement above all. `WASD` is
+/// a shape under the left hand, and binding it logically would scatter it across an AZERTY board.
+///
+/// Only keys that produce a character can be named this way. Modifiers, `Enter`, `Tab` and the
+/// function keys have no character, so bind those by position; they sit in the same place on every
+/// layout, so nothing is lost. A dead key — the `´` that waits for a following vowel — produces
+/// nothing on its own and never matches.
+///
+/// Case is not part of the identity: `LogicalKey('z')` is the Z key whether or not shift is down,
+/// since a capital `Z` is that same key read differently rather than a key of its own.
+///
+/// One caution. The two ways of naming a key are separate identities, so `LogicalKey('z')` and
+/// `KeyCode::KeyZ` are different controls even while a QWERTY player is pressing the one key both
+/// describe. Everything that reasons about which control a binding holds — consuming it, spotting a
+/// conflict, ranking a chord against a shorter one — treats them as two. Binding the same key both
+/// ways in one game is where that shows, and the fix is to pick one for that key.
+#[cfg(feature = "keyboard")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LogicalKey(pub char);
+
+#[cfg(feature = "keyboard")]
+impl LogicalKey {
+    /// The character this names, in the normalized form controls are compared in.
+    pub fn character(self) -> char {
+        normalize_character(self.0)
+    }
+}
+
+/// Folds away the distinctions a keyboard makes with a modifier rather than with a key, so that one
+/// key has one identity. Only case, today: `Z` is shift and the Z key, not a key of its own, and
+/// which of the two a platform reports for `Ctrl+Shift+Z` is not something a binding should have to
+/// know.
+///
+/// Left alone where lowercasing is not one-for-one — Turkish dotted `İ` and the like — because a
+/// substitute of a different length is no longer the key the player pressed.
+#[cfg(feature = "keyboard")]
+pub(crate) fn normalize_character(character: char) -> char {
+    let mut lowered = character.to_lowercase();
+    match (lowered.next(), lowered.next()) {
+        (Some(single), None) => single,
+        _ => character,
+    }
+}
+
 /// Mouse motion as a binding input.
 ///
 /// ```ignore
@@ -259,6 +328,10 @@ pub enum Control {
     /// it.
     #[cfg(feature = "keyboard")]
     PhysicalKey(KeyCode),
+    /// A keyboard key, by the character it produces on the player's own layout. Holds the
+    /// normalized character — see [`LogicalKey`].
+    #[cfg(feature = "keyboard")]
+    LogicalKey(char),
     /// A mouse button.
     #[cfg(feature = "mouse")]
     MouseButton(MouseButton),
@@ -283,7 +356,9 @@ impl Control {
     pub const fn family(self) -> crate::device::DeviceFamily {
         match self {
             #[cfg(feature = "keyboard")]
-            Self::PhysicalKey(_) => crate::device::DeviceFamily::KeyboardMouse,
+            Self::PhysicalKey(_) | Self::LogicalKey(_) => {
+                crate::device::DeviceFamily::KeyboardMouse
+            }
             #[cfg(feature = "mouse")]
             Self::MouseButton(_) => crate::device::DeviceFamily::KeyboardMouse,
             Self::MouseMotion => crate::device::DeviceFamily::KeyboardMouse,
@@ -306,7 +381,7 @@ impl Control {
     pub const fn shape(self) -> ChannelShape {
         match self {
             #[cfg(feature = "keyboard")]
-            Self::PhysicalKey(_) => ChannelShape::Button,
+            Self::PhysicalKey(_) | Self::LogicalKey(_) => ChannelShape::Button,
             #[cfg(feature = "mouse")]
             Self::MouseButton(_) => ChannelShape::Button,
             // Including the triggers, which carry a fraction on this channel.
@@ -327,6 +402,8 @@ impl From<ButtonControl> for Control {
         match control {
             #[cfg(feature = "keyboard")]
             ButtonControl::PhysicalKey(key) => Self::PhysicalKey(key),
+            #[cfg(feature = "keyboard")]
+            ButtonControl::LogicalKey(character) => Self::LogicalKey(character),
             #[cfg(feature = "mouse")]
             ButtonControl::MouseButton(button) => Self::MouseButton(button),
             #[cfg(feature = "gamepad")]
@@ -349,6 +426,8 @@ impl TryFrom<Control> for ButtonControl {
         match control {
             #[cfg(feature = "keyboard")]
             Control::PhysicalKey(key) => Ok(Self::PhysicalKey(key)),
+            #[cfg(feature = "keyboard")]
+            Control::LogicalKey(character) => Ok(Self::LogicalKey(character)),
             #[cfg(feature = "mouse")]
             Control::MouseButton(button) => Ok(Self::MouseButton(button)),
             #[cfg(feature = "gamepad")]
@@ -380,6 +459,8 @@ impl From<Control> for BindingInput {
         match control {
             #[cfg(feature = "keyboard")]
             Control::PhysicalKey(key) => Self::Button(key),
+            #[cfg(feature = "keyboard")]
+            Control::LogicalKey(character) => Self::LogicalKey(character),
             #[cfg(feature = "mouse")]
             Control::MouseButton(button) => Self::MouseButton(button),
             #[cfg(feature = "gamepad")]
@@ -396,9 +477,12 @@ impl From<Control> for BindingInput {
 /// The binding input used by the first interactive stage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BindingInput {
-    /// A keyboard key.
+    /// A keyboard key, by position.
     #[cfg(feature = "keyboard")]
     Button(KeyCode),
+    /// A keyboard key, by the character it produces.
+    #[cfg(feature = "keyboard")]
+    LogicalKey(char),
     /// A mouse button.
     #[cfg(feature = "mouse")]
     MouseButton(MouseButton),
@@ -436,6 +520,8 @@ impl BindingInput {
         match self {
             #[cfg(feature = "keyboard")]
             Self::Button(key) => visit(Control::PhysicalKey(*key)),
+            #[cfg(feature = "keyboard")]
+            Self::LogicalKey(character) => visit(Control::LogicalKey(*character)),
             #[cfg(feature = "mouse")]
             Self::MouseButton(button) => visit(Control::MouseButton(*button)),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
@@ -473,6 +559,10 @@ impl BindingInput {
         match self {
             #[cfg(feature = "keyboard")]
             Self::Button(key) => visit(BindingPart::Whole, Control::PhysicalKey(*key)),
+            #[cfg(feature = "keyboard")]
+            Self::LogicalKey(character) => {
+                visit(BindingPart::Whole, Control::LogicalKey(*character))
+            }
             #[cfg(feature = "mouse")]
             Self::MouseButton(button) => visit(BindingPart::Whole, Control::MouseButton(*button)),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
@@ -517,8 +607,13 @@ impl BindingInput {
             // A whole binding is replaced outright, since the new input is entirely the new
             // control.
             (Self::MouseMotion, BindingPart::Whole) => self.replace_whole(control),
+            // A logical binding is overwritten by whatever control arrives, physical included, which
+            // is what capture hands it: the player pressed a position, and on their own layout the
+            // two name the same key anyway. Resetting to defaults brings the logical one back.
             #[cfg(feature = "keyboard")]
-            (Self::Button(_), BindingPart::Whole) => self.replace_whole(control),
+            (Self::Button(_) | Self::LogicalKey(_), BindingPart::Whole) => {
+                self.replace_whole(control)
+            }
             #[cfg(feature = "mouse")]
             (Self::MouseButton(_), BindingPart::Whole) => self.replace_whole(control),
             #[cfg(feature = "gamepad")]
@@ -565,7 +660,7 @@ impl BindingInput {
     pub const fn channel_shape(&self) -> ChannelShape {
         match self {
             #[cfg(feature = "keyboard")]
-            Self::Button(_) => ChannelShape::Button,
+            Self::Button(_) | Self::LogicalKey(_) => ChannelShape::Button,
             #[cfg(feature = "mouse")]
             Self::MouseButton(_) => ChannelShape::Button,
             // Buttons, but an axis and a direction by the time anything binds to them.
@@ -636,6 +731,13 @@ pub trait IntoBindingInput {
 impl IntoBindingInput for KeyCode {
     fn into_binding_input(self) -> BindingInput {
         BindingInput::Button(self)
+    }
+}
+
+#[cfg(feature = "keyboard")]
+impl IntoBindingInput for LogicalKey {
+    fn into_binding_input(self) -> BindingInput {
+        BindingInput::LogicalKey(self.character())
     }
 }
 
@@ -744,6 +846,8 @@ pub(crate) fn as_button_control(input: &BindingInput) -> Option<ButtonControl> {
     match input {
         #[cfg(feature = "keyboard")]
         BindingInput::Button(key) => Some(ButtonControl::PhysicalKey(*key)),
+        #[cfg(feature = "keyboard")]
+        BindingInput::LogicalKey(character) => Some(ButtonControl::LogicalKey(*character)),
         #[cfg(feature = "mouse")]
         BindingInput::MouseButton(button) => Some(ButtonControl::MouseButton(*button)),
         #[cfg(feature = "gamepad")]
@@ -813,5 +917,40 @@ mod tests {
         // The two edges belong to the states they name, so a reading exactly on one settles it.
         assert!(threshold.pressed(threshold.press, false));
         assert!(!threshold.pressed(threshold.release, true));
+    }
+
+    /// A logical binding is an ordinary button as far as a rebind is concerned. Capture reports the
+    /// position the player pressed, so the row it lands in stops being logical — which costs the
+    /// player nothing, since on their own layout the two name the same key. Resetting to defaults
+    /// brings the logical binding back.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_rebind_overwrites_a_logical_binding_with_the_position_captured() {
+        let mut input = LogicalKey('z').into_binding_input();
+        assert_eq!(input.channel_shape(), ChannelShape::Button);
+        assert_eq!(input.controls(), [Control::LogicalKey('z')]);
+
+        assert!(input.set_part(BindingPart::Whole, Control::PhysicalKey(KeyCode::KeyY)));
+        assert_eq!(input, BindingInput::Button(KeyCode::KeyY));
+
+        // And the shape still governs: a stick cannot take a key's place.
+        #[cfg(feature = "gamepad")]
+        assert!(!input.set_part(BindingPart::Whole, Control::GamepadStick(Stick::Left)));
+    }
+
+    /// Case is a modifier's doing, not a key's, so it cannot reach the control's identity — the
+    /// binding a player declares and the one a save file reads back have to be the same value.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_logical_key_is_the_same_key_in_either_case() {
+        assert_eq!(LogicalKey('Z').character(), 'z');
+        assert_eq!(
+            LogicalKey('Z').into_binding_input(),
+            LogicalKey('z').into_binding_input()
+        );
+        // Left alone where lowercasing would not be one-for-one.
+        assert_eq!(LogicalKey('İ').character(), 'İ');
+        // And untouched where there is no case to fold.
+        assert_eq!(LogicalKey('+').character(), '+');
     }
 }
