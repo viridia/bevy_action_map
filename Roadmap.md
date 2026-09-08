@@ -52,8 +52,6 @@ in `docs/decisions.md`, where each says what reversing it would cost.
   bytes go was always the app's decision — chunk 92.
 - **A snapshot of a context's state.** The shape is designed and written down; nothing has taken one
   — chunk 83.
-- **A window on the input frame.** `RawEvent` carries no source window, so nothing can scope a
-  binding to one — chunk 63.
 
 ### Upstreaming, if it happens
 
@@ -173,21 +171,6 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 The live tier of [docs/issues.md](./docs/issues.md): no unusual configuration, no feature nobody has
 used, and the answer is still wrong. Six more of its entries are behind this one and not yet
 routed.
-
----
-
-## Phase VI — the parts a solo developer trips over
-
-The long tail cannot verify what it does not own, so mistakes have to be caught rather than
-discovered in QA that nobody is running.
-
-### 63. Multi-window
-
-R13.5: an input frame carries no source window, so nothing can scope a binding to one — a MUST with
-zero code behind it.
-
-- **Why it waits:** nothing in tree has a second window. Of everything the grooming sweeps found,
-  this is the one with no in-tree pressure behind it at all.
 
 ---
 

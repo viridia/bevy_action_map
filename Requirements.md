@@ -831,8 +831,14 @@ pointers that appear and vanish. Most bugs in this area come from treating one o
 - **R13.4 (MUST)** Cursor grab / relative mouse mode interaction: entering grab must not produce a
   spurious huge delta; leaving it must restore position; document the interaction with
   `bevy_window::CursorOptions`.
-- **R13.5 (MUST)** Multiple windows: input frames must carry the source window and bindings must be
-  filterable by it.
+- **R13.5 (WITHDRAWN)** ~~Multiple windows: input frames must carry the source window and bindings
+  must be filterable by it.~~ _Withdrawn: nothing in tree has a second window, and neither shape a
+  multi-window app takes calls for this crate to gain one. A window per player is speculative —
+  nothing built or observed does that. A multi-document editor's global shortcuts are the real case,
+  and Bevy already answers it without a mapper: `FocusedInput`'s window-as-parent-of-last-resort
+  propagator reaches an unclaimed event's window on its own. What would revive this is an app
+  choosing to route those shortcuts through bindings instead of a window observer — a second in-tree
+  window whose owner wants the mapper, not `FocusedInput`, to know which one an event came from._
 - **R13.6 (MUST)** Multi-touch: multiple simultaneous pointers with stable IDs; touch must not be
   silently emulated as mouse unless the app opts in.
 - **R13.7 (SHOULD)** OS gestures (`PinchGesture`, `RotationGesture`, `PanGesture`,
