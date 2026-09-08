@@ -66,15 +66,24 @@ const CONTROL_WIDTH: f32 = 155.0;
 /// How far a follower's line sits under the row it rides.
 const FOLLOWER_INDENT: f32 = 20.0;
 
+// A row's own text size, and the gaps and padding sized against it. Named so that fitting one
+// more row is a one-line change here rather than a hunt through `table` and `cell` for the
+// numbers that add up to a row's height.
+const ROW_FONT_SIZE: f32 = 13.0;
+/// The vertical gap between one row and the next within a table.
+const ROW_GAP: f32 = 1.0;
+/// The vertical padding inside a cell's border, above and below its text.
+const ROW_PADDING_V: f32 = 0.0;
+
 /// How far one press of the stepper moves `Turn`'s deadzone. The bounds are the tunable's own,
 /// declared in `actions.rs` and read back off it, so the two cannot drift apart.
 const DEAD_ZONE_STEP: f32 = 0.05;
 
 /// Whether the controls screen is up.
 ///
-/// A state rather than a flag on a resource, for the reason [`Game`](crate::pause::Game) is one: the
-/// screen is spawned by `OnEnter` and despawned by `OnExit`, and there is one fact about whether it
-/// is showing rather than a screen and a flag that have to agree.
+/// A state rather than a flag on a resource, for the reason [`Game`](crate::pause::Game) is one:
+/// the screen is spawned by `OnEnter` and despawned by `OnExit`, and there is one fact about
+/// whether it is showing rather than a screen and a flag that have to agree.
 #[derive(States, Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Settings {
     #[default]
@@ -937,7 +946,7 @@ fn table(title: &'static str, mut rows: Vec<ActionMapping>) -> impl Scene {
     }
 
     bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(2.0) }
+        Node { flex_direction: FlexDirection::Column, row_gap: {Val::Px(ROW_GAP)} }
         Children [
             (
                 Text::new(title)
@@ -1141,14 +1150,14 @@ fn cell(cell: Cell) -> impl Scene {
         {row_tag}
         {follower_tag}
         Text({cell.text})
-        TextFont { font_size: 14.0_f32 }
+        TextFont { font_size: {ROW_FONT_SIZE} }
         TextColor({cell.color})
         BorderColor::all(cell.border)
         Node {
             width: {Val::Px(cell.width)},
             border: {UiRect::all(Val::Px(1.0))},
             border_radius: {BorderRadius::all(Val::Px(3.0))},
-            padding: {UiRect::axes(Val::Px(6.0), Val::Px(1.0))},
+            padding: {UiRect::axes(Val::Px(6.0), Val::Px(ROW_PADDING_V))},
         }
     }
 }

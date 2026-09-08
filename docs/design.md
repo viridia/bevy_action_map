@@ -432,7 +432,15 @@ fn movement(input: ContextActions<OnFoot>) {
 
 `ContextActions<C>` is for a context with exactly one instance; a system taking it is skipped when
 there is no instance or several, following Bevy's `Single`. `ActionsQuery<C>` is the per-player form
-— `get`, `iter`, `len`. Both expose `value`, `try_value`, `phase`, `fired` and `why_not`.
+— `get`, `iter`, `len`. Both expose `value`, `try_value`, `phase`, `fired`, `elapsed`, `progress`
+and `why_not`.
+
+`elapsed` and `progress` read a `hold` or `hold_and_release` binding's own timer back out — how long
+its control has been down, and how far that is toward the duration it needs, clamped to `0.0..=1.0`.
+Both are `0.0` where an action has no such binding, or none of its bindings is currently held; where
+more than one qualifies, the one furthest along wins. Nothing new is tracked to answer this — the
+timer is the same `Scratch` the binding's own condition already keeps between ticks, walked from
+outside evaluation rather than threaded through it.
 
 `why_not` answers the question a call site cannot:
 

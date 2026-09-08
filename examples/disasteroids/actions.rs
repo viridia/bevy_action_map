@@ -8,7 +8,7 @@ use bevy_action_map::prelude::*;
 use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode, mouse::MouseButton};
 
 use crate::pause::{self, Game};
-use crate::ship::RELOAD;
+use crate::ship::{BOMB_CHARGE, RELOAD};
 
 // The categories below are localization keys rather than words on screen: a rebinding screen
 // groups by them, and the game's translation catalogue decides what "disasteroids.flight" reads as.
@@ -29,6 +29,15 @@ pub struct Turn;
 #[derive(InputAction)]
 #[action(path = "disasteroids.fire", output = bool, intent = Button, category = "disasteroids.weapons")]
 pub struct Fire;
+
+/// Hold to charge, let go to lose the charge, or keep holding and it goes off on its own.
+///
+/// `output = bool` and a `hold_once` condition are the whole of the "charge and release nothing"
+/// feel: there is no separate charge action to poll, because [`ContextActions::progress`] reads the
+/// same hold's own timer back out while [`Fired`] waits for it to finish.
+#[derive(InputAction)]
+#[action(path = "disasteroids.smart_bomb", output = bool, intent = Button, category = "disasteroids.weapons")]
+pub struct SmartBomb;
 
 /// Jump somewhere else on the field, at some risk.
 ///
@@ -202,6 +211,18 @@ pub fn plugin(app: &mut App) {
         controls
             .bind::<Fire>(MouseButton::Left)
             .pulse(RELOAD)
+            .mappable();
+
+        // `hold_once` rather than `hold`: the bomb fires itself once and stops, rather than firing
+        // again every tick the button stays down the way `Thrust` or a `pulse`d `Fire` would.
+        // Fixed, like the other pad rows above, for the same reason: the pad is Steam/console
+        // remapping's territory, not this screen's.
+        controls
+            .bind::<SmartBomb>(GamepadButton::West)
+            .hold_once(BOMB_CHARGE);
+        controls
+            .bind::<SmartBomb>(KeyCode::KeyB)
+            .hold_once(BOMB_CHARGE)
             .mappable();
 
         // Hold the throttle for three quarters of a second and it opens up. `Started` fires the

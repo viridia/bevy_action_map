@@ -39,6 +39,7 @@ use crate::action::{
     TickDomain,
 };
 use crate::binding::InputContextBuilder;
+use crate::condition::BindingCondition;
 use crate::eval::{Transition, dispatch_class_fires, dispatch_transitions, evaluate_context};
 use crate::frame::{FrameTimestamp, InputFrame};
 use crate::inspect::OverrideStage;
@@ -261,6 +262,64 @@ impl<C: InputContext> InputContextState<C> {
         A: InputAction<Output = bool>,
     {
         self.phase::<A>() == ActionPhase::Fired
+    }
+
+    /// How long the control behind a `hold` or `hold_and_release` binding has been down, in the
+    /// context's own seconds.
+    ///
+    /// Zero when the action has no such binding, or none of them is currently held. Where more than
+    /// one binding qualifies — a keyboard hold and a gamepad hold on the same action — this follows
+    /// whichever is furthest along.
+    pub fn elapsed<A>(&self) -> f32
+    where
+        A: InputAction,
+    {
+        self.holding::<A>().map_or(0.0, |(time, _)| time)
+    }
+
+    /// Progress toward firing a `hold` or `hold_and_release` binding, from `0.0` to `1.0`.
+    ///
+    /// Meant for a charge meter or a hold-to-confirm indicator. Zero on the same terms as
+    /// [`elapsed`](Self::elapsed), and clamped at `1.0` rather than continuing to climb once the
+    /// control has been held past the duration.
+    pub fn progress<A>(&self) -> f32
+    where
+        A: InputAction,
+    {
+        self.holding::<A>()
+            .map_or(0.0, |(time, duration)| (time / duration).clamp(0.0, 1.0))
+    }
+
+    // The elapsed time and duration of whichever `hold`-shaped binding is furthest along.
+    //
+    // `Scratch::time` already accumulates exactly this while `Hold` or `HoldAndRelease` is
+    // building or satisfied, so this is a read path over existing working memory rather than new
+    // bookkeeping (R3.4, R3.5).
+    fn holding<A>(&self) -> Option<(f32, f32)>
+    where
+        A: InputAction,
+    {
+        let slot = self.plan.slot_for_action(A::id())?;
+        self.plan
+            .bindings()
+            .iter()
+            .filter(|binding| binding.slot == slot)
+            .filter_map(|binding| {
+                binding
+                    .conditions
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, condition)| match condition {
+                        BindingCondition::Hold { duration, .. }
+                        | BindingCondition::HoldAndRelease { duration } => {
+                            let scratch_index =
+                                binding.scratch_base + binding.modifiers.len() + index;
+                            Some((self.scratch[scratch_index].time, *duration))
+                        }
+                        _ => None,
+                    })
+            })
+            .max_by(|(a, _), (b, _)| a.total_cmp(b))
     }
 
     /// Says once that an action was read here but never bound here.
@@ -699,6 +758,26 @@ impl<C: InputContext + Component> ContextActions<'_, '_, C> {
         A: InputAction<Output = bool>,
     {
         self.state().fired::<A>()
+    }
+
+    /// How long the control behind a `hold` or `hold_and_release` binding has been down.
+    ///
+    /// See [`InputContextState::elapsed`].
+    pub fn elapsed<A>(&self) -> f32
+    where
+        A: InputAction,
+    {
+        self.state().elapsed::<A>()
+    }
+
+    /// Progress toward firing a `hold` or `hold_and_release` binding, from `0.0` to `1.0`.
+    ///
+    /// See [`InputContextState::progress`].
+    pub fn progress<A>(&self) -> f32
+    where
+        A: InputAction,
+    {
+        self.state().progress::<A>()
     }
 
     /// Explains why an action is not firing.

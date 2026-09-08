@@ -36,9 +36,17 @@ impl Size {
 #[derive(Component, Default, Clone)]
 pub struct Asteroid;
 
+/// Caught in the smart bomb's blast, and going off once its own timer runs out.
+///
+/// A timer per rock rather than an immediate despawn: `ship::smart_bomb` marks every rock the blast
+/// reaches the instant it fires, well before the ring on screen has finished expanding, so the bang
+/// has to wait for the same beat the light does.
+#[derive(Component, Clone, Deref, DerefMut)]
+pub struct Doomed(pub Timer);
+
 pub fn plugin(app: &mut App) {
     app.add_systems(Startup, starting_rocks.spawn());
-    app.add_systems(FixedUpdate, shatter_on_hit.in_set(Simulating));
+    app.add_systems(FixedUpdate, (shatter_on_hit, detonate).in_set(Simulating));
 }
 
 /// The opening spread of rocks: a `SceneList` rather than a `Scene`, because these are six sibling
@@ -77,18 +85,34 @@ fn shatter_on_hit(
             }
 
             commands.entity(bullet).try_despawn();
-            commands.entity(rock).try_despawn();
-
-            if let Some(smaller) = size.smaller() {
-                for _ in 0..2 {
-                    commands.spawn_scene(asteroid(
-                        smaller,
-                        rock_at.translation.truncate(),
-                        drift() * 1.6,
-                    ));
-                }
-            }
+            shatter(&mut commands, rock, rock_at.translation.truncate(), *size);
             break;
+        }
+    }
+}
+
+/// Ticks every rock the smart bomb has caught, and shatters the ones whose fuse just ran out.
+fn detonate(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut doomed: Query<(Entity, &mut Doomed, &Transform, &Size)>,
+) {
+    for (rock, mut fuse, transform, size) in &mut doomed {
+        if fuse.tick(time.delta()).just_finished() {
+            shatter(&mut commands, rock, transform.translation.truncate(), *size);
+        }
+    }
+}
+
+/// Gone, and — past [`Size::Small`] — replaced by two smaller rocks where it stood.
+///
+/// Shared by a direct hit and the smart bomb's delayed one: both end a rock's life the same way,
+/// and only how they decide *which* rock differs.
+fn shatter(commands: &mut Commands, rock: Entity, position: Vec2, size: Size) {
+    commands.entity(rock).try_despawn();
+    if let Some(smaller) = size.smaller() {
+        for _ in 0..2 {
+            commands.spawn_scene(asteroid(smaller, position, drift() * 1.6));
         }
     }
 }

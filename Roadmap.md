@@ -163,6 +163,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 95  | Pong, shared across the single-concept demos          |
 | 106 | A diagnostic overlay for Split Friction                |
 | 107 | A diagnostic overlay for Pong                          |
+| 99  | The smart bomb, and a charge meter                     |
 
 ---
 
@@ -489,6 +490,10 @@ so the requirement has a destination in `Requirements.md` and, until this chunk,
 
 - **Self-contained**, and independent of 94a and 94c — a different corner of the same requirements
   section, not a shared mechanism.
+- **Not doing: a mappable either.** The either-ness is declared in the chord's modifier at bind
+  time; capture reads one physical keypress and can only ever answer with `LeftCtrl` or `RightCtrl`,
+  never both. A row built this way is not something a rebind screen can produce, so it stays a
+  `Fixed` binding — a game wanting a rebindable "either" still writes two mappable rows by hand.
 
 ### 94c. A platform modifier
 
@@ -512,24 +517,6 @@ position, so a binding cannot target where the pointer is at all.
   viewport" is a follow-on, not part of proving position exists at all.
 - **Review surface:** whether an absolute position needs the same dead-zone/rescale modifier chain
   a delta does, or is exempt as a different kind of channel entirely.
-
-### 99. The smart bomb, and a charge meter
-
-R3.4 (MUST) and R3.5 (`docs/issues.md` 1014): an action has no elapsed time and no progress, so
-nothing can draw a charge meter, though both numbers already exist on `Scratch` and
-`BindingCondition::Hold` — this is a read path out, not new state.
-
-- **Disasteroids, not Pong.** A smart bomb: hold to charge, release nothing — it fires itself once
-  `Hold`'s duration is reached, sending out a radial pulse that clears every asteroid within a
-  distance. A progress bar at the bottom of the screen is drawn from the same number R3.5 exposes.
-- **Adds a twelfth row to the settings screen.** See the settings-screen-density note: compress
-  spacing and font size to fit rather than add scrolling or collapsible sections, and pull the
-  screen's sizing values out into named constants while touching this file, so the next row is a
-  one-line change.
-- **Not doing:** charge levels, upgrades, or anything beyond proving the two numbers are real and
-  readable.
-- **Verified by:** playing it — the bar fills while held, the pulse fires unprompted at full charge,
-  and letting go early cancels it, same as any other `Hold`.
 
 ### 100. A preset can carry a tunable
 

@@ -4,7 +4,8 @@ use bevy::prelude::*;
 use bevy_action_map::prelude::*;
 use std::f32::consts::TAU;
 
-use crate::actions::{Afterburner, Fire, Flying, Hyperspace, Thrust, Turn};
+use crate::actions::{Afterburner, Fire, Flying, Hyperspace, SmartBomb, Thrust, Turn};
+use crate::asteroids::{Asteroid, Doomed};
 use crate::field::{HALF_EXTENT, Lifetime, Velocity, Wraps};
 use crate::pause::Simulating;
 
@@ -25,6 +26,16 @@ const MUZZLE_SPEED: f32 = 620.0;
 /// rediscover it.
 pub const RELOAD: f32 = 0.18;
 
+/// How long the smart bomb takes to charge, in seconds.
+pub const BOMB_CHARGE: f32 = 0.5;
+/// How far from the ship the smart bomb reaches.
+const BOMB_RADIUS: f32 = 260.0;
+/// How long the ring takes to expand and fade.
+const BLAST_DURATION: f32 = 0.3;
+/// When a caught rock actually goes — a beat before the ring finishes, the way a hit lands before
+/// the shockwave that caused it does.
+const BLAST_FUSE: f32 = 0.25;
+
 #[derive(Component, Default, Clone)]
 pub struct Ship;
 
@@ -35,13 +46,24 @@ pub struct Bullet;
 #[derive(Component, Default, Clone)]
 struct Exhaust;
 
+/// The fill of the charge meter at the bottom of the screen, tracked by width.
+#[derive(Component, Default, Clone)]
+struct BombMeterFill;
+
+/// The smart bomb's ring, expanding and fading over [`BLAST_DURATION`].
+#[derive(Component, Default, Clone)]
+struct ShockRing;
+
 pub fn plugin(app: &mut App) {
-    app.add_systems(Startup, ship.spawn());
+    app.add_systems(Startup, (ship.spawn(), bomb_meter.spawn()));
     // Only `fly` polls now. What is left in a schedule is the thing that has to happen on every
     // tick whether the player did anything or not; the two things that happen *because* the player
     // did something are observers on the ship itself.
     app.add_systems(FixedUpdate, fly.in_set(Simulating));
-    app.add_systems(Update, show_exhaust);
+    app.add_systems(
+        Update,
+        (show_exhaust, redraw_bomb_meter, animate_shock_ring),
+    );
 }
 
 /// The ship and the flame that hangs off the back of it, as one scene.
@@ -62,6 +84,7 @@ fn ship() -> impl Scene {
         Flying
         on(shoot)
         on(hyperspace)
+        on(smart_bomb)
         Mesh2d(asset_value(Triangle2d::new(
             Vec2::new(18.0, 0.0),
             Vec2::new(-12.0, 11.0),
@@ -171,6 +194,110 @@ fn hyperspace(
     );
     transform.rotation = Quat::from_rotation_z(angle);
     velocity.0 = Vec2::ZERO;
+}
+
+/// Marks every rock the blast reaches, and shows the ring that reached them.
+///
+/// `Fired` here is the hold's own doing: `hold_once` waits out [`BOMB_CHARGE`] and fires by itself,
+/// so nothing here has to watch a timer to know the charge is done.
+///
+/// What gets caught is decided now, once, off where the rocks are at this instant — not off where
+/// the ring's edge happens to be on some later frame. The alternative would have to tell a rock the
+/// blast just made from one that was already there when it fired, which is the one thing this game
+/// never needs to know.
+fn smart_bomb(
+    blast: On<Fired<SmartBomb>>,
+    mut commands: Commands,
+    ships: Query<&Transform, With<Ship>>,
+    rocks: Query<(Entity, &Transform), With<Asteroid>>,
+) {
+    let Ok(ship_at) = ships.get(blast.entity) else {
+        return;
+    };
+    for (rock, rock_at) in rocks {
+        if ship_at.translation.distance(rock_at.translation) < BOMB_RADIUS {
+            commands
+                .entity(rock)
+                .insert(Doomed(Timer::from_seconds(BLAST_FUSE, TimerMode::Once)));
+        }
+    }
+    commands.spawn_scene(shock_ring(ship_at.translation));
+}
+
+/// The blast ring, as a scene: an annulus at full size, shrunk to a point until
+/// [`animate_shock_ring`] lets it grow.
+///
+/// `Lifetime` gives it the clock both that system and its own despawn read — one timer answering
+/// both "how far along" and "when to remove this" rather than two numbers that could disagree.
+fn shock_ring(at: Vec3) -> impl Scene {
+    bsn! {
+        ShockRing
+        Mesh2d(asset_value(Annulus::new(BOMB_RADIUS - 6.0, BOMB_RADIUS)))
+        MeshMaterial2d::<ColorMaterial>(asset_value(Color::srgba(0.6, 0.85, 1.0, 0.8)))
+        Transform {
+            translation: {at},
+            scale: {Vec3::splat(0.02)},
+        }
+        Lifetime(Timer::from_seconds(BLAST_DURATION, TimerMode::Once))
+    }
+}
+
+/// Grows the ring outward and fades it out over its own lifetime.
+fn animate_shock_ring(
+    rings: Query<(&mut Transform, &Lifetime, &MeshMaterial2d<ColorMaterial>), With<ShockRing>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    for (mut transform, age, material) in rings {
+        let fraction = (age.elapsed_secs() / BLAST_DURATION).clamp(0.0, 1.0);
+        transform.scale = Vec3::splat(0.02 + fraction * 0.98);
+        if let Some(mut material) = materials.get_mut(&material.0) {
+            material.color.set_alpha(0.8 * (1.0 - fraction));
+        }
+    }
+}
+
+/// The charge meter, as a scene: a track and the fill [`redraw_bomb_meter`] resizes.
+///
+/// Centred at the bottom of the screen rather than tucked in a corner — this is the one control
+/// with something to show while it is happening, so it gets the reading's own line.
+fn bomb_meter() -> impl Scene {
+    bsn! {
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(24.0),
+            width: Val::Percent(100.0),
+            justify_content: JustifyContent::Center,
+        }
+        Children [
+            (
+                Node {
+                    width: Val::Px(200.0),
+                    height: Val::Px(8.0),
+                    border: {UiRect::all(Val::Px(1.0))},
+                }
+                BorderColor::all(Color::srgb(0.5, 0.6, 0.6))
+                Children [
+                    (
+                        BombMeterFill
+                        Node { width: Val::Percent(0.0), height: Val::Percent(100.0) }
+                        BackgroundColor(Color::srgb(0.6, 0.85, 1.0))
+                    )
+                ]
+            )
+        ]
+    }
+}
+
+/// Reads the same number [`SmartBomb`]'s own hold condition already keeps, rather than timing the
+/// charge a second time here.
+fn redraw_bomb_meter(
+    input: ContextActions<Flying>,
+    mut fill: Query<&mut Node, With<BombMeterFill>>,
+) {
+    let Ok(mut fill) = fill.single_mut() else {
+        return;
+    };
+    fill.width = Val::Percent(input.progress::<SmartBomb>() * 100.0);
 }
 
 fn show_exhaust(
