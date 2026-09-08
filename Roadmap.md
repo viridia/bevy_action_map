@@ -164,6 +164,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 106 | A diagnostic overlay for Split Friction                |
 | 107 | A diagnostic overlay for Pong                          |
 | 99  | The smart bomb, and a charge meter                     |
+| 100 | A preset can carry a tunable                          |
 
 ---
 
@@ -517,16 +518,6 @@ position, so a binding cannot target where the pointer is at all.
   viewport" is a follow-on, not part of proving position exists at all.
 - **Review surface:** whether an absolute position needs the same dead-zone/rescale modifier chain
   a delta does, or is exempt as a different kind of channel entirely.
-
-### 100. A preset can carry a tunable
-
-R19.12, the tunable half (`docs/issues.md` 1039): `PresetBuilder` has `bind` and no `tune`, though
-`Overrides::tune` already exists and a preset is exactly the same override machinery.
-
-- **Disasteroids.** One of the existing presets (45) also sets a tunable — a dead zone or a
-  sensitivity value — alongside its bindings, proving a preset is not bindings-only.
-- **The smallest item in this document: one builder method.** `Preset::rows` is already public;
-  `PresetBuilder::tune` is the missing door onto the same path `bind` already uses.
 
 ### 101. Semantic control aliases for a console confirm swap
 

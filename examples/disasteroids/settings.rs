@@ -26,7 +26,7 @@ use bevy::ui::UiSystems;
 use bevy::ui::auto_directional_navigation::{AutoDirectionalNavigation, AutoDirectionalNavigator};
 use bevy::ui_widgets::{Activate, Button};
 use bevy_action_map::mapping::{
-    Tunable, TunableValue, declared_mappings, fallback_label, tunables,
+    Tunable, TunableValue, declared_mappings, declared_tunables, fallback_label, tunables,
 };
 use bevy_action_map::overrides::{Override, Overrides, apply_overrides_with_preset};
 use bevy_action_map::prelude::*;
@@ -265,6 +265,17 @@ fn presets(world: &World) -> Vec<Preset> {
                 DeviceFamily::Gamepad,
                 [Control::GamepadAxis(GamepadAxis::RightStickX)],
             );
+            // A preset is not only rebound controls: southpaw asks for a looser dead zone on the
+            // stick it just moved turning onto.
+            southpaw.tune(
+                DeviceFamily::Gamepad,
+                TURN_DEAD_ZONE_KEY,
+                TunableValue::Range {
+                    value: 0.25,
+                    min: 0.0,
+                    max: 0.5,
+                },
+            );
         }),
     ]
 }
@@ -279,22 +290,41 @@ fn row_named(
         .find(|row| row.family == family && row.key == key)
 }
 
+/// The tunable named `family` and `key`, if any in the list is — [`row_named`] for tunables.
+fn tunable_named(tunables: &[Tunable], family: DeviceFamily, key: &'static str) -> Option<Tunable> {
+    tunables
+        .iter()
+        .copied()
+        .find(|tunable| tunable.family == family && tunable.key == key)
+}
+
 /// Which of `presets` currently matches what is bound, if any.
 ///
-/// Checked against the union of every row any preset in the list names, not just this preset's own
-/// — a preset that names nothing (`Default`) is a claim that none of *them* have moved, which is
-/// only answerable by looking at what the others would have changed. A row a preset does not name
-/// reads as that row's own declared default, the same rule [`effective`] already applies to a
-/// pending row nobody has touched.
+/// Checked against the union of every row and every tunable any preset in the list names, not just
+/// this preset's own — a preset that names nothing (`Default`) is a claim that none of *them* have
+/// moved, which is only answerable by looking at what the others would have changed. A row or
+/// tunable a preset does not name reads as its own declared default, the same rule [`effective`]
+/// already applies to a pending row nobody has touched.
 fn selected_preset(
     presets: &[Preset],
     declared: &[ActionMapping],
     live: &[ActionMapping],
+    declared_tunables: &[Tunable],
+    live_tunables: &[Tunable],
     pending: &Overrides,
 ) -> Option<&'static str> {
     let touched: Vec<(DeviceFamily, MappingKey)> = presets
         .iter()
         .flat_map(|preset| preset.rows.iter().map(|(family, key, _)| (family, key)))
+        .collect();
+    let touched_tunables: Vec<(DeviceFamily, &'static str)> = presets
+        .iter()
+        .flat_map(|preset| {
+            preset
+                .rows
+                .iter_tunables()
+                .map(|(family, key, _)| (family, key))
+        })
         .collect();
 
     presets
@@ -308,6 +338,15 @@ fn selected_preset(
                     return false;
                 };
                 effective(declared_row, &preset.rows) == effective(live_row, pending)
+            }) && touched_tunables.iter().all(|&(family, key)| {
+                let Some(declared_tunable) = tunable_named(declared_tunables, family, key) else {
+                    return false;
+                };
+                let Some(live_tunable) = tunable_named(live_tunables, family, key) else {
+                    return false;
+                };
+                effective_tunable(&declared_tunable, &preset.rows)
+                    == effective_tunable(&live_tunable, pending)
             })
         })
         .map(|preset| preset.name)
@@ -346,13 +385,22 @@ fn screen(world: &World) -> impl Scene {
     // reads as matching what is bound.
     let presets = presets(world);
     let declared = declared_mappings(world);
+    let declared_tunable_rows = declared_tunables(world);
+    let live_tunables = tunables(world);
     let pending = world.resource::<PendingOverrides>().rows.clone();
-    let selected = selected_preset(&presets, &declared, &all, &pending);
+    let selected = selected_preset(
+        &presets,
+        &declared,
+        &all,
+        &declared_tunable_rows,
+        &live_tunables,
+        &pending,
+    );
     let dead_zone = dead_zone_tunable(world, &pending);
-    let hold_or_toggle = tunables(world)
-        .into_iter()
+    let hold_or_toggle = live_tunables
+        .iter()
         .find(|tunable| tunable.key == HOLD_OR_TOGGLE_KEY)
-        .is_some_and(|tunable| effective_tunable(&tunable, &pending) == TunableValue::Bool(true));
+        .is_some_and(|tunable| effective_tunable(tunable, &pending) == TunableValue::Bool(true));
 
     bsn! {
         // Closing the screen is nothing but despawning it, which the state can do on its own — and
@@ -756,12 +804,12 @@ struct PresetButton(&'static str);
 /// could name is touched directly; [`redraw_pending`] notices the change and repaints everything
 /// that might have moved, including every preset button's own highlight.
 ///
-/// Every row *any* registered preset names is cleared first, not just the ones this preset itself
-/// names: picking a new preset supersedes whatever the last one wrote rather than layering onto it,
-/// and a preset that names nothing (`Default`) is a claim about all of them, the same reading
-/// [`selected_preset`] already gives that case. Skipping this step is exactly the bug an earlier
-/// version of this function had — `Default`'s own rows are empty, so writing only what it names
-/// wrote nothing at all, and whatever the last preset had moved simply stayed moved.
+/// Every row and tunable *any* registered preset names is cleared first, not just the ones this
+/// preset itself names: picking a new preset supersedes whatever the last one wrote rather than
+/// layering onto it, and a preset that names nothing (`Default`) is a claim about all of them, the
+/// same reading [`selected_preset`] already gives that case. Skipping this step is exactly the bug
+/// an earlier version of this function had — `Default`'s own rows are empty, so writing only what
+/// it names wrote nothing at all, and whatever the last preset had moved simply stayed moved.
 fn preset_pressed(activate: On<Activate>, buttons: Query<&PresetButton>, mut commands: Commands) {
     let Ok(&PresetButton(name)) = buttons.get(activate.entity) else {
         return;
@@ -775,13 +823,28 @@ fn preset_pressed(activate: On<Activate>, buttons: Query<&PresetButton>, mut com
             .iter()
             .flat_map(|preset| preset.rows.iter().map(|(family, key, _)| (family, key)))
             .collect();
+        let touched_tunables: Vec<(DeviceFamily, &'static str)> = presets
+            .iter()
+            .flat_map(|preset| {
+                preset
+                    .rows
+                    .iter_tunables()
+                    .map(|(family, key, _)| (family, key))
+            })
+            .collect();
 
         let mut pending = world.resource_mut::<PendingOverrides>();
         for (family, key) in touched {
             pending.rows.reset(family, key);
         }
+        for (family, key) in touched_tunables {
+            pending.rows.reset_tunable(family, key);
+        }
         for (family, key, over) in preset.rows.iter() {
             pending.rows.set(family, key, over.clone());
+        }
+        for (family, key, value) in preset.rows.iter_tunables() {
+            pending.rows.tune(family, key, value);
         }
         pending.preset_rows = preset.rows.clone();
     });
@@ -801,6 +864,8 @@ fn preset_pressed(activate: On<Activate>, buttons: Query<&PresetButton>, mut com
 fn redraw_pending(world: &mut World) {
     let live = mappings(world);
     let declared = declared_mappings(world);
+    let live_tunables = tunables(world);
+    let declared_tunable_rows = declared_tunables(world);
     let presets = presets(world);
     let pending = world.resource::<PendingOverrides>().rows.clone();
 
@@ -831,7 +896,14 @@ fn redraw_pending(world: &mut World) {
         );
     }
 
-    let selected = selected_preset(&presets, &declared, &live, &pending);
+    let selected = selected_preset(
+        &presets,
+        &declared,
+        &live,
+        &declared_tunable_rows,
+        &live_tunables,
+        &pending,
+    );
     let mut buttons = world.query::<(&PresetButton, &mut BorderColor, &mut BackgroundColor)>();
     for (button, mut border, mut background) in buttons.iter_mut(world) {
         let is_selected = Some(button.0) == selected;
@@ -843,10 +915,10 @@ fn redraw_pending(world: &mut World) {
         });
     }
 
-    if let Some(tunable) = tunables(world)
-        .into_iter()
+    if let Some(tunable) = live_tunables
+        .iter()
         .find(|tunable| tunable.key == HOLD_OR_TOGGLE_KEY)
-        && let TunableValue::Bool(active) = effective_tunable(&tunable, &pending)
+        && let TunableValue::Bool(active) = effective_tunable(tunable, &pending)
     {
         let mut checkbox = world.query_filtered::<&mut Text, With<HoldOrToggleValue>>();
         if let Ok(mut text) = checkbox.single_mut(world) {

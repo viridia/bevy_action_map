@@ -301,15 +301,6 @@ consulting its own working copy.
 
 _Fix:_ **chunk 42** — its binding panel is where this distinction has to render anyway.
 
-### 1039 A preset cannot carry a tunable
-
-R19.12, the tunable half — "named alternative arrangements of mappings **and tunables**".
-`PresetBuilder` has `bind` and no `tune`. Reachable by hand (`Preset::rows` is public and
-`Overrides::tune` applies through the same path), offered by nothing, tested by nothing. The
-smallest item in this document: one builder method.
-
-_Fix:_ **chunk 100**.
-
 ### 1040 No semantic control aliases
 
 R4.4 (SHOULD) — semantic control aliases (`Submit`, `Cancel`, `MenuLeft`) resolving per device

@@ -840,7 +840,10 @@ pub enum OverrideProblemKind {
 A `Preset` is a name paired with an `Overrides`. `Preset::build(world, name, |p| ..)` gives it the
 builder's own ergonomics — `p.bind::<A>(family, controls)` resolves `A`'s declared mapping in that
 family and writes the row, so an app never derives a key by hand. It panics rather than guessing
-when an action has no mapping in that family or more than one.
+when an action has no mapping in that family or more than one. `p.tune(family, key, value)` sets a
+tunable alongside it, so "Southpaw" can move a dead zone the same step it moves a stick's axis; it
+writes straight through to `Overrides::tune`, since a tunable's key is already the app's own string
+rather than one the crate hands out.
 
 Passing a preset to `apply_overrides_with_preset` exempts exactly the rows that preset names from
 the `NotRebindable` refusal — which is what lets a preset move a `Fixed` row a capture screen never
