@@ -83,6 +83,7 @@ here, so there is one `D`-numbering in the project.
 | **D57** | Where two pads report one axis, the one that moved last speaks                | design §7.4     |
 | **D60** | The character-producing door is a method, not a fourth `ControlClass`         | design §5.4     |
 | **D61** | A gamepad stick is a `Control`, named whole                                   | design §8.1     |
+| **D66** | Control classes are a closed set                                             | design §5.4     |
 
 ---
 
@@ -600,6 +601,17 @@ all, since the game disables the default dispatch plugin outright. That is the s
 presentation surface makes elsewhere, and it is a real cost of being explicit rather than a free
 lunch.
 
+**The `Ctrl+Z` case.** `Ctrl+Z` meaning undo-in-field when a text input has focus and
+undo-in-document otherwise looks like it needs a widget to elect at runtime, and it does not: the
+text field's focus-activated context claims `Ctrl+Z`, and when focus is elsewhere that context is
+inactive and the global binding wins. The election is expressed by which context is active, a
+consequence of what has focus, not a runtime decision.
+
+**What static-only interception gives up.** Only a widget that claims a control conditionally on its
+own internal state — a text field that swallows `Ctrl+Z` only while its undo stack is non-empty. The
+workaround is to make that state part of context activation (a `TextFieldWithUndoHistory` context)
+rather than a runtime decision, keeping the claim inspectable by R22.1.
+
 ### D24 — One crate, feature-gated by source
 
 **Decided.** One crate with `keyboard`, `mouse`, `gamepad`, `serialize`, `focus`, `state`,
@@ -994,9 +1006,11 @@ library and an input mapper may only be expressed by whoever depends on both.
 
 **Two consequences that were not obvious.** The previous value has to be the whole value rather than
 a boolean, or two directions cannot be compared. And the claim on a control is held while the
-binding is `Ongoing` as well as `Fired`, because a binding that fires once per direction entered
-says nothing in between — a claim lasting only as long as the fire would hand the stick back to the
-game underneath for exactly the ticks the player was still holding it.
+binding is `Building` or `Firing`, not only on the tick it fires, because a binding that fires once
+per direction entered says nothing in between — a claim scoped to the firing tick alone would hand
+the stick back to the game underneath for exactly the ticks the player was still holding it. The
+same rule covers a charging `.hold()` and a part-way `.multi_tap()`: nothing about consumption is
+special to navigation, this is just where the gap was first found.
 
 ---
 
@@ -1399,3 +1413,16 @@ took a bare `ControlClass` — `CaptureSession::accepting` and `PromptScope::of`
 a capture accepting it refused every key and never ended, and a prompt scope narrowed to it came back
 empty. `contains` carried a variant it could never say yes to, and `contains_event` existed only to
 work around that. Reversing this brings all of it back.
+
+### D66 — Control classes are a closed set
+
+**Decided.** The classes a binding can name (button-like, character-producing, and so on) are a
+fixed enum. Third parties extend modifiers (R5.6) and conditions (R6.6) but do not add classes.
+
+**Rules out.** The `Custom` variant D19 gives modifiers and conditions, applied here too.
+
+**Reversal.** A class over text input is a correctness trap: an author writing one by hand gets
+AZERTY, dead keys, and IME wrong and never learns it, because the QA pass that would catch it — one
+that types Japanese — is exactly what a solo developer does not have (R24.8). Where a mechanism is a
+footgun rather than a convenience, the crate owns it rather than opening it up.
+

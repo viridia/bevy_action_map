@@ -163,6 +163,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 107 | A diagnostic overlay for Pong                          |
 | 99  | The smart bomb, and a charge meter                     |
 | 100 | A preset can carry a tunable                          |
+| 51  | The constitution, trimmed                             |
 
 ---
 
@@ -177,23 +178,6 @@ routed.
 ## Phase VIII — settling
 
 Nothing here changes what the crate can do.
-
-### 51. The constitution, trimmed
-
-`Requirements.md` accreted argument because the house style used to point it there. This is the pass
-that clears what accumulated under the old rule.
-
-- **The target is 20 italic `_(...)_` asides**, not the long requirements. Measurement first,
-  because the instinct is wrong: 220 requirements, 962 lines of body, median 3 lines, only 14 over
-  twelve — and most of those are long because they carry a table of cases or an enumerated set of
-  states, which *is* the requirement. Trimming by length would remove constitutional content.
-- **The test, per requirement:** does this sentence say what must be true, or defend it? Defence
-  moves to `docs/decisions.md`. It is moved rather than deleted.
-- **Withdrawn requirements are exempt.**
-- **Why it is a chunk rather than an afternoon.** Twenty judgement calls in the document every
-  other document defers to, where dropping a load-bearing clause is invisible in a diff.
-- **Review surface:** whether anything moved landed somewhere a reader would find it. Text moved out
-  of the constitution and into a section nobody opens has been deleted with extra steps.
 
 ### 77. A test fixture the crate shares
 

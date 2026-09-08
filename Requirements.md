@@ -138,12 +138,10 @@ must be delegable to the backend's own UI.
   map its own debug and editor bindings.
 - **R0.5 (MUST)** Consumers of action state (gameplay code, prompts) must not need to know which
   backend produced it. Backend identity is queryable but never required at the call site.
-- **R0.6 (MUST)** A backend that is authoritative for a device must be able to suppress that device
-  at **L0**, so its raw events never reach the input frame at all. R0.4 stops us computing an action
-  the backend owns; it does not stop us sampling the hardware underneath it, and on the case that
-  motivates D22 the hardware is still there — Steam presents a pad it is driving as an emulated
-  gamepad, which the platform enumerates and we sample, so every input arrives twice. The same
-  capability is what lets a replay backend mute live hardware while it plays.
+- **R0.6 (MUST)** _(D22)_ A backend that is authoritative for a device must be able to suppress that
+  device at **L0**, so its raw events never reach the input frame at all — R0.4 stops us computing
+  an action the backend owns, not sampling the hardware underneath it. The same capability lets a
+  replay backend mute live hardware while it plays.
 
 ### Non-goals
 
@@ -385,23 +383,12 @@ LWIM: polled `ActionState` with `current_duration()` and explicit `consume()`.
   counted with.)_
 - **R3.5 (SHOULD)** Expose _progress_ toward firing (0..1) for hold-to-confirm UI — Unreal's
   CommonUI hold indicators need this and it is painful to reconstruct externally.
-- **R3.6 (MUST)** Provide "consume"/mark-handled semantics so a binding can prevent lower-priority
-  contexts from also reacting this tick.
+- **R3.6 (MUST)** _(D23)_ Provide "consume"/mark-handled semantics so a binding can prevent
+  lower-priority contexts from also reacting this tick. This does not extend to an action's own
+  other observers on one firing — see D23.
 
-  _(Narrowed: this also required preventing **the same action's other observers** from reacting,
-  and that half is withdrawn. It is the dynamic interception D23 rules out, one level further down —
-  an observer electing at handling time to suppress its peers makes the outcome depend on which ran
-  first, which is what R8.3 forbids for contexts and is no more defensible for observers. Its
-  motivating case is a UI handler out-ranking a gameplay one, and that is already answered by the
-  half kept: the UI's context claims the control and the gameplay action never fires at all, which
-  is both stronger and inspectable. If a case appears that genuinely needs two observers of one
-  firing to arbitrate between themselves, it should arrive as its own requirement with that case
-  attached.
-
-  Bevy declines to offer it in any case, for the same reason. Stopping propagation on a bubbled
-  event stops it reaching entities **further down the chain**, never the other observers **on the
-  same entity**, which all still run — observers on one entity are unordered, so "suppress my peers"
-  can only mean "suppress whichever have not run yet".)_
+  _(If a case appears that genuinely needs two observers of one firing to arbitrate between
+  themselves, it should arrive as its own requirement with that case attached.)_
 - **R3.7 (MUST)** Actions must be individually disable-able without unbinding, and re-enabling must
   not spuriously fire (require-reset semantics: a key held across the enable boundary does not count
   as a fresh press).
@@ -458,12 +445,8 @@ Unreal maps context→key→(triggers, modifiers). Steam moves the whole binding
     a static set of keys: a dead key produces nothing until the following key decides what it
     becomes, and an IME composition consumes keys that produce no text until it commits (R12.6). The
     predicate must see the event.
-  - **The set of classes is closed**, and third parties do not define new ones. This is a deliberate
-    reversal of the extensibility this document grants modifiers (R5.6) and conditions (R6.6), for a
-    reason those do not share: a class over text input is a correctness trap. An author writing one
-    by hand will get AZERTY, dead keys, and IME wrong and will never learn it, because the QA pass
-    that types Japanese does not exist (R24.8). Where a mechanism is a footgun rather than a
-    convenience, the crate owns it.
+  - **The set of classes is closed** _(D66)_, and third parties do not define new ones — unlike the
+    extensibility this document grants modifiers (R5.6) and conditions (R6.6).
 - **R4.10 (MUST)** A control class must be justified by **non-enumerability**: it exists only where
   a developer could not reasonably write the set out. "Character-producing keys" qualifies, because
   the set is a function of layout and IME state. "Any button-shaped control" qualifies, because the
@@ -631,23 +614,17 @@ dispatch level. Unity: no arbitration for PassThrough actions, first-match for o
 
 - **R8.1 (MUST)** Define and document a default clash strategy across bindings on the same control;
   longest/most-specific chord wins is the recommended default (`Ctrl+S` suppresses `S`).
-- **R8.2 (MUST)** Higher-priority contexts must be able to _consume_ a control so lower-priority
-  contexts do not see it, and this must be opt-in per binding (a menu consumes `Escape`, but the
-  "screenshot" global hotkey should still see `F12`). _A claim lasts for as long as the binding has
-  something to say — while its conditions are `Ongoing` as well as on the tick it fires. Chunk 30
-  narrowed this from "on the fire" after a menu binding that fires once per direction entered was
-  found handing the stick back to the game between two crossings. The consequence worth stating is
-  that a charging `.hold()` and a part-way `.multi_tap()` now claim their controls too, which is the
-  same rule and not a special case._
+- **R8.2 (MUST)** _(D44)_ Higher-priority contexts must be able to _consume_ a control so
+  lower-priority contexts do not see it, and this must be opt-in per binding (a menu consumes
+  `Escape`, but the "screenshot" global hotkey should still see `F12`).
+
+  _(A claim lasts as long as the binding is `Building` or `Firing`, not only on the tick it fires —
+  see D44. A charging `.hold()` or a part-way `.multi_tap()` claims its control on every such
+  tick.)_
 - **R8.2a (MUST)** Consumption governs what reaches other _contexts_, and cannot govern what reaches
-  a consumer outside this crate that reads device events directly. _Found by chunk 30, and named as
-  a requirement because a menu that swallows `Space` while `bevy_ui_widgets` still activates a
-  button with it is R8.2 met on paper and unmet in the game. The path in question is
-  `InputDispatchPlugin`, the only thing that turns a global keyboard event into a focused one. The
-  fix is a mapper-aware plugin in its place — `DefaultPlugins` is a group, so an app can disable one
-  member and add another. Chunk 49 explored it and deferred rather than built it: chunk 61's
-  exclusivity closed the one collision Disasteroids exposed, leaving no in-tree symptom to build
-  against. See the deferred table in Roadmap.md, which also carries the design that was sketched._
+  a consumer outside this crate that reads device events directly — `bevy_ui_widgets` activating a
+  button on `Space` while a menu context consumes it is R8.2 met on paper and unmet in the game. See
+  Roadmap.md's deferred table for the fix under consideration and why it is not yet built.
 - **R8.3 (MUST)** Consumption must be resolvable in one deterministic pass with no ordering
   ambiguity between systems.
 - **R8.4 (MUST)** Interop with focus/UI: per D23 (§22), a focused widget claims controls by
@@ -1073,12 +1050,12 @@ that assumes any of that is stable loses player data silently on the next patch.
   differently, and conflating them breaks the case they exist for: two players with identical
   controllers and identical mappings differ only in pairing, and must not need two copies of one
   binding table to say so.
-- **R17.9 (MUST)** The serialized form of a control is a stable format this crate owns and
+- **R17.9 (MUST)** _(D49)_ The serialized form of a control is a stable format this crate owns and
   round-trip tests, not the `Debug` or `serde` representation of an upstream type. A control name is
   a serialized key with D6's stability obligation, and deriving it from `KeyCode`'s variant names
-  would put that obligation somewhere we do not control — an upstream rename would silently orphan
-  every saved binding. The format must also carry what the binding layer already distinguishes:
-  physical versus logical keys (§12.R12.1) and device class, at minimum.
+  would put that obligation somewhere we do not control. The format must also carry what the binding
+  layer already distinguishes: physical versus logical keys (§12.R12.1) and device class, at
+  minimum.
 - **R17.10 (MUST)** _(D59)_ The portable saved type claims no field besides `action_map_version`,
   `bindings`, and `tunables`, and the version field is not a bare `version`. A settings layer that
   merges several resources' fields into one shared TOML table by name may place this type's fields
@@ -1220,36 +1197,31 @@ and response curves ([IGA file][steam-iga]).
   (R19.1), and the control scheme it belongs to. Its category comes from the action it belongs to
   (R1.6).
 
-  A mapping holds an **ordered list of slots**, each holding one control, with a **capacity** saying
-  how many slots it has. "Primary and secondary" is the commercial arrangement — a keyboard row with
-  two cells — and a model holding one control per mapping cannot express it at all: the workaround
-  is a second row under an alias name, which tells the player two things are separate when they are
-  the same. Order is what makes the first slot primary, so it is part of the data rather than an
-  artefact of iteration. A screen draws one cell per slot; "cell" is the drawing and never the data.
+  A mapping holds an **ordered list of slots** _(D29)_, each holding one control, with a
+  **capacity** saying how many slots it has — "primary and secondary" is a common arrangement, a
+  keyboard row with two cells. The first slot is primary by convention, so order is part of the
+  data rather than an artefact of iteration.. A screen draws one cell per slot; "cell" is the
+  drawing and never the data.
 
   Capacity is **inferred from the declared defaults and raisable by the author**, never inferred
   downward: a mapping holding two defaults has room for two without anyone saying so, and an author
   who ships one default and wants a spare slot says so once. An unbounded capacity exists for the
   other kind of program — a tool whose command set is too large and open to lay out in a table — and
   is not what a game reaches for.
-- **R19.10 (MUST)** A binding is **listed by default and rebindable only when declared**. Three
-  states, and every binding is in exactly one:
+- **R19.10 (MUST)** _(D28)_ A binding is **listed by default and rebindable only when declared**.
+  Three states, and every binding is in exactly one:
 
-  - **Listed and fixed**, which is what saying nothing gets: the player reads it on a controls
-    screen and cannot change it. This is the whole of the gamepad story on a console, and most of it
-    on Steam.
+  - **Listed and fixed**, which is the default: the player reads it on a controls screen and cannot
+    change it. This is the whole of the gamepad story on a console, and most of it on Steam.
   - **Listed and rebindable**, which is a declared mapping. Rebindability is the presence or absence
     of a mapping rather than a flag on the binding, which is R4.7.
   - **Unlisted**, which must be asked for. Reserved for a binding that is another binding's
     implementation detail — a second reading of a control that already appears under a different
     name — rather than a control the player operates.
 
-  The two questions must not be conflated. An earlier framing had listing follow rebindability, so
-  declining to offer a rebind also hid the binding, and the commonest gamepad screen in the industry
-  — a read-only list of what the pad does, with the remapping owned by the platform — could not be
-  drawn from our own data at all. Rebindability is the developer's call because a fixed binding is a
-  design decision; being able to see the controls is the player's business, and the default belongs
-  to them.
+  The two questions must not be conflated: rebindability is the developer's call because a fixed
+  binding is a design decision, while being able to see the controls is the player's business and
+  the default belongs to them.
 - **R19.11 (MUST)** Player-adjustable parameters are exposed as **named tunables**, not as modifier
   chains. A tunable is a declared, typed, named, range-bounded parameter on a binding —
   `sensitivity: f32 in 0.1..=10.0`, `invert_y: bool`, `deadzone: f32 in 0.0..=0.5`, `hold_or_toggle:
@@ -1263,31 +1235,21 @@ and response curves ([IGA file][steam-iga]).
   ships a sensible starting point per control scheme.
 - **R19.13 (SHOULD)** A game that offers no rebinding UI at all must still work: mappings,
   tunables, and presets are additive declarations, never a precondition for binding an action.
-- **R19.14 (MUST)** Every player-visible name this crate carries — mapping names (R19.9), action
-  categories (R1.6), tunable and preset names (R19.11, R19.12) — is a **localization key, not
+- **R19.14 (MUST)** _(D31)_ Every player-visible name this crate carries — mapping names (R19.9),
+  action categories (R1.6), tunable and preset names (R19.11, R19.12) — is a **localization key, not
   display text**. Rendering it is the app's business, exactly as R18.3 already requires for the
   control half of a rebinding row.
 
-  Without this the rebinding screen is half-localized: R18.3 makes "Space" and "A button"
-  translatable while the "Move Forward" beside them is a literal baked into the binding declaration.
-  A localized game would have to shadow every one of those strings with a lookup of its own, which
-  is the table the crate was supposed to provide.
-
   Consequences, since they constrain the design rather than describe it:
 
-  - **A key inherits D6's stability problem.** It appears in files outside the code — a translation
-    catalogue rather than a save — and renaming one silently drops the game back to fallback text
-    with no compile error. Keys need the same deliberate, convention-governed treatment as action
-    paths (R1.8), and the convention should cover both.
-  - **A key SHOULD be derivable rather than declared twice.** A mapping's natural key is its
-    action's path plus its part name — `gameplay.move` plus `forward` — and both already exist and
-    are already stable. Note this does _not_ reopen D6: what D6 rejected was deriving identity from
-    the Rust module path, which tracks code structure. Deriving from an author-declared path does
-    not, because the thing being derived from is itself stable by declaration. An explicit override
-    must remain available.
-  - **A game with no localization layer must still read sensibly** (R19.13). A fallback renderer
-    turning a key into presentable text is required, so that shipping a translation catalogue is
-    never the price of seeing a readable rebinding screen.
+  - **A key inherits D6's stability problem** and needs the same deliberate, convention-governed
+    treatment as action paths (R1.8); the convention should cover both.
+  - **A key SHOULD be derivable rather than declared twice** — a mapping's natural key is its
+    action's path plus its part name (`gameplay.move.forward`), both already stable. This does not
+    reopen D6, which rejected deriving identity from the Rust module path, not from an
+    author-declared one. An explicit override must remain available.
+  - **A game with no localization layer must still read sensibly** (R19.13): a fallback renderer
+    turning a key into presentable text is required.
 
 - **R19.15 (MUST)** Mapping keys must be unique within a control scheme, and a collision must be
   reported when the context is declared rather than discovered by a player, since in a saved file a
@@ -1311,15 +1273,11 @@ and response curves ([IGA file][steam-iga]).
     the action is the same, because the two are separate rows in contexts that may be live at
     different times, while the override store is keyed by mapping alone (§17).
 
-- **R19.16 (MUST)** Several actions may deliberately read one control — tap to dodge and hold to
-  sprint, a throttle that opens up when it is held — and the player rebinds **the control**, not one
-  of the actions. A binding must be able to declare that it **rides another action's mapping**:
-  it contributes no slots, is not a row of its own, and an override applied to that mapping rewrites
-  it too.
-
-  Without it the two get separate rows and a rebind moves only one, which is a gameplay bug rather
-  than a display oddity: the afterburner stays on the old key, and whatever the player later binds
-  there acquires an afterburner. Conflict detection cannot catch it, because nothing collides.
+- **R19.16 (MUST)** _(D30)_ Several actions may deliberately read one control — tap to dodge and
+  hold to sprint, a throttle that opens up when it is held — and the player rebinds **the control**,
+  not one of the actions. A binding must be able to declare that it **rides another action's
+  mapping**: it contributes no slots, is not a row of its own, and an override applied to that
+  mapping rewrites it too.
 
   - **The link is declared, never inferred.** Two bindings happening to read one control are as
     often a coincidence as an intention.
@@ -1474,18 +1432,8 @@ character keys.
   does not decide at handling time whether to let an input fall through, so no two-phase
   dispatch/collect/resolve ordering is needed and R8.3 is preserved.
 
-  The case that appears to demand dynamic interception is covered without it: `Ctrl+Z` meaning
-  undo-in-field when a text input has focus and
-  undo-in-document otherwise is _already_ static. The text field's focus-activated context claims
-  `Ctrl+Z`; when focus is elsewhere that context is inactive and the global binding wins. Nothing
-  about it requires the widget to elect anything at runtime — the election is expressed by which
-  context is active, which is a consequence of what has focus.
-
-  What static-only interception gives up is narrower than it first appears: only a widget that
-  claims a control _conditionally on its own internal state_ — a text field that swallows `Ctrl+Z`
-  only while its undo stack is non-empty. The workaround is to make that state part of context
-  activation (activate a `TextFieldWithUndoHistory` context) rather than a runtime decision, which
-  keeps the claim inspectable by R22.1.
+  _(What this gives up is narrower than it first appears — see D23 for the `Ctrl+Z` case it already
+  covers and the one case it does not.)_
 
 ### Declarative scene formats (BSN)
 
@@ -1540,13 +1488,10 @@ properties that decided the state layout, as **D8**.
 - **R23.3 (MUST)** Context activation/deactivation must not cause structural ECS churn proportional
   to the number of actions — activating a context should not spawn, despawn, insert, or remove per
   action. A layout that does so must show the cost is acceptable at the action counts in §23.R23.1.
-- **R23.4 (SHOULD)** Change detection on action state, so that UI which reacts to bindings or
+- **R23.4 (SHOULD)** _(D8)_ Change detection on action state, so that UI which reacts to bindings or
   action values (§18 prompts especially) can subscribe rather than poll; unchanged actions must not
-  mark themselves changed every frame. Note that if state is one component, Bevy's change ticks are
-  all-or-nothing across it — per-action granularity must then be built in (a dirty set or
-  per-mapping change tick), or every prompt wakes whenever any action moves. Settled by **D8**: the
-  dirty set is per action, and the component's own change tick is set only on a tick where one
-  moved.
+  mark themselves changed every frame. Settled by D8: the dirty set is per action, and the
+  component's own change tick is set only on a tick where one moved.
 - **R23.5 (MUST)** Action state must be snapshot-able and restorable cheaply enough to run per
   rollback tick (§10.R10.3), and reachable from an `ActionId` in O(1) without a hash lookup on the
   hot path. _How_ — see **D8**.
