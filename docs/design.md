@@ -935,7 +935,9 @@ src/
     modifier.rs      dead zones, compasses, curves, toggles, and the value math they apply
     builder.rs       the declaration API, and the BindingSpec record it writes
   condition.rs       conditions and their verdicts and descriptors
-  context.rs         declaring a context, its per-entity state, the reading params
+  context.rs         re-exports the two below, which are private to it
+    state.rs         one instance's live state, and the params that read it
+    declare.rs       the app wiring, the records declaration writes, the type-erased reads
   plan.rs            compilation, slot allocation, diagnostics
   eval.rs            the evaluator, consumption, the exclusion ceiling, dispatch
   event.rs           Fired/Started/Completed/Canceled, class bindings

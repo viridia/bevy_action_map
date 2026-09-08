@@ -167,6 +167,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 77  | `context.rs`'s test fixtures, deduplicated and reordered |
 | 78a | `DeviceFamily` moves to `device.rs`                   |
 | 78b | `binding.rs` is three files, and `mapping.rs` gains a library |
+| 78c | `context.rs` is two files, plus a shared test fixture module |
 
 ---
 
@@ -175,23 +176,6 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 The live tier of [docs/issues.md](./docs/issues.md): no unusual configuration, no feature nobody has
 used, and the answer is still wrong. Six more of its entries are behind this one and not yet
 routed.
-
----
-
-## Phase VIII — settling
-
-Nothing here changes what the crate can do.
-
-### 78c. `context.rs` is three files
-
-The live state; declaration and app wiring; and the type-erased boundary — the `read_*`/`apply_to_*`
-functions registered on `DeclaredContext`, which are the only reason the file depends on
-`overrides`, `present`, `mapping` and `inspect`. After 75 there are six of them rather than eight,
-which is why this follows rather than leads. 1,713 lines of code and 3,028 of tests.
-
-- **Same shape as 78b**, `src/context/{state,declare,erased}.rs` beside a `src/context.rs`.
-- **Carries `InputContextBuilder`'s split from 78b**, and says which way it went.
-- **Ground rule 3 applies literally:** `examples/` must not change.
 
 ---
 
