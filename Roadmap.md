@@ -164,6 +164,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 99  | The smart bomb, and a charge meter                     |
 | 100 | A preset can carry a tunable                          |
 | 51  | The constitution, trimmed                             |
+| 77  | `context.rs`'s test fixtures, deduplicated and reordered |
 
 ---
 
@@ -178,20 +179,6 @@ routed.
 ## Phase VIII — settling
 
 Nothing here changes what the crate can do.
-
-### 77. A test fixture the crate shares
-
-8,672 of the crate's 20,124 lines are tests, and they repeat themselves: `struct Jump` is declared
-nine times, `Move` six, `OnFoot` five; `capture.rs` and `overrides.rs` build near-identical fixture
-contexts independently; `context.rs` alone holds 53 `App::new()`.
-
-- **A `#[cfg(test)] mod test_support`** with the fixture actions, contexts, and press-and-step
-  helpers. It shrinks `context.rs` further than 78 does.
-- **Watch the action registry.** It is a process-global intern table keyed by declared path, so
-  fixture actions shared across modules share one `ActionId` for the whole test binary. Already true
-  of any two modules picking the same path; what changes is that it becomes deliberate.
-- **Review surface:** whether a test still reads on its own. A fixture that has to be looked up in
-  another module to understand a failure costs more than the duplication did.
 
 ### 78. Two files doing several jobs each
 

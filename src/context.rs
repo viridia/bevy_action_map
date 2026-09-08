@@ -1733,25 +1733,10 @@ mod tests {
         GamepadAxis, GamepadButton, RawGamepadAxisChangedEvent, RawGamepadButtonChangedEvent,
         RawGamepadEvent,
     };
+    #[cfg(feature = "mouse")]
+    use bevy_input::mouse::{MouseButton, MouseButtonInput};
 
-    #[derive(InputAction)]
-    #[action(path = "tests.jump", output = bool, intent = Button)]
-    struct Jump;
-
-    #[derive(InputContext)]
-    #[context(path = "tests.on_foot", tick = Fixed)]
-    struct OnFoot;
-
-    #[derive(Resource, Default)]
-    struct Probe {
-        value: bool,
-        phase: ActionPhase,
-    }
-
-    fn probe_jump(input: ContextActions<OnFoot>, mut probe: bevy_ecs::system::ResMut<'_, Probe>) {
-        probe.value = input.value::<Jump>();
-        probe.phase = input.phase::<Jump>();
-    }
+    // ---- event-and-step helpers, shared by every fixture below ----
 
     fn press(key_code: KeyCode, logical_key: Key, state: ButtonState) -> KeyboardInput {
         KeyboardInput {
@@ -1760,6 +1745,15 @@ mod tests {
             state,
             text: None,
             repeat: false,
+            window: bevy_ecs::entity::Entity::PLACEHOLDER,
+        }
+    }
+
+    #[cfg(feature = "mouse")]
+    fn mouse_click(button: MouseButton, state: ButtonState) -> MouseButtonInput {
+        MouseButtonInput {
+            button,
+            state,
             window: bevy_ecs::entity::Entity::PLACEHOLDER,
         }
     }
@@ -1773,120 +1767,73 @@ mod tests {
         let _ = app.world_mut().try_run_schedule(FixedUpdate);
     }
 
-    #[test]
-    fn pressing_and_releasing_a_key_updates_the_action_state() {
+    // ---- Jump / OnFoot: the default single-action fixture, used all over this module ----
+
+    #[derive(InputAction)]
+    #[action(path = "tests.jump", output = bool, intent = Button)]
+    struct Jump;
+
+    #[derive(InputContext)]
+    #[context(path = "tests.on_foot", tick = Fixed)]
+    struct OnFoot;
+
+    /// `Jump` bound to `Space`, in a spawned `OnFoot` instance, and nothing else.
+    fn jump_app() -> App {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<OnFoot>(|context| {
             context.bind::<Jump>(KeyCode::Space);
         });
         app.world_mut().spawn(OnFoot);
-        app.init_resource::<Probe>();
-        app.add_systems(FixedUpdate, probe_jump);
-
-        app.world_mut()
-            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
-        app.update();
-        run_fixed_tick(&mut app);
-
-        let probe = app.world().resource::<Probe>();
-        assert!(probe.value);
-        assert_eq!(probe.phase, ActionPhase::Fired);
-
-        app.world_mut()
-            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Released));
-        app.update();
-        run_fixed_tick(&mut app);
-
-        let probe = app.world().resource::<Probe>();
-        assert!(!probe.value);
-        assert_eq!(probe.phase, ActionPhase::Completed);
+        app
     }
 
-    /// The other half of the keyboard-and-mouse family, which until now the crate only claimed to
-    /// support: a mouse button drives an action exactly as a key does.
-    #[cfg(feature = "mouse")]
-    #[test]
-    fn pressing_and_releasing_a_mouse_button_updates_the_action_state() {
-        use bevy_input::mouse::{MouseButton, MouseButtonInput};
-
-        let click = |state| MouseButtonInput {
-            button: MouseButton::Left,
-            state,
-            window: Entity::PLACEHOLDER,
-        };
-
-        let mut app = App::new();
-        app.add_plugins((InputPlugin, ActionMapPlugin));
-        app.add_context::<OnFoot>(|context| {
-            context.bind::<Jump>(MouseButton::Left);
-        });
-        app.world_mut().spawn(OnFoot);
-        app.init_resource::<Probe>();
-        app.add_systems(FixedUpdate, probe_jump);
-
-        app.world_mut().write_message(click(ButtonState::Pressed));
-        app.update();
-        run_fixed_tick(&mut app);
-
-        let probe = app.world().resource::<Probe>();
-        assert!(probe.value);
-        assert_eq!(probe.phase, ActionPhase::Fired);
-
-        app.world_mut().write_message(click(ButtonState::Released));
-        app.update();
-        run_fixed_tick(&mut app);
-
-        let probe = app.world().resource::<Probe>();
-        assert!(!probe.value);
-        assert_eq!(probe.phase, ActionPhase::Completed);
+    #[derive(Resource, Default)]
+    struct Probe {
+        value: bool,
+        phase: ActionPhase,
     }
 
-    /// A mouse button is a button, so it serves as a part of a composite — which is what
-    /// `ButtonControl` gaining a variant is for, rather than only `Control`.
-    #[cfg(feature = "mouse")]
-    #[test]
-    fn a_mouse_button_can_be_part_of_a_composite() {
-        use bevy_input::mouse::{MouseButton, MouseButtonInput};
-
-        #[derive(InputAction)]
-        #[action(path = "tests.lean", output = f32, intent = Analog1)]
-        struct Lean;
-
-        #[derive(Resource, Default)]
-        struct LeanProbe(f32);
-
-        let mut app = App::new();
-        app.add_plugins((InputPlugin, ActionMapPlugin));
-        app.add_context::<FreeLook>(|context| {
-            context.bind::<Lean>(AxisButtons::new(MouseButton::Left, MouseButton::Right));
-        });
-        app.world_mut().spawn(FreeLook);
-        app.init_resource::<LeanProbe>();
-        app.add_systems(
-            Update,
-            |input: ContextActions<FreeLook>,
-             mut probe: bevy_ecs::system::ResMut<'_, LeanProbe>| {
-                probe.0 = input.value::<Lean>();
-            },
-        );
-
-        let click = |app: &mut App, button, state| {
-            app.world_mut().write_message(MouseButtonInput {
-                button,
-                state,
-                window: Entity::PLACEHOLDER,
-            });
-        };
-
-        click(&mut app, MouseButton::Right, ButtonState::Pressed);
-        app.update();
-        assert_eq!(app.world().resource::<LeanProbe>().0, 1.0);
-
-        click(&mut app, MouseButton::Left, ButtonState::Pressed);
-        app.update();
-        assert_eq!(app.world().resource::<LeanProbe>().0, 0.0, "both held");
+    fn probe_jump(input: ContextActions<OnFoot>, mut probe: bevy_ecs::system::ResMut<'_, Probe>) {
+        probe.value = input.value::<Jump>();
+        probe.phase = input.phase::<Jump>();
     }
+
+    #[derive(Resource, Default)]
+    struct FireCount(u32);
+
+    fn count_jump_fires(
+        input: ContextActions<OnFoot>,
+        mut count: bevy_ecs::system::ResMut<'_, FireCount>,
+    ) {
+        if input.fired::<Jump>() {
+            count.0 += 1;
+        }
+    }
+
+    fn jump_fire_count_app() -> App {
+        let mut app = jump_app();
+        app.init_resource::<FireCount>();
+        app.add_systems(FixedUpdate, count_jump_fires);
+        app
+    }
+
+    /// What a subscriber sees: how many instances the `Changed` filter offered on the last tick.
+    #[derive(Resource, Default)]
+    struct Woken(usize);
+
+    fn count_woken(
+        woken: Query<'_, '_, (), bevy_ecs::prelude::Changed<InputContextState<OnFoot>>>,
+        mut probe: bevy_ecs::system::ResMut<'_, Woken>,
+    ) {
+        probe.0 = woken.iter().count();
+    }
+
+    #[derive(InputAction)]
+    #[action(path = "tests.never_bound_anywhere", output = bool, intent = Button)]
+    struct NeverBoundAnywhere;
+
+    // ---- Move / Look / Turn / FreeLook: the directional-and-motion fixture ----
 
     #[derive(InputAction)]
     #[action(path = "tests.move", output = Vec2, intent = Directional2)]
@@ -1939,6 +1886,124 @@ mod tests {
         probe.jump_phase = input.phase::<Jump>();
     }
 
+    // ---- Thrust: one trigger serving an analog and a button action at once ----
+
+    #[cfg(feature = "gamepad")]
+    #[derive(InputAction)]
+    #[action(path = "tests.thrust", output = f32, intent = Analog1)]
+    struct Thrust;
+
+    #[cfg(feature = "gamepad")]
+    #[derive(Resource, Clone, Copy, Default)]
+    struct TriggerProbe {
+        travel: f32,
+        pressed: bool,
+        phase: ActionPhase,
+    }
+
+    // ---- misc single-test fixtures ----
+
+    #[derive(Resource)]
+    struct AtTheControls;
+
+    #[test]
+    fn pressing_and_releasing_a_key_updates_the_action_state() {
+        let mut app = jump_app();
+        app.init_resource::<Probe>();
+        app.add_systems(FixedUpdate, probe_jump);
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        let probe = app.world().resource::<Probe>();
+        assert!(probe.value);
+        assert_eq!(probe.phase, ActionPhase::Fired);
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Released));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        let probe = app.world().resource::<Probe>();
+        assert!(!probe.value);
+        assert_eq!(probe.phase, ActionPhase::Completed);
+    }
+
+    /// The other half of the keyboard-and-mouse family, which until now the crate only claimed to
+    /// support: a mouse button drives an action exactly as a key does.
+    #[cfg(feature = "mouse")]
+    #[test]
+    fn pressing_and_releasing_a_mouse_button_updates_the_action_state() {
+        let click = |state| mouse_click(MouseButton::Left, state);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context.bind::<Jump>(MouseButton::Left);
+        });
+        app.world_mut().spawn(OnFoot);
+        app.init_resource::<Probe>();
+        app.add_systems(FixedUpdate, probe_jump);
+
+        app.world_mut().write_message(click(ButtonState::Pressed));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        let probe = app.world().resource::<Probe>();
+        assert!(probe.value);
+        assert_eq!(probe.phase, ActionPhase::Fired);
+
+        app.world_mut().write_message(click(ButtonState::Released));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        let probe = app.world().resource::<Probe>();
+        assert!(!probe.value);
+        assert_eq!(probe.phase, ActionPhase::Completed);
+    }
+
+    /// A mouse button is a button, so it serves as a part of a composite — which is what
+    /// `ButtonControl` gaining a variant is for, rather than only `Control`.
+    #[cfg(feature = "mouse")]
+    #[test]
+    fn a_mouse_button_can_be_part_of_a_composite() {
+        #[derive(InputAction)]
+        #[action(path = "tests.lean", output = f32, intent = Analog1)]
+        struct Lean;
+
+        #[derive(Resource, Default)]
+        struct LeanProbe(f32);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.bind::<Lean>(AxisButtons::new(MouseButton::Left, MouseButton::Right));
+        });
+        app.world_mut().spawn(FreeLook);
+        app.init_resource::<LeanProbe>();
+        app.add_systems(
+            Update,
+            |input: ContextActions<FreeLook>,
+             mut probe: bevy_ecs::system::ResMut<'_, LeanProbe>| {
+                probe.0 = input.value::<Lean>();
+            },
+        );
+
+        let click = |app: &mut App, button, state| {
+            app.world_mut().write_message(mouse_click(button, state));
+        };
+
+        click(&mut app, MouseButton::Right, ButtonState::Pressed);
+        app.update();
+        assert_eq!(app.world().resource::<LeanProbe>().0, 1.0);
+
+        click(&mut app, MouseButton::Left, ButtonState::Pressed);
+        app.update();
+        assert_eq!(app.world().resource::<LeanProbe>().0, 0.0, "both held");
+    }
+
     #[test]
     fn directional_composites_and_mouse_motion_stay_live_across_frames() {
         let mut app = App::new();
@@ -1975,19 +2040,6 @@ mod tests {
         let probe = app.world().resource::<MotionProbe>();
         assert_eq!(probe.movement, Vec2::new(1.0, 1.0));
         assert_eq!(probe.look, Vec2::ZERO);
-    }
-
-    #[cfg(feature = "gamepad")]
-    #[derive(InputAction)]
-    #[action(path = "tests.thrust", output = f32, intent = Analog1)]
-    struct Thrust;
-
-    #[cfg(feature = "gamepad")]
-    #[derive(Resource, Clone, Copy, Default)]
-    struct TriggerProbe {
-        travel: f32,
-        pressed: bool,
-        phase: ActionPhase,
     }
 
     /// One trigger, bound twice: once to an analog action and once to a button action. The two
@@ -2296,9 +2348,6 @@ mod tests {
         assert!(!active(&mut app), "leaving the state stands it down again");
     }
 
-    #[derive(Resource)]
-    struct AtTheControls;
-
     /// The general case of the two above: any run condition, not only a state, decides whether a
     /// context is live — including for an instance that arrives after the answer was already yes.
     #[cfg(feature = "keyboard")]
@@ -2424,7 +2473,7 @@ mod tests {
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_reader_is_skipped_rather_than_broken_when_its_context_is_gone() {
-        let mut app = jump_app();
+        let mut app = jump_fire_count_app();
         let player = app
             .world_mut()
             .query_filtered::<Entity, bevy_ecs::prelude::With<OnFoot>>()
@@ -2460,7 +2509,7 @@ mod tests {
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_reader_is_skipped_when_several_instances_exist() {
-        let mut app = jump_app();
+        let mut app = jump_fire_count_app();
         app.world_mut().spawn(OnFoot);
 
         app.world_mut()
@@ -4042,12 +4091,7 @@ mod tests {
 
     #[test]
     fn fixed_tick_contexts_do_not_evaluate_in_the_render_schedule() {
-        let mut app = App::new();
-        app.add_plugins((InputPlugin, ActionMapPlugin));
-        app.add_context::<OnFoot>(|context| {
-            context.bind::<Jump>(KeyCode::Space);
-        });
-        app.world_mut().spawn(OnFoot);
+        let mut app = jump_app();
         app.init_resource::<Probe>();
         app.add_systems(FixedUpdate, probe_jump);
 
@@ -4411,33 +4455,9 @@ mod tests {
         app.update();
     }
 
-    #[derive(Resource, Default)]
-    struct FireCount(u32);
-
-    fn count_jump_fires(
-        input: ContextActions<OnFoot>,
-        mut count: bevy_ecs::system::ResMut<'_, FireCount>,
-    ) {
-        if input.fired::<Jump>() {
-            count.0 += 1;
-        }
-    }
-
-    fn jump_app() -> App {
-        let mut app = App::new();
-        app.add_plugins((InputPlugin, ActionMapPlugin));
-        app.add_context::<OnFoot>(|context| {
-            context.bind::<Jump>(KeyCode::Space);
-        });
-        app.world_mut().spawn(OnFoot);
-        app.init_resource::<FireCount>();
-        app.add_systems(FixedUpdate, count_jump_fires);
-        app
-    }
-
     #[test]
     fn one_press_fires_once_however_many_fixed_ticks_run() {
-        let mut app = jump_app();
+        let mut app = jump_fire_count_app();
 
         app.world_mut()
             .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
@@ -4452,7 +4472,7 @@ mod tests {
 
     #[test]
     fn a_press_survives_a_frame_with_no_fixed_tick() {
-        let mut app = jump_app();
+        let mut app = jump_fire_count_app();
 
         // Two rendered frames go by with the simulation never stepping.
         app.world_mut()
@@ -4546,10 +4566,6 @@ mod tests {
         assert_eq!(app.world().resource::<MotionProbe>().movement, Vec2::Y);
     }
 
-    #[derive(InputAction)]
-    #[action(path = "tests.never_bound_anywhere", output = bool, intent = Button)]
-    struct NeverBoundAnywhere;
-
     #[test]
     fn an_action_the_context_does_not_bind_reads_as_unbound() {
         // Both halves of the slot map's miss: `NeverBoundAnywhere` is interned by the read itself,
@@ -4572,25 +4588,9 @@ mod tests {
         assert!(!state.is_bound::<Jump>());
     }
 
-    /// What a subscriber sees: how many instances the `Changed` filter offered on the last tick.
-    #[derive(Resource, Default)]
-    struct Woken(usize);
-
-    fn count_woken(
-        woken: Query<'_, '_, (), bevy_ecs::prelude::Changed<InputContextState<OnFoot>>>,
-        mut probe: bevy_ecs::system::ResMut<'_, Woken>,
-    ) {
-        probe.0 = woken.iter().count();
-    }
-
     #[test]
     fn change_detection_follows_the_actions_rather_than_the_tick() {
-        let mut app = App::new();
-        app.add_plugins((InputPlugin, ActionMapPlugin));
-        app.add_context::<OnFoot>(|context| {
-            context.bind::<Jump>(KeyCode::Space);
-        });
-        app.world_mut().spawn(OnFoot);
+        let mut app = jump_app();
         app.init_resource::<Woken>();
         app.add_systems(FixedUpdate, count_woken);
 
