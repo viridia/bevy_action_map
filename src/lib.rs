@@ -77,6 +77,12 @@
 //! `Ctrl+S` beats a plain `S` bound in the same context without either binding knowing the other
 //! exists.
 //!
+//! A keyboard binding says which of the two things it means. A
+//! [`KeyCode`](bevy_input::keyboard::KeyCode) is a position, which is what movement wants: `WASD`
+//! is a shape under the left hand and should stay that shape on an AZERTY board. A
+//! [`LogicalKey`](binding::LogicalKey) is the character the player's own layout produces, which is
+//! what an editor-style shortcut wants, so `Ctrl+Z` reaches the key a French player reads as `z`.
+//!
 //! [Modifiers](binding) reshape the raw value on its way to the action: dead zones, response
 //! curves, scale, negate, swizzle, clamping, and rate conversion (turning a stick's *position*
 //! into the same per-frame *delta* a mouse reports). [Conditions](condition) decide *when* a
@@ -160,7 +166,28 @@
 //! An on-screen [prompt](present) ("Press W") stays correct across a rebind because it is derived
 //! from the same data the settings screen edits, not typed out separately. The control half of
 //! that prompt is also a stable, storage-safe string, so a save file and a localization catalogue
-//! can both key off it without depending on any one platform's names for its buttons.
+//! can both key off it without depending on any one platform's names for its buttons. Where a
+//! prompt is shown to a player rather than stored, it can name a pad's buttons the way that pad
+//! does — "Cross" on a DualSense, "A" on an Xbox pad — resolved from the device that is actually
+//! connected.
+//!
+//! Not every setting on a controls screen is a control. A [tunable](mapping) is the rest of that
+//! screen: look sensitivity, invert-Y, whether crouch is a hold or a toggle. They are declared
+//! beside the bindings, travel in the same overrides, and reach a binding that reads one without
+//! the game plumbing the value through itself.
+//!
+//! ## Saving what a player changed
+//!
+//! [`Overrides`](overrides::Overrides) is the live set of changes sitting on top of what the game
+//! declared, and it is what a settings screen edits. To persist it, convert it to
+//! [`SavedOverrides`](overrides::SavedOverrides) — a plain, owned, reflectable shape whose field
+//! names are the file's keys, so a `Reflect`-based settings layer can write it with none of this
+//! crate's code in the path. Where the bytes go is the app's decision; the crate does no file I/O.
+//!
+//! Loading is pure and reports rather than drops. A saved name is resolved against what the game
+//! declares *now*, and anything that no longer resolves — a mapping that was renamed, a control
+//! this build has no feature for — comes back as a problem the game can show the player, instead of
+//! vanishing from their settings without explanation.
 //!
 //! # Feature flags
 //!

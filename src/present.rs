@@ -529,7 +529,8 @@ impl Control {
 
     /// Like [`fallback_label`](Self::fallback_label), but a gamepad's face buttons, bumpers,
     /// triggers, Select/Start and Mode read in `brand`'s own words — "Cross" rather than "South
-    /// Button" for a PlayStation pad. Everything else, including [`GamepadBrand::Generic`], answers
+    /// Button" for a PlayStation pad. Everything else, including
+    /// [`GamepadBrand::Generic`](crate::device::GamepadBrand::Generic), answers
     /// exactly as [`fallback_label`](Self::fallback_label) does.
     ///
     /// Current-generation controllers only (R11.6): DualSense, the Xbox Series pad, and the Switch

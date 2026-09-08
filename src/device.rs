@@ -19,7 +19,7 @@ pub enum DeviceFamily {
 
 /// A device as it exists right now, in this running process.
 ///
-/// Not persistent: a gamepad's [`Entity`](bevy_ecs::entity::Entity) is reassigned by the backend
+/// Not persistent: a gamepad's [`Entity`] is reassigned by the backend
 /// on every reconnect, so nothing should compare a saved `DeviceHandle` against a live one across a
 /// restart. Surviving a reconnect needs a stable identity, which is a separate, not-yet-built
 /// mechanism.

@@ -13,14 +13,14 @@ them what is bound, let them change it, and keep every prompt on screen in sync.
 
 > **Status: early and public for review, not for production.** The core mapping pipeline —
 > keyboard, mouse, gamepad, modifiers, conditions, arbitration, fixed/render tick handling — is
-> built and exercised by a real game (below). The rebinding UI works end to end for
-> that game but hasn't shipped a persistence format yet. There's no crate-level API documentation
-> on docs.rs, and this crate isn't published to crates.io. See [Roadmap.md](./Roadmap.md) for what's
-> done and what's left.
+> built and exercised by three example games (below), and the rebinding UI works end to end for
+> them, overrides and all. Saved overrides have a documented, human-editable format; putting the
+> bytes on disk is still the app's job. This crate isn't published to crates.io, so there's no
+> docs.rs page yet. See [Roadmap.md](./Roadmap.md) for what's done and what's left.
 
 ## Why
 
-![forest](images/disasteroids_settings.png)
+![settings](images/disasteroids_settings.png)
 
 Input management entails more than just "map a `KeyCode` to an enum", because a
 shipped game needs more than a mapping:
@@ -48,26 +48,39 @@ shipped game needs more than a mapping:
 - **Keyboard, mouse, and gamepad**, each an optional feature, sharing one pipeline. `no_std` at the
   core (`alloc` only), so the mapping logic itself doesn't require `std`.
 - **Multiple bindings per action**, combined — chords (`Ctrl+S`), alternatives (`Space` or
-  gamepad South), and composites (WASD as one `Vec2`) all resolve through the same arbitration.
+  gamepad South), and composites (WASD as one `Vec2`) all resolve through the same arbitration. A
+  binding can also name a whole class of control, which is how "press anything to join" and a text
+  field claiming every character key are written.
 - **Modifiers**: dead zones, response curves, scale, negate, swizzle, clamping, and rate conversion
   (turning a stick's _position_ into the same per-frame _delta_ a mouse reports).
 - **Conditions**: press, release, hold, tap, multi-tap, pulse — composed the way Unreal's triggers
   are, as "any of these" / "all of these" / "none of these must hold."
-- **Context activation and priority.** A context can be tied to a game state, a Bevy run condition, or
-  driven by hand; a higher-priority context consumes a control before a lower one ever sees it.
+- **Context activation and priority.** A context can be tied to a game state, a Bevy run condition,
+  or driven by hand; a higher-priority context consumes a control before a lower one ever sees it,
+  and an exclusive one shuts out everything beneath it for as long as it is up.
 - **Fixed and render tick domains**, with a windowed event drain so fixed-timestep gameplay loses no
   edges and duplicates none, whatever the frame rate is doing.
-- **Read actions by polling or by observer** — `Actions<C>` in a system, or `On<Fired<Jump>>` as an
-  entity event, whichever fits the call site.
-- **A presentation mapping model**, derived from the same bindings gameplay uses: which controls
-  are shown, which are changeable, primary/secondary slots, two actions sharing one control on
-  purpose (tap to dodge, hold to sprint — rebind the control, not either action).
-- **Interactive rebinding capture** with conflict detection, reserved controls, and live text
-  prompts that update themselves when a binding changes.
+- **Read actions by polling or by observer** — `ContextActions<C>` in a system, or `On<Fired<Jump>>`
+  as an entity event, whichever fits the call site.
+- **Rebinding, end to end.** The same declarations gameplay uses generate a settings model — which
+  controls are shown, which are changeable, primary and secondary slots, two actions deliberately
+  sharing one control (tap to dodge, hold to sprint, rebind the control rather than either action).
+  Capture takes a new control interactively, with conflict detection and reserved controls a game
+  never hands out, and every on-screen prompt updates itself. Prompts read a pad in its own words:
+  "Cross" on a DualSense, "A" on an Xbox pad.
+- **Saved overrides** in a documented, human-editable format that resolves against what the game
+  currently declares — a binding saved by an older build reports itself rather than disappearing.
+  Writing the bytes is left to whatever settings layer you already use.
+- **Presets and tunables.** Ship alternate control families (`Southpaw`, `Classic`) as named presets
+  rather than making players rebind row by row, and expose the settings that aren't controls at all
+  — sensitivity, invert-Y, hold-versus-toggle — through the same screen.
+- **Local co-op.** Give each player's entity its own context instance and pair it to their devices,
+  and neither player sees the other's input. Players join by pressing anything on an unclaimed
+  device, and rebind independently without either becoming a default the next player inherits.
 - **Diagnostics that answer "why didn't this fire?"** — inactive context, a higher-priority consumer,
   a longer chord winning, an unmet condition, or a device that isn't this player's.
 
-See [Roadmap.md](./Roadmap.md)'s "Where this stands" table for the precise, current line between
+See [Roadmap.md](./Roadmap.md)'s "Where this stands" for the precise, current line between
 built and not-yet.
 
 ## Quick start
@@ -97,7 +110,7 @@ fn main() {
         .run();
 }
 
-fn print_jump(input: Actions<OnFoot>) {
+fn print_jump(input: ContextActions<OnFoot>) {
     if input.fired::<Jump>() {
         println!("Jump fired");
     }
@@ -132,10 +145,12 @@ renamed; that stability is the point of declaring it separately.
 
 ### Contexts: what's listening right now
 
-A context groups the bindings that are active together: `OnFoot`, `InVehicle`, `MainMenu`. You assign
-one to an entity — the player, or a bare entity for input that isn't tied to anything in particular —
-and that entity holds the live state for every action in the context. Local multiplayer falls out
-of this for free: each player's entity has its own context instance, so nobody shares state.
+A context groups the bindings that are active together: `OnFoot`, `InVehicle`, `MainMenu`. You
+assign one to an entity — the player, or a bare entity for input that isn't tied to anything in
+particular — and that entity holds the live state for every action in the context. Local multiplayer
+starts here: each player's entity gets its own context instance, so nobody shares state, and pairing
+that instance to a set of devices is what stops player two's stick moving player one. A context with
+no pairing reads everything, which is why none of the above needs mentioning to stay single-player.
 
 A context can be always-on, tied to a `bevy_state` state, driven by any run condition, or flipped by
 hand. Contexts also have a priority: while a settings screen's context is active and consumes the
@@ -163,10 +178,15 @@ A binding's control doesn't have to be a single input: `DirectionalButtons::wasd
 keys into one **composite**, so `Move` reads a single `Vec2` instead of four buttons the game code
 would otherwise have to assemble itself.
 
+A keyboard binding says which of the two things it means. `KeyCode::KeyW` is a position, which is
+what movement wants — WASD is a shape under the left hand, and it should stay that shape on an
+AZERTY board. `LogicalKey('z')` is the character, which is what an editor-style shortcut wants, so
+`Ctrl+Z` lands on the key a French player actually reads as `z`.
+
 ### Reading actions: poll or observe
 
 ```rust,ignore
-fn movement(input: Actions<OnFoot>) {
+fn movement(input: ContextActions<OnFoot>) {
     let dir = input.value::<Move>();     // Vec2, checked at compile time
     if input.fired::<Jump>() { /* ... */ }
 }
@@ -178,8 +198,8 @@ fn on_jump(_: On<Fired<Jump>>) {
 
 Every action has a **phase** each tick — `Idle`, `Started`, `Building`, `Fired`, `Firing`,
 `Completed`, `Canceled` — so a hold that's building, a hold that just fired, and a hold released too
-early are all distinguishable, whether you read it by polling `Actions<C>` or by listening for
-`Fired<A>` / `Started<A>` / `Completed<A>` / `Canceled<A>` as entity events on the context's own
+early are all distinguishable, whether you read it by polling `ContextActions<C>` or by listening
+for `Fired<A>` / `Started<A>` / `Completed<A>` / `Canceled<A>` as entity events on the context's own
 entity.
 
 ### Presentation: mapping and rebinding
@@ -248,12 +268,12 @@ fn main() {
     app.run();
 }
 
-fn move_player(input: Actions<OnFoot>) {
+fn move_player(input: ContextActions<OnFoot>) {
     let dir = input.value::<Move>();
     if input.fired::<Jump>() { /* ... */ }
 }
 
-fn look_camera(input: Actions<FreeLook>) {
+fn look_camera(input: ContextActions<FreeLook>) {
     let delta = input.value::<Look>();
 }
 ```
@@ -264,7 +284,8 @@ Run it: `cargo run --example move_and_jump`.
 
 `examples/disasteroids` is the crate's proving ground: a small, playable asteroids-like game, driven
 entirely through this crate, keyboard or gamepad. Its input layer — seven actions, two gameplay
-contexts, and every binding — lives in `examples/disasteroids/actions.rs`. Its `F2`/pad-Y settings screen is a real rebinding UI, with its own
+contexts, and every binding — lives in `examples/disasteroids/actions.rs`, and nothing else in the
+game mentions a key or a button. Its `F2`/pad-Y settings screen is a real rebinding UI, with its own
 context: it lists every binding without being told about any of them, can be navigated end to end
 from a gamepad, and applies a rebind live.
 
@@ -276,13 +297,21 @@ Fly with `W`/↑ and `A`/`D` (or ←/→), fire with `Space`, jump with `Left Sh
 
 ## Other examples
 
-| Example         | Shows                                                                  |
-| --------------- | ---------------------------------------------------------------------- |
-| `minimal`       | The smallest possible setup                                            |
-| `move_and_jump` | Two device classes, two tick domains, dead zones, a rate conversion    |
-| `disasteroids`  | A full game with a rebinding settings screen                           |
-| `capture`       | Interactive rebind capture in isolation, without a full game around it |
-| `diagnostics`   | What a bad binding declaration reports, and when                       |
+Every example runs from a clean checkout with `cargo run --example <name>`, and between them they
+exercise every part of the crate. The three games are where it is worth starting; the rest are
+single-concept demos small enough to read in one sitting.
+
+| Example           | Shows                                                                     |
+| ----------------- | ------------------------------------------------------------------------- |
+| `disasteroids`    | A full game with a rebinding settings screen, keyboard or gamepad          |
+| `split_friction`  | Split-screen co-op: two players, two cameras, a device paired to each      |
+| `pong`            | Two players on one machine, the second pad claimed the moment it appears   |
+| `minimal`         | The smallest possible setup                                               |
+| `move_and_jump`   | Two device classes, two tick domains, dead zones, a rate conversion        |
+| `capture`         | Interactive rebind capture on its own, without a game around it            |
+| `text_field`      | A focused text field claiming every character key beside live gameplay     |
+| `diagnostics`     | What a bad binding declaration reports, and when — no window, no `App`     |
+| `ime_diagnostic`  | What a keypress really carries while an IME is composing                   |
 
 ## Installing
 
@@ -310,7 +339,7 @@ rather than in an issue tracker. Each document answers one question:
 | [docs/design.md](./docs/design.md) | How the crate works — architecture, the input frame, evaluation, state, the presentation surface, persistence |
 | [docs/decisions.md](./docs/decisions.md) | Why it works that way: the decisions expensive to reverse, each with what it rules out and what reversing it would cost |
 | [Roadmap.md](./Roadmap.md) | What's left and what's broken — **start here to see current status** |
-| [Requirements.md](./Requirements.md) | ~220 numbered requirements, with prior art surveyed from LWIM, `bevy_enhanced_input`, Unreal, Unity, Steam Input, and Godot |
+| [Requirements.md](./Requirements.md) | 221 numbered requirements, with prior art surveyed from LWIM, `bevy_enhanced_input`, Unreal, Unity, Steam Input, and Godot |
 
 Two more, for readers who want the comparison rather than the specification:
 
