@@ -16,8 +16,8 @@
 //!
 //! **Every binding is listed; changing one is what has to be asked for.** A player is entitled to
 //! see what their controls do, so a binding appears here by saying nothing at all — as a row they
-//! can read and not change. [`mappable`](crate::binding::BindingHandle::mappable) is what makes a
-//! row changeable, and [`private`](crate::binding::BindingHandle::private) is what keeps a binding
+//! can read and not change. [`mappable`](crate::binding::BindingBuilder::mappable) is what makes a
+//! row changeable, and [`private`](crate::binding::BindingBuilder::private) is what keeps a binding
 //! out of the list altogether, for the ones that are genuinely the game's own business.
 //!
 //! Two actions may deliberately share one control (tap to dodge, hold to sprint), and the player
@@ -28,9 +28,9 @@
 //!
 //! A **tunable** is the other half of the presentation model: a named, typed value — a range or a
 //! switch — that adjusts one binding without ever showing the modifier it drives.
-//! [`tunable_dead_zone`](crate::binding::BindingHandle::tunable_dead_zone) and
-//! [`hold_or_toggle`](crate::binding::InputContextBuilder::hold_or_toggle) both declare one; a screen
-//! walks them with [`tunables`] the same way it walks mappings with [`mappings`].
+//! [`tunable_dead_zone`](crate::binding::BindingBuilder::tunable_dead_zone) and
+//! [`hold_or_toggle`](crate::binding::InputContextBuilder::hold_or_toggle) both declare one; a
+//! screen walks them with [`tunables`] the same way it walks mappings with [`mappings`].
 //!
 //! ```ignore
 //! app.add_context::<OnFoot>(|controls| {
@@ -150,7 +150,7 @@ impl core::fmt::Display for MappingKey {
 pub enum RebindPolicy {
     /// The player may change it, in this game's own screen.
     ///
-    /// What [`mappable`](crate::binding::BindingHandle::mappable) declares.
+    /// What [`mappable`](crate::binding::BindingBuilder::mappable) declares.
     Here,
     /// Shown so the player can see what the control does, and not changeable here.
     ///
@@ -285,7 +285,7 @@ pub enum TunableValue {
 
 /// One player-adjustable value, as a rebinding screen's tunables section reads it.
 ///
-/// [`tunable_dead_zone`](crate::binding::BindingHandle::tunable_dead_zone) and
+/// [`tunable_dead_zone`](crate::binding::BindingBuilder::tunable_dead_zone) and
 /// [`hold_or_toggle`](crate::binding::InputContextBuilder::hold_or_toggle) are what declares one.
 /// [`key`](Self::key) is a localization key rather than text to show, the same courtesy
 /// [`ActionMapping::key`] gets — render it through [`fallback_label`] for a game with no
@@ -424,8 +424,8 @@ mod tests {
 
         // Each part carries the controls it currently holds, which is what a read-only screen
         // shows. One apiece here: nothing declared a second mappable binding.
-        assert_eq!(mappings[0].slots, [Control::Key(KeyCode::KeyW)]);
-        assert_eq!(mappings[4].slots, [Control::Key(KeyCode::Space)]);
+        assert_eq!(mappings[0].slots, [Control::PhysicalKey(KeyCode::KeyW)]);
+        assert_eq!(mappings[4].slots, [Control::PhysicalKey(KeyCode::Space)]);
         assert_eq!(mappings[4].capacity, Some(1), "one default, one slot");
 
         // The category comes from the action, so the four movement rows file together.
@@ -519,7 +519,7 @@ mod tests {
 
         let mappings = mappings(app.world());
         assert_eq!(mappings.len(), 1);
-        assert_eq!(mappings[0].slots, [Control::Key(KeyCode::Space)]);
+        assert_eq!(mappings[0].slots, [Control::PhysicalKey(KeyCode::Space)]);
         assert_eq!(mappings[0].rebind_policy, RebindPolicy::Fixed);
         assert!(!mappings[0].rebind_policy.is_rebindable());
     }
@@ -631,7 +631,10 @@ mod tests {
         assert_eq!(mappings.len(), 1, "one row, not two");
         assert_eq!(
             mappings[0].slots,
-            [Control::Key(KeyCode::Space), Control::Key(KeyCode::Enter)],
+            [
+                Control::PhysicalKey(KeyCode::Space),
+                Control::PhysicalKey(KeyCode::Enter)
+            ],
             "in the order they were declared, which is what makes the first one primary"
         );
         // Nobody said "2". A mapping is never narrower than the defaults it already holds, so
@@ -676,7 +679,7 @@ mod tests {
         });
 
         let mappings = mappings(app.world());
-        assert_eq!(mappings[0].slots, [Control::Key(KeyCode::Space)]);
+        assert_eq!(mappings[0].slots, [Control::PhysicalKey(KeyCode::Space)]);
         assert_eq!(mappings[0].capacity, Some(2), "one default, two slots");
         assert_eq!(mappings[1].capacity, None);
 
@@ -854,7 +857,7 @@ mod tests {
         let mappings = mappings(app.world());
         assert_eq!(mappings.len(), 1);
         assert_eq!(mappings[0].key.to_string(), "mapping_tests.jump");
-        assert_eq!(mappings[0].slots, [Control::Key(KeyCode::Space)]);
+        assert_eq!(mappings[0].slots, [Control::PhysicalKey(KeyCode::Space)]);
         assert_eq!(
             mappings[0].capacity,
             Some(1),

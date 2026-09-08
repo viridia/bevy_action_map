@@ -77,7 +77,7 @@ pub trait Condition: Send + Sync + 'static {
 
 /// The built-in conditions.
 // `Clone` for the reason `BindingModifier` is: applying an override copies the authored bindings
-// and rewrites their sources, and the defaults have to survive that intact.
+// and rewrites their inputs, and the defaults have to survive that intact.
 #[derive(Clone)]
 pub enum BindingCondition {
     /// Fires on the tick the control leaves rest.
@@ -125,7 +125,7 @@ pub enum BindingCondition {
     /// Calls an application-defined condition.
     ///
     /// Shared rather than owned, so that copying a binding set copies the reference and not the
-    /// condition. Use [`when`](crate::binding::BindingHandle::when) rather than building this by
+    /// condition. Use [`when`](crate::binding::BindingBuilder::when) rather than building this by
     /// hand.
     Custom(Arc<dyn Condition>),
 }

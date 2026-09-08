@@ -103,7 +103,7 @@ impl PresetBuilder<'_> {
     ///
     /// A preset is not only rebound controls: "Southpaw" might also want a tighter dead zone on
     /// the stick it just moved, and this is how it says so. `key` is whatever was passed to
-    /// [`tunable_dead_zone`](crate::binding::BindingHandle::tunable_dead_zone) or
+    /// [`tunable_dead_zone`](crate::binding::BindingBuilder::tunable_dead_zone) or
     /// [`hold_or_toggle`](crate::binding::InputContextBuilder::hold_or_toggle) when the binding
     /// was declared.
     pub fn tune(

@@ -131,7 +131,7 @@ impl fmt::Debug for ActionId {
 /// What kind of control an action can consume.
 ///
 /// Use this to describe the controls that are a good fit for the action, so binding UIs can filter
-/// to sources that produce the right kind of input.
+/// to the ones that produce the right kind of value.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -407,7 +407,7 @@ impl ActionValue {
             // Magnitude rather than one component: dropping an axis of a stick would silently
             // discard half of what the player did, whereas its length is a fair answer to "how
             // far". The cost is the sign, which is why a signed 1D reading wants a single axis as
-            // its source rather than a whole stick.
+            // its input rather than a whole stick.
             Self::Axis2(value) => value.length(),
             Self::Axis3(value) => value.length(),
         }

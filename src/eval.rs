@@ -23,7 +23,7 @@ use crate::action::{ActionIntent, ActionPhase, ActionValue, InputContext};
 use crate::binding::ButtonControl;
 #[cfg(feature = "gamepad")]
 use crate::binding::Stick;
-use crate::binding::{BindingSource, ButtonThreshold, Control};
+use crate::binding::{BindingInput, ButtonThreshold, Control};
 use crate::condition::ConditionState;
 use crate::context::InputContextState;
 use crate::frame::{InputFrame, RawEvent, TimedRawEvent};
@@ -265,7 +265,7 @@ pub(crate) fn evaluate_context<
 
 /// Which half of the plan a fold pass is for.
 ///
-/// The two kinds of source have different temporal semantics, and the split is what lets a fast tap
+/// The two kinds of input have different temporal semantics, and the split is what lets a fast tap
 /// be seen without disturbing a mouse delta.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Fold {
@@ -373,7 +373,7 @@ impl<C: InputContext> InputContextState<C> {
         self.fold(threshold, mouse_delta, delta, Fold::Delta, consumed, claims);
     }
 
-    /// Moves one control's held state, for the sources that have a state to hold.
+    /// Moves one control's held state, for the inputs that have a state to hold.
     fn apply_level_event(&mut self, event: &RawEvent, threshold: &ButtonThreshold) {
         #[cfg(not(feature = "gamepad"))]
         let _ = threshold;
@@ -537,7 +537,7 @@ impl<C: InputContext> InputContextState<C> {
             }
             match control {
                 #[cfg(feature = "keyboard")]
-                ButtonControl::Key(key) => held_buttons.contains(&key),
+                ButtonControl::PhysicalKey(key) => held_buttons.contains(&key),
                 #[cfg(feature = "mouse")]
                 ButtonControl::MouseButton(button) => held_mouse_buttons.contains(&button),
                 #[cfg(feature = "gamepad")]
@@ -557,7 +557,7 @@ impl<C: InputContext> InputContextState<C> {
                 if !binding.chord.iter().copied().all(&is_pressed) {
                     continue;
                 }
-                binding.source.for_each_control(|control| {
+                binding.input.for_each_control(|control| {
                     match chord_claims.iter_mut().find(|(seen, _)| *seen == control) {
                         Some((_, best)) => *best = (*best).max(binding.chord_len),
                         None => chord_claims.push((control, binding.chord_len)),
@@ -568,7 +568,7 @@ impl<C: InputContext> InputContextState<C> {
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         let out_ranked = |binding: &crate::plan::CompiledBinding| {
             let mut lost = false;
-            binding.source.for_each_control(|control| {
+            binding.input.for_each_control(|control| {
                 lost |= chord_claims
                     .iter()
                     .any(|&(seen, best)| seen == control && best > binding.chord_len);
@@ -593,7 +593,7 @@ impl<C: InputContext> InputContextState<C> {
                 .filter(|binding| binding.tunable_shared == Some(scratch_index))
             {
                 active = crate::binding::toggle_active(&binding.modifiers);
-                if crate::binding::as_button_control(&binding.source).is_some_and(&is_pressed) {
+                if crate::binding::as_button_control(&binding.input).is_some_and(&is_pressed) {
                     actuated = true;
                 }
             }
@@ -606,7 +606,7 @@ impl<C: InputContext> InputContextState<C> {
             let intent = plan.intent_for_slot(slot);
 
             // A slot belongs to exactly one half, and `ActionIntent::accepts` is what guarantees
-            // it: a `Delta2` action admits only delta-shaped sources and every other intent admits
+            // it: a `Delta2` action admits only delta-shaped inputs and every other intent admits
             // none, so no slot can want both passes.
             let wanted = match kind {
                 Fold::Delta => intent == ActionIntent::Delta2,
@@ -634,31 +634,31 @@ impl<C: InputContext> InputContextState<C> {
                 #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
                 let held_back = false;
 
-                let value = match binding.source {
+                let value = match binding.input {
                     #[cfg(feature = "keyboard")]
-                    BindingSource::Button(key_code) => ActionValue::Bool(
-                        !consumed.contains(Control::Key(key_code))
+                    BindingInput::Button(key_code) => ActionValue::Bool(
+                        !consumed.contains(Control::PhysicalKey(key_code))
                             && held_buttons.contains(&key_code),
                     ),
                     #[cfg(feature = "mouse")]
-                    BindingSource::MouseButton(button) => ActionValue::Bool(
+                    BindingInput::MouseButton(button) => ActionValue::Bool(
                         !consumed.contains(Control::MouseButton(button))
                             && held_mouse_buttons.contains(&button),
                     ),
                     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-                    BindingSource::Axis1(parts) => ActionValue::Axis1(axis_from_buttons(
+                    BindingInput::Axis1(parts) => ActionValue::Axis1(axis_from_buttons(
                         is_pressed(parts.negative),
                         is_pressed(parts.positive),
                     )),
                     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-                    BindingSource::Directional2(parts) => {
+                    BindingInput::Directional2(parts) => {
                         // Four keys and a D-pad reach an action through this same arm, which is
                         // the whole point of the composite.
                         let x = axis_from_buttons(is_pressed(parts.left), is_pressed(parts.right));
                         let y = axis_from_buttons(is_pressed(parts.down), is_pressed(parts.up));
                         ActionValue::Axis2(Vec2::new(x, y))
                     }
-                    BindingSource::MouseMotion => {
+                    BindingInput::MouseMotion => {
                         ActionValue::Axis2(if consumed.contains(Control::MouseMotion) {
                             Vec2::ZERO
                         } else {
@@ -668,9 +668,9 @@ impl<C: InputContext> InputContextState<C> {
                     // Both views of a button channel, chosen by what the action asked for. A
                     // trigger carries a fraction, so an analog action gets the travel and a button
                     // action gets the thresholded press — R2.10's case, and the reason a binding
-                    // cannot be resolved from the source alone.
+                    // cannot be resolved from the input alone.
                     #[cfg(feature = "gamepad")]
-                    BindingSource::GamepadButton(button) => {
+                    BindingInput::GamepadButton(button) => {
                         let reading = held_gamepad_buttons
                             .get(&button)
                             .copied()
@@ -681,7 +681,7 @@ impl<C: InputContext> InputContextState<C> {
                         }
                     }
                     #[cfg(feature = "gamepad")]
-                    BindingSource::GamepadAxis(axis) => {
+                    BindingInput::GamepadAxis(axis) => {
                         ActionValue::Axis1(if consumed.contains(Control::GamepadAxis(axis)) {
                             0.0
                         } else {
@@ -689,7 +689,7 @@ impl<C: InputContext> InputContextState<C> {
                         })
                     }
                     #[cfg(feature = "gamepad")]
-                    BindingSource::GamepadStick(stick) => {
+                    BindingInput::GamepadStick(stick) => {
                         ActionValue::Axis2(gamepad_stick_value(held_gamepad_axes, stick))
                     }
                 };
@@ -760,7 +760,7 @@ impl<C: InputContext> InputContextState<C> {
                 // between two crossings, and a charging hold would leak its key to whatever is
                 // underneath until it completed.
                 if binding.consume && condition_state >= ConditionState::Building {
-                    claims.extend(binding.source.controls());
+                    claims.extend(binding.input.controls());
                 }
                 let value = if condition_state == ConditionState::Satisfied {
                     value
@@ -2079,7 +2079,7 @@ mod tests {
         ));
         assert_eq!(
             claims,
-            alloc::vec![Control::Key(bevy_input::keyboard::KeyCode::KeyA)]
+            alloc::vec![Control::PhysicalKey(bevy_input::keyboard::KeyCode::KeyA)]
         );
     }
 

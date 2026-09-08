@@ -1278,7 +1278,7 @@ fn start_capture(activate: On<Activate>, cells: Query<&RebindCell>, mut commands
         };
         world.entity_mut(entity).insert((
             session.excluding([
-                Control::Key(KeyCode::Escape),
+                Control::PhysicalKey(KeyCode::Escape),
                 Control::GamepadButton(GamepadButton::East),
             ]),
             BackgroundColor(LISTENING),

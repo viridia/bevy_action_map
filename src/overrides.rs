@@ -6,7 +6,7 @@
 //!
 //! ```ignore
 //! let mut overrides = Overrides::new();
-//! overrides.bind(DeviceFamily::KeyboardMouse, forward.key, [Control::Key(KeyCode::KeyE)]);
+//! overrides.bind(DeviceFamily::KeyboardMouse, forward.key, [Control::PhysicalKey(KeyCode::KeyE)]);
 //!
 //! // Every context, every instance, effective immediately.
 //! let problems = apply_overrides(world, &overrides);
@@ -864,7 +864,7 @@ pub(crate) fn rewrite(
     let mut grown: Vec<BindingSpec> = Vec::new();
 
     // Both computed against the *declared* bindings and never re-derived as we go: `leader_of`
-    // matches a follower to its leader by the controls the two read, so once a source has been
+    // matches a follower to its leader by the controls the two read, so once an input has been
     // rewritten the two no longer look alike and the link would be lost half way through the pass.
     let parts = mapped_parts(declared);
     let leaders: Vec<Option<usize>> = (0..declared.len())
@@ -915,12 +915,12 @@ pub(crate) fn rewrite(
                 // A slot the defaults already fill: the binding stays where it is and reads
                 // something else.
                 Some(part) => {
-                    variant[part.binding].source.set_part(part.part, control);
+                    variant[part.binding].input.set_part(part.part, control);
                     rewrite_followers(declared, &leaders, &mut variant, part.binding);
                 }
                 // A slot the game shipped nothing for — the empty secondary of a `mappable_upto(2)`
                 // row. The last binding feeding the row is cloned onto the new control, so the
-                // secondary behaves like the primary rather than like a bare source with no
+                // secondary behaves like the primary rather than like a bare input with no
                 // modifiers or conditions on it.
                 None => {
                     let Some(last) = contributors.last() else {
@@ -966,7 +966,7 @@ pub(crate) fn rewrite(
             // keyboard row shares nothing with a same-named gamepad tunable), and a key match alone
             // would move a keyboard override onto a gamepad binding that only happens to share text.
             if decl.key != tunable.key
-                || crate::binding::binding_family(&binding.source) != Some(tunable.family)
+                || crate::binding::binding_family(&binding.input) != Some(tunable.family)
             {
                 continue;
             }
@@ -1010,7 +1010,7 @@ fn refusal(
     // their own rows a second time — "Move Down: S | S", a wrong screen rather than an untidy one.
     if wanted.len() > contributors.len()
         && let Some(last) = contributors.last()
-        && parts_in(&declared[last.binding].source) > 1
+        && parts_in(&declared[last.binding].input) > 1
     {
         return Some(OverrideProblemKind::CompositeCannotGrow);
     }
@@ -1042,9 +1042,9 @@ fn refusal(
 
 /// How many presentation rows one binding feeds: one for a plain control, four for a directional
 /// composite.
-fn parts_in(source: &crate::binding::BindingSource) -> usize {
+fn parts_in(input: &crate::binding::BindingInput) -> usize {
     let mut count = 0;
-    source.for_each_part(|_, _| count += 1);
+    input.for_each_part(|_, _| count += 1);
     count
 }
 
@@ -1078,7 +1078,7 @@ fn rewrite_followers(
     // A follower reads exactly what its leader reads — that identity is how the link was resolved
     // in the first place — so keeping it true is an assignment rather than a second rewrite.
     for rider in riders {
-        variant[rider].source = variant[leader].source;
+        variant[rider].input = variant[leader].input;
     }
 }
 
@@ -1089,19 +1089,19 @@ fn clone_onto(
     control: Control,
 ) -> BindingSpec {
     let mut grown = binding.clone();
-    grown.source.set_part(part, control);
+    grown.input.set_part(part, control);
     grown
 }
 
 /// The presentation rows for a variant, keyed to the declared ones.
 ///
-/// Derived from the rewritten bindings rather than patched, so the rows and the plan cannot disagree
-/// about what is bound — with two exceptions the derivation cannot express on its own. A row the
-/// player emptied has no bindings left and so derives nothing at all; it has to stay on the screen,
-/// holding nothing, or there is nowhere to bind it back. And capacity is raised, never lowered
-/// (R19.9): a row rebound down to one control still derives from one binding, so its capacity is
-/// widened back against what was declared rather than taken from the derived row as-is, or the
-/// second slot a rebind just vacated could never be filled again.
+/// Derived from the rewritten bindings rather than patched, so the rows and the plan cannot
+/// disagree about what is bound — with two exceptions the derivation cannot express on its own. A
+/// row the player emptied has no bindings left and so derives nothing at all; it has to stay on the
+/// screen, holding nothing, or there is nowhere to bind it back. And capacity is raised, never
+/// lowered (R19.9): a row rebound down to one control still derives from one binding, so its
+/// capacity is widened back against what was declared rather than taken from the derived row as-is,
+/// or the second slot a rebind just vacated could never be filled again.
 fn current_rows(
     variant: &[BindingSpec],
     declared: &[ActionMapping],
@@ -1210,25 +1210,25 @@ mod tests {
         let mut app = app();
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::Key(KeyCode::KeyW)]
+            [Control::PhysicalKey(KeyCode::KeyW)]
         );
 
         let overrides = bind(
             &app,
             "override_tests.move.up",
-            &[Control::Key(KeyCode::KeyI)],
+            &[Control::PhysicalKey(KeyCode::KeyI)],
         );
         let problems = apply_overrides(app.world_mut(), &overrides);
 
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::Key(KeyCode::KeyI)]
+            [Control::PhysicalKey(KeyCode::KeyI)]
         );
         // And only that part of the composite: the other three keys are where they were.
         assert_eq!(
             slots(&app, "override_tests.move.left"),
-            [Control::Key(KeyCode::KeyA)]
+            [Control::PhysicalKey(KeyCode::KeyA)]
         );
     }
 
@@ -1241,7 +1241,7 @@ mod tests {
         let overrides = bind(
             &app,
             "override_tests.move.up",
-            &[Control::Key(KeyCode::KeyI)],
+            &[Control::PhysicalKey(KeyCode::KeyI)],
         );
         apply_overrides(app.world_mut(), &overrides);
 
@@ -1249,14 +1249,18 @@ mod tests {
             .into_iter()
             .find(|mapping| mapping.key.to_string() == "override_tests.move.up")
             .expect("the row is still declared");
-        assert_eq!(declared.slots, [Control::Key(KeyCode::KeyW)], "still W");
+        assert_eq!(
+            declared.slots,
+            [Control::PhysicalKey(KeyCode::KeyW)],
+            "still W"
+        );
 
         // And applying a second time is a diff against the same defaults, not against the first
         // apply — so going back to a row nobody overrode restores the shipped control.
         apply_overrides(app.world_mut(), &Overrides::new());
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::Key(KeyCode::KeyW)]
+            [Control::PhysicalKey(KeyCode::KeyW)]
         );
     }
 
@@ -1268,11 +1272,15 @@ mod tests {
         // A prompt is a runtime question, so something has to be carrying the context
         // before it has an answer at all.
         app.world_mut().spawn(Playing);
-        let overrides = bind(&app, "override_tests.jump", &[Control::Key(KeyCode::KeyK)]);
+        let overrides = bind(
+            &app,
+            "override_tests.jump",
+            &[Control::PhysicalKey(KeyCode::KeyK)],
+        );
         apply_overrides(app.world_mut(), &overrides);
 
         let jump = row(&app, "override_tests.jump");
-        assert_eq!(jump.slots, [Control::Key(KeyCode::KeyK)]);
+        assert_eq!(jump.slots, [Control::PhysicalKey(KeyCode::KeyK)]);
         // The follower is still on the row rather than orphaned onto a row of its own...
         assert_eq!(jump.followers.len(), 1);
         assert_eq!(jump.followers[0].action, Lunge::id());
@@ -1283,7 +1291,7 @@ mod tests {
         assert_eq!(prompts.len(), 1);
         assert_eq!(
             prompts[0].origin.control(),
-            Some(Control::Key(KeyCode::KeyK))
+            Some(Control::PhysicalKey(KeyCode::KeyK))
         );
     }
 
@@ -1329,13 +1337,19 @@ mod tests {
         let overrides = bind(
             &app,
             "override_tests.jump",
-            &[Control::Key(KeyCode::Space), Control::Key(KeyCode::KeyK)],
+            &[
+                Control::PhysicalKey(KeyCode::Space),
+                Control::PhysicalKey(KeyCode::KeyK),
+            ],
         );
         apply_overrides(app.world_mut(), &overrides);
 
         assert_eq!(
             slots(&app, "override_tests.jump"),
-            [Control::Key(KeyCode::Space), Control::Key(KeyCode::KeyK)]
+            [
+                Control::PhysicalKey(KeyCode::Space),
+                Control::PhysicalKey(KeyCode::KeyK)
+            ]
         );
         // The follower rides both, and is still one sub-row rather than two.
         let jump = row(&app, "override_tests.jump");
@@ -1347,8 +1361,8 @@ mod tests {
                 .map(|prompt| prompt.origin.control())
                 .collect::<Vec<_>>(),
             [
-                Some(Control::Key(KeyCode::Space)),
-                Some(Control::Key(KeyCode::KeyK))
+                Some(Control::PhysicalKey(KeyCode::Space)),
+                Some(Control::PhysicalKey(KeyCode::KeyK))
             ],
             "the rider was copied onto the new slot too"
         );
@@ -1365,16 +1379,23 @@ mod tests {
         let grown = bind(
             &app,
             "override_tests.jump",
-            &[Control::Key(KeyCode::Space), Control::Key(KeyCode::KeyK)],
+            &[
+                Control::PhysicalKey(KeyCode::Space),
+                Control::PhysicalKey(KeyCode::KeyK),
+            ],
         );
         apply_overrides(app.world_mut(), &grown);
 
-        let shrunk = bind(&app, "override_tests.jump", &[Control::Key(KeyCode::KeyK)]);
+        let shrunk = bind(
+            &app,
+            "override_tests.jump",
+            &[Control::PhysicalKey(KeyCode::KeyK)],
+        );
         apply_overrides(app.world_mut(), &shrunk);
 
         assert_eq!(
             slots(&app, "override_tests.jump"),
-            [Control::Key(KeyCode::KeyK)]
+            [Control::PhysicalKey(KeyCode::KeyK)]
         );
         let prompts = BindingTable::new(app.world()).prompts(Lunge::id(), PromptScope::ANY);
         assert_eq!(
@@ -1382,7 +1403,7 @@ mod tests {
                 .iter()
                 .map(|prompt| prompt.origin.control())
                 .collect::<Vec<_>>(),
-            [Some(Control::Key(KeyCode::KeyK))],
+            [Some(Control::PhysicalKey(KeyCode::KeyK))],
             "Space is gone from the rider as well as from the row"
         );
     }
@@ -1412,7 +1433,11 @@ mod tests {
             ActionPhase::Fired
         );
 
-        let overrides = bind(&app, "override_tests.jump", &[Control::Key(KeyCode::KeyK)]);
+        let overrides = bind(
+            &app,
+            "override_tests.jump",
+            &[Control::PhysicalKey(KeyCode::KeyK)],
+        );
         apply_overrides(app.world_mut(), &overrides);
 
         let state = app
@@ -1431,7 +1456,11 @@ mod tests {
     #[test]
     fn an_instance_spawned_after_a_rebind_gets_the_new_bindings() {
         let mut app = app();
-        let overrides = bind(&app, "override_tests.jump", &[Control::Key(KeyCode::KeyK)]);
+        let overrides = bind(
+            &app,
+            "override_tests.jump",
+            &[Control::PhysicalKey(KeyCode::KeyK)],
+        );
         apply_overrides(app.world_mut(), &overrides);
 
         app.world_mut().spawn(Playing);
@@ -1441,7 +1470,7 @@ mod tests {
         assert_eq!(prompts.len(), 1);
         assert_eq!(
             prompts[0].origin.control(),
-            Some(Control::Key(KeyCode::KeyK))
+            Some(Control::PhysicalKey(KeyCode::KeyK))
         );
     }
 
@@ -1456,7 +1485,11 @@ mod tests {
         let player_a = app.world_mut().spawn(Playing).id();
         let player_b = app.world_mut().spawn(Playing).id();
 
-        let overrides = bind(&app, "override_tests.jump", &[Control::Key(KeyCode::KeyK)]);
+        let overrides = bind(
+            &app,
+            "override_tests.jump",
+            &[Control::PhysicalKey(KeyCode::KeyK)],
+        );
         let problems = apply_overrides_for(app.world_mut(), player_a, &overrides);
         assert!(problems.is_empty(), "{problems:?}");
 
@@ -1508,7 +1541,7 @@ mod tests {
         // future one, ever sees Jump listed on anything but Space.
         assert_eq!(
             slots(&app, "override_tests.jump"),
-            [Control::Key(KeyCode::Space)]
+            [Control::PhysicalKey(KeyCode::Space)]
         );
     }
 
@@ -1524,7 +1557,11 @@ mod tests {
             .get_resource::<crate::present::PromptGeneration>()
             .map_or(0, |generation| generation.0);
 
-        let overrides = bind(&app, "override_tests.jump", &[Control::Key(KeyCode::KeyK)]);
+        let overrides = bind(
+            &app,
+            "override_tests.jump",
+            &[Control::PhysicalKey(KeyCode::KeyK)],
+        );
         apply_overrides(app.world_mut(), &overrides);
 
         let after = app
@@ -1551,14 +1588,17 @@ mod tests {
         overrides.bind(
             DeviceFamily::KeyboardMouse,
             gone,
-            [Control::Key(KeyCode::KeyZ)],
+            [Control::PhysicalKey(KeyCode::KeyZ)],
         );
         overrides.bind(look.family, look.key, [Control::MouseMotion]);
-        overrides.bind(jump.family, jump.key, [Control::Key(KeyCode::F1)]);
+        overrides.bind(jump.family, jump.key, [Control::PhysicalKey(KeyCode::F1)]);
         overrides.bind(
             up.family,
             up.key,
-            [Control::Key(KeyCode::KeyI), Control::Key(KeyCode::KeyO)],
+            [
+                Control::PhysicalKey(KeyCode::KeyI),
+                Control::PhysicalKey(KeyCode::KeyO),
+            ],
         );
 
         let problems = apply_overrides(app.world_mut(), &overrides);
@@ -1573,7 +1613,7 @@ mod tests {
             "{kinds:?}"
         );
         assert!(kinds.contains(&OverrideProblemKind::Reserved {
-            control: Control::Key(KeyCode::F1)
+            control: Control::PhysicalKey(KeyCode::F1)
         }));
         assert!(kinds.contains(&OverrideProblemKind::TooManyControls {
             capacity: Some(1),
@@ -1583,11 +1623,11 @@ mod tests {
         // Refused whole, never half: every one of those rows still holds what it shipped with.
         assert_eq!(
             slots(&app, "override_tests.jump"),
-            [Control::Key(KeyCode::Space)]
+            [Control::PhysicalKey(KeyCode::Space)]
         );
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::Key(KeyCode::KeyW)]
+            [Control::PhysicalKey(KeyCode::KeyW)]
         );
     }
 
@@ -1672,7 +1712,11 @@ mod tests {
         let mut overrides = Overrides::new();
         for target in &rows {
             if target.rebind_policy.is_rebindable() {
-                overrides.bind(target.family, target.key, [Control::Key(KeyCode::KeyZ)]);
+                overrides.bind(
+                    target.family,
+                    target.key,
+                    [Control::PhysicalKey(KeyCode::KeyZ)],
+                );
             }
         }
 
@@ -1694,14 +1738,14 @@ mod tests {
         overrides.reset_context(&rows, "override_tests.playing");
         assert!(overrides.is_empty());
 
-        overrides.bind(up.family, up.key, [Control::Key(KeyCode::KeyZ)]);
+        overrides.bind(up.family, up.key, [Control::PhysicalKey(KeyCode::KeyZ)]);
         overrides.reset_all();
         assert!(overrides.is_empty());
 
         apply_overrides(app.world_mut(), &overrides);
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::Key(KeyCode::KeyW)]
+            [Control::PhysicalKey(KeyCode::KeyW)]
         );
     }
 
@@ -1714,7 +1758,11 @@ mod tests {
         assert_eq!(target.rebind_policy, RebindPolicy::Fixed);
 
         let mut preset = Overrides::new();
-        preset.bind(target.family, target.key, [Control::Key(KeyCode::F2)]);
+        preset.bind(
+            target.family,
+            target.key,
+            [Control::PhysicalKey(KeyCode::F2)],
+        );
 
         // Refused without a preset: a bare `apply_overrides` treats this row exactly as a capture
         // screen would.
@@ -1728,7 +1776,7 @@ mod tests {
         );
         assert_eq!(
             slots(&app, "override_tests.settings"),
-            [Control::Key(KeyCode::F1)]
+            [Control::PhysicalKey(KeyCode::F1)]
         );
 
         // The same row moves once the same rows are named as the preset authorizing it.
@@ -1736,7 +1784,7 @@ mod tests {
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(
             slots(&app, "override_tests.settings"),
-            [Control::Key(KeyCode::F2)]
+            [Control::PhysicalKey(KeyCode::F2)]
         );
     }
 
@@ -1753,7 +1801,7 @@ mod tests {
         assert!(problems.is_empty());
         assert_eq!(
             slots(&app, "override_tests.jump"),
-            [Control::Key(KeyCode::Space)],
+            [Control::PhysicalKey(KeyCode::Space)],
             "not ours is not cleared"
         );
     }
@@ -1781,7 +1829,10 @@ mod tests {
         overrides.bind(
             up.family,
             up.key,
-            [Control::Key(KeyCode::KeyW), Control::Key(KeyCode::KeyI)],
+            [
+                Control::PhysicalKey(KeyCode::KeyW),
+                Control::PhysicalKey(KeyCode::KeyI),
+            ],
         );
         let problems = apply_overrides(app.world_mut(), &overrides);
 
@@ -1794,11 +1845,11 @@ mod tests {
         );
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::Key(KeyCode::KeyW)]
+            [Control::PhysicalKey(KeyCode::KeyW)]
         );
         assert_eq!(
             slots(&app, "override_tests.move.down"),
-            [Control::Key(KeyCode::KeyS)],
+            [Control::PhysicalKey(KeyCode::KeyS)],
             "and the other three directions are untouched"
         );
     }
@@ -1823,7 +1874,10 @@ mod tests {
 
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::Key(KeyCode::KeyW), Control::Key(KeyCode::ArrowUp)]
+            [
+                Control::PhysicalKey(KeyCode::KeyW),
+                Control::PhysicalKey(KeyCode::ArrowUp)
+            ]
         );
 
         let up = row(&app, "override_tests.move.up");
@@ -1831,21 +1885,27 @@ mod tests {
         overrides.bind(
             up.family,
             up.key,
-            [Control::Key(KeyCode::KeyW), Control::Key(KeyCode::KeyI)],
+            [
+                Control::PhysicalKey(KeyCode::KeyW),
+                Control::PhysicalKey(KeyCode::KeyI),
+            ],
         );
         let problems = apply_overrides(app.world_mut(), &overrides);
 
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::Key(KeyCode::KeyW), Control::Key(KeyCode::KeyI)],
+            [
+                Control::PhysicalKey(KeyCode::KeyW),
+                Control::PhysicalKey(KeyCode::KeyI)
+            ],
             "the secondary moved and the primary did not"
         );
         assert_eq!(
             slots(&app, "override_tests.move.down"),
             [
-                Control::Key(KeyCode::KeyS),
-                Control::Key(KeyCode::ArrowDown)
+                Control::PhysicalKey(KeyCode::KeyS),
+                Control::PhysicalKey(KeyCode::ArrowDown)
             ],
             "and the other rows kept both of theirs"
         );
@@ -1875,12 +1935,16 @@ mod tests {
             "two mappable bindings merge into one two-slot row"
         );
 
-        let overrides = bind(&app, "override_tests.jump", &[Control::Key(KeyCode::Space)]);
+        let overrides = bind(
+            &app,
+            "override_tests.jump",
+            &[Control::PhysicalKey(KeyCode::Space)],
+        );
         let problems = apply_overrides(app.world_mut(), &overrides);
         assert!(problems.is_empty(), "{problems:?}");
 
         let jump = row(&app, "override_tests.jump");
-        assert_eq!(jump.slots, [Control::Key(KeyCode::Space)]);
+        assert_eq!(jump.slots, [Control::PhysicalKey(KeyCode::Space)]);
         assert_eq!(
             jump.capacity,
             Some(2),
@@ -2060,12 +2124,15 @@ mod tests {
                     DeviceFamily::KeyboardMouse,
                     "persist_tests.move.up",
                 ),
-                [Control::Key(KeyCode::KeyI)],
+                [Control::PhysicalKey(KeyCode::KeyI)],
             );
             overrides.bind(
                 DeviceFamily::KeyboardMouse,
                 mapping_key(&declared, DeviceFamily::KeyboardMouse, "persist_tests.jump"),
-                [Control::Key(KeyCode::Space), Control::Key(KeyCode::KeyJ)],
+                [
+                    Control::PhysicalKey(KeyCode::Space),
+                    Control::PhysicalKey(KeyCode::KeyJ),
+                ],
             );
             overrides.set(
                 DeviceFamily::KeyboardMouse,
@@ -2189,7 +2256,7 @@ mod tests {
                     DeviceFamily::KeyboardMouse,
                     mapping_key(&declared, DeviceFamily::KeyboardMouse, "persist_tests.jump")
                 ),
-                Some(&Override::Controls(alloc::vec![Control::Key(
+                Some(&Override::Controls(alloc::vec![Control::PhysicalKey(
                     KeyCode::Space
                 )]))
             );

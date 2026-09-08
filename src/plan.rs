@@ -6,7 +6,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use core::marker::PhantomData;
 
 use crate::action::{ActionId, ActionIntent, ChannelShape};
-use crate::binding::{BindingModifier, BindingSource, BindingSpec, ClassBindingSpec, Control};
+use crate::binding::{BindingInput, BindingModifier, BindingSpec, ClassBindingSpec, Control};
 use crate::capture::{ClassFilter, ControlClass};
 use crate::condition::BindingCondition;
 use crate::event::{ClassDispatch, Dispatch};
@@ -269,14 +269,12 @@ impl core::fmt::Display for BindingDiagnostic {
 
 /// The channel a binding's value actually arrives on, after any modifier that reshapes it.
 fn effective_shape(binding: &BindingSpec) -> Result<ChannelShape, DiagnosticKind> {
-    let source_shape = binding.source.channel_shape();
-    let mut shape = source_shape;
+    let input_shape = binding.input.channel_shape();
+    let mut shape = input_shape;
     for modifier in &binding.modifiers {
         if let Some(reshaped) = modifier.reshapes() {
             if shape == ChannelShape::Delta2 {
-                return Err(DiagnosticKind::RateFromDelta {
-                    shape: source_shape,
-                });
+                return Err(DiagnosticKind::RateFromDelta { shape: input_shape });
             }
             shape = reshaped;
         }
@@ -389,7 +387,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
             && crate::binding::leader_of(bindings, index).is_none()
         {
             let reads_the_same = bindings.iter().enumerate().any(|(other, spec)| {
-                other != index && spec.action == follows.action && spec.source == binding.source
+                other != index && spec.action == follows.action && spec.input == binding.input
             });
             found.push(at(if reads_the_same {
                 DiagnosticKind::FollowsUnlisted {
@@ -407,7 +405,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
             let rebindable = declaration.rebind_policy.is_rebindable();
             let mut family = None;
             let mut mixed = false;
-            binding.source.for_each_part(|part, control| {
+            binding.input.for_each_part(|part, control| {
                 let key = crate::mapping::MappingKey::new(prefix, part);
                 let (claimant, claimed_as) = keys
                     .entry((control.family(), key))
@@ -437,7 +435,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
         }
 
         if let Some(decl) = &binding.tunable
-            && let Some(family) = crate::binding::binding_family(&binding.source)
+            && let Some(family) = crate::binding::binding_family(&binding.input)
         {
             match tunable_keys.entry((family, decl.key)) {
                 alloc::collections::btree_map::Entry::Vacant(entry) => {
@@ -458,15 +456,15 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
 
         // Against the bindings before this one only, so a duplicated pair is reported once.
         for earlier in &bindings[..index] {
-            if earlier.action == binding.action && earlier.source == binding.source {
-                binding.source.for_each_control(|control| {
+            if earlier.action == binding.action && earlier.input == binding.input {
+                binding.input.for_each_control(|control| {
                     found.push(at(DiagnosticKind::DuplicateBinding { control }));
                 });
                 break;
             }
             if earlier.consume != binding.consume {
-                earlier.source.for_each_control(|theirs| {
-                    binding.source.for_each_control(|mine| {
+                earlier.input.for_each_control(|theirs| {
+                    binding.input.for_each_control(|mine| {
                         if theirs == mine {
                             found.push(at(DiagnosticKind::ConsumeDisagreement {
                                 control: mine,
@@ -514,7 +512,7 @@ pub(crate) fn diagnose_classes(bindings: &[ClassBindingSpec]) -> Vec<BindingDiag
 /// An authored binding with its action resolved to a state slot.
 pub(crate) struct CompiledBinding {
     pub(crate) slot: usize,
-    pub(crate) source: BindingSource,
+    pub(crate) input: BindingInput,
     pub(crate) modifiers: Vec<BindingModifier>,
     pub(crate) conditions: Vec<BindingCondition>,
     pub(crate) consume: bool,
@@ -634,7 +632,7 @@ impl<C> Plan<C> {
     ///   flags stay aligned with no rebuilding.
     ///
     /// A binding for an action the template does not have would still get a slot of its own, which
-    /// cannot happen: a variant only rewrites the sources of bindings the template already holds.
+    /// cannot happen: a variant only rewrites the inputs of bindings the template already holds.
     ///
     /// Class bindings are not part of the diff — they are never rebindable, so they carry over from
     /// `template` unchanged rather than being rebuilt from a list that would just be a copy of them.
@@ -674,7 +672,7 @@ impl<C> Plan<C> {
             if !matches!(decl.default, crate::mapping::TunableValue::Bool(_)) {
                 continue;
             }
-            let Some(family) = crate::binding::binding_family(&binding.source) else {
+            let Some(family) = crate::binding::binding_family(&binding.input) else {
                 continue;
             };
             tunable_groups
@@ -726,7 +724,7 @@ impl<C> Plan<C> {
 
             compiled.push(CompiledBinding {
                 slot,
-                source: binding.source,
+                input: binding.input,
                 modifiers: binding.modifiers,
                 conditions: binding.conditions,
                 consume: binding.consume,
@@ -752,7 +750,7 @@ impl<C> Plan<C> {
         // with everything else — unlike `class_bindings`, which is never part of that diff.
         let mut indexed_controls: Vec<Control> = Vec::new();
         for binding in &compiled {
-            binding.source.for_each_control(|control| {
+            binding.input.for_each_control(|control| {
                 if !indexed_controls.contains(&control) {
                     indexed_controls.push(control);
                 }
@@ -875,7 +873,7 @@ mod tests {
         assert_eq!(
             found[0].kind,
             DiagnosticKind::DuplicateBinding {
-                control: Control::Key(KeyCode::Space)
+                control: Control::PhysicalKey(KeyCode::Space)
             }
         );
     }
@@ -936,7 +934,7 @@ mod tests {
         assert_eq!(
             found[0].kind,
             DiagnosticKind::ConsumeDisagreement {
-                control: Control::Key(KeyCode::Escape),
+                control: Control::PhysicalKey(KeyCode::Escape),
                 other: "plan_tests.menu",
             }
         );
@@ -1104,8 +1102,8 @@ mod tests {
         let (bindings, class_bindings) = builder.finish();
         let plan = Plan::<()>::from_bindings(bindings, class_bindings);
 
-        assert!(plan.is_indexed(Control::Key(KeyCode::Space)));
-        assert!(!plan.is_indexed(Control::Key(KeyCode::KeyA)));
+        assert!(plan.is_indexed(Control::PhysicalKey(KeyCode::Space)));
+        assert!(!plan.is_indexed(Control::PhysicalKey(KeyCode::KeyA)));
     }
 
     // Two class bindings watching the same filter: the second can never fire, and that should be

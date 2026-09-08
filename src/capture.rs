@@ -39,7 +39,7 @@
 //! - **Excluded** ([`excluding`](CaptureSession::excluding)): the screen's own controls, so it
 //!   stays operable while listening. Silent: an excluded control is not being refused, it is busy
 //!   doing its normal job, which is how the key that cancels a capture gets through to cancel it.
-//! - **Reserved** ([`reserved`](crate::binding::BindingHandle::reserved)): declared on a binding,
+//! - **Reserved** ([`reserved`](crate::binding::BindingBuilder::reserved)): declared on a binding,
 //!   global across its family. Loud, because a player who just pressed it meant to bind it and is
 //!   owed the reason.
 
@@ -585,7 +585,7 @@ fn arrival(
         #[cfg(feature = "keyboard")]
         RawEvent::Keyboard(key) => (key.state == bevy_input::ButtonState::Pressed && !key.repeat)
             .then_some(Arrival {
-                control: Control::Key(key.key_code),
+                control: Control::PhysicalKey(key.key_code),
                 deliberate: true,
             }),
         // A press, like a key: the player meant it, so refusing one is worth saying out loud.
@@ -801,7 +801,7 @@ mod tests {
         app.update();
         assert_eq!(
             app.world().resource::<Heard>().captured,
-            [Control::Key(KeyCode::KeyT)]
+            [Control::PhysicalKey(KeyCode::KeyT)]
         );
         // Answered once, and the component is gone — which is how a screen knows it has stopped
         // listening without being told separately.
@@ -823,7 +823,7 @@ mod tests {
 
         assert_eq!(
             app.world().resource::<Heard>().captured,
-            [Control::Key(KeyCode::KeyQ)]
+            [Control::PhysicalKey(KeyCode::KeyQ)]
         );
     }
 
@@ -843,7 +843,7 @@ mod tests {
         assert!(app.world().resource::<Heard>().captured.is_empty());
         assert_eq!(
             app.world().resource::<Heard>().refused,
-            [(Control::Key(KeyCode::F1), RefusedReason::Reserved)]
+            [(Control::PhysicalKey(KeyCode::F1), RefusedReason::Reserved)]
         );
 
         // And the session is still listening, so the player can pick something else.
@@ -851,7 +851,7 @@ mod tests {
         app.update();
         assert_eq!(
             app.world().resource::<Heard>().captured,
-            [Control::Key(KeyCode::KeyE)]
+            [Control::PhysicalKey(KeyCode::KeyE)]
         );
     }
 
@@ -862,7 +862,12 @@ mod tests {
     #[test]
     fn reserved_answers_before_shape() {
         assert_eq!(
-            admissible(Control::Key(KeyCode::F1), None, ControlClass::AnyAxis, true),
+            admissible(
+                Control::PhysicalKey(KeyCode::F1),
+                None,
+                ControlClass::AnyAxis,
+                true
+            ),
             Err(RefusedReason::Reserved)
         );
     }
@@ -874,7 +879,7 @@ mod tests {
         let mut app = app();
         app.world_mut().spawn(
             CaptureSession::accepting(ControlClass::AnyButton)
-                .excluding([Control::Key(KeyCode::Escape)]),
+                .excluding([Control::PhysicalKey(KeyCode::Escape)]),
         );
         app.update();
 
@@ -927,7 +932,7 @@ mod tests {
         assert_eq!(
             app.world()
                 .resource::<crate::eval::ConsumedControls>()
-                .claimant(Control::Key(KeyCode::Space)),
+                .claimant(Control::PhysicalKey(KeyCode::Space)),
             Some("capture")
         );
     }
@@ -937,7 +942,7 @@ mod tests {
         let app = app();
         let jump = mapping(&app, "capture_tests.jump").key;
 
-        let found = conflicts(app.world(), Control::Key(KeyCode::KeyW), Some(jump));
+        let found = conflicts(app.world(), Control::PhysicalKey(KeyCode::KeyW), Some(jump));
         assert_eq!(found.len(), 1);
         assert_eq!(
             alloc::string::ToString::to_string(&found[0].mapping),
@@ -951,11 +956,18 @@ mod tests {
         );
 
         // Nothing holds this one.
-        assert!(conflicts(app.world(), Control::Key(KeyCode::KeyZ), Some(jump)).is_empty());
+        assert!(conflicts(app.world(), Control::PhysicalKey(KeyCode::KeyZ), Some(jump)).is_empty());
 
         // And a mapping does not conflict with itself, so rebinding a control to where it already
         // reports nothing rather than reporting the row the player is looking at.
-        assert!(conflicts(app.world(), Control::Key(KeyCode::Space), Some(jump)).is_empty());
+        assert!(
+            conflicts(
+                app.world(),
+                Control::PhysicalKey(KeyCode::Space),
+                Some(jump)
+            )
+            .is_empty()
+        );
     }
 
     /// A row holds a list, so *any* slot of it holding the control is a clash — a secondary binding
@@ -976,7 +988,11 @@ mod tests {
 
         let settings = crate::mapping::mappings(app.world())[1].key;
         // The secondary, which a `==` against a single control would have missed.
-        let found = conflicts(app.world(), Control::Key(KeyCode::Enter), Some(settings));
+        let found = conflicts(
+            app.world(),
+            Control::PhysicalKey(KeyCode::Enter),
+            Some(settings),
+        );
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].action_path, "capture_tests.jump");
     }
@@ -994,13 +1010,18 @@ mod tests {
         pending.bind(
             DeviceFamily::KeyboardMouse,
             jump,
-            [Control::Key(KeyCode::KeyW)],
+            [Control::PhysicalKey(KeyCode::KeyW)],
         );
 
         // Still on Space in the world, so the world-only query hears nothing.
-        assert!(conflicts(app.world(), Control::Key(KeyCode::KeyW), Some(up)).is_empty());
+        assert!(conflicts(app.world(), Control::PhysicalKey(KeyCode::KeyW), Some(up)).is_empty());
 
-        let found = conflicts_pending(&mappings, &pending, Control::Key(KeyCode::KeyW), Some(up));
+        let found = conflicts_pending(
+            &mappings,
+            &pending,
+            Control::PhysicalKey(KeyCode::KeyW),
+            Some(up),
+        );
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].action_path, "capture_tests.jump");
     }
@@ -1016,15 +1037,25 @@ mod tests {
 
         let mut pending = Overrides::new();
         pending.set(DeviceFamily::KeyboardMouse, jump, Override::NotOurs);
-        let found = conflicts_pending(&mappings, &pending, Control::Key(KeyCode::Space), Some(up));
+        let found = conflicts_pending(
+            &mappings,
+            &pending,
+            Control::PhysicalKey(KeyCode::Space),
+            Some(up),
+        );
         assert_eq!(found.len(), 1, "NotOurs leaves the row reading as it did");
         assert_eq!(found[0].action_path, "capture_tests.jump");
 
         // Contrast with `Cleared`, which does free the control.
         pending.set(DeviceFamily::KeyboardMouse, jump, Override::Cleared);
         assert!(
-            conflicts_pending(&mappings, &pending, Control::Key(KeyCode::Space), Some(up))
-                .is_empty()
+            conflicts_pending(
+                &mappings,
+                &pending,
+                Control::PhysicalKey(KeyCode::Space),
+                Some(up)
+            )
+            .is_empty()
         );
     }
 
@@ -1044,7 +1075,7 @@ mod tests {
         app.update();
 
         let heard = app.world().resource::<Heard>();
-        assert_eq!(heard.captured, [Control::Key(KeyCode::KeyK)]);
+        assert_eq!(heard.captured, [Control::PhysicalKey(KeyCode::KeyK)]);
         assert_eq!(heard.slots, [1]);
     }
 
@@ -1157,7 +1188,7 @@ mod tests {
     /// A class is a property, not a list.
     #[test]
     fn classes_are_decided_by_the_channel_a_control_reports_on() {
-        assert!(ControlClass::AnyButton.contains(Control::Key(KeyCode::KeyA)));
+        assert!(ControlClass::AnyButton.contains(Control::PhysicalKey(KeyCode::KeyA)));
         assert!(!ControlClass::AnyButton.contains(Control::MouseMotion));
         assert!(ControlClass::AnyDelta.contains(Control::MouseMotion));
 
@@ -1282,11 +1313,11 @@ mod tests {
 
         let app = app();
         let reserved = app.world().resource::<ReservedControls>();
-        assert!(reserved.contains(Control::Key(KeyCode::F1)));
+        assert!(reserved.contains(Control::PhysicalKey(KeyCode::F1)));
         assert!(!reserved.contains(Control::GamepadButton(GamepadButton::Select)));
         assert_eq!(
             reserved
-                .claimant(Control::Key(KeyCode::F1))
+                .claimant(Control::PhysicalKey(KeyCode::F1))
                 .unwrap()
                 .context,
             "capture_tests.on_foot"
@@ -1306,7 +1337,7 @@ mod tests {
 
         assert_eq!(
             app.world().resource::<Heard>().captured,
-            [Control::Key(KeyCode::KeyB)]
+            [Control::PhysicalKey(KeyCode::KeyB)]
         );
     }
 
@@ -1410,7 +1441,7 @@ mod tests {
 
         assert_eq!(
             app.world().resource::<Heard>().captured,
-            vec![Control::Key(KeyCode::KeyN); 2]
+            vec![Control::PhysicalKey(KeyCode::KeyN); 2]
         );
         assert!(app.world().get::<CaptureSession>(first).is_none());
         assert!(app.world().get::<CaptureSession>(second).is_none());

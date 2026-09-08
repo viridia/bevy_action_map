@@ -468,7 +468,7 @@ trait objects versus a reflected registry. That trade turned out not to apply. A
 controls and tunable values only; modifiers, conditions and chord structure are developer data and
 never reach a save file. So `Modifier` and `Condition` carry no `Reflect` bound and custom
 extensions are not serialized, because nothing asks them to be. The `Arc` rather than a `Box` is for
-an unrelated reason: applying an override clones the authored bindings and rewrites their sources,
+an unrelated reason: applying an override clones the authored bindings and rewrites their inputs,
 and the originals have to survive that intact.
 
 ### D65 — The device model is closed; a third-party device kind needs one in hand to design against
@@ -1389,7 +1389,7 @@ with no per-mapping rebinding, presets the only way to move one. That premise is
 R19.12 is revised alongside this decision.
 
 **What stays split.** Consumption does not follow: `for_each_control` still decomposes
-`BindingSource::GamepadStick` into its two `GamepadAxis` atoms, unchanged, which is the granularity
+`BindingInput::GamepadStick` into its two `GamepadAxis` atoms, unchanged, which is the granularity
 `ConsumedControls` and reservation already key on. `Control::GamepadStick` is the first `Control`
 naming something another `Control` also names in part, and it stays confined to presentation,
 override and capture — it is never a claim.

@@ -106,7 +106,7 @@ impl RawEvent {
         use crate::binding::Control;
         match self {
             #[cfg(feature = "keyboard")]
-            Self::Keyboard(event) => Some(Control::Key(event.key_code)),
+            Self::Keyboard(event) => Some(Control::PhysicalKey(event.key_code)),
             #[cfg(feature = "mouse")]
             Self::MouseButton(event) => Some(Control::MouseButton(event.button)),
             Self::MouseMotion(_) => Some(Control::MouseMotion),

@@ -32,9 +32,10 @@ use crate::event::{Dispatch, dispatch_for};
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonControl {
-    /// A keyboard key.
+    /// A keyboard key, by physical position rather than by the character the layout prints on
+    /// it.
     #[cfg(feature = "keyboard")]
-    Key(KeyCode),
+    PhysicalKey(KeyCode),
     /// A mouse button.
     #[cfg(feature = "mouse")]
     MouseButton(MouseButton),
@@ -46,7 +47,7 @@ pub enum ButtonControl {
 #[cfg(feature = "keyboard")]
 impl From<KeyCode> for ButtonControl {
     fn from(key: KeyCode) -> Self {
-        Self::Key(key)
+        Self::PhysicalKey(key)
     }
 }
 
@@ -100,8 +101,8 @@ impl AxisButtons {
     #[cfg(feature = "keyboard")]
     pub const fn ad() -> Self {
         Self {
-            negative: ButtonControl::Key(KeyCode::KeyA),
-            positive: ButtonControl::Key(KeyCode::KeyD),
+            negative: ButtonControl::PhysicalKey(KeyCode::KeyA),
+            positive: ButtonControl::PhysicalKey(KeyCode::KeyD),
         }
     }
 
@@ -109,8 +110,8 @@ impl AxisButtons {
     #[cfg(feature = "keyboard")]
     pub const fn left_right() -> Self {
         Self {
-            negative: ButtonControl::Key(KeyCode::ArrowLeft),
-            positive: ButtonControl::Key(KeyCode::ArrowRight),
+            negative: ButtonControl::PhysicalKey(KeyCode::ArrowLeft),
+            positive: ButtonControl::PhysicalKey(KeyCode::ArrowRight),
         }
     }
 }
@@ -165,10 +166,10 @@ impl DirectionalButtons {
     #[cfg(feature = "keyboard")]
     pub const fn wasd() -> Self {
         Self {
-            up: ButtonControl::Key(KeyCode::KeyW),
-            down: ButtonControl::Key(KeyCode::KeyS),
-            left: ButtonControl::Key(KeyCode::KeyA),
-            right: ButtonControl::Key(KeyCode::KeyD),
+            up: ButtonControl::PhysicalKey(KeyCode::KeyW),
+            down: ButtonControl::PhysicalKey(KeyCode::KeyS),
+            left: ButtonControl::PhysicalKey(KeyCode::KeyA),
+            right: ButtonControl::PhysicalKey(KeyCode::KeyD),
         }
     }
 
@@ -176,10 +177,10 @@ impl DirectionalButtons {
     #[cfg(feature = "keyboard")]
     pub const fn arrow_keys() -> Self {
         Self {
-            up: ButtonControl::Key(KeyCode::ArrowUp),
-            down: ButtonControl::Key(KeyCode::ArrowDown),
-            left: ButtonControl::Key(KeyCode::ArrowLeft),
-            right: ButtonControl::Key(KeyCode::ArrowRight),
+            up: ButtonControl::PhysicalKey(KeyCode::ArrowUp),
+            down: ButtonControl::PhysicalKey(KeyCode::ArrowDown),
+            left: ButtonControl::PhysicalKey(KeyCode::ArrowLeft),
+            right: ButtonControl::PhysicalKey(KeyCode::ArrowRight),
         }
     }
 
@@ -197,7 +198,7 @@ impl DirectionalButtons {
 
 /// One binding as the setup closure declared it: one `.bind` call, plus whatever was chained onto
 /// it. This is what the compiled plan is built from.
-// Cloned when an override is applied: the variant is the authored set with some sources rewritten,
+// Cloned when an override is applied: the variant is the authored set with some inputs rewritten,
 // and the authored set has to stay intact so a later diff still has defaults to diff against.
 #[derive(Clone)]
 pub(crate) struct BindingSpec {
@@ -211,7 +212,7 @@ pub(crate) struct BindingSpec {
     // The only place the concrete action type survives bind time. Everything downstream works in
     // slots, which cannot name a generic event.
     pub(crate) dispatch: Dispatch,
-    pub(crate) source: BindingSource,
+    pub(crate) input: BindingInput,
     pub(crate) modifiers: Vec<BindingModifier>,
     pub(crate) conditions: Vec<BindingCondition>,
     pub(crate) consume: bool,
@@ -232,7 +233,7 @@ pub(crate) struct BindingSpec {
 
 /// One class binding as [`InputContextBuilder::bind_class`] declared it.
 ///
-/// Deliberately not a `BindingSpec`: a class binding has no source to modify, no chord, no mapping,
+/// Deliberately not a `BindingSpec`: a class binding has no input to modify, no chord, no mapping,
 /// and nothing to combine — the only things it carries are the class it watches, whether it
 /// consumes what it catches, and where to send it.
 pub(crate) struct ClassBindingSpec {
@@ -305,10 +306,10 @@ pub(crate) struct FollowsDecl {
 
 /// The binding whose mapping `bindings[index]` rides, if there is one.
 ///
-/// A follower reads the same controls as the binding it follows, which is what makes matching on the
-/// source the whole of the resolution: it settles the family and the controls together, and it picks
-/// the right one of several bindings the target action may have. `None` is a plan-build error rather
-/// than a silent no-op — see `DiagnosticKind::FollowsNothing`.
+/// A follower reads the same controls as the binding it follows, which is what makes matching on
+/// the input the whole of the resolution: it settles the family and the controls together, and it
+/// picks the right one of several bindings the target action may have. `None` is a plan-build error
+/// rather than a silent no-op — see `DiagnosticKind::FollowsNothing`.
 pub(crate) fn leader_of(bindings: &[BindingSpec], index: usize) -> Option<usize> {
     let follows = bindings[index].follows?;
     bindings
@@ -317,7 +318,7 @@ pub(crate) fn leader_of(bindings: &[BindingSpec], index: usize) -> Option<usize>
         .find(|&(other, spec)| {
             other != index
                 && spec.action == follows.action
-                && spec.source == bindings[index].source
+                && spec.input == bindings[index].input
                 // A binding with no mapping has none to ride, which rules out a chain of followers
                 // without needing to say so separately.
                 && spec.mapping.is_some()
@@ -359,7 +360,7 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
             continue;
         };
         let prefix = declaration.prefix.unwrap_or(binding.path);
-        binding.source.for_each_part(|part, control| {
+        binding.input.for_each_part(|part, control| {
             parts.push(MappedPart {
                 key: crate::mapping::MappingKey::new(prefix, part),
                 family: control.family(),
@@ -417,9 +418,9 @@ pub(crate) fn mappings_of(
             action_path: binding.path,
             category: binding.category,
             // A part of a composite holds a button, whatever the composite as a whole
-            // reports; a whole binding holds whatever its own source does.
+            // reports; a whole binding holds whatever its own input does.
             accepts: match entry.part {
-                BindingPart::Whole => binding.source.channel_shape(),
+                BindingPart::Whole => binding.input.channel_shape(),
                 _ => ChannelShape::Button,
             },
             family: entry.family,
@@ -453,7 +454,7 @@ pub(crate) fn mappings_of(
         };
         let prefix = declaration.prefix.unwrap_or(leader.path);
         let condition = crate::condition::describe(&binding.conditions);
-        leader.source.for_each_part(|part, control| {
+        leader.input.for_each_part(|part, control| {
             let key = crate::mapping::MappingKey::new(prefix, part);
             if let Some(mapping) = mappings.iter_mut().find(|mapping| {
                 mapping.key == key
@@ -497,7 +498,7 @@ pub(crate) fn tunables_of(
         let Some(decl) = &binding.tunable else {
             continue;
         };
-        let family = binding_family(&binding.source)
+        let family = binding_family(&binding.input)
             .expect("a tunable's binding must resolve to at least one control");
         // Several bindings may declare the same key — `hold_or_toggle` reaching a primary and a
         // secondary key is the ordinary case — and they are one row to the player, not two. Every
@@ -522,11 +523,11 @@ pub(crate) fn tunables_of(
     tunables
 }
 
-/// The family a binding's source belongs to, for a binding that resolves to a single control — a
+/// The family a binding's input belongs to, for a binding that resolves to a single control — a
 /// tunable is only ever declared on one of those, never a composite.
-pub(crate) fn binding_family(source: &BindingSource) -> Option<crate::device::DeviceFamily> {
+pub(crate) fn binding_family(input: &BindingInput) -> Option<crate::device::DeviceFamily> {
     let mut family = None;
-    source.for_each_part(|_, control| family = Some(control.family()));
+    input.for_each_part(|_, control| family = Some(control.family()));
     family
 }
 
@@ -536,19 +537,19 @@ pub(crate) fn binding_family(source: &BindingSource) -> Option<crate::device::De
 ///
 /// A key or a mouse button always qualifies — neither has anything but a press to report. A gamepad
 /// button is the interesting case (R2.10): the same control reads as `Bool` when the action wants
-/// a plain press and as a continuous `Axis1` fraction otherwise (see `BindingSource::GamepadButton`
+/// a plain press and as a continuous `Axis1` fraction otherwise (see `BindingInput::GamepadButton`
 /// in `eval.rs`), so it qualifies only when `intent` is `ActionIntent::Button`. Every composite,
-/// axis or motion source reports something other than `Bool` outright and never qualifies.
-fn always_reports_bool(source: &BindingSource, intent: ActionIntent) -> bool {
+/// axis or motion input reports something other than `Bool` outright and never qualifies.
+fn always_reports_bool(input: &BindingInput, intent: ActionIntent) -> bool {
     #[cfg(not(feature = "gamepad"))]
     let _ = intent;
-    match source {
+    match input {
         #[cfg(feature = "keyboard")]
-        BindingSource::Button(_) => true,
+        BindingInput::Button(_) => true,
         #[cfg(feature = "mouse")]
-        BindingSource::MouseButton(_) => true,
+        BindingInput::MouseButton(_) => true,
         #[cfg(feature = "gamepad")]
-        BindingSource::GamepadButton(_) => intent == ActionIntent::Button,
+        BindingInput::GamepadButton(_) => intent == ActionIntent::Button,
         _ => false,
     }
 }
@@ -612,7 +613,7 @@ impl MappingDecl {
     }
 }
 
-/// Mouse motion as a binding source.
+/// Mouse motion as a binding input.
 ///
 /// ```ignore
 /// context.bind::<Look>(MouseMove);
@@ -624,7 +625,7 @@ impl MappingDecl {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MouseMove;
 
-/// Which part of a binding's source a control is.
+/// Which part of a binding's input a control is.
 ///
 /// A single control is the [`Whole`](BindingPart::Whole) of its binding. A composite has parts,
 /// named for what each one does rather than for where it sits: the four keys of a directional
@@ -670,20 +671,21 @@ impl BindingPart {
 
 /// One physical control.
 ///
-/// A binding names a *source*, which may be a control or an arrangement of several — a directional
+/// A binding names an *input*, which may be a control or an arrangement of several — a directional
 /// composite is four buttons. This is what those decompose into, and it is the granularity at which
-/// one context takes a control from another: a menu claiming the movement keys claims four controls,
-/// and a global screenshot key bound to a fifth is unaffected.
+/// one context takes a control from another: a menu claiming the movement keys claims four
+/// controls, and a global screenshot key bound to a fifth is unaffected.
 ///
-/// [`GamepadStick`](Self::GamepadStick) is the one exception: a stick is two axes, but nothing binds
-/// or rebinds one of them on its own, so it is named here whole, the same way
+/// [`GamepadStick`](Self::GamepadStick) is the one exception: a stick is two axes, but nothing
+/// binds or rebinds one of them on its own, so it is named here whole, the same way
 /// [`MouseMotion`](Self::MouseMotion) already is. It still decomposes to those two axes for
-/// consumption — see [`BindingSource::for_each_control`].
+/// consumption — see [`BindingInput::for_each_control`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Control {
-    /// A keyboard key.
+    /// A keyboard key, by physical position rather than by the character the layout prints on
+    /// it.
     #[cfg(feature = "keyboard")]
-    Key(KeyCode),
+    PhysicalKey(KeyCode),
     /// A mouse button.
     #[cfg(feature = "mouse")]
     MouseButton(MouseButton),
@@ -708,7 +710,7 @@ impl Control {
     pub const fn family(self) -> crate::device::DeviceFamily {
         match self {
             #[cfg(feature = "keyboard")]
-            Self::Key(_) => crate::device::DeviceFamily::KeyboardMouse,
+            Self::PhysicalKey(_) => crate::device::DeviceFamily::KeyboardMouse,
             #[cfg(feature = "mouse")]
             Self::MouseButton(_) => crate::device::DeviceFamily::KeyboardMouse,
             Self::MouseMotion => crate::device::DeviceFamily::KeyboardMouse,
@@ -721,7 +723,7 @@ impl Control {
 
     /// The kind of channel this one control reports on.
     ///
-    /// The counterpart of [`BindingSource::channel_shape`] for a single control rather than an
+    /// The counterpart of [`BindingInput::channel_shape`] for a single control rather than an
     /// arrangement of them, and what decides whether a captured control fits the mapping it was
     /// captured for.
     ///
@@ -731,7 +733,7 @@ impl Control {
     pub const fn shape(self) -> ChannelShape {
         match self {
             #[cfg(feature = "keyboard")]
-            Self::Key(_) => ChannelShape::Button,
+            Self::PhysicalKey(_) => ChannelShape::Button,
             #[cfg(feature = "mouse")]
             Self::MouseButton(_) => ChannelShape::Button,
             // Including the triggers, which carry a fraction on this channel.
@@ -751,7 +753,7 @@ impl From<ButtonControl> for Control {
     fn from(control: ButtonControl) -> Self {
         match control {
             #[cfg(feature = "keyboard")]
-            ButtonControl::Key(key) => Self::Key(key),
+            ButtonControl::PhysicalKey(key) => Self::PhysicalKey(key),
             #[cfg(feature = "mouse")]
             ButtonControl::MouseButton(button) => Self::MouseButton(button),
             #[cfg(feature = "gamepad")]
@@ -773,7 +775,7 @@ impl TryFrom<Control> for ButtonControl {
     fn try_from(control: Control) -> Result<Self, Self::Error> {
         match control {
             #[cfg(feature = "keyboard")]
-            Control::Key(key) => Ok(Self::Key(key)),
+            Control::PhysicalKey(key) => Ok(Self::PhysicalKey(key)),
             #[cfg(feature = "mouse")]
             Control::MouseButton(button) => Ok(Self::MouseButton(button)),
             #[cfg(feature = "gamepad")]
@@ -796,15 +798,15 @@ fn set_button(part: &mut ButtonControl, control: Control) -> bool {
     }
 }
 
-/// The source that reads exactly this one control.
+/// The input that reads exactly this one control.
 ///
-/// Every control is a source on its own; the composites are the sources that are *not* reachable
+/// Every control is an input on its own; the composites are the inputs that are *not* reachable
 /// this way, since no single control carries a direction or a signed axis.
-impl From<Control> for BindingSource {
+impl From<Control> for BindingInput {
     fn from(control: Control) -> Self {
         match control {
             #[cfg(feature = "keyboard")]
-            Control::Key(key) => Self::Button(key),
+            Control::PhysicalKey(key) => Self::Button(key),
             #[cfg(feature = "mouse")]
             Control::MouseButton(button) => Self::MouseButton(button),
             #[cfg(feature = "gamepad")]
@@ -818,9 +820,9 @@ impl From<Control> for BindingSource {
     }
 }
 
-/// The binding source used by the first interactive stage.
+/// The binding input used by the first interactive stage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BindingSource {
+pub enum BindingInput {
     /// A keyboard key.
     #[cfg(feature = "keyboard")]
     Button(KeyCode),
@@ -846,8 +848,8 @@ pub enum BindingSource {
     GamepadStick(Stick),
 }
 
-impl BindingSource {
-    /// Calls `visit` with every physical control this source reads.
+impl BindingInput {
+    /// Calls `visit` with every physical control this input reads.
     ///
     /// One for a plain control, four for a directional composite, two for a stick — its two axes,
     /// never [`Control::GamepadStick`] itself, so that a plain binding on one axis and a binding on
@@ -860,7 +862,7 @@ impl BindingSource {
     pub fn for_each_control(&self, mut visit: impl FnMut(Control)) {
         match self {
             #[cfg(feature = "keyboard")]
-            Self::Button(key) => visit(Control::Key(*key)),
+            Self::Button(key) => visit(Control::PhysicalKey(*key)),
             #[cfg(feature = "mouse")]
             Self::MouseButton(button) => visit(Control::MouseButton(*button)),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
@@ -889,7 +891,7 @@ impl BindingSource {
         }
     }
 
-    /// Calls `visit` with every control this source reads, and the part of the source it is.
+    /// Calls `visit` with every control this input reads, and the part of the input it is.
     ///
     /// A composite's parts are named for the direction each one pushes rather than for their
     /// position, which is what lets a rebinding screen address one of them — "the key that moves
@@ -897,7 +899,7 @@ impl BindingSource {
     pub fn for_each_part(&self, mut visit: impl FnMut(BindingPart, Control)) {
         match self {
             #[cfg(feature = "keyboard")]
-            Self::Button(key) => visit(BindingPart::Whole, Control::Key(*key)),
+            Self::Button(key) => visit(BindingPart::Whole, Control::PhysicalKey(*key)),
             #[cfg(feature = "mouse")]
             Self::MouseButton(button) => visit(BindingPart::Whole, Control::MouseButton(*button)),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
@@ -927,19 +929,19 @@ impl BindingSource {
         }
     }
 
-    /// Puts a different control in one part of this source, which is what a rebind does.
+    /// Puts a different control in one part of this input, which is what a rebind does.
     ///
-    /// The exact inverse of [`for_each_part`](Self::for_each_part): a part this source does not have
+    /// The exact inverse of [`for_each_part`](Self::for_each_part): a part this input does not have
     /// is refused, and so is a control that cannot serve the part it was offered for. Both refusals
     /// are `false` rather than a panic, because the caller is applying a saved override and a saved
     /// override can say anything.
     ///
-    /// **The source's channel shape is invariant.** A whole binding on a key takes another button
+    /// **The input's channel shape is invariant.** A whole binding on a key takes another button
     /// and not a stick axis, so applying an override can never turn a plan that compiled into one
     /// that would not — the shape mismatch is caught here even if nothing caught it earlier.
     pub(crate) fn set_part(&mut self, part: BindingPart, control: Control) -> bool {
         match (&mut *self, part) {
-            // A whole binding is replaced outright, since the new source is entirely the new
+            // A whole binding is replaced outright, since the new input is entirely the new
             // control.
             (Self::MouseMotion, BindingPart::Whole) => self.replace_whole(control),
             #[cfg(feature = "keyboard")]
@@ -969,7 +971,7 @@ impl BindingSource {
         }
     }
 
-    /// Swaps a whole-binding source for the one that reads `control`, if the shape survives it.
+    /// Swaps a whole-binding input for the one that reads `control`, if the shape survives it.
     fn replace_whole(&mut self, control: Control) -> bool {
         let replacement = Self::from(control);
         if replacement.channel_shape() != self.channel_shape() {
@@ -979,14 +981,14 @@ impl BindingSource {
         true
     }
 
-    /// Every physical control this source reads, collected.
+    /// Every physical control this input reads, collected.
     pub fn controls(&self) -> alloc::vec::Vec<Control> {
         let mut controls = alloc::vec::Vec::new();
         self.for_each_control(|control| controls.push(control));
         controls
     }
 
-    /// The kind of channel this source reports on.
+    /// The kind of channel this input reports on.
     pub const fn channel_shape(&self) -> ChannelShape {
         match self {
             #[cfg(feature = "keyboard")]
@@ -1051,63 +1053,63 @@ impl Stick {
 /// a particular action is decided against the action's [`ActionIntent`] when the context is
 /// declared. This is what lets one trigger drive a button action in one game and an analog action
 /// in another.
-pub trait BindingSourceSpec {
-    /// Converts this source value into the internal binding representation.
-    fn into_binding_source(self) -> BindingSource;
+pub trait IntoBindingInput {
+    /// Converts this value into the internal binding representation.
+    fn into_binding_input(self) -> BindingInput;
 }
 
 #[cfg(feature = "keyboard")]
-impl BindingSourceSpec for KeyCode {
-    fn into_binding_source(self) -> BindingSource {
-        BindingSource::Button(self)
+impl IntoBindingInput for KeyCode {
+    fn into_binding_input(self) -> BindingInput {
+        BindingInput::Button(self)
     }
 }
 
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-impl BindingSourceSpec for AxisButtons {
-    fn into_binding_source(self) -> BindingSource {
-        BindingSource::Axis1(self)
+impl IntoBindingInput for AxisButtons {
+    fn into_binding_input(self) -> BindingInput {
+        BindingInput::Axis1(self)
     }
 }
 
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-impl BindingSourceSpec for DirectionalButtons {
-    fn into_binding_source(self) -> BindingSource {
-        BindingSource::Directional2(self)
+impl IntoBindingInput for DirectionalButtons {
+    fn into_binding_input(self) -> BindingInput {
+        BindingInput::Directional2(self)
     }
 }
 
-impl BindingSourceSpec for MouseMove {
-    fn into_binding_source(self) -> BindingSource {
-        BindingSource::MouseMotion
+impl IntoBindingInput for MouseMove {
+    fn into_binding_input(self) -> BindingInput {
+        BindingInput::MouseMotion
     }
 }
 
 #[cfg(feature = "mouse")]
-impl BindingSourceSpec for MouseButton {
-    fn into_binding_source(self) -> BindingSource {
-        BindingSource::MouseButton(self)
+impl IntoBindingInput for MouseButton {
+    fn into_binding_input(self) -> BindingInput {
+        BindingInput::MouseButton(self)
     }
 }
 
 #[cfg(feature = "gamepad")]
-impl BindingSourceSpec for GamepadButton {
-    fn into_binding_source(self) -> BindingSource {
-        BindingSource::GamepadButton(self)
+impl IntoBindingInput for GamepadButton {
+    fn into_binding_input(self) -> BindingInput {
+        BindingInput::GamepadButton(self)
     }
 }
 
 #[cfg(feature = "gamepad")]
-impl BindingSourceSpec for GamepadAxis {
-    fn into_binding_source(self) -> BindingSource {
-        BindingSource::GamepadAxis(self)
+impl IntoBindingInput for GamepadAxis {
+    fn into_binding_input(self) -> BindingInput {
+        BindingInput::GamepadAxis(self)
     }
 }
 
 #[cfg(feature = "gamepad")]
-impl BindingSourceSpec for Stick {
-    fn into_binding_source(self) -> BindingSource {
-        BindingSource::GamepadStick(self)
+impl IntoBindingInput for Stick {
+    fn into_binding_input(self) -> BindingInput {
+        BindingInput::GamepadStick(self)
     }
 }
 
@@ -1248,7 +1250,7 @@ pub enum CompassPoints {
     Eight,
 }
 
-/// A modifier that transforms one source value before it is written to an action.
+/// A modifier that transforms one input value before it is written to an action.
 ///
 /// Implement this for anything the built-in set does not cover. A modifier is a pure function of
 /// what it is given — no world access — so that it produces the same answer when a replay or a
@@ -1273,7 +1275,7 @@ pub trait Modifier: Send + Sync + 'static {
 }
 
 /// Built-in modifiers that can be chained onto a binding.
-// `Clone` so that a set of authored bindings can be copied and have its sources rewritten, which is
+// `Clone` so that a set of authored bindings can be copied and have its inputs rewritten, which is
 // how an override is applied without destroying the defaults it overrides.
 #[derive(Clone)]
 pub enum BindingModifier {
@@ -1331,7 +1333,7 @@ pub enum BindingModifier {
     /// Calls an application-defined modifier.
     ///
     /// Shared rather than owned, so that copying a binding set copies the reference and not the
-    /// modifier. Use [`custom`](BindingHandle::custom) rather than building this by hand.
+    /// modifier. Use [`custom`](BindingBuilder::custom) rather than building this by hand.
     Custom(Arc<dyn Modifier>),
 }
 
@@ -1382,26 +1384,26 @@ impl BindingModifier {
     }
 }
 
-/// A chainable handle for the binding that was just declared.
-pub struct BindingHandle<'a, C> {
+/// Configures the binding that was just declared, one chained call at a time.
+pub struct BindingBuilder<'a, C> {
     builder: &'a mut InputContextBuilder<C>,
     index: usize,
 }
 
-/// A chainable handle for the class binding that was just declared.
+/// Configures the class binding that was just declared, one chained call at a time.
 ///
-/// Deliberately not [`BindingHandle`]: a class binding has no source to run a modifier or a
+/// Deliberately not [`BindingBuilder`]: a class binding has nothing to run a modifier or a
 /// condition against, so this exposes only what actually applies to one.
-pub struct ClassBindingHandle<'a, C> {
+pub struct ClassBindingBuilder<'a, C> {
     builder: &'a mut InputContextBuilder<C>,
     index: usize,
 }
 
-impl<C> ClassBindingHandle<'_, C> {
+impl<C> ClassBindingBuilder<'_, C> {
     /// Takes this class binding's controls, so that lower-priority contexts do not see them.
     ///
-    /// The generalization of a plain binding's [`consume`](BindingHandle::consume) from one control
-    /// to every member of the class this binding watches — a focused text field claiming
+    /// The generalization of a plain binding's [`consume`](BindingBuilder::consume) from one
+    /// control to every member of the class this binding watches — a focused text field claiming
     /// character-producing keys away from gameplay is the motivating case.
     pub fn consume(self) -> Self {
         self.builder.class_bindings[self.index].consume = true;
@@ -1409,7 +1411,7 @@ impl<C> ClassBindingHandle<'_, C> {
     }
 }
 
-impl<'a, C> BindingHandle<'a, C> {
+impl<'a, C> BindingBuilder<'a, C> {
     fn push_modifier(&mut self, modifier: BindingModifier) {
         self.builder.bindings[self.index].modifiers.push(modifier);
     }
@@ -1911,14 +1913,14 @@ impl<C> Default for InputContextBuilder<C> {
 }
 
 impl<C> InputContextBuilder<C> {
-    fn push_binding<A: InputAction>(&mut self, source: BindingSource) -> BindingHandle<'_, C> {
+    fn push_binding<A: InputAction>(&mut self, input: BindingInput) -> BindingBuilder<'_, C> {
         self.bindings.push(BindingSpec {
             action: A::id(),
             intent: A::INTENT,
             path: A::PATH,
             category: A::CATEGORY,
             dispatch: dispatch_for::<A>,
-            source,
+            input,
             modifiers: Vec::new(),
             conditions: Vec::new(),
             // The action's default, which a binding can then make an exception of either way.
@@ -1931,13 +1933,13 @@ impl<C> InputContextBuilder<C> {
             chord: Vec::new(),
         });
         let index = self.bindings.len() - 1;
-        BindingHandle {
+        BindingBuilder {
             builder: self,
             index,
         }
     }
 
-    /// Binds an action to a source value.
+    /// Binds an action to an input value.
     ///
     /// An action may be bound more than once — a keyboard key and a gamepad button, a stick and
     /// the movement keys. Every binding for an action contributes to the same value, combined
@@ -1961,8 +1963,8 @@ impl<C> InputContextBuilder<C> {
     /// context.bind::<Move>(Stick::Left).dead_zone(DeadZone::radial(0.15));
     /// context.bind::<Look>(MouseMove);
     /// ```
-    pub fn bind<A: InputAction>(&mut self, source: impl BindingSourceSpec) -> BindingHandle<'_, C> {
-        self.push_binding::<A>(source.into_binding_source())
+    pub fn bind<A: InputAction>(&mut self, input: impl IntoBindingInput) -> BindingBuilder<'_, C> {
+        self.push_binding::<A>(input.into_binding_input())
     }
 
     /// Declares `Follower` as riding every one of `Leader`'s bindings, one for one.
@@ -1991,34 +1993,34 @@ impl<C> InputContextBuilder<C> {
     /// If `Leader` has no bindings declared yet, or if `Follower` and `Leader` are the same action.
     pub fn follow<Follower: InputAction, Leader: InputAction>(
         &mut self,
-        configure: impl Fn(BindingHandle<'_, C>) -> BindingHandle<'_, C>,
+        configure: impl Fn(BindingBuilder<'_, C>) -> BindingBuilder<'_, C>,
     ) {
         assert!(
             Follower::id() != Leader::id(),
             "`{}` cannot follow its own action: it would be riding the mapping it is declaring",
             Follower::PATH
         );
-        let sources: Vec<BindingSource> = self
+        let inputs: Vec<BindingInput> = self
             .bindings
             .iter()
             .filter(|binding| binding.action == Leader::id())
-            .map(|binding| binding.source)
+            .map(|binding| binding.input)
             .collect();
         assert!(
-            !sources.is_empty(),
+            !inputs.is_empty(),
             "`{}` has no bindings yet for `{}` to follow — declare `{}` first",
             Leader::PATH,
             Follower::PATH,
             Leader::PATH
         );
-        for source in sources {
-            let handle = self.push_binding::<Follower>(source);
-            handle.builder.bindings[handle.index].mapping = None;
-            handle.builder.bindings[handle.index].follows = Some(FollowsDecl {
+        for input in inputs {
+            let binding = self.push_binding::<Follower>(input);
+            binding.builder.bindings[binding.index].mapping = None;
+            binding.builder.bindings[binding.index].follows = Some(FollowsDecl {
                 action: Leader::id(),
                 path: Leader::PATH,
             });
-            configure(handle);
+            configure(binding);
         }
     }
 
@@ -2060,12 +2062,12 @@ impl<C> InputContextBuilder<C> {
     ///
     /// # Panics
     ///
-    /// If no binding of `A` declared so far is eligible — nothing yet bound, or every source so far
+    /// If no binding of `A` declared so far is eligible — nothing yet bound, or every input so far
     /// is analog.
     pub fn hold_or_toggle<A: InputAction>(&mut self, key: &'static str) {
         let mut touched = 0usize;
         for binding in &mut self.bindings {
-            if binding.action != A::id() || !always_reports_bool(&binding.source, binding.intent) {
+            if binding.action != A::id() || !always_reports_bool(&binding.input, binding.intent) {
                 continue;
             }
             binding
@@ -2093,8 +2095,8 @@ impl<C> InputContextBuilder<C> {
         );
     }
 
-    /// Binds to every control a [`ControlClass`](crate::capture::ControlClass) names, rather than to
-    /// one control.
+    /// Binds to every control a [`ControlClass`](crate::capture::ControlClass) names, rather than
+    /// to one control.
     ///
     /// Where a plain [`bind`](Self::bind) reads one control you name, this reads whichever member of
     /// the class shows up. It fires once per matching, otherwise-unclaimed event, carrying that
@@ -2118,7 +2120,7 @@ impl<C> InputContextBuilder<C> {
     pub fn bind_class<A: crate::event::ClassBinding>(
         &mut self,
         class: crate::capture::ControlClass,
-    ) -> ClassBindingHandle<'_, C> {
+    ) -> ClassBindingBuilder<'_, C> {
         self.push_class_binding::<A>(crate::capture::ClassFilter::Shape(class))
     }
 
@@ -2139,14 +2141,14 @@ impl<C> InputContextBuilder<C> {
     ///
     /// controls.bind_characters::<TypedCharacter>().consume();
     /// ```
-    pub fn bind_characters<A: crate::event::ClassBinding>(&mut self) -> ClassBindingHandle<'_, C> {
+    pub fn bind_characters<A: crate::event::ClassBinding>(&mut self) -> ClassBindingBuilder<'_, C> {
         self.push_class_binding::<A>(crate::capture::ClassFilter::Characters)
     }
 
     fn push_class_binding<A: crate::event::ClassBinding>(
         &mut self,
         filter: crate::capture::ClassFilter,
-    ) -> ClassBindingHandle<'_, C> {
+    ) -> ClassBindingBuilder<'_, C> {
         self.class_bindings.push(ClassBindingSpec {
             action_path: A::PATH,
             filter,
@@ -2154,7 +2156,7 @@ impl<C> InputContextBuilder<C> {
             dispatch: crate::event::class_dispatch_for::<A>,
         });
         let index = self.class_bindings.len() - 1;
-        ClassBindingHandle {
+        ClassBindingBuilder {
             builder: self,
             index,
         }
@@ -2190,7 +2192,7 @@ impl<C> InputContextBuilder<C> {
     pub(crate) fn reserved(&self, context: &'static str) -> Vec<crate::capture::ReservedControl> {
         let mut reserved = Vec::new();
         for binding in self.bindings.iter().filter(|binding| binding.reserved) {
-            binding.source.for_each_control(|control| {
+            binding.input.for_each_control(|control| {
                 reserved.push(crate::capture::ReservedControl {
                     control,
                     action_path: binding.path,
@@ -2376,18 +2378,18 @@ pub(crate) fn toggle_active(modifiers: &[BindingModifier]) -> bool {
         .unwrap_or(false)
 }
 
-/// A binding's source, converted to the control [`is_pressed`](crate::eval)-style raw actuation
+/// A binding's input, converted to the control [`is_pressed`](crate::eval)-style raw actuation
 /// checks read — `None` for anything [`always_reports_bool`] would already have refused, which is
-/// every source a shared toggle's pre-pass ever needs to ask about.
+/// every input a shared toggle's pre-pass ever needs to ask about.
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-pub(crate) fn as_button_control(source: &BindingSource) -> Option<ButtonControl> {
-    match source {
+pub(crate) fn as_button_control(input: &BindingInput) -> Option<ButtonControl> {
+    match input {
         #[cfg(feature = "keyboard")]
-        BindingSource::Button(key) => Some(ButtonControl::Key(*key)),
+        BindingInput::Button(key) => Some(ButtonControl::PhysicalKey(*key)),
         #[cfg(feature = "mouse")]
-        BindingSource::MouseButton(button) => Some(ButtonControl::MouseButton(*button)),
+        BindingInput::MouseButton(button) => Some(ButtonControl::MouseButton(*button)),
         #[cfg(feature = "gamepad")]
-        BindingSource::GamepadButton(button) => Some(ButtonControl::GamepadButton(*button)),
+        BindingInput::GamepadButton(button) => Some(ButtonControl::GamepadButton(*button)),
         _ => None,
     }
 }
@@ -2774,7 +2776,7 @@ mod tests {
         assert!(bindings[0].tunable.is_some());
     }
 
-    /// An action bound only through analog sources has nothing `hold_or_toggle` can toggle, and
+    /// An action bound only through analog inputs has nothing `hold_or_toggle` can toggle, and
     /// says so rather than silently doing nothing.
     #[cfg(feature = "gamepad")]
     #[test]
@@ -2841,32 +2843,32 @@ mod tests {
         #[cfg(feature = "keyboard")]
         {
             assert_eq!(
-                BindingSource::Button(KeyCode::Space).channel_shape(),
+                BindingInput::Button(KeyCode::Space).channel_shape(),
                 ChannelShape::Button
             );
             assert_eq!(
-                BindingSource::Directional2(DirectionalButtons::wasd()).channel_shape(),
+                BindingInput::Directional2(DirectionalButtons::wasd()).channel_shape(),
                 ChannelShape::Axis2
             );
         }
 
         assert_eq!(
-            BindingSource::MouseMotion.channel_shape(),
+            BindingInput::MouseMotion.channel_shape(),
             ChannelShape::Delta2
         );
 
         #[cfg(feature = "gamepad")]
         {
             assert_eq!(
-                BindingSource::GamepadButton(GamepadButton::LeftTrigger2).channel_shape(),
+                BindingInput::GamepadButton(GamepadButton::LeftTrigger2).channel_shape(),
                 ChannelShape::Button
             );
             assert_eq!(
-                BindingSource::GamepadAxis(GamepadAxis::RightStickX).channel_shape(),
+                BindingInput::GamepadAxis(GamepadAxis::RightStickX).channel_shape(),
                 ChannelShape::Axis1
             );
             assert_eq!(
-                BindingSource::GamepadStick(Stick::Left).channel_shape(),
+                BindingInput::GamepadStick(Stick::Left).channel_shape(),
                 ChannelShape::Axis2
             );
         }
@@ -2900,7 +2902,7 @@ mod tests {
             GamepadButton::DPadRight,
         );
 
-        assert_eq!(mixed.up, ButtonControl::Key(KeyCode::KeyW));
+        assert_eq!(mixed.up, ButtonControl::PhysicalKey(KeyCode::KeyW));
         assert_eq!(
             mixed.down,
             ButtonControl::GamepadButton(GamepadButton::DPadDown)
@@ -2911,7 +2913,7 @@ mod tests {
         );
         assert_eq!(
             DirectionalButtons::wasd().up,
-            ButtonControl::Key(KeyCode::KeyW)
+            ButtonControl::PhysicalKey(KeyCode::KeyW)
         );
     }
 
@@ -2984,12 +2986,12 @@ mod tests {
         let (bindings, _) = builder.finish();
         assert_eq!(bindings.len(), 2);
         assert!(matches!(
-            bindings[0].source,
-            BindingSource::GamepadButton(GamepadButton::South)
+            bindings[0].input,
+            BindingInput::GamepadButton(GamepadButton::South)
         ));
         assert!(matches!(
-            bindings[1].source,
-            BindingSource::GamepadStick(Stick::Left)
+            bindings[1].input,
+            BindingInput::GamepadStick(Stick::Left)
         ));
     }
 

@@ -213,7 +213,7 @@ fn next(world: &mut World) {
     // Escape is kept out of it so that it can go on meaning "not this one". A control capture
     // ignores is a control that still works, which is the whole purpose of an exclusion list.
     let listening = world
-        .spawn(session.excluding([Control::Key(KeyCode::Escape)]))
+        .spawn(session.excluding([Control::PhysicalKey(KeyCode::Escape)]))
         .id();
     let mut walk = world.resource_mut::<Walk>();
     walk.listening = Some(listening);

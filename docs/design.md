@@ -509,14 +509,14 @@ an older pad's own labels.
 
 ## 8. Bindings
 
-### 8.1 Controls and sources
+### 8.1 Controls and inputs
 
 ```rust
-pub enum Control { Key(KeyCode), MouseButton(MouseButton), GamepadButton(GamepadButton),
+pub enum Control { PhysicalKey(KeyCode), MouseButton(MouseButton), GamepadButton(GamepadButton),
                    GamepadAxis(GamepadAxis), GamepadStick(Stick), MouseMotion }
 ```
 
-A `BindingSource` is one control or an arrangement of them. Composites carry a `BindingPart` naming
+A `BindingInput` is one control or an arrangement of them. Composites carry a `BindingPart` naming
 which piece of the whole a control drives:
 
 ```rust
@@ -525,18 +525,18 @@ pub enum BindingPart { Whole, Negative, Positive, Up, Down, Left, Right }
 
 `AxisButtons` makes a bipolar axis from two buttons; `DirectionalButtons` makes a direction from
 four (`DirectionalButtons::wasd()` is the named case); `Stick` and `MouseMove` are the analog
-sources, and both read as `BindingPart::Whole` — a stick has no part a player rebinds one of.
+inputs, and both read as `BindingPart::Whole` — a stick has no part a player rebinds one of.
 `GamepadStick` is `Control`'s only member naming what another one of its members names in part: a
 whole stick, for presentation, override application and capture, reporting `ChannelShape::Axis2` the
 way `MouseMotion` reports `Delta2`. Consumption does not follow it —
-`BindingSource::for_each_control` still decomposes a stick binding into its two `GamepadAxis` atoms,
+`BindingInput::for_each_control` still decomposes a stick binding into its two `GamepadAxis` atoms,
 which is the granularity `ConsumedControls` and reservation key on. `Control::family()` and
-`Control::shape()` classify one control, and `BindingSource::channel_shape` classifies an
+`Control::shape()` classify one control, and `BindingInput::channel_shape` classifies an
 arrangement.
 
 ### 8.2 The builder
 
-`bind::<A>(source)` returns a `BindingHandle` carrying every combinator. Chaining reads in
+`bind::<A>(input)` returns a `BindingBuilder` carrying every combinator. Chaining reads in
 evaluation order, which is the order the plan stores them.
 
 | Group | |
@@ -740,7 +740,7 @@ CaptureSession::for_mapping(&mapping)        // first slot
 CaptureSession::for_slot(&mapping, 1)        // the secondary
 CaptureSession::accepting(ControlClass::AnyButton)
     .within(DeviceFamily::KeyboardMouse)
-    .excluding([Control::Key(KeyCode::Escape)])
+    .excluding([Control::PhysicalKey(KeyCode::Escape)])
 ```
 
 The crate answers with a `ControlCaptured` or `CaptureRefused` event on that same entity and removes
@@ -813,7 +813,7 @@ what was in flight and re-arms require-reset. Followers riding a row that change
 `InputContextPlan<C>` is left untouched, so the next patch's revised defaults still reach a player
 who never touched that row.
 
-Three slot cases: a slot the defaults fill has its binding's source rewritten; a slot they left
+Three slot cases: a slot the defaults fill has its binding's input rewritten; a slot they left
 empty is filled by *copying* the binding beside it, so a secondary carries the same modifiers and
 conditions as the primary; and a slot the override no longer has takes its binding away. Copying
 only works where a binding reads one control, so a row that is one part of a composite is refused a
@@ -930,7 +930,7 @@ src/
   device.rs      L0  families and handles, pairing sets, gamepad calibration and brand resolution
   frame.rs       L1  the event queue, sampling, retirement
   action.rs          identity, intent, channel shape, value, phase, scratch
-  binding.rs         controls, sources, composites, modifiers, the context builder
+  binding.rs         controls, inputs, composites, modifiers, the context builder
   condition.rs       conditions and their verdicts and descriptors
   context.rs         declaring a context, its per-entity state, the reading params
   plan.rs            compilation, slot allocation, diagnostics

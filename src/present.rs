@@ -12,7 +12,7 @@
 //! player's language. This module is where both come from.
 //!
 //! ```ignore
-//! let control = Control::Key(KeyCode::KeyW);
+//! let control = Control::PhysicalKey(KeyCode::KeyW);
 //! control.name()             // "key/KeyW"  — stored, and the key a catalogue looks up
 //! control.fallback_label()   // "W"         — shown when there is no catalogue
 //! Control::from_name("key/KeyW")  // Some(control) — and None for anything else
@@ -363,7 +363,7 @@ impl Control {
     /// through [`from_name`](Control::from_name).
     ///
     /// ```ignore
-    /// Control::Key(KeyCode::Space).name()             // "key/Space"
+    /// Control::PhysicalKey(KeyCode::Space).name()             // "key/Space"
     /// Control::GamepadButton(GamepadButton::South).name()  // "pad/South"
     /// Control::GamepadStick(Stick::Left).name()             // "stick/Left"
     /// ```
@@ -373,7 +373,7 @@ impl Control {
         match self {
             #[cfg(feature = "keyboard")]
             // `KeyCode` has no unnamed variants, so the table covers it exhaustively.
-            Self::Key(key) => Cow::Borrowed(key_name(key).unwrap_or("key/unknown")),
+            Self::PhysicalKey(key) => Cow::Borrowed(key_name(key).unwrap_or("key/unknown")),
             #[cfg(feature = "gamepad")]
             Self::GamepadButton(button) => button_name(button).map_or_else(
                 || match button {
@@ -415,7 +415,7 @@ impl Control {
     pub fn from_name(name: &str) -> Option<Self> {
         #[cfg(feature = "keyboard")]
         if let Some(key) = key_from_name(name) {
-            return Some(Self::Key(key));
+            return Some(Self::PhysicalKey(key));
         }
         #[cfg(feature = "gamepad")]
         if let Some(button) = button_from_name(name) {
@@ -472,7 +472,7 @@ impl Control {
 
         match self {
             #[cfg(feature = "keyboard")]
-            Self::Key(key) => Cow::Borrowed(key_label(key).unwrap_or("Unknown Key")),
+            Self::PhysicalKey(key) => Cow::Borrowed(key_label(key).unwrap_or("Unknown Key")),
             #[cfg(feature = "gamepad")]
             Self::GamepadButton(button) => button_label(button).map_or_else(
                 || match button {
@@ -965,7 +965,7 @@ mod tests {
 
         #[cfg(feature = "keyboard")]
         for &key in ALL_KEYS {
-            round_trip(Control::Key(key));
+            round_trip(Control::PhysicalKey(key));
         }
         #[cfg(feature = "gamepad")]
         for &button in ALL_BUTTONS {
@@ -996,7 +996,7 @@ mod tests {
     fn no_two_controls_share_a_name() {
         let mut names = alloc::vec::Vec::new();
         #[cfg(feature = "keyboard")]
-        names.extend(ALL_KEYS.iter().map(|&key| Control::Key(key).name()));
+        names.extend(ALL_KEYS.iter().map(|&key| Control::PhysicalKey(key).name()));
         #[cfg(feature = "gamepad")]
         names.extend(
             ALL_BUTTONS
@@ -1046,22 +1046,28 @@ mod tests {
     #[cfg(all(feature = "keyboard", feature = "gamepad"))]
     #[test]
     fn what_is_stored_is_not_what_is_shown() {
-        let space = Control::Key(KeyCode::Space);
+        let space = Control::PhysicalKey(KeyCode::Space);
         assert_eq!(space.name(), "key/Space");
         assert_eq!(space.fallback_label(), "Space");
 
-        assert_eq!(Control::Key(KeyCode::KeyW).fallback_label(), "W");
+        assert_eq!(Control::PhysicalKey(KeyCode::KeyW).fallback_label(), "W");
         assert_eq!(
-            Control::Key(KeyCode::ShiftLeft).fallback_label(),
+            Control::PhysicalKey(KeyCode::ShiftLeft).fallback_label(),
             "Left Shift"
         );
-        assert_eq!(Control::Key(KeyCode::Digit1).fallback_label(), "1");
-        assert_eq!(Control::Key(KeyCode::ArrowUp).fallback_label(), "Up Arrow");
+        assert_eq!(Control::PhysicalKey(KeyCode::Digit1).fallback_label(), "1");
         assert_eq!(
-            Control::Key(KeyCode::NumpadAdd).fallback_label(),
+            Control::PhysicalKey(KeyCode::ArrowUp).fallback_label(),
+            "Up Arrow"
+        );
+        assert_eq!(
+            Control::PhysicalKey(KeyCode::NumpadAdd).fallback_label(),
             "Numpad +"
         );
-        assert_eq!(Control::Key(KeyCode::Backquote).fallback_label(), "`");
+        assert_eq!(
+            Control::PhysicalKey(KeyCode::Backquote).fallback_label(),
+            "`"
+        );
 
         // Named by position rather than by any one manufacturer's letters, and the two triggers
         // are told apart by what they are rather than by Bevy's numbering.
@@ -1136,7 +1142,7 @@ mod tests {
     fn nothing_is_left_without_a_label() {
         #[cfg(feature = "keyboard")]
         for &key in ALL_KEYS {
-            let label = Control::Key(key).fallback_label();
+            let label = Control::PhysicalKey(key).fallback_label();
             assert!(!label.is_empty(), "{key:?} has no label");
             assert_ne!(label, "Unknown Key", "{key:?} fell through the table");
         }
@@ -1256,7 +1262,7 @@ mod prompt_tests {
         assert_eq!(prompts[0].origin.name(), "key/Space");
         assert_eq!(
             prompts[0].origin.control(),
-            Some(Control::Key(KeyCode::Space))
+            Some(Control::PhysicalKey(KeyCode::Space))
         );
     }
 
@@ -1388,7 +1394,9 @@ mod prompt_tests {
         assert_eq!(labels(&prompts), ["S"]);
         assert_eq!(
             prompts[0].with,
-            vec![ControlOrigin::Ours(Control::Key(KeyCode::ControlLeft))]
+            vec![ControlOrigin::Ours(Control::PhysicalKey(
+                KeyCode::ControlLeft
+            ))]
         );
     }
 

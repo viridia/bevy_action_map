@@ -145,7 +145,7 @@
 //!
 //! The binding API above is a developer's model. Dead zones and response curves are
 //! implementation detail nobody rebinding "move forward" should have to think about. Marking a
-//! binding [`mappable`](binding::BindingHandle::mappable) adds it to a smaller model built for
+//! binding [`mappable`](binding::BindingBuilder::mappable) adds it to a smaller model built for
 //! presentation instead: a named [mapping] with an ordered list of slots ("Primary",
 //! "Secondary"), which a settings screen can walk without knowing anything else about your
 //! actions or bindings.
@@ -168,10 +168,10 @@
 //! | ------------- | :-----: | ----------------------------------------------------------------- |
 //! | `std`         |   yes   | The standard library. Off for `no_std` + `alloc` targets.         |
 //! | `libm`        |         | A software math backend, for `no_std` builds without `std`'s.     |
-//! | `keyboard`    |   yes   | Keyboard keys as a binding source.                                |
-//! | `mouse`       |   yes   | Mouse buttons and motion as a binding source.                     |
-//! | `gamepad`     |   yes   | Gamepad buttons and axes as a binding source.                     |
-//! | `touch`       |         | Touch input as a binding source.                                  |
+//! | `keyboard`    |   yes   | Keyboard keys as a binding input.                                |
+//! | `mouse`       |   yes   | Mouse buttons and motion as a binding input.                     |
+//! | `gamepad`     |   yes   | Gamepad buttons and axes as a binding input.                     |
+//! | `touch`       |         | Touch input as a binding input.                                  |
 //! | `bevy_reflect`|   yes   | Runtime reflection, needed to register custom modifiers and conditions. |
 //! | `serialize`   |         | `serde` support for saving and loading binding overrides.         |
 //! | `focus`       |         | Integration with `bevy_input_focus`: focus-driven contexts.       |
@@ -335,7 +335,7 @@ pub mod prelude {
     pub use crate::binding::{AxisButtons, DirectionalButtons};
     #[cfg(feature = "keyboard")]
     pub use bevy_input::keyboard::KeyCode;
-    // `MouseMove` is ungated because `BindingSource::MouseMotion` is.
+    // `MouseMove` is ungated because `BindingInput::MouseMotion` is.
     pub use crate::binding::{
         BindingPart, ButtonThreshold, CompassPoints, Control, DeadZone, MouseMove,
     };

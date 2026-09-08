@@ -393,7 +393,7 @@ impl<C: InputContext> InputContextState<C> {
         for binding in self.plan.bindings().iter().filter(|b| b.slot == slot) {
             let mut taken = None;
             let mut outranked = None;
-            binding.source.for_each_control(|control| {
+            binding.input.for_each_control(|control| {
                 if pairing.is_some_and(|p| p.owner_for(control.family()).is_some()) {
                     reachable = true;
                 }
@@ -665,7 +665,7 @@ pub enum ActionObstacle {
     /// A longer chord on one of this action's controls took it.
     ///
     /// `Ctrl+S` firing is why a plain `S` binding did not. See
-    /// [`with`](crate::binding::BindingHandle::with).
+    /// [`with`](crate::binding::BindingBuilder::with).
     Outranked {
         /// The control the longer chord took.
         control: crate::binding::Control,
@@ -1431,7 +1431,7 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
 
         // By part rather than by control, so that a composite answers once per direction and a
         // stick answers once rather than twice — the same view the presentation model takes.
-        binding.source.for_each_part(|part, control| {
+        binding.input.for_each_part(|part, control| {
             prompts.push(BoundControl {
                 action,
                 part,
@@ -1443,7 +1443,7 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
         // Claims are by control, because taking a composite takes every control in it.
         if binding.consume {
             binding
-                .source
+                .input
                 .for_each_control(|control| claims.push((control, action)));
         }
     }
@@ -3340,7 +3340,7 @@ mod tests {
         assert_eq!(
             report.1,
             Some(ActionObstacle::Consumed {
-                control: Control::Key(KeyCode::Escape),
+                control: Control::PhysicalKey(KeyCode::Escape),
                 by: "tests.taker",
             }),
             "and it says who took it"
@@ -3501,7 +3501,7 @@ mod tests {
         assert_eq!(
             state.why_not::<TypeS>(&consumed, None),
             ActionObstacle::Outranked {
-                control: crate::binding::Control::Key(KeyCode::KeyS),
+                control: crate::binding::Control::PhysicalKey(KeyCode::KeyS),
                 chord: 3,
             }
         );
