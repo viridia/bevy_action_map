@@ -48,10 +48,11 @@ use bevy_ecs::world::World;
 use bevy_reflect::{Reflect, ReflectDeserialize, ReflectSerialize};
 
 use crate::action::ChannelShape;
-use crate::binding::{BindingSpec, Control, MappedPart, apply_tunable_value, mapped_parts};
+use crate::binding::{BindingSpec, Control};
 use crate::capture::{ControlClass, RefusedReason, admissible};
 use crate::device::DeviceFamily;
 use crate::mapping::{ActionMapping, MappingKey, Tunable, TunableValue};
+use crate::mapping::{MappedPart, apply_tunable_value, mapped_parts};
 
 /// What a player did to one mapping.
 ///
@@ -868,7 +869,7 @@ pub(crate) fn rewrite(
     // rewritten the two no longer look alike and the link would be lost half way through the pass.
     let parts = mapped_parts(declared);
     let leaders: Vec<Option<usize>> = (0..declared.len())
-        .map(|index| crate::binding::leader_of(declared, index))
+        .map(|index| crate::mapping::leader_of(declared, index))
         .collect();
 
     for row in rows {
@@ -966,7 +967,7 @@ pub(crate) fn rewrite(
             // keyboard row shares nothing with a same-named gamepad tunable), and a key match alone
             // would move a keyboard override onto a gamepad binding that only happens to share text.
             if decl.key != tunable.key
-                || crate::binding::binding_family(&binding.input) != Some(tunable.family)
+                || crate::mapping::binding_family(&binding.input) != Some(tunable.family)
             {
                 continue;
             }
@@ -975,7 +976,7 @@ pub(crate) fn rewrite(
     }
 
     let current = current_rows(&variant, rows, context);
-    let current_tunables = crate::binding::tunables_of(&variant, context);
+    let current_tunables = crate::mapping::tunables_of(&variant, context);
     (variant, current, current_tunables, problems)
 }
 
@@ -1107,7 +1108,7 @@ fn current_rows(
     declared: &[ActionMapping],
     context: &'static str,
 ) -> Vec<ActionMapping> {
-    let derived = crate::binding::mappings_of(variant, context);
+    let derived = crate::mapping::mappings_of(variant, context);
     declared
         .iter()
         .map(|row| {
@@ -1119,7 +1120,7 @@ fn current_rows(
                         && current.action == row.action
                 })
                 .map(|current| ActionMapping {
-                    capacity: crate::binding::widest(current.capacity, row.capacity),
+                    capacity: crate::mapping::widest(current.capacity, row.capacity),
                     ..current.clone()
                 })
                 .unwrap_or_else(|| ActionMapping {

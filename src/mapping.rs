@@ -52,8 +52,8 @@ use alloc::vec::Vec;
 
 use bevy_ecs::world::World;
 
-use crate::action::{ActionId, ChannelShape};
-use crate::binding::{BindingPart, Control};
+use crate::action::{ActionId, ActionIntent, ChannelShape};
+use crate::binding::{BindingInput, BindingModifier, BindingPart, BindingSpec, Control};
 use crate::condition::ConditionDescriptor;
 use crate::device::DeviceFamily;
 use crate::inspect::OverrideStage;
@@ -362,6 +362,316 @@ fn gather_tunables(world: &World, stage: OverrideStage) -> Vec<Tunable> {
         .iter()
         .flat_map(|context| (context.tunables)(world, stage))
         .collect()
+}
+
+/// The more permissive of two capacities. `None` means unlimited.
+///
+/// Several bindings can feed one mapping, and each carries whatever its own combinator asked for.
+/// The mapping takes the widest: a narrower declaration on one binding says nothing about the
+/// mapping itself, only about a binding that happens to share the row.
+pub(crate) const fn widest(a: Option<usize>, b: Option<usize>) -> Option<usize> {
+    match (a, b) {
+        (None, _) | (_, None) => None,
+        (Some(a), Some(b)) if a >= b => Some(a),
+        (_, b) => b,
+    }
+}
+
+/// The binding whose mapping `bindings[index]` rides, if there is one.
+///
+/// A follower reads the same controls as the binding it follows, which is what makes matching on
+/// the input the whole of the resolution: it settles the family and the controls together, and it
+/// picks the right one of several bindings the target action may have. `None` is a plan-build error
+/// rather than a silent no-op — see `DiagnosticKind::FollowsNothing`.
+pub(crate) fn leader_of(bindings: &[BindingSpec], index: usize) -> Option<usize> {
+    let follows = bindings[index].follows?;
+    bindings
+        .iter()
+        .enumerate()
+        .find(|&(other, spec)| {
+            other != index
+                && spec.action == follows.action
+                && spec.input == bindings[index].input
+                // A binding with no mapping has none to ride, which rules out a chain of followers
+                // without needing to say so separately.
+                && spec.mapping.is_some()
+        })
+        .map(|(other, _)| other)
+}
+
+/// One control an authored [`BindingSpec`] contributes to one
+/// [`ActionMapping`](crate::mapping::ActionMapping) row.
+///
+/// This is a fact read off an existing binding, produced by [`mapped_parts`] rather than declared
+/// on its own. `binding` and `part` say exactly where it came from: which entry in the binding
+/// list, and which of that binding's parts (the whole thing, for a plain control; one direction,
+/// for a composite).
+///
+/// The order these arrive in is the order a mapping's slots fill, which is what makes the first one
+/// the primary.
+#[derive(Clone, Copy)]
+pub(crate) struct MappedPart {
+    pub(crate) key: crate::mapping::MappingKey,
+    pub(crate) family: crate::device::DeviceFamily,
+    /// Index into the binding list this was read from.
+    pub(crate) binding: usize,
+    pub(crate) part: BindingPart,
+    pub(crate) control: Control,
+}
+
+/// Every mapped part of every listed binding, in slot order.
+///
+/// Two different passes read this instead of walking `bindings` themselves: [`mappings_of`] turns
+/// it into the [`ActionMapping`](crate::mapping::ActionMapping) list a settings screen reads, and
+/// [`rewrite`](crate::overrides::rewrite) walks it to find exactly which binding and part to change
+/// when a player's override lands. The two must agree on what each row holds, or the player's new
+/// control ends up in a slot the screen is not showing it in.
+pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
+    let mut parts = Vec::new();
+    for (index, binding) in bindings.iter().enumerate() {
+        let Some(declaration) = binding.mapping else {
+            continue;
+        };
+        let prefix = declaration.prefix.unwrap_or(binding.path);
+        binding.input.for_each_part(|part, control| {
+            parts.push(MappedPart {
+                key: crate::mapping::MappingKey::new(prefix, part),
+                family: control.family(),
+                binding: index,
+                part,
+                control,
+            });
+        });
+    }
+    parts
+}
+
+/// The `ActionMapping` list for one binding list: one row per mappable part.
+///
+/// Called on the bindings a context declares (from `mappings`) and again, unchanged, on the
+/// rewritten bindings a variant plan holds once an override has been applied (from
+/// `overrides::rewrite`) — same rule either way, so that a row built one way and a row rewritten
+/// another can never disagree about what is bound.
+///
+/// Empty for a game that declares none, which is the default and costs nothing.
+///
+/// Bindings that derive the same key in the same family for the same action are merged into one
+/// mapping holding both controls, because that is what a player sees: one row for Jump with a
+/// primary and a secondary, not two rows both called Jump. Merging is keyed by family as well as
+/// by name, so the keyboard and gamepad rows stay separate; and by action, so two different actions
+/// landing on one name is still reported as a collision.
+pub(crate) fn mappings_of(
+    bindings: &[BindingSpec],
+    context: &'static str,
+) -> Vec<crate::mapping::ActionMapping> {
+    let mut mappings: Vec<crate::mapping::ActionMapping> = Vec::new();
+    for entry in mapped_parts(bindings) {
+        let binding = &bindings[entry.binding];
+        // `mapped_parts` yields nothing for a binding without one.
+        let Some(declaration) = binding.mapping else {
+            continue;
+        };
+
+        if let Some(mapping) = mappings.iter_mut().find(|mapping| {
+            mapping.key == entry.key
+                && mapping.family == entry.family
+                && mapping.action == binding.action
+        }) {
+            mapping.slots.push(entry.control);
+            mapping.capacity = widest(mapping.capacity, declaration.capacity);
+            // Bindings that disagree about this are a plan-build error, so the first one
+            // wins here only so that the value is deterministic while the context is
+            // being refused.
+            continue;
+        }
+
+        mappings.push(crate::mapping::ActionMapping {
+            key: entry.key,
+            action: binding.action,
+            action_path: binding.path,
+            category: binding.category,
+            // A part of a composite holds a button, whatever the composite as a whole
+            // reports; a whole binding holds whatever its own input does.
+            accepts: match entry.part {
+                BindingPart::Whole => binding.input.channel_shape(),
+                _ => ChannelShape::Button,
+            },
+            family: entry.family,
+            slots: alloc::vec![entry.control],
+            capacity: declaration.capacity,
+            rebind_policy: declaration.rebind_policy,
+            context,
+            followers: Vec::new(),
+        });
+    }
+
+    // A mapping is never narrower than the defaults it already holds, so declaring two
+    // bindings is enough on its own to make a two-slot row — nobody has to also say "2".
+    for mapping in &mut mappings {
+        mapping.capacity = widest(mapping.capacity, Some(mapping.slots.len()));
+    }
+
+    // A second pass rather than folded into the first: a follower's row is found by the
+    // *leader's* declaration, and `leader_of` wants the whole binding list resolved, not just
+    // whatever has been pushed to `mappings` so far.
+    for (index, binding) in bindings.iter().enumerate() {
+        let Some(leader_index) = leader_of(bindings, index) else {
+            // No binding to ride, or `follows` was not declared at all — either way `diagnose`
+            // owns reporting it, and this pass has nothing to attach.
+            continue;
+        };
+        let leader = &bindings[leader_index];
+        // `leader_of` only returns a binding whose `mapping` is `Some`, so this always matches.
+        let Some(declaration) = leader.mapping else {
+            continue;
+        };
+        let prefix = declaration.prefix.unwrap_or(leader.path);
+        let condition = crate::condition::describe(&binding.conditions);
+        leader.input.for_each_part(|part, control| {
+            let key = crate::mapping::MappingKey::new(prefix, part);
+            if let Some(mapping) = mappings.iter_mut().find(|mapping| {
+                mapping.key == key
+                    && mapping.family == control.family()
+                    && mapping.action == leader.action
+            }) {
+                // A row with two slots is two leader bindings, and Disasteroids' `Afterburner`
+                // follows both of Thrust's — one binding per key, same follower action either
+                // way. Without this it would be pushed once per slot it follows, and a screen
+                // would draw the same sub-row twice.
+                if !mapping
+                    .followers
+                    .iter()
+                    .any(|follower| follower.action == binding.action)
+                {
+                    mapping.followers.push(crate::mapping::Follower {
+                        action: binding.action,
+                        action_path: binding.path,
+                        condition,
+                    });
+                }
+            }
+        });
+    }
+    mappings
+}
+
+/// The `Tunable` list for one binding list: one row per declared tunable.
+///
+/// Called the same way `mappings_of` is — on a context's own bindings, and again on the rewritten
+/// bindings a variant plan holds once a tunable override has been applied — so a row built one way
+/// and a row rewritten another never disagree about what value is live. The current value is read
+/// straight off the modifier it targets rather than kept separately, for the same reason: a row and
+/// the binding it describes cannot then drift apart.
+pub(crate) fn tunables_of(
+    bindings: &[BindingSpec],
+    context: &'static str,
+) -> Vec<crate::mapping::Tunable> {
+    let mut tunables: Vec<crate::mapping::Tunable> = Vec::new();
+    for binding in bindings {
+        let Some(decl) = &binding.tunable else {
+            continue;
+        };
+        let family = binding_family(&binding.input)
+            .expect("a tunable's binding must resolve to at least one control");
+        // Several bindings may declare the same key — `hold_or_toggle` reaching a primary and a
+        // secondary key is the ordinary case — and they are one row to the player, not two. Every
+        // sharer's value is kept in step by `rewrite` (below), so the first one found stands for
+        // the whole group.
+        if tunables
+            .iter()
+            .any(|tunable| tunable.key == decl.key && tunable.family == family)
+        {
+            continue;
+        }
+        tunables.push(crate::mapping::Tunable {
+            key: decl.key,
+            action: binding.action,
+            action_path: binding.path,
+            category: binding.category,
+            family,
+            context,
+            value: current_tunable_value(&binding.modifiers[decl.modifier_index], decl.default),
+        });
+    }
+    tunables
+}
+
+/// The family a binding's input belongs to, for a binding that resolves to a single control — a
+/// tunable is only ever declared on one of those, never a composite.
+pub(crate) fn binding_family(input: &BindingInput) -> Option<crate::device::DeviceFamily> {
+    let mut family = None;
+    input.for_each_part(|_, control| family = Some(control.family()));
+    family
+}
+
+/// Whether this binding's raw value is always a plain press — `ActionValue::Bool` every tick, never
+/// a continuous fraction — which is what `hold_or_toggle` needs to be safe: toggling a value that
+/// carries real analog information would flatten it.
+///
+/// A key or a mouse button always qualifies — neither has anything but a press to report. A gamepad
+/// button is the interesting case (R2.10): the same control reads as `Bool` when the action wants
+/// a plain press and as a continuous `Axis1` fraction otherwise (see `BindingInput::GamepadButton`
+/// in `eval.rs`), so it qualifies only when `intent` is `ActionIntent::Button`. Every composite,
+/// axis or motion input reports something other than `Bool` outright and never qualifies.
+pub(crate) fn always_reports_bool(input: &BindingInput, intent: ActionIntent) -> bool {
+    #[cfg(not(feature = "gamepad"))]
+    let _ = intent;
+    match input {
+        #[cfg(feature = "keyboard")]
+        BindingInput::Button(_) => true,
+        #[cfg(feature = "mouse")]
+        BindingInput::MouseButton(_) => true,
+        #[cfg(feature = "gamepad")]
+        BindingInput::GamepadButton(_) => intent == ActionIntent::Button,
+        _ => false,
+    }
+}
+
+/// Writes a tunable's new value into the modifier it targets — the write counterpart of
+/// [`current_tunable_value`], used when an override is applied. Silently does nothing on a shape
+/// mismatch, for the same reason that function falls back to the default: unreachable through the
+/// crate's own API, and cheap insurance if that ever stops being true.
+pub(crate) fn apply_tunable_value(
+    modifier: &mut BindingModifier,
+    value: crate::mapping::TunableValue,
+) {
+    match (modifier, value) {
+        (
+            BindingModifier::DeadZone(dead_zone),
+            crate::mapping::TunableValue::Range { value, .. },
+        ) => {
+            dead_zone.lower = value;
+        }
+        (BindingModifier::Toggle { active }, crate::mapping::TunableValue::Bool(value)) => {
+            *active = value;
+        }
+        _ => {}
+    }
+}
+
+/// Reads a tunable's live value back off the modifier it targets — the bounds travel from the
+/// declared default, since a player adjusts the value but never the range it moves within.
+fn current_tunable_value(
+    modifier: &BindingModifier,
+    default: crate::mapping::TunableValue,
+) -> crate::mapping::TunableValue {
+    match (modifier, default) {
+        (
+            BindingModifier::DeadZone(dead_zone),
+            crate::mapping::TunableValue::Range { min, max, .. },
+        ) => crate::mapping::TunableValue::Range {
+            value: dead_zone.lower,
+            min,
+            max,
+        },
+        (BindingModifier::Toggle { active }, crate::mapping::TunableValue::Bool(_)) => {
+            crate::mapping::TunableValue::Bool(*active)
+        }
+        // Unreachable through the crate's own API: `declare_tunable` always pairs a modifier with
+        // the value shape that targets it. Falling back to the default rather than panicking is
+        // cheap insurance against a future tunable-declaring method getting that pairing wrong.
+        _ => default,
+    }
 }
 
 #[cfg(all(test, feature = "keyboard"))]

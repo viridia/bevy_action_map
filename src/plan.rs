@@ -384,7 +384,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
         // binding of that action reads this" and "one does, and has no mapping to lend". The second
         // is worth its own diagnostic because the fix is on the *other* binding.
         if let Some(follows) = binding.follows
-            && crate::binding::leader_of(bindings, index).is_none()
+            && crate::mapping::leader_of(bindings, index).is_none()
         {
             let reads_the_same = bindings.iter().enumerate().any(|(other, spec)| {
                 other != index && spec.action == follows.action && spec.input == binding.input
@@ -435,7 +435,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
         }
 
         if let Some(decl) = &binding.tunable
-            && let Some(family) = crate::binding::binding_family(&binding.input)
+            && let Some(family) = crate::mapping::binding_family(&binding.input)
         {
             match tunable_keys.entry((family, decl.key)) {
                 alloc::collections::btree_map::Entry::Vacant(entry) => {
@@ -672,7 +672,7 @@ impl<C> Plan<C> {
             if !matches!(decl.default, crate::mapping::TunableValue::Bool(_)) {
                 continue;
             }
-            let Some(family) = crate::binding::binding_family(&binding.input) else {
+            let Some(family) = crate::mapping::binding_family(&binding.input) else {
                 continue;
             };
             tunable_groups

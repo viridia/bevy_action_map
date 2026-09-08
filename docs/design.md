@@ -930,7 +930,10 @@ src/
   device.rs      L0  families and handles, pairing sets, gamepad calibration and brand resolution
   frame.rs       L1  the event queue, sampling, retirement
   action.rs          identity, intent, channel shape, value, phase, scratch
-  binding.rs         controls, inputs, composites, modifiers, the context builder
+  binding.rs         re-exports the three below, which are private to it
+    control.rs       controls, inputs, composites, parts, the conversion into a binding input
+    modifier.rs      dead zones, compasses, curves, toggles, and the value math they apply
+    builder.rs       the declaration API, and the BindingSpec record it writes
   condition.rs       conditions and their verdicts and descriptors
   context.rs         declaring a context, its per-entity state, the reading params
   plan.rs            compilation, slot allocation, diagnostics
@@ -938,7 +941,7 @@ src/
   event.rs           Fired/Started/Completed/Canceled, class bindings
   player.rs          the Paired component
   join.rs        L3  is_claimed
-  mapping.rs         mappings, slots, capacity, tunables
+  mapping.rs         mappings, slots, capacity, tunables, and their derivation from bindings
   overrides.rs       the diff structure, applying it, serialization
   preset.rs          a named Overrides and its builder
   capture.rs         capture sessions, reserved controls, conflict detection
