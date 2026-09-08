@@ -1,5 +1,7 @@
 # bevy_action_map
 
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 A comprehensive input action manager for [Bevy](https://bevyengine.org).
 
 Declare what your game reacts to, bind whatever devices should drive it, and let players change their minds later.
@@ -353,4 +355,11 @@ Two more, for readers who want the comparison rather than the specification:
 
 ## License
 
-Dual-licensed under MIT or Apache-2.0, at your option, as declared in [Cargo.toml](./Cargo.toml).
+Dual-licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](./LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](./LICENSE-MIT))
+
+at your option. Unless you explicitly state otherwise, any contribution intentionally submitted for
+inclusion in this crate by you shall be dual-licensed as above, without any additional terms or
+conditions.
