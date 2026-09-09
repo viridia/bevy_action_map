@@ -20,6 +20,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+# Editor and agent configuration, development tooling, the README's screenshot, and the process
+# document are repository furniture rather than part of the crate. `images/` is the expensive one: a
+# single screenshot outweighs everything under `assets/`. `tools/` is already skipped for carrying
+# its own manifest — named here so that stays true if it ever stops being a package of its own.
+exclude = [".DS_Store", ".claude/", ".vscode/", "images/", "scripts/", "tools/", "CLAUDE.md"]
 
 [lints]
 workspace = true
