@@ -47,7 +47,9 @@ in `docs/decisions.md`, where each says what reversing it would cost.
 
 ### Never built
 
-- **Glyphs.** Identifiers are defined; no image is resolved.
+- **Glyphs.** The art is in `assets/input_prompts/` and the identifier scheme holds against it, but
+  no type names a glyph and nothing resolves one. R18.4 specifies the identifier; no code declares
+  it.
 - **Writing a saved override set to a file.** The crate serializes and deserializes one; where the
   bytes go was always the app's decision — chunk 92.
 - **A snapshot of a context's state.** The shape is designed and written down; nothing has taken one
@@ -172,20 +174,94 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 
 ---
 
-## Phase VII — wrong answers from an ordinary build
+What is left, in semantic groups ordered roughly by priority. The order is a guide rather than a
+schedule: any chunk may be reordered once the one before it has been read, and a chunk's number is
+its identity rather than its position.
 
-The live tier of [docs/issues.md](./docs/issues.md): no unusual configuration, no feature nobody has
-used, and the answer is still wrong. Six more of its entries are behind this one and not yet
-routed.
+## Defects
+
+Wrong answers from code that has already shipped. The full register is
+[docs/issues.md](./docs/issues.md), which also holds the findings that carry no chunk and say
+so per entry.
+
+### 108. Focus loss, regated
+
+R16.1 (`docs/issues.md` 1013): `RawEvent::FocusLost` (`frame.rs:93`) exists only under this crate's
+own `keyboard` feature, but the signal behind it — `bevy_input`'s `KeyboardFocusLost` — is unified
+on by `bevy_window`'s own `Cargo.toml` in any build with a real window, independent of what this
+crate requests. A `mouse`-and-`gamepad` build (no `keyboard`) has the event and no code reading it,
+so a mouse button held through alt-tab never clears — R16.1's "all held controls" MUST, unmet in
+exactly the configuration that can reach it.
+
+- **A regate, not new plumbing.** `RawEvent::FocusLost` and its `control()`/`device()` arms in
+  `frame.rs`, the collecting system at `frame.rs:301`, and the three match arms in
+  `eval.rs`/`capture.rs` move from `#[cfg(feature = "keyboard")]` to
+  `#[cfg(any(feature = "keyboard", feature = "mouse"))]`. The two `.clear()` calls inside stay
+  independently gated on their own feature, same as today.
+- **Verification:** a headless `App` built `--no-default-features --features mouse,gamepad,std,...`
+  that fires `KeyboardFocusLost` and confirms a held mouse button comes back unheld — the probe this
+  finding never got. `scripts/verify.sh --full`'s eight-combination sweep only `cargo check`s each
+  shape, so it would not have caught this; this chunk's test is what actually runs the `mouse`-
+  without-`keyboard` case.
+- **Not doing: anything about gamepad.** A gamepad's held state already clears on its own
+  `Connection(Disconnected)` event (`eval.rs:422-426`); focus loss carries no gamepad information
+  and needs none.
 
 ---
 
-## Phase IX — the second example
+## Devices and players
 
 Disasteroids is one player reading one set of bindings, so everything about device pairing is
-invisible to it. Split Friction is the example that has to answer *which* device drove an action.
-Two smaller examples sit here for the same reason rather than the same subject: each is the first
-caller a shipped mechanism has ever had, and neither is Split Friction's.
+invisible to it. Split Friction is the example that has to answer *which* device drove an
+action, and most of this section is what it needs.
+
+### 72. Device identity, and a pairing that survives a restart
+
+R11.5: stable persistent device identity, distinct from the runtime handle, and Split Friction
+putting each player back on the device they had.
+
+- **Now carries calibration's persistence too.** Chunk 22 built the measuring and the applying keyed
+  to the runtime handle, which is exactly what a persistent identity would key instead. This chunk
+  carries `GamepadCalibration` across a restart alongside the pairing, or says why the two want
+  different storage.
+- **And the calibration step itself**, which has no in-tree caller: `CalibrationSampling` is driven
+  end to end by tests but by no screen. A calibration a player performs and then loses on quit is
+  worth little, so the screen and the persistence are one feature.
+- **Verified by:** playing it, quitting, relaunching — the same protagonist on the same device
+  without anyone pressing anything — and by unplugging a pad and plugging it back in.
+
+### 103. A disconnect signal and a reconnect prompt
+
+R15.5 (MUST) (`docs/issues.md` 1020): on device loss the owning player must be identifiable
+(already true), in-flight actions canceled (already true), **and a signal raised so the app can
+pause and show a reconnect prompt** (nothing today).
+
+- **Split Friction.** A pad disconnects mid-game; the app pauses and shows "player 2, reconnect to
+  resume" until the pad (or another) reappears.
+- **What the signal is** is this chunk's open question: Bevy's own `GamepadConnectionEvent` read
+  directly, or something this crate re-raises so a game does not have to know the pairing's own
+  bookkeeping to react correctly.
+
+### 104. Named device-requirement sets at the join screen
+
+R15.7 (SHOULD) (`docs/issues.md` 1042, split from 1020): named device-requirement sets with required
+and optional devices — nothing exists under this name anywhere in `src/`.
+
+- **Split Friction's join screen**, validating "this player needs a gamepad" versus "keyboard is
+  fine" before a pane is handed a protagonist, rather than silently accepting any device.
+
+### 105. Auto-switching a player's active scheme
+
+R15.8 (SHOULD) (`docs/issues.md` 1043, split from 1020): auto-switching a player's active scheme on
+input, with hysteresis — nothing exists, and R18.6's withdrawal names this as the one thing that
+would revive it.
+
+- **Split Friction.** A player on a pad picks up the keyboard instead; control follows without a
+  menu trip. R18.6 stays withdrawn unless this chunk's hysteresis turns out not to hold up under
+  real play.
+- **`docs/issues.md` 1044 (R15.9, opaque platform-user identity)** stays unrouted alongside this —
+  floated for Split Friction too, but nothing to show without a real platform SDK, and not yet worth
+  a faked stub the way chunk 42 fakes a backend.
 
 ### 71. Per-player presets
 
@@ -204,107 +280,49 @@ that the point is the per-player selection, not the preset's own content.
 - **Verified by:** playing it — each pane selects independently, and the other pane's bindings do
   not move.
 
-### 72. Device identity, and a pairing that survives a restart
-
-R11.5: stable persistent device identity, distinct from the runtime handle, and Split Friction
-putting each player back on the device they had.
-
-- **Now carries calibration's persistence too.** Chunk 22 built the measuring and the applying keyed
-  to the runtime handle, which is exactly what a persistent identity would key instead. This chunk
-  carries `GamepadCalibration` across a restart alongside the pairing, or says why the two want
-  different storage.
-- **And the calibration step itself**, which has no in-tree caller: `CalibrationSampling` is driven
-  end to end by tests but by no screen. A calibration a player performs and then loses on quit is
-  worth little, so the screen and the persistence are one feature.
-- **Verified by:** playing it, quitting, relaunching — the same protagonist on the same device
-  without anyone pressing anything — and by unplugging a pad and plugging it back in.
-
-### 73. A key rendered through a catalogue
-
-Every `fallback_label` call in tree is unconditional: nineteen sites across `examples/`, not one
-going through a catalogue. The crate's half of R19.14 is done, but the claim that those names are
-*keys a localized game looks up* has never been exercised.
-
-- **In an example, not the crate.** Rendering is the app's business.
-- **Disasteroids, not Split Friction.** The keys being resolved are the settings screen's own
-  binding labels, so the settings screen that already renders them is where a catalogue lookup
-  replaces the unconditional `fallback_label` call — not a new UI.
-- **What it is:** Disasteroids' renderer reading a catalogue file, a second locale to prove it
-  switches, and the fallback kept for the key the catalogue misses.
-- **Not fluent.** `bevy_fluent` is pinned to an older Bevy, and fluent's own value — plurals,
-  gender, bidi — is orthogonal to whether our keys resolve, since they resolve to nouns. The one
-  thing it would genuinely test is whether our key syntax collides with its identifier grammar, and
-  that is a reading of the spec rather than a dependency.
-- **Review surface:** whether the key is the one an author would actually want to type.
-
-### 83. Rewind, without the network
-
-`InputContextState`'s own comment says a rollback snapshot is the two tables plus the dirty bits,
-and `docs/design.md` §6 says the same. Nothing has ever taken one. A ring buffer of snapshots and
-the `InputFrame`s that followed each, with a key that rewinds N ticks and re-simulates forward, is
-rollback's three requirements — snapshot, restore, deterministic re-simulation — with the
-network removed, which was the expensive part.
-
-- **The recorded transition log and the re-simulated one must match**, which is the assertion doing
-  the real work. The visible rewind is what makes it a chunk rather than a test.
-- **The held-state question is narrower than the deferred row made it sound.**
-  `HashSet<MouseButton>` and `HashMap<GamepadButton, ButtonReading>` were called an obstacle to
-  snapshotting, but `bevy_platform`'s maps default to `FixedHasher`, so iteration order is
-  deterministic across runs and processes rather than randomly seeded. What is left is that order
-  depends on insertion history, which bites only a snapshot serialized by iterating — and not one
-  restored by value. This chunk says which kind it needs, and `indexmap` is the tool if the answer
-  is the former.
-- **The per-slot read it needs, `FixedBitSet::contains`, is already there and ungated** — `dirty`
-  moved off the hand-rolled `DirtySet` to `fixedbitset`, which carries the method as a stock part of
-  the type rather than something built for this chunk's sake.
-- **What stays deferred:** injection and reconciliation — feeding a remote player's frame, and
-  disagreeing with the authority about what happened. Those want a network; rewinding does not.
-- **Split if it grows.** Making the state snapshot-able with a differential test is separable from
-  the example that rewinds, and ground rule 1 says that split happens before the code, not during.
-- **Depends on chunk 95.** The visible rewind reuses its Pong base rather than a third vehicle — the
-  same paddle-and-ball simulation snapshotted and re-simulated forward, with the recorded and
-  re-simulated transition logs compared. Chunk 42 will already have proven the base can host one
-  grafted concept without disturbing its own.
-- **Check whether `docs/issues.md` 1041 belongs here.** R9.9's pumped sampling mode (stopping
-  `InputFramePlugin` from scheduling its own sampling) was floated as a fit for a rewind demo, on
-  the theory that re-simulating forward wants control over exactly when a frame is sampled. Confirm
-  that before routing it here — if re-simulation does not actually need to suppress live sampling,
-  1041 stays unrouted rather than getting a home it does not need.
-
-### 92. Persisting bindings through `bevy_settings`
-
-Chunk 23 wired `Overrides` into Disasteroids' settings screen; nothing has ever written one to disk.
-"Writing a saved override set to a file" is still listed as never built, the destination left to the
-app on purpose (D53). `bevy_settings` is that destination: register `SavedOverrides` (D59) as a
-`SettingsGroup` resource and let it merge into the game's one settings file alongside whatever else
-the app declares there.
-
-- **The mechanism is validated, not open.** A scratch test against
-  `bevy_settings::resources_to_toml` / `apply_settings_to_world` confirmed the whole path
-  round-trips correctly: `SavedOverrides`'s own fields are walked structurally (no stutter, no
-  bevy_settings change needed), and its nested `SavedRow`/`SavedTunableValue` fields bridge through
-  `#[reflect(Serialize, Deserialize)]` to their own hand-written encoding rather than bevy_reflect's
-  generic enum shape. This crate's own
-  `overrides::tests::persistence::a_saved_override_set_round_trips_through_reflect` pins the same
-  contract without a `bevy_settings` dependency. This chunk is the remaining wiring, not a risk to
-  chase.
-- **Load at startup, save on Confirm.** `apply_and_close` in `settings.rs` already applies a pending
-  `Overrides` to the running game; this chunk adds a startup system calling `resolve_saved` against
-  the loaded `SavedOverrides` resource before the first `apply_overrides`, and a `save_overrides`
-  call on Confirm feeding back into it.
-- **A dev-dependency of the examples, not the crate.** This crate publishes `SavedOverrides` and no
-  opinion about where the bytes go (D53); `bevy_settings` is wired into `examples/disasteroids`
-  only.
-- **Not doing:** per-profile or per-scheme settings groups (R17.4), and anything Split Friction's
-  two protagonists need — chunk 71 owns per-player preset selection once a settings group exists to
-  read and write, this chunk owns getting one player's set to and from disk at all.
-- **Retires the "Writing a saved override set to a file" row** in "Never built".
-- **Verified by:** rebinding a control, quitting Disasteroids, relaunching it, and finding the
-  binding still applied.
-
 ---
 
-## Unscheduled by phase
+## Bindings and conditions
+
+What a binding can name, and when it counts as firing. Each of these is a gap a game runs into
+rather than a defect in what exists.
+
+### 94b. Either modifier
+
+R12.3: a chord's modifier should be able to say "either Ctrl", as one binding rather than two.
+`with` takes a single `ButtonControl`, so a game wanting either `LeftCtrl` or `RightCtrl` to arm a
+chord writes both bindings by hand today. R4.10 already assigns this to the chord mechanism by name,
+so the requirement has a destination in `Requirements.md` and, until this chunk, none in the plan.
+
+- **Self-contained**, and independent of 94c — a different corner of the same requirements
+  section, not a shared mechanism.
+- **Not doing: a mappable either.** The either-ness is declared in the chord's modifier at bind
+  time; capture reads one physical keypress and can only ever answer with `LeftCtrl` or `RightCtrl`,
+  never both. A row built this way is not something a rebind screen can produce, so it stays a
+  `Fixed` binding — a game wanting a rebindable "either" still writes two mappable rows by hand.
+
+### 94c. A platform modifier
+
+R12.4: `Cmd` on macOS should be usable as `Ctrl` everywhere else, as a named modifier resolved at
+binding time rather than something every cross-platform game re-derives by hand.
+
+- **Resolved at binding time, not read time.** The name a game binds does not change per platform;
+  what it expands to does, once, when the plan is built — not on every frame the control is read.
+- **Self-contained**, and independent of 94b.
+
+### 98. Pointer position, and a mouse-controlled paddle
+
+R13.1, R13.4, R13.6 (`docs/issues.md` 1015): the frame carries mouse *motion* and no absolute
+position, so a binding cannot target where the pointer is at all.
+
+- **Depends on chunk 95.** The demo is a Pong variant, and the simplest one there is: a paddle whose
+  position follows the mouse's Y coordinate directly, rather than reading a delta and integrating
+  it.
+- **Not doing: split-screen viewport mapping (R15.10).** That is Split Friction's problem once this
+  mechanism exists, not this chunk's — a second pointer meaning "position within my own camera's
+  viewport" is a follow-on, not part of proving position exists at all.
+- **Review surface:** whether an absolute position needs the same dead-zone/rescale modifier chain
+  a delta does, or is exempt as a different kind of channel entirely.
 
 ### 33. Conditions that read other actions
 
@@ -349,6 +367,132 @@ control the player was already holding.
 - **Why it exists as its own chunk.** A `MUST` whose only record of a destination was in the log is
   exactly what ground rule 5 forbids.
 
+### 102. A global timing scale
+
+R20.4 (`docs/issues.md` 1045, split from 1021): every hold duration, tap window and repeat rate
+globally scalable by one user preference, where today only per-mapping tunables exist.
+
+- **Disasteroids' settings screen**, as an accessibility slider — "input timing ×1.5" — applied
+  across every declared hold/tap/repeat value at once rather than one at a time.
+- **Crate work, not only an example.** Scaling every timing by hand from the app side is exactly
+  what R20.4 says a game should not have to do, so the scale factor's application point is a design
+  question for this chunk rather than something the example alone can supply.
+
+---
+
+## Presentation and prompts
+
+What the player is shown, once the crate knows what is bound.
+
+### 73. A key rendered through a catalogue
+
+Every `fallback_label` call in tree is unconditional: nineteen sites across `examples/`, not one
+going through a catalogue. The crate's half of R19.14 is done, but the claim that those names are
+*keys a localized game looks up* has never been exercised.
+
+- **In an example, not the crate.** Rendering is the app's business.
+- **Disasteroids, not Split Friction.** The keys being resolved are the settings screen's own
+  binding labels, so the settings screen that already renders them is where a catalogue lookup
+  replaces the unconditional `fallback_label` call — not a new UI.
+- **What it is:** Disasteroids' renderer reading a catalogue file, a second locale to prove it
+  switches, and the fallback kept for the key the catalogue misses.
+- **Not fluent.** `bevy_fluent` is pinned to an older Bevy, and fluent's own value — plurals,
+  gender, bidi — is orthogonal to whether our keys resolve, since they resolve to nouns. The one
+  thing it would genuinely test is whether our key syntax collides with its identifier grammar, and
+  that is a reading of the spec rather than a dependency.
+- **Review surface:** whether the key is the one an author would actually want to type.
+
+### 101. Semantic control aliases for a console confirm swap
+
+R4.4 (SHOULD) (`docs/issues.md` 1040): semantic aliases (`Submit`, `Cancel`, `MenuLeft`) resolving
+per device family, load-bearing for R18.7's console confirm-button swap rather than merely
+convenient.
+
+- **Disasteroids' settings screen**, which already does directional navigation (29): the same screen
+  reads `Cancel` rather than a hard-coded key, so its on-screen prompt says the right thing on
+  keyboard and on a pad without the app hand-rolling the swap itself.
+- **Not doing:** a general aliasing mechanism beyond the three names R4.4 asks for — this proves the
+  concept the requirement names, not a configurable alias table.
+
+---
+
+## Persistence and snapshots
+
+Both take the same state out of a context and put it back: one to a file between runs, one to
+memory between ticks.
+
+### 92. Persisting bindings through `bevy_settings`
+
+Chunk 23 wired `Overrides` into Disasteroids' settings screen; nothing has ever written one to disk.
+"Writing a saved override set to a file" is still listed as never built, the destination left to the
+app on purpose (D53). `bevy_settings` is that destination: register `SavedOverrides` (D59) as a
+`SettingsGroup` resource and let it merge into the game's one settings file alongside whatever else
+the app declares there.
+
+- **The mechanism is validated, not open.** A scratch test against
+  `bevy_settings::resources_to_toml` / `apply_settings_to_world` confirmed the whole path
+  round-trips correctly: `SavedOverrides`'s own fields are walked structurally (no stutter, no
+  bevy_settings change needed), and its nested `SavedRow`/`SavedTunableValue` fields bridge through
+  `#[reflect(Serialize, Deserialize)]` to their own hand-written encoding rather than bevy_reflect's
+  generic enum shape. This crate's own
+  `overrides::tests::persistence::a_saved_override_set_round_trips_through_reflect` pins the same
+  contract without a `bevy_settings` dependency. This chunk is the remaining wiring, not a risk to
+  chase.
+- **Load at startup, save on Confirm.** `apply_and_close` in `settings.rs` already applies a pending
+  `Overrides` to the running game; this chunk adds a startup system calling `resolve_saved` against
+  the loaded `SavedOverrides` resource before the first `apply_overrides`, and a `save_overrides`
+  call on Confirm feeding back into it.
+- **A dev-dependency of the examples, not the crate.** This crate publishes `SavedOverrides` and no
+  opinion about where the bytes go (D53); `bevy_settings` is wired into `examples/disasteroids`
+  only.
+- **Not doing:** per-profile or per-scheme settings groups (R17.4), and anything Split Friction's
+  two protagonists need — chunk 71 owns per-player preset selection once a settings group exists to
+  read and write, this chunk owns getting one player's set to and from disk at all.
+- **Retires the "Writing a saved override set to a file" row** in "Never built".
+- **Verified by:** rebinding a control, quitting Disasteroids, relaunching it, and finding the
+  binding still applied.
+
+### 83. Rewind, without the network
+
+`InputContextState`'s own comment says a rollback snapshot is the two tables plus the dirty bits,
+and `docs/design.md` §6 says the same. Nothing has ever taken one. A ring buffer of snapshots and
+the `InputFrame`s that followed each, with a key that rewinds N ticks and re-simulates forward, is
+rollback's three requirements — snapshot, restore, deterministic re-simulation — with the
+network removed, which was the expensive part.
+
+- **The recorded transition log and the re-simulated one must match**, which is the assertion doing
+  the real work. The visible rewind is what makes it a chunk rather than a test.
+- **The held-state question is narrower than the deferred row made it sound.**
+  `HashSet<MouseButton>` and `HashMap<GamepadButton, ButtonReading>` were called an obstacle to
+  snapshotting, but `bevy_platform`'s maps default to `FixedHasher`, so iteration order is
+  deterministic across runs and processes rather than randomly seeded. What is left is that order
+  depends on insertion history, which bites only a snapshot serialized by iterating — and not one
+  restored by value. This chunk says which kind it needs, and `indexmap` is the tool if the answer
+  is the former.
+- **The per-slot read it needs, `FixedBitSet::contains`, is already there and ungated** — `dirty`
+  moved off the hand-rolled `DirtySet` to `fixedbitset`, which carries the method as a stock part of
+  the type rather than something built for this chunk's sake.
+- **What stays deferred:** injection and reconciliation — feeding a remote player's frame, and
+  disagreeing with the authority about what happened. Those want a network; rewinding does not.
+- **Split if it grows.** Making the state snapshot-able with a differential test is separable from
+  the example that rewinds, and ground rule 1 says that split happens before the code, not during.
+- **Depends on chunk 95.** The visible rewind reuses its Pong base rather than a third vehicle — the
+  same paddle-and-ball simulation snapshotted and re-simulated forward, with the recorded and
+  re-simulated transition logs compared. Chunk 42 will already have proven the base can host one
+  grafted concept without disturbing its own.
+- **Check whether `docs/issues.md` 1041 belongs here.** R9.9's pumped sampling mode (stopping
+  `InputFramePlugin` from scheduling its own sampling) was floated as a fit for a rewind demo, on
+  the theory that re-simulating forward wants control over exactly when a frame is sampled. Confirm
+  that before routing it here — if re-simulation does not actually need to suppress live sampling,
+  1041 stays unrouted rather than getting a home it does not need.
+
+---
+
+## The library itself
+
+Three chunks no game asks for and no published crate can do without: an extension point nothing
+outside has exercised, the reflection the documents promise, and documentation that runs.
+
 ### 42. The authority backend, faked
 
 The backend seam made real against something that is not Steam, because the seam is only proven by a
@@ -384,138 +528,6 @@ second implementer and the real one cannot live here.
   two modal contexts that must be live on one pad at once, or an input observed twice. A decision
   this chunk cannot break is a decision that was not made.
 
-### 28. Docs that run
-
-- **Make the doctests execute.** `dynamic_linking` on the `bevy` dev-dependency breaks the merged
-  doctest binary, so every `///` example compiles but none runs. Fixing it means making
-  `dynamic_linking` opt-in, at the cost of slower example builds — a trade-off to make deliberately
-  rather than inherit.
-- **The README rewrite** — a user-facing introduction, feature list and quickstart, with examples
-  lifted from a real game rather than invented.
-- **`src/lib.rs`'s crate-level docs, alongside it.** The `//!` block largely mirrors the README's
-  Concepts section and has drifted the same way — both were drafted early and neither has kept pace
-  with what the crate grew into since.
-- **Comparison upkeep.** [docs/comparison.md](./docs/comparison.md) is read against BEI 0.26.0 and
-  LWIM 0.21.0, which is a claim with a date on it. Both crates move.
-- **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
-  look at the module pages the way a stranger would.
-
-### 94b. Either modifier
-
-R12.3: a chord's modifier should be able to say "either Ctrl", as one binding rather than two.
-`with` takes a single `ButtonControl`, so a game wanting either `LeftCtrl` or `RightCtrl` to arm a
-chord writes both bindings by hand today. R4.10 already assigns this to the chord mechanism by name,
-so the requirement has a destination in `Requirements.md` and, until this chunk, none in the plan.
-
-- **Self-contained**, and independent of 94c — a different corner of the same requirements
-  section, not a shared mechanism.
-- **Not doing: a mappable either.** The either-ness is declared in the chord's modifier at bind
-  time; capture reads one physical keypress and can only ever answer with `LeftCtrl` or `RightCtrl`,
-  never both. A row built this way is not something a rebind screen can produce, so it stays a
-  `Fixed` binding — a game wanting a rebindable "either" still writes two mappable rows by hand.
-
-### 94c. A platform modifier
-
-R12.4: `Cmd` on macOS should be usable as `Ctrl` everywhere else, as a named modifier resolved at
-binding time rather than something every cross-platform game re-derives by hand.
-
-- **Resolved at binding time, not read time.** The name a game binds does not change per platform;
-  what it expands to does, once, when the plan is built — not on every frame the control is read.
-- **Self-contained**, and independent of 94b.
-
-### 98. Pointer position, and a mouse-controlled paddle
-
-R13.1, R13.4, R13.6 (`docs/issues.md` 1015): the frame carries mouse *motion* and no absolute
-position, so a binding cannot target where the pointer is at all.
-
-- **Depends on chunk 95.** The demo is a Pong variant, and the simplest one there is: a paddle whose
-  position follows the mouse's Y coordinate directly, rather than reading a delta and integrating
-  it.
-- **Not doing: split-screen viewport mapping (R15.10).** That is Split Friction's problem once this
-  mechanism exists, not this chunk's — a second pointer meaning "position within my own camera's
-  viewport" is a follow-on, not part of proving position exists at all.
-- **Review surface:** whether an absolute position needs the same dead-zone/rescale modifier chain
-  a delta does, or is exempt as a different kind of channel entirely.
-
-### 101. Semantic control aliases for a console confirm swap
-
-R4.4 (SHOULD) (`docs/issues.md` 1040): semantic aliases (`Submit`, `Cancel`, `MenuLeft`) resolving
-per device family, load-bearing for R18.7's console confirm-button swap rather than merely
-convenient.
-
-- **Disasteroids' settings screen**, which already does directional navigation (29): the same screen
-  reads `Cancel` rather than a hard-coded key, so its on-screen prompt says the right thing on
-  keyboard and on a pad without the app hand-rolling the swap itself.
-- **Not doing:** a general aliasing mechanism beyond the three names R4.4 asks for — this proves the
-  concept the requirement names, not a configurable alias table.
-
-### 102. A global timing scale
-
-R20.4 (`docs/issues.md` 1045, split from 1021): every hold duration, tap window and repeat rate
-globally scalable by one user preference, where today only per-mapping tunables exist.
-
-- **Disasteroids' settings screen**, as an accessibility slider — "input timing ×1.5" — applied
-  across every declared hold/tap/repeat value at once rather than one at a time.
-- **Crate work, not only an example.** Scaling every timing by hand from the app side is exactly
-  what R20.4 says a game should not have to do, so the scale factor's application point is a design
-  question for this chunk rather than something the example alone can supply.
-
-### 103. A disconnect signal and a reconnect prompt
-
-R15.5 (MUST) (`docs/issues.md` 1020): on device loss the owning player must be identifiable
-(already true), in-flight actions canceled (already true), **and a signal raised so the app can
-pause and show a reconnect prompt** (nothing today).
-
-- **Split Friction.** A pad disconnects mid-game; the app pauses and shows "player 2, reconnect to
-  resume" until the pad (or another) reappears.
-- **What the signal is** is this chunk's open question: Bevy's own `GamepadConnectionEvent` read
-  directly, or something this crate re-raises so a game does not have to know the pairing's own
-  bookkeeping to react correctly.
-
-### 104. Named device-requirement sets at the join screen
-
-R15.7 (SHOULD) (`docs/issues.md` 1042, split from 1020): named device-requirement sets with required
-and optional devices — nothing exists under this name anywhere in `src/`.
-
-- **Split Friction's join screen**, validating "this player needs a gamepad" versus "keyboard is
-  fine" before a pane is handed a protagonist, rather than silently accepting any device.
-
-### 105. Auto-switching a player's active scheme
-
-R15.8 (SHOULD) (`docs/issues.md` 1043, split from 1020): auto-switching a player's active scheme on
-input, with hysteresis — nothing exists, and R18.6's withdrawal names this as the one thing that
-would revive it.
-
-- **Split Friction.** A player on a pad picks up the keyboard instead; control follows without a
-  menu trip. R18.6 stays withdrawn unless this chunk's hysteresis turns out not to hold up under
-  real play.
-- **`docs/issues.md` 1044 (R15.9, opaque platform-user identity)** stays unrouted alongside this —
-  floated for Split Friction too, but nothing to show without a real platform SDK, and not yet worth
-  a faked stub the way chunk 42 fakes a backend.
-
-### 108. Focus loss, regated
-
-R16.1 (`docs/issues.md` 1013): `RawEvent::FocusLost` (`frame.rs:93`) exists only under this crate's
-own `keyboard` feature, but the signal behind it — `bevy_input`'s `KeyboardFocusLost` — is unified
-on by `bevy_window`'s own `Cargo.toml` in any build with a real window, independent of what this
-crate requests. A `mouse`-and-`gamepad` build (no `keyboard`) has the event and no code reading it,
-so a mouse button held through alt-tab never clears — R16.1's "all held controls" MUST, unmet in
-exactly the configuration that can reach it.
-
-- **A regate, not new plumbing.** `RawEvent::FocusLost` and its `control()`/`device()` arms in
-  `frame.rs`, the collecting system at `frame.rs:301`, and the three match arms in
-  `eval.rs`/`capture.rs` move from `#[cfg(feature = "keyboard")]` to
-  `#[cfg(any(feature = "keyboard", feature = "mouse"))]`. The two `.clear()` calls inside stay
-  independently gated on their own feature, same as today.
-- **Verification:** a headless `App` built `--no-default-features --features mouse,gamepad,std,...`
-  that fires `KeyboardFocusLost` and confirms a held mouse button comes back unheld — the probe this
-  finding never got. `scripts/verify.sh --full`'s eight-combination sweep only `cargo check`s each
-  shape, so it would not have caught this; this chunk's test is what actually runs the `mouse`-
-  without-`keyboard` case.
-- **Not doing: anything about gamepad.** A gamepad's held state already clears on its own
-  `Connection(Disconnected)` event (`eval.rs:422-426`); focus loss carries no gamepad information
-  and needs none.
-
 ### 109. Derive `Reflect`, and turn on auto-registration instead of hand-writing it
 
 R24.3 (`docs/issues.md` 1019): `Control`, `DeviceFamily`, `ActionMapping`, `RebindPolicy`, `Prompt`,
@@ -547,6 +559,22 @@ re-adds it.
 
 [bevyengine/bevy#15030]: https://github.com/bevyengine/bevy/pull/15030
 
+### 28. Docs that run
+
+- **Make the doctests execute.** `dynamic_linking` on the `bevy` dev-dependency breaks the merged
+  doctest binary, so every `///` example compiles but none runs. Fixing it means making
+  `dynamic_linking` opt-in, at the cost of slower example builds — a trade-off to make deliberately
+  rather than inherit.
+- **The README rewrite** — a user-facing introduction, feature list and quickstart, with examples
+  lifted from a real game rather than invented.
+- **`src/lib.rs`'s crate-level docs, alongside it.** The `//!` block largely mirrors the README's
+  Concepts section and has drifted the same way — both were drafted early and neither has kept pace
+  with what the crate grew into since.
+- **Comparison upkeep.** [docs/comparison.md](./docs/comparison.md) is read against BEI 0.26.0 and
+  LWIM 0.21.0, which is a claim with a date on it. Both crates move.
+- **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
+  look at the module pages the way a stranger would.
+
 ---
 
 ## Deliberately deferred
@@ -557,7 +585,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | Area | Gated on |
 | --- | --- |
 | **Persisting calibration**, keyed to identity (R11.7, R14.11) | R11.5's stable device identity, which chunk 72 builds. Measured calibration lasts as long as the process |
-| **Glyph ids** (R18.4) | asset-pipeline questions, sharper than they looked when this row was written. Kenney's input prompt set covers keyboard, mouse, three pad brands and Steam, CC0 — but its generic set ships blank, unlabeled buttons, so a generic-tier icon is not the self-contained image the brand → generic → text chain assumed; it needs a short text stamp. Chunk 70 closed this for the three named brands — `fallback_label_for_brand` gives a short current-generation word ("A", "Cross", "B") for face buttons, bumpers, triggers, Select/Start and Mode — but deliberately left `GamepadBrand::Generic` falling through to `fallback_label`'s sentence-shaped strings ("East Button"), so the unlabeled-icon problem is exactly as open for the generic tier as it was before. The identifier scheme is the other open half — R18.4 wants a key of (brand, control), chunk 37's stored names are already the control half, and Kenney's real file names are still the way to falsify it. Presentation sketch: `PromptIcon`, standalone in `examples/common/` beside `PromptSpan` rather than a mode of it — `PromptSpan` is `TextSpan`-based for inline prose, and Bevy/parley has no inline-image-in-text-run support, so an icon-capable prompt is necessarily block-level — resolving through R18.9's glyph-source sum type rather than assuming our own identifier is the only shape a backend hands back. The stamp text is a defaults question, not a missing feature: the studio's answer is R19.14's catalogue, the long tail's is a heuristic (leading candidate: the compass name's first letter, "E" for East) that has to be *right* rather than merely present, per "Who this is for"'s standard for a default nobody tests |
+| **Glyph ids** (R18.4) | the identifier scheme, and now nothing else. R18.4 wants a key of (brand, control); chunk 37's stored names are already the control half, and Kenney's real file names are still the way to falsify it. Two things this row used to wait on are answered. The generic tier's blank, unlabeled buttons are a content task rather than a design question — the stamp gets authored onto the icons by hand, so the brand → generic → text chain needs no heuristic to invent one, and chunk 70's `fallback_label_for_brand` already covers the three named brands. The presentation shape is no longer forced either: an icon prompt had to be block-level because `PromptSpan` is `TextSpan`-based and Bevy had no inline image in a text run, which made falling back from an icon to a word a change of layout kind rather than of content. [bevy#25710][]'s `InlineBox`/`InlineImage` removes that once it merges, leaving one `IconPromptSpan` that becomes a block prompt by being an only child, the way `PromptSpan` already does, and falls back to text inside the same span. Resolution still goes through R18.9's glyph-source sum type rather than assuming our own identifier is the only shape a backend hands back |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it. Checked against `steamworks` 0.13: `get_glyph_for_action_origin` resolves to an absolute filesystem path under the Steam client's own install directory (`tenfoot/resource/images/library/controller/api/`), which a Bevy `AssetPath` can carry natively via `from_path_buf` — no string-escaping the drive letter or backslashes. The path is not to be opened as given: a custom `AssetSource` reader must canonicalize it and reject anything outside a known root before reading, rather than trust an external SDK's return value as a bare filesystem path. One scheme, one hard-coded root is the right size while only this one root is confirmed; a second scheme is warranted only if a second root with its own lifecycle surfaces (e.g. something ephemeral, which cannot share a stable root's caching and hot-reload assumptions) — not one scheme per SDK call that happens to return a path |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import |
 | **Netcode injection and reconciliation** | a networked target. Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. What is left here needs a remote player to inject a frame for and an authority to disagree with |
@@ -581,5 +609,6 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
+[bevy#25710]: https://github.com/bevyengine/bevy/pull/25710
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678
