@@ -509,8 +509,9 @@ network removed, which was the expensive part.
 - **The per-slot read it needs, `FixedBitSet::contains`, is already there and ungated** — `dirty`
   moved off the hand-rolled `DirtySet` to `fixedbitset`, which carries the method as a stock part of
   the type rather than something built for this chunk's sake.
-- **What stays deferred:** injection and reconciliation — feeding a remote player's frame, and
-  disagreeing with the authority about what happened. Those want a network; rewinding does not.
+- **What stays deferred:** injection and reconciliation — feeding a remote player's resolved action
+  through the authority-backend seam (D69), and disagreeing with the authority about what happened.
+  Those want a network and chunk 42's trait; rewinding does not.
 - **Split if it grows.** Making the state snapshot-able with a differential test is separable from
   the example that rewinds, and ground rule 1 says that split happens before the code, not during.
 - **Depends on chunk 95.** The visible rewind reuses its Pong base rather than a third vehicle — the
@@ -539,6 +540,8 @@ second implementer and the real one cannot live here.
   An authority backend supplies an `ActionValue` per owned action, substituted for the fold's output
   inside the evaluator so the state machine still synthesizes the edges. A source backend needs
   nothing new — `InputFrame::record` is already the door.
+- **The same trait is what a network authority backend would build on** (D69, the netcode deferred
+  row) — a second reason, beyond Steam, that this needs to be real rather than a doc comment.
 - **The mock lives entirely in `examples/`.** The traits are public API and carry a maintenance
   promise; the fake is a test fixture and gets deleted when a real backend exists.
 - **It must fake the API, not the concept.** Level-only reads with no timestamps, an "is this bound"
@@ -624,7 +627,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Persisting calibration**, keyed to identity (R11.7, R14.11) | R11.5's stable device identity, which chunk 72 builds. Measured calibration lasts as long as the process |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it. Checked against `steamworks` 0.13: `get_glyph_for_action_origin` resolves to an absolute filesystem path under the Steam client's own install directory (`tenfoot/resource/images/library/controller/api/`), which a Bevy `AssetPath` can carry natively via `from_path_buf` — no string-escaping the drive letter or backslashes. The path is not to be opened as given: a custom `AssetSource` reader must canonicalize it and reject anything outside a known root before reading, rather than trust an external SDK's return value as a bare filesystem path. One scheme, one hard-coded root is the right size while only this one root is confirmed; a second scheme is warranted only if a second root with its own lifecycle surfaces (e.g. something ephemeral, which cannot share a stable root's caching and hot-reload assumptions) — not one scheme per SDK call that happens to return a path |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import |
-| **Netcode injection and reconciliation** | a networked target. Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. What is left here needs a remote player to inject a frame for and an authority to disagree with |
+| **Netcode injection and reconciliation** | a networked target, and chunk 42's authority-backend trait. Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. Injection targets L2 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs a remote player's resolved action to inject and a later correction to reconcile against it |
 | **Consumption-aware `FocusedInput` dispatch** (R8.2a) | **a game wanting `bevy_ui_widgets`' own widgets working generically, unmodified, without a context per widget kind.** A context per kind is the path to reach for first, and Disasteroids ships that way. A design for the filter was built and set aside: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline rather than a second raw-message read — keyboard only, since every keyboard-driven widget observer at the pinned commit gates on `ButtonState::Pressed` and none reacts to a release |
 | **Promoting `WidgetKind` and the per-kind context into the crate** | [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native widget-kind id. Promoting a shape this crate invented first, ahead of that conversation, risks committing to the wrong one |
 | **A context-level exclusion from the mapping list** | a second screen needing the same filter and duplicating it. `ActionMapping::context` already carries the data, and one call site filtering on it costs one line — at two, the crate is the one paying for the repetition |

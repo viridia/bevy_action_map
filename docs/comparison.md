@@ -385,18 +385,23 @@ default is right: a refactor is free, and breaking a player's settings takes a d
   data yourself), and `CustomInput`/`CustomInputs` (a resource of `ActionValue`s that bindings can
   read, for inputs Bevy does not model). Between them these cover testing, cutscenes, AI, and
   network-replicated input.
-- **This crate** puts the seam one layer lower: the input frame (L1) is a distinct, constructible,
-  serializable object, and the whole mapping layer is a pure function of it. So a replay or a
-  network peer writes *events*, not action states, and everything downstream — conditions, chords,
-  consumption, contexts — is re-derived rather than bypassed. Action state is two `Copy` slices plus
-  a dirty bitset, so snapshot/restore is two slice copies.
+- **This crate** splits the two jobs. Local replay and CI determinism use the input frame (L1): a
+  distinct, constructible, serializable object, with the whole mapping layer a pure function of it,
+  so a replay re-derives through conditions, chords, consumption and contexts rather than bypassing
+  them — something an action-level mock cannot exercise. A network peer instead targets the
+  authority-backend seam (§11), the same door Steam Input uses: an already-resolved `ActionValue`
+  rather than a raw frame, so two peers never need to share a `Plan`. That is the same job LWIM's
+  `ActionDiff` does, not a lower-level alternative to it. Action state is two `Copy` slices plus a
+  dirty bitset either way, so snapshot/restore is two slice copies.
 
-The rollback half of this is **designed and not proven** — there is no testbed in tree that actually
-rolls back, and Roadmap.md's deferred table says so. Treat LWIM's `ActionDiff` as the shipping
-answer and this as an argument about where the seam belongs.
+The record/replay half of this is proven; chunk 83 exercises it directly. The network half is
+**designed and not proven** — there is no testbed in tree that sends a frame over a wire, and
+Roadmap.md's deferred table says so, gated on chunk 42's authority-backend trait landing first.
 
-Mocking at the action level (BEI, LWIM) and injecting at the event level (this crate) are not the
-same test. The first tests your game logic; the second also tests your bindings.
+Mocking at the action level (BEI, LWIM) and record/replaying at the frame level (this crate, for
+local determinism) are not the same test. The first tests your game logic; the second also tests
+your bindings. For a live network peer, this crate reaches for the same action-level seam BEI and
+LWIM do.
 
 ## 11. Backends that own the bindings
 

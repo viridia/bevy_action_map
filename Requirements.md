@@ -695,10 +695,11 @@ a stored input stream, and a deterministic test is a replay with assertions.
   state, input frame, dt) — no wall-clock reads, no RNG, no frame counters, no global mutable state.
 - **R10.3 (MUST)** All internal mapping state (hold timers, tap counters, smoothing filters, chord
   progress) must be snapshot-able and restorable, so rollback can rewind it.
-- **R10.4 (MUST)** Injection: the app must be able to feed a synthetic input frame (from network,
-  AI, replay, or test) in place of live device input, at L1, per player.
-- **R10.5 (SHOULD)** Injection at L2 as well (force an action to a value/state) — needed for
-  tutorials, cutscenes, and remote players whose actions are replicated rather than their raw input.
+- **R10.4 (MUST)** Injection: the app must be able to feed a synthetic input frame (AI, replay, or
+  test) in place of live device input, at L1, per player.
+- **R10.5 (MUST)** _(D69)_ Injection at L2 as well (force an action to a value/state) — the default
+  seam for a network peer, since it replicates the resolved action without requiring peers to share
+  a `Plan`. Also needed for tutorials and cutscenes.
 - **R10.6 (SHOULD)** A quantization hook so float values entering the simulation can be reduced to a
   fixed representation, avoiding cross-platform float divergence and shrinking the wire format.
 - **R10.7 (SHOULD)** Document precisely which parts of the pipeline are guaranteed deterministic

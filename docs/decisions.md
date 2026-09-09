@@ -1212,6 +1212,28 @@ real backend links against, so this is a binding gap rather than a platform one:
 patch upstream to that crate, or by a direct FFI call past it. Chunk 42's mock does not hit this,
 since it fakes the API the crate exposes rather than Steam's own.
 
+### D69 — Netcode replication targets L2, not L1
+
+**Decided.** A network peer's actions are replicated through the authority-backend seam (D22, D51)
+— an already-resolved `ActionValue`, keyed by the action's own stable path (R1.1) — not by shipping
+raw `InputFrame`s for a remote peer to run back through bindings and conditions. Local replay,
+record/replay CI tests (R10.8) and chunk 83's rewind stay on L1, where re-deriving through the
+mapping layer is the point; a network peer is treated as just another authority backend.
+
+**Rules out.** A raw-frame wire protocol as netcode's default path, and any design that assumes two
+peers share a `Plan`.
+
+**Reversal.** L1 replication needs every peer to evaluate a remote player's frame against an
+identical `Plan` — same bindings, same modifier thresholds, same tunables — to reproduce the same
+action, so a patch, a mod, or a player's own rebind has to stay in lockstep across peers or the
+resimulation silently diverges, and the wire carries device and calibration detail no receiving peer
+needs. Authority-backend replication carries none of that: whichever `Plan` produced the value stays
+local, and the receiving peer never re-derives anything from it.
+
+**Note.** The record/replay argument for L1 — a replay re-derives through bindings and conditions,
+an action-level mock cannot — is real, but it argues for testing rigor, not for a network wire
+format. `Requirements.md` §10 conflated the two before this decision separated them.
+
 ### D52 — Pairing is a runtime handle; the join gesture reuses class bindings
 
 **Decided.** `DeviceHandle` models keyboard and mouse as one value, a gamepad as the backend's own
