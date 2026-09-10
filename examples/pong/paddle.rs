@@ -15,6 +15,7 @@
 //! if a different pad is plugged back in; that is chunk 103's, not this one's.
 
 use bevy::prelude::*;
+use bevy_action_map::binding::InputContextBuilder;
 use bevy_action_map::device::DeviceHandle;
 use bevy_action_map::player::Paired;
 use bevy_action_map::prelude::*;
@@ -47,19 +48,22 @@ pub const INSET: f32 = 30.0;
 const SPEED: f32 = 380.0;
 
 pub fn plugin(app: &mut App) {
-    app.add_context::<Paddle>(|controls| {
-        controls.bind::<Move>(AxisButtons::new(KeyCode::KeyS, KeyCode::KeyW));
-        controls.bind::<Move>(AxisButtons::new(KeyCode::ArrowDown, KeyCode::ArrowUp));
-        controls.bind::<Move>(GamepadAxis::LeftStickY);
-        controls.bind::<Move>(AxisButtons::new(
-            GamepadButton::DPadDown,
-            GamepadButton::DPadUp,
-        ));
-    });
-
+    app.add_context::<Paddle>(bindings);
     app.add_systems(Startup, spawn);
-    app.add_systems(FixedUpdate, walk);
+    app.add_systems(FixedUpdate, walk::<Paddle>);
     app.add_systems(Update, pair_gamepad);
+}
+
+/// Everything [`Move`] is bound to, as a function rather than a closure inside [`plugin`], so a
+/// variant that declares [`Paddle`] itself gets the same controls without copying them.
+pub fn bindings(controls: &mut InputContextBuilder<Paddle>) {
+    controls.bind::<Move>(AxisButtons::new(KeyCode::KeyS, KeyCode::KeyW));
+    controls.bind::<Move>(AxisButtons::new(KeyCode::ArrowDown, KeyCode::ArrowUp));
+    controls.bind::<Move>(GamepadAxis::LeftStickY);
+    controls.bind::<Move>(AxisButtons::new(
+        GamepadButton::DPadDown,
+        GamepadButton::DPadUp,
+    ));
 }
 
 /// Both paddles are the same scene, [`paddle`]; player one gets a [`Paddle`] and a [`Paired`]
@@ -72,7 +76,8 @@ fn spawn(mut commands: Commands) {
     commands.spawn_scene(paddle(Side::RIGHT, HALF_EXTENT.x - INSET));
 }
 
-fn paddle(side: Side, x: f32) -> impl Scene {
+/// The scene both paddles are, whatever is driving them.
+pub fn paddle(side: Side, x: f32) -> impl Scene {
     bsn! {
         template_value(side)
         Mesh2d(asset_value(Rectangle::new(WIDTH, HEIGHT)))
@@ -81,9 +86,13 @@ fn paddle(side: Side, x: f32) -> impl Scene {
     }
 }
 
-fn walk(
+/// Moves every paddle reading context `C` at the rate its [`Move`] action reports.
+///
+/// Generic over the context, so a variant that drives one paddle from somewhere else registers this
+/// once per context rather than writing a second copy of it.
+pub fn walk<C: InputContext + Component>(
     time: Res<Time>,
-    input: ActionsQuery<Paddle>,
+    input: ActionsQuery<C>,
     mut paddles: Query<&mut Transform, With<Side>>,
 ) {
     let delta = time.delta_secs();

@@ -12,7 +12,7 @@ const SPEED: f32 = 260.0;
 const MAX_BOUNCE_ANGLE: f32 = 60.0_f32 * core::f32::consts::PI / 180.0;
 
 #[derive(Component, Clone, Default)]
-struct Ball;
+pub struct Ball;
 
 #[derive(Component, Clone, Copy, Default, Deref, DerefMut)]
 struct Velocity(Vec2);
