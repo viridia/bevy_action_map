@@ -85,6 +85,8 @@ run_step "cargo test --all-features --lib --tests" cargo test --all-features --l
 run_doctest_step
 run_step "cargo test --no-default-features --features libm --test no_devices" \
     cargo test --no-default-features --features libm --test no_devices
+run_step "cargo test --no-default-features --features std,mouse,gamepad --test focus_loss_without_keyboard" \
+    cargo test --no-default-features --features std,mouse,gamepad --test focus_loss_without_keyboard
 
 if [[ ${full} -eq 1 ]]; then
     echo "== device-feature matrix =="

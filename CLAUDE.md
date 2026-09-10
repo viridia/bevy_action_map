@@ -166,6 +166,7 @@ cargo test --all-features
 cargo clippy --all-features --all-targets
 cargo clippy --no-default-features --features libm      # the no-devices build
 cargo test --no-default-features --features libm --test no_devices
+cargo test --no-default-features --features std,mouse,gamepad --test focus_loss_without_keyboard
 ```
 
 Whenever a `cfg` group changes, build all eight device-feature combinations — a configuration nobody

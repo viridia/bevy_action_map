@@ -38,7 +38,13 @@ use bevy_input::InputSystems;
 #[cfg(feature = "gamepad")]
 use bevy_input::gamepad::RawGamepadEvent;
 #[cfg(feature = "keyboard")]
-use bevy_input::keyboard::{KeyboardFocusLost, KeyboardInput};
+use bevy_input::keyboard::KeyboardInput;
+// Bevy's own `KeyboardFocusLost` is what a real windowed app unifies on regardless of this crate's
+// features (`bevy_window`'s `Cargo.toml` asks for `bevy_input/keyboard` unconditionally), so a
+// mouse-only build sees it too — `mouse`'s own feature entry asks for `bevy_input/keyboard` to make
+// that true in an isolated build as well (R16.1).
+#[cfg(any(feature = "keyboard", feature = "mouse"))]
+use bevy_input::keyboard::KeyboardFocusLost;
 #[cfg(feature = "mouse")]
 use bevy_input::mouse::{MouseButtonInput, MouseMotion};
 
@@ -92,7 +98,7 @@ pub enum RawEvent {
     Gamepad(RawGamepadEvent),
     /// The window lost input focus, reported by Bevy's `KeyboardFocusLost` — alt-tab, a lock screen,
     /// a suspend. Every physically-held keyboard and mouse control is released as of this event.
-    #[cfg(feature = "keyboard")]
+    #[cfg(any(feature = "keyboard", feature = "mouse"))]
     FocusLost,
 }
 
@@ -116,7 +122,7 @@ impl RawEvent {
             }
             #[cfg(feature = "gamepad")]
             Self::Gamepad(RawGamepadEvent::Axis(axis)) => Some(Control::GamepadAxis(axis.axis)),
-            #[cfg(feature = "keyboard")]
+            #[cfg(any(feature = "keyboard", feature = "mouse"))]
             Self::FocusLost => None,
             #[cfg(feature = "gamepad")]
             Self::Gamepad(RawGamepadEvent::Connection(_)) => None,
@@ -142,7 +148,7 @@ impl RawEvent {
                 RawGamepadEvent::Axis(axis) => axis.gamepad,
                 RawGamepadEvent::Connection(connection) => connection.gamepad,
             }),
-            #[cfg(feature = "keyboard")]
+            #[cfg(any(feature = "keyboard", feature = "mouse"))]
             Self::FocusLost => DeviceHandle::KeyboardMouse,
         }
     }
@@ -298,7 +304,9 @@ impl InputFrame {
 pub fn sample_input(
     mut frame: bevy_ecs::system::ResMut<InputFrame>,
     #[cfg(feature = "keyboard")] mut keyboard_inputs: MessageReader<KeyboardInput>,
-    #[cfg(feature = "keyboard")] mut focus_lost: MessageReader<KeyboardFocusLost>,
+    #[cfg(any(feature = "keyboard", feature = "mouse"))] mut focus_lost: MessageReader<
+        KeyboardFocusLost,
+    >,
     #[cfg(feature = "mouse")] mut mouse_button_inputs: MessageReader<MouseButtonInput>,
     #[cfg(feature = "mouse")] mut mouse_motion_inputs: MessageReader<MouseMotion>,
     #[cfg(feature = "gamepad")] mut gamepad_inputs: MessageReader<RawGamepadEvent>,
@@ -315,7 +323,7 @@ pub fn sample_input(
         frame.record(RawEvent::Keyboard(event.clone()));
     }
 
-    #[cfg(feature = "keyboard")]
+    #[cfg(any(feature = "keyboard", feature = "mouse"))]
     for _ in focus_lost.read() {
         frame.record(RawEvent::FocusLost);
     }
@@ -377,10 +385,10 @@ impl Plugin for InputFramePlugin {
             );
 
         #[cfg(feature = "keyboard")]
-        {
-            app.add_message::<KeyboardInput>();
-            app.add_message::<KeyboardFocusLost>();
-        }
+        app.add_message::<KeyboardInput>();
+
+        #[cfg(any(feature = "keyboard", feature = "mouse"))]
+        app.add_message::<KeyboardFocusLost>();
 
         #[cfg(feature = "mouse")]
         {

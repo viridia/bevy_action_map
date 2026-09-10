@@ -171,6 +171,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 78b | `binding.rs` is three files, and `mapping.rs` gains a library |
 | 78c | `context.rs` is two files, plus a shared test fixture module |
 | 94a | A binding can name the logical key, not only the physical one |
+| 108 | Focus loss, regated                                   |
 
 ---
 
@@ -183,29 +184,6 @@ its identity rather than its position.
 Wrong answers from code that has already shipped. The full register is
 [docs/issues.md](./docs/issues.md), which also holds the findings that carry no chunk and say
 so per entry.
-
-### 108. Focus loss, regated
-
-R16.1 (`docs/issues.md` 1013): `RawEvent::FocusLost` (`frame.rs:93`) exists only under this crate's
-own `keyboard` feature, but the signal behind it — `bevy_input`'s `KeyboardFocusLost` — is unified
-on by `bevy_window`'s own `Cargo.toml` in any build with a real window, independent of what this
-crate requests. A `mouse`-and-`gamepad` build (no `keyboard`) has the event and no code reading it,
-so a mouse button held through alt-tab never clears — R16.1's "all held controls" MUST, unmet in
-exactly the configuration that can reach it.
-
-- **A regate, not new plumbing.** `RawEvent::FocusLost` and its `control()`/`device()` arms in
-  `frame.rs`, the collecting system at `frame.rs:301`, and the three match arms in
-  `eval.rs`/`capture.rs` move from `#[cfg(feature = "keyboard")]` to
-  `#[cfg(any(feature = "keyboard", feature = "mouse"))]`. The two `.clear()` calls inside stay
-  independently gated on their own feature, same as today.
-- **Verification:** a headless `App` built `--no-default-features --features mouse,gamepad,std,...`
-  that fires `KeyboardFocusLost` and confirms a held mouse button comes back unheld — the probe this
-  finding never got. `scripts/verify.sh --full`'s eight-combination sweep only `cargo check`s each
-  shape, so it would not have caught this; this chunk's test is what actually runs the `mouse`-
-  without-`keyboard` case.
-- **Not doing: anything about gamepad.** A gamepad's held state already clears on its own
-  `Connection(Disconnected)` event (`eval.rs:422-426`); focus loss carries no gamepad information
-  and needs none.
 
 ---
 

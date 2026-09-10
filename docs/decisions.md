@@ -1234,6 +1234,24 @@ local, and the receiving peer never re-derives anything from it.
 an action-level mock cannot — is real, but it argues for testing rigor, not for a network wire
 format. `Requirements.md` §10 conflated the two before this decision separated them.
 
+### D70 — `mouse`'s feature entry also asks for `bevy_input/keyboard`
+
+**Decided.** `RawEvent::FocusLost` is read whenever `keyboard` or `mouse` is enabled (R16.1),
+because a real windowed game gets Bevy's `KeyboardFocusLost` either way — `bevy_window`'s own
+`Cargo.toml` asks for `bevy_input/keyboard` unconditionally, and Cargo unifies that on across the
+whole build no matter what a game's manifest requests. This crate's own isolated builds never pull
+`bevy_window` in, so the same unification has to come from this crate's own graph instead: `mouse`
+requests `bevy_input/keyboard` alongside `bevy_input/mouse`.
+
+**Rules out.** Gating the read on `feature = "keyboard"` alone, which is the bug this decision
+fixes, and a marker feature of this crate's own for "wants focus tracking" — the fact being modeled
+belongs to `bevy_input`'s module boundary, not to a choice one of this crate's games makes.
+
+**Reversal.** `mouse`-only, `cargo check`ed in isolation, stops compiling, because
+`bevy_input::keyboard` leaves that build's feature graph; and if the read reverted with it, a mouse
+button held through alt-tab would stick again with `keyboard` disabled, the R16.1 gap chunk 108
+closed.
+
 ### D52 — Pairing is a runtime handle; the join gesture reuses class bindings
 
 **Decided.** `DeviceHandle` models keyboard and mouse as one value, a gamepad as the backend's own

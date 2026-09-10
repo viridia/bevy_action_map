@@ -68,29 +68,6 @@ _Fix:_ a chunk rather than an edit. Dropping per part instead of per binding and
 outright are both defensible, and which is right is a design question about what clearing one arrow
 of a movement composite means. Unrouted.
 
-### 1013 In a build without `keyboard`, a held mouse button survives alt-tab
-
-`frame.rs:93` · reasoned from `bevy_window`'s own `Cargo.toml`, **not probed** against a real
-`--no-default-features --features mouse` build
-
-`RawEvent::FocusLost` exists only under this crate's own `#[cfg(feature = "keyboard")]`
-(`frame.rs:95`), which `Cargo.toml:88` maps straight onto `bevy_input/keyboard` — reading as though
-a `mouse`-only build has no focus-loss signal to read. It isn't this crate's feature that decides
-whether `bevy_input`'s `KeyboardFocusLost` fires, though: `bevy_window`'s own `Cargo.toml`
-unconditionally depends on `bevy_input` with `features = ["gestures", "keyboard", "mouse"]`, so any
-build using `bevy_window`/`bevy_winit` — the only place alt-tab means anything — has
-`bevy_input/keyboard` unified on regardless of what this crate requests. The event is always there;
-`RawEvent::FocusLost` just isn't compiled to read it.
-
-The reachable case is real: a mouse-and-gamepad game shipping `--no-default-features --features
-mouse,gamepad,...` to drop a keyboard-binding surface it doesn't use, on an ordinary desktop window.
-`held_mouse_buttons` in that build has no way to clear on focus loss, so alt-tabbing out mid-click
-leaves the button stuck fired on return — R16.1's MUST.
-
-_Fix:_ **chunk 108** — regate `RawEvent::FocusLost` and its handling on
-`any(feature = "keyboard", feature = "mouse")` instead of `keyboard` alone. Fixable at our layer
-after all; an earlier version of this entry said otherwise on the strength of the wrong premise.
-
 ### 1046 A class binding on an analog source has no dead zone
 
 `binding.rs`'s own doc for `bind_class` — "it skips modifiers, conditions and the presentation

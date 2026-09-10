@@ -91,7 +91,7 @@ libm = ["bevy_math/libm"]
 
 # Input sources, mirroring bevy_input's own feature layout.
 keyboard = ["bevy_input/keyboard"]
-mouse = ["bevy_input/mouse"]
+mouse = ["bevy_input/mouse", "bevy_input/keyboard"]
 gamepad = ["bevy_input/gamepad"]
 touch = ["bevy_input/touch"]
 

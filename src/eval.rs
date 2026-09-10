@@ -286,7 +286,7 @@ enum Fold {
 /// rather than an ordinary press, release, or motion.
 fn interruption_kind(event: &RawEvent) -> Fold {
     match event {
-        #[cfg(feature = "keyboard")]
+        #[cfg(any(feature = "keyboard", feature = "mouse"))]
         RawEvent::FocusLost => Fold::Interrupted,
         #[cfg(feature = "gamepad")]
         RawEvent::Gamepad(RawGamepadEvent::Connection(connection))
@@ -453,10 +453,13 @@ impl<C: InputContext> InputContextState<C> {
                     }
                 }
             },
-            #[cfg(feature = "keyboard")]
+            #[cfg(any(feature = "keyboard", feature = "mouse"))]
             RawEvent::FocusLost => {
-                self.held_buttons.clear();
-                self.held_characters.clear();
+                #[cfg(feature = "keyboard")]
+                {
+                    self.held_buttons.clear();
+                    self.held_characters.clear();
+                }
                 #[cfg(feature = "mouse")]
                 self.held_mouse_buttons.clear();
             }
@@ -484,7 +487,7 @@ impl<C: InputContext> InputContextState<C> {
             RawEvent::Gamepad(RawGamepadEvent::Connection(_)) => false,
             // Unreachable in practice: `control()` is `None` for this event, and `class_dispatch`
             // returns before ever asking. Kept for exhaustiveness, same as the arm above.
-            #[cfg(feature = "keyboard")]
+            #[cfg(any(feature = "keyboard", feature = "mouse"))]
             RawEvent::FocusLost => false,
         }
     }
