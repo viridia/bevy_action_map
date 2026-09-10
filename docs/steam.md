@@ -432,8 +432,30 @@ variant carrying the backend's own handle is the whole of it, and D52 already fr
 runtime value no save file may compare across a restart, which is exactly what an `InputHandle_t`
 is.
 
-Two things follow. The variant has to name *which* backend once more than one is possible, and
-that is where R0.5's queryable identity can land without widening `ActionState`. And the variant
-plays a different role from its siblings: the existing ones filter raw events reaching a context,
-while a Steam-paired entity has no raw events to filter, so the handle is an addressing key for
-where the backend writes rather than a filter. Same meaning to a reader, different mechanism.
+**And no new variant is needed.** `DeviceHandle::Gamepad` already holds a bare `Entity` and the
+crate never looks inside it: nothing in `src/` queries Bevy's `Gamepad` component, and the crate's
+own tests build handles from `Entity::from_bits` — synthetic entities carrying no components at
+all — with everything downstream working. The entity is an opaque key. The only place a real Bevy
+gamepad entity enters is `frame.rs`, converting a raw gamepad event, and that is the path
+suppression turns off.
+
+So a Steam backend spawns one entity per `InputHandle_t`, keeps the handle in its own component in
+its own crate, and hands the game `Paired::to(DeviceHandle::Gamepad(entity))`. `Entity` is already
+a dependency of this crate and `steamworks` never enters its graph — the same indirection Bevy
+uses for `gilrs`, reused rather than reinvented. D52's own wording, "identified by the backend's
+own entity for it", already covers this; "backend" was doing double duty and now means both.
+
+That also answers R0.5 more cheaply than widening anything: given the entity, query it for the
+backend's marker component. Identity that is queryable and never required at the call site.
+
+**Two things the entity does not carry.**
+
+*Brand.* `GamepadBrand::resolve` takes an `Option<u16>` vendor id and is called by the game rather
+than by this crate. A Steam-spawned entity has no vendor id to give (`S7`), so a backend either
+reports `Generic` or maps `InputType` onto `GamepadBrand` itself, which is lossy one way and empty
+the other.
+
+*Disconnect.* The crate learns a pad is gone from `RawGamepadEvent::Connection` reaching the frame,
+and under Steam no such event exists. A backend has to synthesise it, either by pushing a raw event
+or through a path that does not exist yet. This is the one place where "the entity is just a key"
+stops being sufficient, and it touches R11.4 and chunk 103.
