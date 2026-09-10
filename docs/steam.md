@@ -214,7 +214,7 @@ Ground rule 5 applies here as everywhere: each row names what would settle it.
 
 | Question | Gate |
 | --- | --- |
-| **Can two action sets be live at once?** D51's layer question, and the one measurement that could falsify a decision rather than reveal a gap | nothing now — `S16` gives a working bound layout, and the manifest already declares two sets. This is the next thing to measure |
+| **Do action set *layers* stack, where base sets do not?** `S19` settled the base case; layers are D51's intended answer and `steamworks` 0.13 exposes none of the functions | a patched `steamworks`, or a direct FFI call past the safe wrapper |
 | **Does the emulated pad carry Valve's vendor id on Windows?** `S1` is a macOS measurement, and D22's original claim may have described Windows | a Windows machine with the same pad |
 | **Can a player's configuration emit keyboard and mouse events for a pad while the game reads Steam Input natively?** `S1` found `Keyboard-1` and `Mouse-1` alongside the emulated pad. They exist whether or not they emit, and only a binding that maps a pad control to a key would make them. If that combination is reachable, suppressing the gamepad family does not stop it, and the input arrives as ordinary keyboard events the game has no reason to distrust | a bound configuration, so `S6` first, then a hand-edited config that maps a pad control to a key |
 
@@ -297,3 +297,29 @@ Measured together with `S16`:
 `InputAnalogActionData_t`'s `x`/`y` span `-1.0..=1.0` with the resting stick near zero and full
 deflection reaching `1.000`. It maps onto `ActionValue::Axis2` with no rescaling, which is what
 D51 assumed without measuring.
+
+### S19 — Exactly one action set is live per controller, and the last activation wins
+
+D51 measured. A manifest declaring two action sets, an analog action bound in each, and four
+phases cycling how they are activated:
+
+| Phase | Activation | `Move` (set 1) | `pong.move` (set 2) |
+| --- | --- | --- | --- |
+| 0 | set 1 alone | active | — |
+| 1 | set 2 alone | — | active |
+| 2 | set 1 **then** set 2, same frame | — | active |
+| 3 | set 2 **then** set 1, same frame | active | — |
+
+`ActivateActionSet` is exclusive and replaces rather than stacks. Two sets cannot be live at once
+through the base API, and `steamworks` 0.13 exposes nothing else (`S10`).
+
+**Confirms D51**, which reached the same conclusion from Valve's documentation and the binding's
+API surface. The value of measuring it is that the alternative was live: had Steam left both sets
+reporting, this crate's any-number-of-contexts model would have mapped onto Steam directly.
+
+**What it costs.** A Steam authority backend can drive **one** of this crate's contexts at a time.
+A game running a gameplay context and a modal overlay context simultaneously — which this crate
+does routinely, and which chunk 42's Pong variant was designed around — cannot have both fed by
+Steam. `ActivateActionSetLayer` exists in the Steamworks SDK and is the intended answer, but the
+Rust binding does not expose it, so reaching it needs a patch upstream or a direct FFI call past
+the safe wrapper.

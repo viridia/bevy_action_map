@@ -569,9 +569,13 @@ second implementer and the real one cannot live here.
   ours to show.
 - **R0.6, the half that is not about Steam.** A backend suppresses its devices at L0 so their raw
   events never reach the frame. Without it the demo reads the pad twice.
-- **Review surface, and it is the point of the chunk.** Two decisions are still falsifiable here:
-  two modal contexts that must be live on one pad at once, or an input observed twice. A decision
-  this chunk cannot break is a decision that was not made. The third — a backend-owned action
+- **Review surface, and it is the point of the chunk.** One decision is still falsifiable here: an
+  input observed twice. A decision this chunk cannot break is a decision that was not made.
+- **Two modal contexts on one pad is measured, and the answer is no** (`docs/steam.md` S19). Steam
+  runs exactly one action set per controller and the last activation wins, so the pause overlay over
+  an in-progress rally cannot have both contexts fed by Steam. Either the vehicle changes, or this
+  chunk reaches `ActivateActionSetLayer` past the safe binding — which is a dependency decision, not
+  a demo detail, and wants settling before the chunk is written. The third — a backend-owned action
   accepting a `.hold()` — chunk 111 made unrepresentable rather than diagnosable, so the hold on the
   serve is now the local paddle's or nothing.
 - **R0.5's queryable half is still owed.** A delegated action's value is indistinguishable from a
