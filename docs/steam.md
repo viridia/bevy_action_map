@@ -102,7 +102,7 @@ to nothing at all: every origin list was empty and `bActive` was false throughou
 treats handle resolution as a health check reports itself working and delivers nothing. Readiness is
 `bActive`, or a non-empty origin list.
 
-### S6 — Steam applies no controller configuration to a process it did not launch
+### S6 — Steam Input requires a GUI application with a window
 
 Root cause of what `S5` observes. `GetAnalogActionOrigins` and `GetDigitalActionOrigins` returned
 empty for every action of an activated set, and `bActive` was false, in **every** run — including
@@ -119,9 +119,12 @@ Eliminated, one at a time:
 - being launched by Steam — packaged as a `.app` and started from the library, still zero
   controllers and still no origins.
 
-What is left untried is a process with a **window**. Every run so far has been windowless, and
-Steam routes a controller to a game's focused window. That is the next experiment and it is no
-longer a small one: it wants a real Bevy app rather than a console binary.
+**Answered: the window was it.** A `winit` build of the same probe — same app id, same manifest,
+same everything else — gets a controller, resolves origins, and streams analog values. Every
+failing run was windowless. macOS bounces the dock icon until an application registers with the
+window server, and a process that never does is not one Steam will route a controller to.
+
+No app id is needed for any of this. A borrowed one plus a window is enough.
 
 ### S15 — The redistributable dylib must sit beside the binary
 
@@ -211,9 +214,7 @@ Ground rule 5 applies here as everywhere: each row names what would settle it.
 
 | Question | Gate |
 | --- | --- |
-| **Does a process with a window get a controller and a configuration?** `S6` eliminated everything else, including being launched by Steam. Every run has been windowless | a Bevy app with a real window, packaged as a `.app` and added to Steam. No app id needed — the borrowed one already carries our manifest |
-| **Do glyph paths resolve as D22 describes** — absolute, under the client's own install directory | bound actions, so `S6` first |
-| **Can two action sets be live at once?** D51's layer question, and the one measurement that could falsify a decision rather than reveal a gap | bound actions, so `S6` first |
+| **Can two action sets be live at once?** D51's layer question, and the one measurement that could falsify a decision rather than reveal a gap | nothing now — `S16` gives a working bound layout, and the manifest already declares two sets. This is the next thing to measure |
 | **Does the emulated pad carry Valve's vendor id on Windows?** `S1` is a macOS measurement, and D22's original claim may have described Windows | a Windows machine with the same pad |
 | **Can a player's configuration emit keyboard and mouse events for a pad while the game reads Steam Input natively?** `S1` found `Keyboard-1` and `Mouse-1` alongside the emulated pad. They exist whether or not they emit, and only a binding that maps a pad control to a key would make them. If that combination is reachable, suppressing the gamepad family does not stop it, and the input arrives as ordinary keyboard events the game has no reason to distrust | a bound configuration, so `S6` first, then a hand-edited config that maps a pad control to a key |
 
@@ -247,3 +248,52 @@ pad was wired on `0x0b12`, and kept the same handle across a transport swap (`S8
 suppression policy needs — Steam's handle to an OS device — therefore fails on product id even
 with this file in hand. Vendor id still matches, but vendor id alone cannot separate an emulated
 pad from a real one (`S1`), which is where this started.
+
+### S16 — The manifest declares actions; a *layout* binds them, and it is a workshop artifact
+
+Two separate things, and only the first is a file the game controls.
+
+The action manifest (`S4`) declares action sets and actions. What maps a physical control onto an
+action is a **layout**, and for app id 480 the one in force was `workshop://1761888411`, "Official
+Configuration", authored by Valve. Viewed against our manifest it rendered every binding as `--`:
+Valve's layout binds Spacewar's actions, our manifest replaced them, and every binding in it was
+orphaned.
+
+**A mismatched layout fails silently.** No refusal, no diagnostic — an empty layout, zero origins,
+`bActive` false. Indistinguishable at the API from having no controller at all, which is what made
+`S6` take so long to isolate. The client's own red "ERROR MESSAGES PRESENT" banner contained no
+errors.
+
+Editing the layout forks a personal copy. Binding the left stick to `Move` by hand made everything
+work at once:
+
+```
+origins for Move: 1
+  Left Stick Movement | glyph: …/controller_base/images/api/dark/shared_lstick_md.png
+show_binding_panel -> true
+Move: bActive -> true
+Move: +0.888, +0.459 (active true)
+Move: -0.008, -1.000 (active true)
+```
+
+**What this means for R19.8.** "Delegate to the backend's own UI" is not a courtesy — the bindings
+live in a workshop ecosystem the game has no write access to. A shipped game publishes a default
+layout for its own app id and the player may replace it; there is no in-game path to authoring one.
+
+### S17 — Origins, glyphs and the binding panel all work, and D22's glyph path is wrong
+
+Measured together with `S16`:
+
+- `GetAnalogActionOrigins` returns one origin per bound control;
+- `GetStringForActionOrigin` gives a readable label — `Left Stick Movement`;
+- `GetGlyphForActionOrigin` gives an absolute path, and it is **not** where D22 says. Measured:
+  `<bundle>/Contents/MacOS/controller_base/images/api/dark/shared_lstick_md.png`, against D22's
+  `tenfoot/resource/images/library/controller/api/`. Note the `dark` component: the glyphs are
+  themed, which nothing in this project's documents anticipated;
+- `ShowBindingPanel` returns `true` and opens the client's configuration UI over the game.
+
+### S18 — Analog action data arrives as a normalized pair in ±1.0
+
+`InputAnalogActionData_t`'s `x`/`y` span `-1.0..=1.0` with the resting stick near zero and full
+deflection reaching `1.000`. It maps onto `ActionValue::Axis2` with no rescaling, which is what
+D51 assumed without measuring.
