@@ -27,6 +27,7 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 | `docs/comparison.md` | how this crate differs from BEI and LWIM | someone asks why this exists |
 | `docs/one-way-doors.md` | what stops being revisable if an input crate goes upstream | upstreaming comes up |
 | `docs/issues.md` | the implementation scan's findings, `1.1`–`6`, by severity | a finding needs routing, or you are about to re-find one |
+| `docs/steam.md` | what a running Steam client actually does, `S1`–`S12` | a decision rests on how an external backend behaves |
 
 `archive/` holds the retired `Design.md`, `Log.md` and `Log-archive.md`. **Nothing in flight reasons
 from them** — they describe the crate as it was, two of them are longer than anything in `docs/`,

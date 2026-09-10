@@ -559,13 +559,35 @@ The same capability is what lets a replay backend mute live hardware.
 
 **Checked against `steamworks` 0.13, the Rust binding of the Steamworks SDK.** ISteamInput has no
 call that suppresses the emulated pad — that emulation is a per-title setting the player controls in
-the Steam client, not something a game can query or toggle. What suppression at the source layer
-comes down to for the Steam case is device-identity filtering: an emulated pad enumerates under
-Valve's own vendor id, distinct from the hardware underneath it, and that is the same primitive D64
-already built for `GamepadBrand`. No second mechanism is needed, only a policy — drop raw events from
-a Valve-vendor device while a Steam authority is active for that family — and the exact id wants
-confirming against a running client before a real backend ships, the same way R14's gamepad findings
-were measured rather than assumed.
+the Steam client, not something a game can query or toggle.
+
+**Device-identity filtering was the plan, and it does not work.** This decision proposed dropping
+raw events from a Valve-vendor device while a Steam authority was active for that family, on the
+theory that an emulated pad enumerates under Valve's own vendor id and so needs no mechanism beyond
+the one D64 built for `GamepadBrand`. It asked for that id to be confirmed against a running client
+before a real backend shipped. Measured, it is wrong: the emulated pad carries Microsoft's vendor id
+and the Xbox 360 product id, sharing a vendor with the hardware underneath it (`docs/steam.md` S1),
+and nothing in the API relates Steam's controller handle to an OS device (S3). There is no way to
+identify *which* device is the emulation.
+
+**What replaces it: suppression is per family, declared by the game.** A game that ships a Steam
+build knows it does; it tells this crate to stop recording a whole device family at L0, and the
+sampler skips that family's events. Wholesale rather than per device because per device is not
+implementable, not because it is cheaper — if Valve ever exposes a handle-to-device mapping the
+policy narrows and nothing above L0 notices. Declared rather than detected, because a Steam build
+launched with Steam not running must still read its pads, and a suppression that silently turns
+itself on and off between runs is the worst kind of input bug to diagnose. The same switch is what
+lets a replay backend mute live hardware, which is what this decision wanted from it all along.
+
+**Not a Cargo feature.** Suppression is a runtime fact — the same binary runs with the client up and
+with it absent — so no compile-time flag can express it. It would also be a feature that *removes*
+behaviour, which Cargo's additive-feature rule forbids: one crate in the graph enabling it would
+silence gamepads for every other.
+
+**The gap this leaves** is keyboard and mouse. Steam creates emulated devices for both alongside the
+pad (S1), and suppressing the gamepad family does not touch them. Whether a configuration can emit
+keys for a pad while the game reads Steam Input natively is unmeasured, and `docs/steam.md` carries
+the question.
 
 ### D23 — Focus integrates by activation, and interception is static
 

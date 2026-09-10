@@ -510,6 +510,33 @@ network removed, which was the expensive part.
 Three chunks no game asks for and no published crate can do without: an extension point nothing
 outside has exercised, the reflection the documents promise, and documentation that runs.
 
+### 112. A backend suppresses a device family at L0
+
+R0.6's other half, and the smallest it will ever be: `docs/steam.md` S1 and S3 killed the
+per-device policy D22 assumed, so what is left is a family switch.
+
+- **A resource naming the suppressed families**, read by `sample_input` (`frame.rs:304`) as a guard
+  around each family's own `MessageReader` loop. Nothing above L1 changes, because a suppressed
+  family simply never reaches the frame.
+- **Declared by the game, not detected.** A Steam build launched with the client absent must read
+  its pads normally, and a suppression that turns itself on and off between runs is the worst kind
+  of input bug to diagnose. The backend's own plugin sets it once its init succeeds.
+- **Not a Cargo feature**, for the two reasons D22 now records: it is a runtime fact, and a feature
+  that removes behaviour is not additive.
+- **Per family rather than per device** because per device is not implementable, not because it is
+  cheaper. S3: Steam hands out an `InputHandle_t` and nothing relates it to an OS device. If Valve
+  ever exposes that mapping the policy narrows and nothing above L0 notices.
+- **Verification is headless and needs no Steam.** An `App` with `gamepad` enabled, the resource
+  set, a synthetic `RawGamepadEvent` pushed through the sampler, and the frame asserted empty; the
+  same test with the resource clear asserts it arrives. The eight-combination matrix covers the
+  `cfg` interaction, since suppression has to compile with each family absent.
+- **Not doing: keyboard and mouse.** Steam emulates both alongside the pad (S1) and the family
+  switch would silence them wholesale, which is wrong — a player using a pad through Steam still
+  types. Whether Steam can emit keys for a pad while the game reads Steam Input natively is
+  unmeasured, and `docs/steam.md` carries the question. This chunk suppresses what a backend
+  actually owns and leaves that one open.
+- **Not doing: R0.4's per-action split**, which lives at L2 and is chunk 111's, already landed.
+
 ### 42. The authority backend, faked
 
 The backend seam made real against something that is not Steam, because the seam is only proven by a
@@ -612,6 +639,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 
 | Area | Gated on |
 | --- | --- |
+| **A real Steam backend, validated out of tree** | an app id, which needs a Steamworks partner account. `docs/steam.md` S4 and S6 mean a borrowed app id gets handle resolution and no bindings, so the four open questions there cannot be answered without one. The shape is settled: a probe rather than a game, in its own repository, pinning `bevy_action_map` by git rev so it breaks only on a deliberate bump — and it is an audit rather than a gate, since it needs a client and a pad and cannot run in CI. `steam_probe/` is its gitignored seed and moves out when the repository exists. Nothing in this crate is blocked on it: per-family suppression is chunk 112, and the presentation half can be built against API signatures already verified to exist |
 | **Persisting calibration**, keyed to identity (R11.7, R14.11) | R11.5's stable device identity, which chunk 72 builds. Measured calibration lasts as long as the process |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it. Checked against `steamworks` 0.13: `get_glyph_for_action_origin` resolves to an absolute filesystem path under the Steam client's own install directory (`tenfoot/resource/images/library/controller/api/`), which a Bevy `AssetPath` can carry natively via `from_path_buf` — no string-escaping the drive letter or backslashes. The path is not to be opened as given: a custom `AssetSource` reader must canonicalize it and reject anything outside a known root before reading, rather than trust an external SDK's return value as a bare filesystem path. One scheme, one hard-coded root is the right size while only this one root is confirmed; a second scheme is warranted only if a second root with its own lifecycle surfaces (e.g. something ephemeral, which cannot share a stable root's caching and hot-reload assumptions) — not one scheme per SDK call that happens to return a path |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import |
