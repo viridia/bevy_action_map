@@ -1225,8 +1225,12 @@ the error that remains.
 
 **A context is a layer.** Steam allows one action set active per controller plus a stack of layers,
 where this crate runs any number of contexts at once. **Measured** (`docs/steam.md` S19):
-`ActivateActionSet` is exclusive and last-call-wins, so two sets genuinely cannot be live together
-and a Steam backend drives one context at a time until layers are reachable. Layers stack and
+`ActivateActionSet` is exclusive and last-call-wins, so two sets genuinely cannot be live together.
+But a set per context was never required (S20): one control can drive several actions in one set and
+Steam picks no winner, so a backend may declare every delegated action in a single set and let this
+crate's own contexts, priorities and consumption do the arbitrating. Sets then partition contexts by
+what can be live together, not one per context — and mutually exclusive contexts, which `EXCLUSIVE`
+and the exclusion ceiling already name, are exactly where a set boundary can fall. Layers stack and
 override in the direction priorities already do, so a backend activates one base set and pushes a
 layer per active context — and an action bound in several contexts is one action declared once in
 the base set. Consumption is the part layers cannot express: a lower layer's action is shadowed or

@@ -323,3 +323,117 @@ does routinely, and which chunk 42's Pong variant was designed around — cannot
 Steam. `ActivateActionSetLayer` exists in the Steamworks SDK and is the intended answer, but the
 Rust binding does not expose it, so reaching it needs a patch upstream or a direct FFI call past
 the safe wrapper.
+
+### S20 — One control can drive several actions in one set, and Steam does not arbitrate
+
+Two digital actions, `alpha` and `beta`, declared in the same action set and both bound to the A
+button. Both resolve an origin reading `A Button`, and both report pressed on the same frame:
+
+```
+origins for alpha: 1
+  A Button
+origins for beta: 1
+  A Button
+alpha: active=true pressed=true
+beta: active=true pressed=true
+```
+
+Steam fans a control out to every action bound to it and picks no winner. Arbitration is the
+game's.
+
+**This largely retires S19's constraint.** S19 rules out a Steam action set per context wherever
+two contexts can be live together — but a set per context was never required. One set holding
+every delegated action works: activate it once, poll every action every tick, and let this crate's
+own contexts, priorities and consumption decide what a value means. `apply_authority` already does
+the gating, since an inactive or shadowed context returns before reading anything.
+
+**The correspondence is therefore not one-to-one.** What Steam's sets must not do is split two
+contexts that can be active simultaneously. Contexts that are mutually exclusive may share Steam's
+exclusivity freely — and the crate already names those boundaries, in `EXCLUSIVE` contexts and the
+exclusion ceiling.
+
+**What one set costs** is presentation, not function. The player sees a flat list with one button
+bound to several actions, and no indication that context decides which applies. A set per
+mutually-exclusive group keeps Steam's own tabbed binding UI meaningful, so it remains the better
+shape wherever the exclusivity is real.
+
+---
+
+## Appendix: what the two examples would encode
+
+Worked from the contexts `examples/disasteroids` and `examples/split_friction` actually declare.
+The rule from `S19` and `S20` is that a Steam action set may not split two contexts that can be
+live at the same time; beyond that the mapping is free.
+
+One thing to know first: **action handles are global, not per set.** `GetDigitalActionHandle` takes
+a name and no set, and the same handle comes back whatever is active. A set scopes which actions
+are *live* and what they are bound to, so declaring one action in several sets is natural rather
+than a duplication problem.
+
+### Disasteroids — three contexts, two sets
+
+| Context | Tick | Active when |
+| --- | --- | --- |
+| `Flying` | Fixed | `Game::Playing` |
+| `Shell` | Render | always — it owns Pause, so something must hear the unpause |
+| `Menu` | Render, priority 10, **exclusive** | a screen entity exists |
+
+Which can be live together:
+
+- playing: `Flying` **and** `Shell`;
+- paused: `Shell` alone;
+- a screen up: `Menu` alone, because being exclusive at priority 10 shadows both others.
+
+So `Flying` and `Shell` must share a set, and `Menu` may have its own:
+
+```
+gameplay   Thrust, Turn, Fire, …   (Flying)   +   Pause, ToggleOverlay, ToggleSettings   (Shell)
+menu       Navigate, Confirm, Back (Menu)
+```
+
+Three contexts, two sets, and the split falls exactly where `exclusive` already put it. Note what
+follows: while `menu` is active nothing in `gameplay` reports, so `Pause` goes quiet under a
+settings screen — correct here, since `Menu` has its own way out, but a game wanting a
+still-live global action under a modal would declare it in both sets rather than reaching for
+layers.
+
+### Split Friction — three contexts, one set, two controllers
+
+| Context | Tick | Instances |
+| --- | --- | --- |
+| `Debug` | Render | one, unpaired |
+| `Lobby` | Render | one, unpaired; its only binding is a class binding for the join gesture |
+| `OnFoot` | Fixed | one per protagonist, each `Paired` to a device |
+
+All three are live together — `Lobby` keeps waiting for player two while player one is already
+walking around under `OnFoot`. So they share a single set, and the interesting dimension is not
+sets at all:
+
+**Two players are two controllers, not two action sets.** `ActivateActionSet` and every data read
+take an `InputHandle_t`, so one set is activated separately per controller and each player's values
+are read from their own handle. That is the same axis `Paired` already models, which is why the
+per-player case needs nothing from Steam's set mechanism.
+
+Two problems surface here that Disasteroids never reaches:
+
+**The join gesture has no Steam counterpart, and that is survivable.** `Lobby`'s only binding is
+`bind_class::<Join>(ControlClass::AnyButton)` — "any button, on any device". Steam reports actions
+you declared and nothing else, so there is no way to ask it about an unbound press. A Steam build
+declares a `join` action instead and prompts for it by name. That is what shipped console games do
+— Split Fiction asks for A on Switch — so it is a change of gesture rather than a loss. Class
+bindings remain the one part of this crate's binding vocabulary with no Steam expression.
+
+**Pairing lives in Steam's namespace, and `DeviceHandle` extends to say so.** `Paired` holds a
+`DeviceHandle` naming a Bevy gamepad, where Steam offers an `InputHandle_t`, and `S3` and `S14`
+say the two cannot be joined. That would be a problem only if both device sources were live at
+once — and they are not: suppression is per family and wholesale (D22), so gamepads are Steam's or
+`gilrs`'s and never both. With no gilrs gamepad to reconcile against, a third `DeviceHandle`
+variant carrying the backend's own handle is the whole of it, and D52 already frames a handle as a
+runtime value no save file may compare across a restart, which is exactly what an `InputHandle_t`
+is.
+
+Two things follow. The variant has to name *which* backend once more than one is possible, and
+that is where R0.5's queryable identity can land without widening `ActionState`. And the variant
+plays a different role from its siblings: the existing ones filter raw events reaching a context,
+while a Steam-paired entity has no raw events to filter, so the handle is an addressing key for
+where the backend writes rather than a filter. Same meaning to a reader, different mechanism.

@@ -571,13 +571,14 @@ second implementer and the real one cannot live here.
   events never reach the frame. Without it the demo reads the pad twice.
 - **Review surface, and it is the point of the chunk.** One decision is still falsifiable here: an
   input observed twice. A decision this chunk cannot break is a decision that was not made.
-- **Two modal contexts on one pad is measured, and the answer is no** (`docs/steam.md` S19). Steam
-  runs exactly one action set per controller and the last activation wins, so the pause overlay over
-  an in-progress rally cannot have both contexts fed by Steam. Either the vehicle changes, or this
-  chunk reaches `ActivateActionSetLayer` past the safe binding — which is a dependency decision, not
-  a demo detail, and wants settling before the chunk is written. The third — a backend-owned action
-  accepting a `.hold()` — chunk 111 made unrepresentable rather than diagnosable, so the hold on the
-  serve is now the local paddle's or nothing.
+- **Two modal contexts on one pad is measured, and the vehicle survives.** Steam runs one action
+  set per controller and the last activation wins (`docs/steam.md` S19), so a set per context is
+  out — but one control can drive several actions in one set and Steam arbitrates none of them
+  (S20). The pause overlay over an in-progress rally works from a single set holding every
+  delegated action, with this crate doing its own gating. `ActivateActionSetLayer` is not needed.
+- **A backend-owned action accepting a `.hold()`** was the third falsifiable decision, and chunk
+  111 made it unrepresentable rather than diagnosable, so the hold on the serve is now the local
+  paddle's or nothing.
 - **R0.5's queryable half is still owed.** A delegated action's value is indistinguishable from a
   bound one at the call site, which is the requirement's point, but nothing yet names *which*
   authority produced it: chunk 111 left `AuthorityValues` unnamed rather than adding a field with no
