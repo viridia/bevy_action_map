@@ -172,6 +172,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 78c | `context.rs` is two files, plus a shared test fixture module |
 | 94a | A binding can name the logical key, not only the physical one |
 | 108 | Focus loss, regated                                   |
+| 111 | An outside authority writes an action's value at L2   |
 
 ---
 
@@ -514,12 +515,12 @@ outside has exercised, the reflection the documents promise, and documentation t
 The backend seam made real against something that is not Steam, because the seam is only proven by a
 second implementer and the real one cannot live here.
 
-- **The traits land in `src/backend.rs`**, which has been a doc comment and no code since chunk 1.
-  An authority backend supplies an `ActionValue` per owned action, substituted for the fold's output
-  inside the evaluator so the state machine still synthesizes the edges. A source backend needs
-  nothing new — `InputFrame::record` is already the door.
-- **The same trait is what a network authority backend would build on** (D69, the netcode deferred
-  row) — a second reason, beyond Steam, that this needs to be real rather than a doc comment.
+- **Depends on chunk 111**, which landed the injection itself: `delegate::<A>()` and
+  `AuthorityValues` (D71). What is left here is the half a settings screen asks for on demand rather
+  than the half the evaluator reads every tick — origins, glyphs, whether an action is bound at all,
+  and delegating a rebind (R18.8, R18.9, R19.8). That is where a trait in `src/backend.rs` earns its
+  place, and where a source backend would be described if it needed anything beyond
+  `InputFrame::record`, which it does not.
 - **The mock lives entirely in `examples/`.** The traits are public API and carry a maintenance
   promise; the fake is a test fixture and gets deleted when a real backend exists.
 - **It must fake the API, not the concept.** Level-only reads with no timestamps, an "is this bound"
@@ -541,10 +542,19 @@ second implementer and the real one cannot live here.
   ours to show.
 - **R0.6, the half that is not about Steam.** A backend suppresses its devices at L0 so their raw
   events never reach the frame. Without it the demo reads the pad twice.
-- **Review surface, and it is the point of the chunk.** Three decisions were written to be
-  falsifiable here: a backend-owned action that accepts a `.hold()` without a plan-build diagnostic,
+- **Review surface, and it is the point of the chunk.** Two decisions are still falsifiable here:
   two modal contexts that must be live on one pad at once, or an input observed twice. A decision
-  this chunk cannot break is a decision that was not made.
+  this chunk cannot break is a decision that was not made. The third — a backend-owned action
+  accepting a `.hold()` — chunk 111 made unrepresentable rather than diagnosable, so the hold on the
+  serve is now the local paddle's or nothing.
+- **R0.5's queryable half is still owed.** A delegated action's value is indistinguishable from a
+  bound one at the call site, which is the requirement's point, but nothing yet names *which*
+  authority produced it: chunk 111 left `AuthorityValues` unnamed rather than adding a field with no
+  reader. A chunk with two real backends in one build is where a name earns itself.
+- **A delegated action has no row on a controls screen**, because it has no binding to derive one
+  from, and `RebindPolicy` has no third state to say why. R17's "not ours" (`Requirements.md`
+  §17.1042) and R19.8's delegate-instead outcome are both this chunk's, and the panel is what needs
+  them.
 
 ### 109. Derive `Reflect`, and turn on auto-registration instead of hand-writing it
 
@@ -605,7 +615,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Persisting calibration**, keyed to identity (R11.7, R14.11) | R11.5's stable device identity, which chunk 72 builds. Measured calibration lasts as long as the process |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it. Checked against `steamworks` 0.13: `get_glyph_for_action_origin` resolves to an absolute filesystem path under the Steam client's own install directory (`tenfoot/resource/images/library/controller/api/`), which a Bevy `AssetPath` can carry natively via `from_path_buf` — no string-escaping the drive letter or backslashes. The path is not to be opened as given: a custom `AssetSource` reader must canonicalize it and reject anything outside a known root before reading, rather than trust an external SDK's return value as a bare filesystem path. One scheme, one hard-coded root is the right size while only this one root is confirmed; a second scheme is warranted only if a second root with its own lifecycle surfaces (e.g. something ephemeral, which cannot share a stable root's caching and hot-reload assumptions) — not one scheme per SDK call that happens to return a path |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import |
-| **Netcode injection and reconciliation** | a networked target, and chunk 42's authority-backend trait. Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. Injection targets L2 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs a remote player's resolved action to inject and a later correction to reconcile against it |
+| **Netcode injection and reconciliation** | a networked target. The injection point is built: chunk 111 landed `delegate` and `AuthorityValues`, so a peer's resolved action already has somewhere to go (D71). Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. Injection targets L2 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs a remote player's resolved action to inject and a later correction to reconcile against it |
 | **Consumption-aware `FocusedInput` dispatch** (R8.2a) | **a game wanting `bevy_ui_widgets`' own widgets working generically, unmodified, without a context per widget kind.** A context per kind is the path to reach for first, and Disasteroids ships that way. A design for the filter was built and set aside: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline rather than a second raw-message read — keyboard only, since every keyboard-driven widget observer at the pinned commit gates on `ButtonState::Pressed` and none reacts to a release |
 | **Promoting `WidgetKind` and the per-kind context into the crate** | [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native widget-kind id. Promoting a shape this crate invented first, ahead of that conversation, risks committing to the wrong one |
 | **A context-level exclusion from the mapping list** | a second screen needing the same filter and duplicating it. `ActionMapping::context` already carries the data, and one call site filtering on it costs one line — at two, the crate is the one paying for the repetition |
@@ -613,7 +623,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Free-form mutually-exclusive context sets** (R7.7 remainder) | nothing in tree needs two independently-exclusive contexts to coexist rather than one dominating the other by priority |
 | **Owner-scoped `ConsumedControls`/exclusion ceiling** (R15.3 remainder, and D13's own remainder) | a real in-tree case with a per-player exclusive context, or a binding consumed across two players' devices. Design if built: a claim visible only if made globally or by the viewer's own paired device; an exclusive context's shadow implicit in its own pairing rather than a separate flag |
 | **Per-entity presentation and prompts** (D52's remainder) | an actual per-player settings or prompt display — **chunk 71 is what this was waiting for**, so expect it met or falsified there rather than merely waiting |
-| **An authority backend's actions in rollback** (D22's remainder) | chunk 42 having a backend to ask. The available answer is recording the backend's output into the frame at sample time, at the cost of a larger frame |
+| **An authority backend's actions in rollback** (D22's remainder) | a snapshot to fit them into. `AuthorityValues` is a plain component and clones with the entity, but what a rewind has to reproduce is what the authority *said* on the tick being re-simulated, which is not in the frame. The available answer is recording the backend's output into the frame at sample time, at the cost of a larger frame |
 | **Sub-frame event timing** (D4's remainder) | [bevy#9087][] upstream. Gamepad stays frame-quantized regardless until gilrs polling is rewritten, so mixed fidelity across sources is permanent for now rather than an artifact |
 | **Schedule enforcement for tick domains** (D9's remainder) | Bevy giving a `SystemParam` a way to know its own schedule. A plugin-time validation pass and a debug assertion stand in |
 | **Mouse wheel as a binding source** (R13.3) | nothing in tree wants it. The wheel is a delta on its own channel, needs `Line`/`Pixel` normalization, and shares nothing with a button but the device |

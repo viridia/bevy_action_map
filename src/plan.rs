@@ -6,7 +6,9 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use core::marker::PhantomData;
 
 use crate::action::{ActionId, ActionIntent, ChannelShape};
-use crate::binding::{BindingInput, BindingModifier, BindingSpec, ClassBindingSpec, Control};
+use crate::binding::{
+    BindingInput, BindingModifier, BindingSpec, ClassBindingSpec, Control, DelegatedSpec,
+};
 use crate::capture::{ClassFilter, ControlClass};
 use crate::condition::BindingCondition;
 use crate::event::{ClassDispatch, Dispatch};
@@ -55,7 +57,8 @@ impl BindingDiagnostic {
             | DiagnosticKind::FollowsNothing { .. }
             | DiagnosticKind::FollowsUnlisted { .. }
             | DiagnosticKind::DuplicateTunableKey { .. }
-            | DiagnosticKind::TunableShapeDisagreement { .. } => Severity::Error,
+            | DiagnosticKind::TunableShapeDisagreement { .. }
+            | DiagnosticKind::BoundAndDelegated => Severity::Error,
             DiagnosticKind::DuplicateBinding { .. }
             | DiagnosticKind::ConsumeDisagreement { .. }
             | DiagnosticKind::DuplicateClassBinding { .. }
@@ -151,6 +154,8 @@ pub enum DiagnosticKind {
         /// The declared lower bound.
         lower: f32,
     },
+    /// An action is both bound in this context and delegated to an outside authority.
+    BoundAndDelegated,
 }
 
 impl core::fmt::Display for BindingDiagnostic {
@@ -261,6 +266,13 @@ impl core::fmt::Display for BindingDiagnostic {
                 "`{}` declares a deadzone at {lower}, at or beyond full deflection. Ordinary \
                  input never escapes it — only a control whose magnitude overshoots 1.0, such as \
                  a diagonal directional composite, produces anything",
+                self.action
+            ),
+            DiagnosticKind::BoundAndDelegated => write!(
+                f,
+                "`{}` is bound to a control in this context and also delegated to an outside \
+                 authority. Only one of the two can decide what the action does; drop whichever \
+                 is not the authority here",
                 self.action
             ),
         }
@@ -509,6 +521,25 @@ pub(crate) fn diagnose_classes(bindings: &[ClassBindingSpec]) -> Vec<BindingDiag
     found
 }
 
+/// Whether anything a context delegated is also bound in it.
+///
+/// The only way the two declarations can contradict each other. Everything else a binding carries —
+/// a modifier, a condition, a mapping row — has no delegated counterpart to disagree with, because
+/// `delegate` offers no way to say it.
+pub(crate) fn diagnose_delegated(
+    bindings: &[BindingSpec],
+    delegated: &[DelegatedSpec],
+) -> Vec<BindingDiagnostic> {
+    delegated
+        .iter()
+        .filter(|spec| bindings.iter().any(|binding| binding.action == spec.action))
+        .map(|spec| BindingDiagnostic {
+            action: spec.path,
+            kind: DiagnosticKind::BoundAndDelegated,
+        })
+        .collect()
+}
+
 /// An authored binding with its action resolved to a state slot.
 pub(crate) struct CompiledBinding {
     pub(crate) slot: usize,
@@ -559,6 +590,19 @@ pub(crate) struct CompiledClassBinding {
 /// the ceiling on slots in one context — 65535 actions, which no plan approaches.
 const UNBOUND: u16 = u16::MAX;
 
+/// Encodes a freshly allocated slot for the reverse index.
+///
+/// The sentinel is not a slot, so the ceiling is one below it rather than `u16::MAX` — storing slot
+/// 65535 would encode as `UNBOUND` and read back as an action this context does not have.
+/// App-build, not runtime (R24.4): a context this size is a mistake in the declaration, and there
+/// is no shipped build in which it happens.
+fn encode_slot(slot: usize) -> u16 {
+    u16::try_from(slot)
+        .ok()
+        .filter(|&slot| slot != UNBOUND)
+        .unwrap_or_else(|| panic!("a context may hold at most {UNBOUND} actions"))
+}
+
 /// The plan is the immutable runtime view of a context's authored bindings.
 // One slot per action, not per binding: an action may be bound several times, and all of those
 // bindings write the same state. Bindings are grouped by slot so the evaluator can fold each
@@ -578,6 +622,10 @@ pub struct Plan<C> {
     // id the context binds rather than by the registry, and held once per plan rather than per
     // instance, so the slack costs two bytes an id in one allocation.
     slot_by_action: Vec<u16>,
+    // The slots an outside authority writes rather than the fold. Held as a list rather than a bit
+    // per slot because the evaluator only ever walks it, and the overwhelmingly common plan
+    // delegates nothing.
+    delegated_slots: Vec<usize>,
     scratch_count: usize,
     // One cell per group of bindings sharing a tunable — see `CompiledBinding::tunable_shared`.
     // Most plans have none.
@@ -639,6 +687,10 @@ impl<C> Plan<C> {
     pub(crate) fn variant_of(template: &Self, bindings: Vec<BindingSpec>) -> Self {
         let mut plan = Self::compile(bindings, Some(template));
         plan.class_bindings.clone_from(&template.class_bindings);
+        // Carried over for the same reason class bindings are: an override rewrites which controls
+        // a binding reads, and a delegated action has none to rewrite. The slots themselves survive
+        // already, since `compile` starts from the template's slot tables.
+        plan.delegated_slots.clone_from(&template.delegated_slots);
         plan
     }
 
@@ -705,15 +757,7 @@ impl<C> Plan<C> {
                     slot_paths.push(binding.path);
                     slot_actions.push(binding.action);
                     let slot = slot_intents.len() - 1;
-                    // The sentinel is not a slot, so the ceiling is one below it rather than
-                    // `u16::MAX` — storing slot 65535 would encode as `UNBOUND` and read back as
-                    // an action this context does not bind. App-build, not runtime (R24.4): a
-                    // context this size is a mistake in the declaration, and there is no shipped
-                    // build in which it happens.
-                    slot_by_action[id] = u16::try_from(slot)
-                        .ok()
-                        .filter(|&slot| slot != UNBOUND)
-                        .unwrap_or_else(|| panic!("a context may bind at most {UNBOUND} actions"));
+                    slot_by_action[id] = encode_slot(slot);
                     slot
                 }
                 slot => usize::from(slot),
@@ -764,6 +808,7 @@ impl<C> Plan<C> {
             slot_paths,
             slot_actions,
             slot_by_action,
+            delegated_slots: Vec::new(),
             scratch_count,
             tunable_scratch_count,
             class_bindings: Vec::new(),
@@ -773,8 +818,42 @@ impl<C> Plan<C> {
         }
     }
 
+    /// Gives each delegated action a state slot of its own, with no binding behind it.
+    ///
+    /// Applied after compilation rather than during it, so that the slots bindings allocated keep
+    /// the indices they already have and a variant compiled from this plan needs no rebuilding.
+    pub(crate) fn delegate(&mut self, delegated: Vec<DelegatedSpec>) {
+        for spec in delegated {
+            let id = spec.action.index() as usize;
+            if id >= self.slot_by_action.len() {
+                self.slot_by_action.resize(id + 1, UNBOUND);
+            }
+            // Never an action a binding already holds: `diagnose_delegated` reports that as an
+            // error and `add_context` refuses the context before anything is compiled.
+            let slot = match self.slot_by_action[id] {
+                UNBOUND => {
+                    self.slot_intents.push(spec.intent);
+                    self.slot_dispatch.push(spec.dispatch);
+                    self.slot_paths.push(spec.path);
+                    self.slot_actions.push(spec.action);
+                    let slot = self.slot_intents.len() - 1;
+                    self.slot_by_action[id] = encode_slot(slot);
+                    slot
+                }
+                slot => usize::from(slot),
+            };
+            if !self.delegated_slots.contains(&slot) {
+                self.delegated_slots.push(slot);
+            }
+        }
+    }
+
     pub(crate) fn bindings(&self) -> &[CompiledBinding] {
         &self.bindings
+    }
+
+    pub(crate) fn delegated_slots(&self) -> &[usize] {
+        &self.delegated_slots
     }
 
     pub(crate) fn slot_count(&self) -> usize {
@@ -1099,7 +1178,7 @@ mod tests {
 
         let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<Jump>(KeyCode::Space);
-        let (bindings, class_bindings) = builder.finish();
+        let (bindings, class_bindings, _) = builder.finish();
         let plan = Plan::<()>::from_bindings(bindings, class_bindings);
 
         assert!(plan.is_indexed(Control::PhysicalKey(KeyCode::Space)));

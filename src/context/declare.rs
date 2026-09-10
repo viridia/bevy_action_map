@@ -835,8 +835,10 @@ fn declare_context<C: InputContext + Component>(
     let activation = builder.activation.take();
     let starts_active = activation.is_none();
 
-    let (bindings, class_bindings) = builder.finish();
-    let plan = Arc::new(Plan::from_bindings(bindings.clone(), class_bindings));
+    let (bindings, class_bindings, delegated) = builder.finish();
+    let mut plan = Plan::from_bindings(bindings.clone(), class_bindings);
+    plan.delegate(delegated);
+    let plan = Arc::new(plan);
     app.insert_resource(InputContextPlan::<C> {
         plan,
         bindings,

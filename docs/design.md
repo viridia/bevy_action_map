@@ -342,6 +342,30 @@ A window losing focus (`RawEvent::FocusLost`) or a gamepad disconnecting cancels
 flight on that source — `Canceled`, not the `Completed` an ordinary release produces. A binding on
 an unaffected device is untouched.
 
+### 5.8 Delegated actions
+
+`controls.delegate::<A>()` gives an action a slot with no binding behind it, and an
+`AuthorityValues` component on the context entity supplies its value. Whatever owns the outside
+authority — a platform input service, a network peer — writes into that component from a system
+ordered before evaluation, and the evaluator substitutes what it finds for the value the fold would
+have produced.
+
+Substitution happens at the state machine, so the same code that turns a bound control's level into
+`Fired`, `Firing` and `Completed` turns the authority's level into the same phases. An authority
+reporting only a level, sampled when asked, is what this is shaped for; nothing on the wire or in
+the platform API needs to carry an edge.
+
+The rest of the pipeline is skipped, because there is nothing to run it against: no control, no
+modifier chain, no conditions, no consumption, and no mapping row on a rebinding screen. `delegate`
+offers no way to declare any of them, which is what makes attaching one unrepresentable rather than
+a mistake to catch. Binding an action the same context delegates is the one contradiction the two
+declarations can express, and is a plan-build error.
+
+Delegated slots are read once per tick, not once per event: the authority is sampled rather than
+replayed. An inactive context stops reading it — there is no held state to keep current, unlike a
+bound control's. Interruption does not reach them either; a window losing focus is this crate's
+device going away, and the authority's has not.
+
 ---
 
 ## 6. State and storage
@@ -969,7 +993,7 @@ src/
   capture.rs         capture sessions, reserved controls, conflict detection
   present.rs         control naming, prompts, prompt scope and staleness
   inspect.rs         the type-erased read of contexts and actions
-  backend.rs         reserved for the source and authority backend traits — a stub today
+  backend.rs         AuthorityValues, the component a delegated action reads its value from
   focus.rs           reserved for bevy_input_focus integration — a stub today
 bevy_action_map_macros/   #[derive(InputAction)], #[derive(InputContext)]
 ```

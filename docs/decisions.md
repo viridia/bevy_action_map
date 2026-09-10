@@ -1194,9 +1194,12 @@ the promise that a consumer need not know which backend produced a value is fals
 path would have to reimplement the state machine, and two implementations of the lifecycle is
 exactly the drift that promise forbids.
 
-**A condition on a backend-owned action is a plan-build error.** The backend has its own activators
-and will not deliver a hold or a multi-tap, so the game asked for behaviour it will not get and
-nothing else would tell it.
+**A condition on a backend-owned action was to be a plan-build error.** The backend has its own
+activators and will not deliver a hold or a multi-tap, so the game asked for behaviour it will not
+get and nothing else would tell it. What shipped needs no diagnostic: `delegate` takes no input and
+returns no builder, so there is nothing to chain a condition onto in the first place (D71). The one
+contradiction the declarations can still express — binding an action the same context delegates — is
+the error that remains.
 
 **A context is a layer.** Steam allows one action set active per controller plus a stack of layers,
 where this crate runs any number of contexts at once. Layers stack and override in the direction
@@ -1251,6 +1254,31 @@ belongs to `bevy_input`'s module boundary, not to a choice one of this crate's g
 `bevy_input::keyboard` leaves that build's feature graph; and if the read reverted with it, a mouse
 button held through alt-tab would stick again with `keyboard` disabled, the R16.1 gap chunk 108
 closed.
+
+### D71 — An authority's values arrive as a component, not through a trait object
+
+**Decided.** The value an authority backend supplies reaches the evaluator through
+`AuthorityValues`, a component on the context entity, written by an ordinary system ordered before
+evaluation. Actions it drives are named by `controls.delegate::<A>()`, which allocates a plan slot
+with no binding behind it. There is no `dyn AuthorityBackend` the evaluator calls.
+
+**Rules out.** A backend resource the evaluator asks — the `World` singleton R0.3 forbids, and with
+it any game whose two players are on two different backends — and a boxed trait object held per
+entity, which would run the backend inside the evaluator system with no system parameters of its
+own.
+
+**Reversal.** Per-entity values are what make R0.4's per-context split fall out with nothing extra,
+and what let a network backend's receive queue, an asset handle or a platform SDK's own resource be
+ordinary system parameters. A trait object the evaluator pulls from has access to none of those, so
+every implementor would have to carry its own way in — which is the interior mutability and the
+hidden channel a `&self` call inside a system forces.
+
+**Note.** D51's "sampled when asked" survives the change of direction: a system ordered immediately
+before evaluation samples once a tick, which is what a pulled call would have done. What a trait is
+still the right shape for is the half this does not cover — origins, glyphs, whether an action is
+bound at all, and delegating a rebind to the backend's own UI (R18.8, R19.8). Those are asked on
+demand by a settings screen rather than once a tick by the evaluator, and chunk 42 is where they
+land.
 
 ### D52 — Pairing is a runtime handle; the join gesture reuses class bindings
 

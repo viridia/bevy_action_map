@@ -49,6 +49,20 @@ pub(crate) struct BindingSpec {
     pub(crate) chord: Vec<ButtonControl>,
 }
 
+/// One action as [`InputContextBuilder::delegate`] declared it: named, and left to an authority
+/// outside this crate.
+///
+/// Deliberately not a `BindingSpec`. There is no input, so nothing to modify, condition, consume or
+/// put on a rebinding screen — which is what makes attaching any of those to a delegated action
+/// unrepresentable rather than a mistake to diagnose.
+#[derive(Clone)]
+pub(crate) struct DelegatedSpec {
+    pub(crate) action: ActionId,
+    pub(crate) intent: ActionIntent,
+    pub(crate) path: &'static str,
+    pub(crate) dispatch: Dispatch,
+}
+
 /// One class binding as [`InputContextBuilder::bind_class`] declared it.
 ///
 /// Deliberately not a `BindingSpec`: a class binding has no input to modify, no chord, no mapping,
@@ -631,6 +645,7 @@ impl<'a, C> BindingBuilder<'a, C> {
 pub struct InputContextBuilder<C> {
     bindings: Vec<BindingSpec>,
     class_bindings: Vec<ClassBindingSpec>,
+    delegated: Vec<DelegatedSpec>,
     // Installed against the `App` once the context has been declared. `None` leaves the context
     // live from the moment an entity carries it; see `active_if`, which lives in `context` because
     // everything it touches does.
@@ -643,6 +658,7 @@ impl<C> Default for InputContextBuilder<C> {
         Self {
             bindings: Vec::new(),
             class_bindings: Vec::new(),
+            delegated: Vec::new(),
             activation: None,
             _marker: PhantomData,
         }
@@ -883,6 +899,39 @@ impl<C> InputContextBuilder<C> {
         self.push_class_binding::<A>(crate::capture::ClassFilter::Characters)
     }
 
+    /// Hands one action to an authority outside this crate, instead of binding controls to it.
+    ///
+    /// A platform's own input service is the usual reason: Steam Input owns the binding screen, the
+    /// conflict rules and the glyphs, and hands the game a value per action rather than a control to
+    /// map. A network peer's actions and a scripted agent's arrive the same way.
+    ///
+    /// The action still fires, completes and cancels on the edges of the value it is given, so
+    /// gameplay code and observers read it exactly as they read a bound one. What it does not have
+    /// is controls: no modifiers, no conditions, no consumption, and no row on your own rebinding
+    /// screen — all of which belong to whoever owns the action now. Binding the same action in the
+    /// same context is refused, since only one of the two can be the authority.
+    ///
+    /// Values arrive through [`AuthorityValues`](crate::backend::AuthorityValues) on the context's
+    /// entity.
+    ///
+    /// ```ignore
+    /// app.add_context::<Paddle>(|paddle| {
+    ///     paddle.bind::<Move>(Stick::Left);
+    ///     paddle.delegate::<Serve>();
+    /// });
+    /// ```
+    pub fn delegate<A: InputAction>(&mut self) {
+        if self.delegated.iter().any(|spec| spec.action == A::id()) {
+            return;
+        }
+        self.delegated.push(DelegatedSpec {
+            action: A::id(),
+            intent: A::INTENT,
+            path: A::PATH,
+            dispatch: dispatch_for::<A>,
+        });
+    }
+
     fn push_class_binding<A: crate::event::ClassBinding>(
         &mut self,
         filter: crate::capture::ClassFilter,
@@ -910,6 +959,10 @@ impl<C> InputContextBuilder<C> {
     pub fn diagnostics(&self) -> Vec<crate::plan::BindingDiagnostic> {
         let mut found = crate::plan::diagnose(&self.bindings);
         found.extend(crate::plan::diagnose_classes(&self.class_bindings));
+        found.extend(crate::plan::diagnose_delegated(
+            &self.bindings,
+            &self.delegated,
+        ));
         found
     }
 
@@ -944,8 +997,8 @@ impl<C> InputContextBuilder<C> {
         reserved
     }
 
-    pub(crate) fn finish(self) -> (Vec<BindingSpec>, Vec<ClassBindingSpec>) {
-        (self.bindings, self.class_bindings)
+    pub(crate) fn finish(self) -> (Vec<BindingSpec>, Vec<ClassBindingSpec>, Vec<DelegatedSpec>) {
+        (self.bindings, self.class_bindings, self.delegated)
     }
 }
 
@@ -998,7 +1051,7 @@ mod tests {
             .negate()
             .dead_zone(DeadZone::radial(0.1));
 
-        let (bindings, _) = builder.finish();
+        let (bindings, ..) = builder.finish();
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].modifiers.len(), 3);
         assert!(matches!(
@@ -1019,7 +1072,7 @@ mod tests {
         builder.bind::<DummyButton>(KeyCode::Space);
         builder.hold_or_toggle::<DummyButton>("tests.hold_or_toggle");
 
-        let (bindings, _) = builder.finish();
+        let (bindings, ..) = builder.finish();
         assert!(matches!(
             bindings[0].modifiers[0],
             BindingModifier::Toggle { active: false }
@@ -1040,7 +1093,7 @@ mod tests {
         builder.bind::<DummyButton>(KeyCode::Enter);
         builder.hold_or_toggle::<DummyButton>("tests.hold_or_toggle");
 
-        let (bindings, _) = builder.finish();
+        let (bindings, ..) = builder.finish();
         for binding in &bindings {
             let decl = binding.tunable.as_ref().expect("declared a tunable");
             assert_eq!(decl.key, "tests.hold_or_toggle");
@@ -1066,7 +1119,7 @@ mod tests {
         builder.bind::<Thrust>(KeyCode::KeyW);
         builder.hold_or_toggle::<Thrust>("tests.hold_or_toggle");
 
-        let (bindings, _) = builder.finish();
+        let (bindings, ..) = builder.finish();
         assert!(bindings[0].tunable.is_none(), "the trigger is untouched");
         assert!(bindings[1].tunable.is_some(), "the key is toggled");
     }
@@ -1080,7 +1133,7 @@ mod tests {
         builder.bind::<DummyButton>(GamepadButton::South);
         builder.hold_or_toggle::<DummyButton>("tests.hold_or_toggle");
 
-        let (bindings, _) = builder.finish();
+        let (bindings, ..) = builder.finish();
         assert!(bindings[0].tunable.is_some());
     }
 
@@ -1111,7 +1164,7 @@ mod tests {
             .dead_zone(DeadZone::radial(0.2))
             .tunable_dead_zone("tests.stick_deadzone", 0.0..=0.5);
 
-        let (bindings, _) = builder.finish();
+        let (bindings, ..) = builder.finish();
         let decl = bindings[0].tunable.as_ref().expect("declared a tunable");
         assert_eq!(decl.key, "tests.stick_deadzone");
         assert_eq!(
@@ -1188,8 +1241,40 @@ mod tests {
 
         let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<Thrust>(GamepadButton::LeftTrigger2);
-        let (bindings, class_bindings) = builder.finish();
+        let (bindings, class_bindings, _) = builder.finish();
         crate::plan::Plan::<()>::from_bindings(bindings, class_bindings);
+    }
+
+    /// Only one of the two can decide what the action does, and a context that says both has not
+    /// said which. Nothing else a binding carries can contradict a delegated action, because
+    /// `delegate` offers no way to declare it in the first place.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn binding_an_action_this_context_delegates_is_refused() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<DummyButton>(KeyCode::Space);
+        builder.delegate::<DummyButton>();
+
+        let found = builder.diagnostics();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(
+            found[0].kind,
+            crate::plan::DiagnosticKind::BoundAndDelegated
+        );
+        assert_eq!(found[0].severity(), crate::plan::Severity::Error);
+    }
+
+    /// Declaring the same delegation twice is the same declaration, not two of them: an action has
+    /// one state slot however many times a context names it.
+    #[test]
+    fn delegating_one_action_twice_says_it_once() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.delegate::<DummyButton>();
+        builder.delegate::<DummyButton>();
+
+        assert!(builder.diagnostics().is_empty());
+        let (_, _, delegated) = builder.finish();
+        assert_eq!(delegated.len(), 1);
     }
 
     #[cfg(feature = "keyboard")]
@@ -1238,7 +1323,7 @@ mod tests {
         builder.bind::<DummyButton>(GamepadButton::South);
         builder.bind::<DummyVec2>(Stick::Left);
 
-        let (bindings, _) = builder.finish();
+        let (bindings, ..) = builder.finish();
         assert_eq!(bindings.len(), 2);
         assert!(matches!(
             bindings[0].input,

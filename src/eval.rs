@@ -17,8 +17,10 @@ use bevy_input::keyboard::KeyboardInput;
 #[cfg(feature = "mouse")]
 use bevy_input::mouse::MouseButtonInput;
 use bevy_math::{Vec2, Vec3};
+use fixedbitset::FixedBitSet;
 
 use crate::action::{ActionIntent, ActionPhase, ActionValue, InputContext};
+use crate::backend::AuthorityValues;
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 use crate::binding::ButtonControl;
 #[cfg(feature = "gamepad")]
@@ -216,7 +218,15 @@ pub(crate) fn evaluate_context<
     // The generic clock, which Bevy points at the fixed timestep inside the fixed schedules — so a
     // context is told how long its own tick was rather than how long the frame was (R9.6).
     time: Res<'_, bevy_time::Time>,
-    mut states: Query<'_, '_, (&mut InputContextState<C>, Option<&crate::player::Paired>)>,
+    mut states: Query<
+        '_,
+        '_,
+        (
+            &mut InputContextState<C>,
+            Option<&crate::player::Paired>,
+            Option<&AuthorityValues>,
+        ),
+    >,
 ) {
     let delta = time.delta_secs();
     // Read once, before this context's own instances can raise it further — evaluation order is
@@ -225,7 +235,7 @@ pub(crate) fn evaluate_context<
     // shadowing.
     let shadowed = ceiling.shadows(C::PRIORITY);
     let mut any_active = false;
-    for (mut state, pairing) in &mut states {
+    for (mut state, pairing, authority) in &mut states {
         // Bypassed for the whole pass and re-marked at the end only if an action moved. Every tick
         // writes *something* here — the read cursor at least — so taking the deref at face value
         // would mark every instance changed every tick, which is the all-or-nothing wake-up R23.4
@@ -246,6 +256,7 @@ pub(crate) fn evaluate_context<
         // players sharing a context cannot take controls from each other.
         let mut claims = Vec::new();
         instance.apply_frame(&frame, &threshold, delta, &consumed, &mut claims, pairing);
+        instance.apply_authority(authority, delta);
         let moved = !instance.dirty.is_clear();
         for control in claims {
             consumed.claim::<S>(control, C::PATH);
@@ -818,39 +829,140 @@ impl<C: InputContext> InputContextState<C> {
             }
 
             if let Some(value) = combined {
-                // Held over from before this context activated: report rest until the player lets
-                // go once, then let the action behave normally (R7.5).
-                //
-                // Button intents only. What R7.5 guards is a *press* synthesized from a control the
-                // player was already holding, and an analog action has no press to synthesize — its
-                // value simply resumes. Holding one back until it reads exactly rest can wedge it
-                // forever, because an axis is not obliged to ever read rest: a drifting stick whose
-                // deadzone the player has taken to zero never does, and the action never recovers.
-                if require_reset[slot] && intent == ActionIntent::Button {
-                    if value.to_bool() {
-                        continue;
-                    }
-                    require_reset.set(slot, false);
-                }
-
-                // Compared rather than inferred from the phase: a held stick reports `Firing`
-                // every tick while its value moves, and an action whose value moved has changed
-                // as surely as one that started or stopped.
-                let before = actions[slot];
-                let phase = update_action_state(&mut actions[slot], value, best, kind);
-                if actions[slot] != before {
-                    dirty.set(slot, true);
-                }
-                // Only the edges. The level phases say that nothing changed, and an observer
-                // firing every tick for a held button would be noise rather than information.
-                if matches!(
-                    phase,
-                    ActionPhase::Fired | ActionPhase::Completed | ActionPhase::Canceled
-                ) {
-                    transitions.push(Transition { slot, phase, value });
-                }
+                commit_slot(
+                    Commit {
+                        slot,
+                        intent,
+                        value,
+                        condition_state: best,
+                        kind,
+                    },
+                    actions,
+                    dirty,
+                    require_reset,
+                    transitions,
+                );
             }
         }
+    }
+
+    /// Writes the values an outside authority supplies, for the slots this context delegates to it.
+    ///
+    /// The authority hands over the value the fold would otherwise have produced, and the same
+    /// state machine diffs it and synthesizes the edges — which is what keeps `fired()` and the
+    /// phases working for an action whose backend reports only a level and never an edge.
+    ///
+    /// Once a tick, unlike the fold: the authority is sampled, not replayed, so there is no queue
+    /// of its events to walk one at a time. `Fold::Level` for the same reason — an interruption is
+    /// this crate's device going away, and the authority's has not.
+    pub(crate) fn apply_authority(&mut self, authority: Option<&AuthorityValues>, delta: f32) {
+        // Unlike a bound action there is no held state to keep up to date while inactive: what the
+        // authority reports is read afresh every tick, so an inactive context simply stops looking.
+        if !self.is_active() {
+            return;
+        }
+        let Self {
+            plan,
+            actions,
+            dirty,
+            transitions,
+            require_reset,
+            ..
+        } = self;
+
+        for &slot in plan.delegated_slots() {
+            let intent = plan.intent_for_slot(slot);
+            let value = authority
+                .and_then(|values| values.value_of(plan.slot_actions()[slot]))
+                .unwrap_or_else(|| at_rest(intent));
+            // The no-conditions path a plain binding takes, rather than a second reading of what a
+            // value means: delegating leaves no way to declare a condition in the first place.
+            let condition_state = crate::condition::combine(&[], value, &mut [], delta);
+            commit_slot(
+                Commit {
+                    slot,
+                    intent,
+                    value,
+                    condition_state,
+                    kind: Fold::Level,
+                },
+                actions,
+                dirty,
+                require_reset,
+                transitions,
+            );
+        }
+    }
+}
+
+/// One slot's resolved value, however it was resolved.
+struct Commit {
+    slot: usize,
+    intent: ActionIntent,
+    value: ActionValue,
+    condition_state: ConditionState,
+    kind: Fold,
+}
+
+/// Moves one action's state on, and records the change and the edge.
+///
+/// The single write path into action state, whether the value came from the fold or from an
+/// authority backend. Two implementations of the lifecycle would drift, and the promise that a
+/// consumer need not know which produced a value is what that would break.
+fn commit_slot(
+    commit: Commit,
+    actions: &mut [crate::action::ActionState],
+    dirty: &mut FixedBitSet,
+    require_reset: &mut FixedBitSet,
+    transitions: &mut Vec<Transition>,
+) {
+    let Commit {
+        slot,
+        intent,
+        value,
+        condition_state,
+        kind,
+    } = commit;
+
+    // Held over from before this context activated: report rest until the player lets go once, then
+    // let the action behave normally (R7.5).
+    //
+    // Button intents only. What R7.5 guards is a *press* synthesized from a control the player was
+    // already holding, and an analog action has no press to synthesize — its value simply resumes.
+    // Holding one back until it reads exactly rest can wedge it forever, because an axis is not
+    // obliged to ever read rest: a drifting stick whose deadzone the player has taken to zero never
+    // does, and the action never recovers.
+    if require_reset[slot] && intent == ActionIntent::Button {
+        if value.to_bool() {
+            return;
+        }
+        require_reset.set(slot, false);
+    }
+
+    // Compared rather than inferred from the phase: a held stick reports `Firing` every tick while
+    // its value moves, and an action whose value moved has changed as surely as one that started or
+    // stopped.
+    let before = actions[slot];
+    let phase = update_action_state(&mut actions[slot], value, condition_state, kind);
+    if actions[slot] != before {
+        dirty.set(slot, true);
+    }
+    // Only the edges. The level phases say that nothing changed, and an observer firing every tick
+    // for a held button would be noise rather than information.
+    if matches!(
+        phase,
+        ActionPhase::Fired | ActionPhase::Completed | ActionPhase::Canceled
+    ) {
+        transitions.push(Transition { slot, phase, value });
+    }
+}
+
+/// What an action of this intent reads when nothing is driving it.
+fn at_rest(intent: ActionIntent) -> ActionValue {
+    match intent {
+        ActionIntent::Button => ActionValue::Bool(false),
+        ActionIntent::Analog1 => ActionValue::Axis1(0.0),
+        ActionIntent::Directional2 | ActionIntent::Delta2 => ActionValue::Axis2(Vec2::ZERO),
     }
 }
 
@@ -1025,8 +1137,105 @@ mod tests {
         const PATH: &'static str = "eval_tests.jump";
     }
 
+    struct Serve;
+
+    impl InputAction for Serve {
+        type Output = bool;
+
+        const INTENT: ActionIntent = ActionIntent::Button;
+        const PATH: &'static str = "eval_tests.serve";
+    }
+
     /// A plausible fixed timestep, for the tests that do not care what it is.
     const TICK: f32 = 1.0 / 64.0;
+
+    /// A context that binds nothing and leaves `Serve` to an outside authority.
+    fn delegated_context() -> InputContextState<Flying> {
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.delegate::<Serve>();
+        let (bindings, class_bindings, delegated) = builder.finish();
+        let mut plan = Plan::from_bindings(bindings, class_bindings);
+        plan.delegate(delegated);
+        InputContextState::<Flying>::new(Arc::new(plan), None)
+    }
+
+    /// An authority hands over a level and never an edge — Steam's `GetDigitalActionData` is
+    /// sampled when asked, and reports no press or release of its own. The state machine is what
+    /// turns that level moving into `Fired` and `Completed`, so gameplay code reads a delegated
+    /// action exactly as it reads a bound one.
+    #[test]
+    fn an_authority_supplies_a_level_and_the_state_machine_makes_the_edges() {
+        let mut state = delegated_context();
+        let mut values = AuthorityValues::new();
+
+        state.apply_authority(Some(&values), TICK);
+        assert!(state.transitions.is_empty(), "rest is not an edge");
+
+        values.set::<Serve>(true);
+        state.apply_authority(Some(&values), TICK);
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Fired);
+        assert!(state.value::<Serve>());
+
+        // Dispatch would have drained it by now.
+        state.transitions.clear();
+
+        state.apply_authority(Some(&values), TICK);
+        assert!(
+            state.transitions.is_empty(),
+            "a level that has not moved is not news"
+        );
+
+        values.set::<Serve>(false);
+        state.apply_authority(Some(&values), TICK);
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Completed);
+    }
+
+    /// Reading rest rather than refusing is what lets a context be spawned before whatever drives
+    /// it exists, and what an authority that has lost its device says by clearing the action.
+    #[test]
+    fn a_delegated_action_with_no_authority_reads_at_rest() {
+        let mut state = delegated_context();
+        let mut values = AuthorityValues::new();
+
+        state.apply_authority(None, TICK);
+        assert!(!state.value::<Serve>());
+        assert!(state.transitions.is_empty());
+
+        values.set::<Serve>(true);
+        state.apply_authority(Some(&values), TICK);
+        state.transitions.clear();
+
+        values.clear::<Serve>();
+        state.apply_authority(Some(&values), TICK);
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Completed);
+    }
+
+    /// The same guard a bound action gets (R7.5), on the authority's values: a menu closing while
+    /// the backend still reports its button down must not read as a fresh press underneath.
+    #[test]
+    fn a_delegated_action_activating_on_a_held_value_waits_for_rest() {
+        let mut state = delegated_context();
+        let mut values = AuthorityValues::new();
+        values.set::<Serve>(true);
+
+        state.deactivate();
+        state.apply_authority(Some(&values), TICK);
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Idle);
+
+        state.activate();
+        state.apply_authority(Some(&values), TICK);
+        assert_eq!(
+            state.phase::<Serve>(),
+            ActionPhase::Idle,
+            "a value held across activation is not a press"
+        );
+
+        values.set::<Serve>(false);
+        state.apply_authority(Some(&values), TICK);
+        values.set::<Serve>(true);
+        state.apply_authority(Some(&values), TICK);
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Fired);
+    }
 
     #[cfg(feature = "keyboard")]
     fn key(state: ButtonState) -> RawEvent {
@@ -1051,7 +1260,7 @@ mod tests {
         builder.bind::<Jump>(KeyCode::Space);
         InputContextState::<Flying>::new(
             Arc::new({
-                let (bindings, class_bindings) = builder.finish();
+                let (bindings, class_bindings, _) = builder.finish();
                 Plan::from_bindings(bindings, class_bindings)
             }),
             None,
@@ -1166,7 +1375,7 @@ mod tests {
         let mut builder = InputContextBuilder::<Flying>::default();
         builder.bind::<Look>(crate::binding::MouseMove);
         let plan = Arc::new({
-            let (bindings, class_bindings) = builder.finish();
+            let (bindings, class_bindings, _) = builder.finish();
             Plan::from_bindings(bindings, class_bindings)
         });
         let mut state = InputContextState::<Flying>::new(plan, None);
@@ -1441,7 +1650,7 @@ mod tests {
         let mut builder = InputContextBuilder::<Flying>::default();
         builder.bind::<Jump>(GamepadButton::South);
         let plan = Arc::new({
-            let (bindings, class_bindings) = builder.finish();
+            let (bindings, class_bindings, _) = builder.finish();
             Plan::from_bindings(bindings, class_bindings)
         });
         let mut state = InputContextState::<Flying>::new(plan, None);
@@ -1498,7 +1707,7 @@ mod tests {
         builder.bind::<Jump>(bevy_input::keyboard::KeyCode::Space);
         builder.bind::<Jump>(GamepadButton::South);
         let plan = Arc::new({
-            let (bindings, class_bindings) = builder.finish();
+            let (bindings, class_bindings, _) = builder.finish();
             Plan::from_bindings(bindings, class_bindings)
         });
         let mut state = InputContextState::<Flying>::new(plan, None);
@@ -1560,7 +1769,7 @@ mod tests {
         builder.bind::<Look>(MouseMove);
         builder.bind::<Look>(Stick::Right).per_second(180.0);
         let plan = Arc::new({
-            let (bindings, class_bindings) = builder.finish();
+            let (bindings, class_bindings, _) = builder.finish();
             Plan::from_bindings(bindings, class_bindings)
         });
         let mut state = InputContextState::<Flying>::new(plan, None);
@@ -1665,7 +1874,7 @@ mod tests {
             .custom(Remembering)
             .custom(Remembering);
         let plan = Arc::new({
-            let (bindings, class_bindings) = builder.finish();
+            let (bindings, class_bindings, _) = builder.finish();
             Plan::from_bindings(bindings, class_bindings)
         });
         let mut state = InputContextState::<Flying>::new(plan, None);
@@ -1750,7 +1959,7 @@ mod tests {
         builder.hold_or_toggle::<Jump>("eval_tests.jump.hold_or_toggle");
         let mut state = InputContextState::<Flying>::new(
             Arc::new({
-                let (mut bindings, class_bindings) = builder.finish();
+                let (mut bindings, class_bindings, _) = builder.finish();
                 force_toggle_on(&mut bindings);
                 Plan::from_bindings(bindings, class_bindings)
             }),
@@ -1858,7 +2067,7 @@ mod tests {
         builder.hold_or_toggle::<Jump>("eval_tests.jump.hold_or_toggle_default");
         let mut state = InputContextState::<Flying>::new(
             Arc::new({
-                let (bindings, class_bindings) = builder.finish();
+                let (bindings, class_bindings, _) = builder.finish();
                 Plan::from_bindings(bindings, class_bindings)
             }),
             None,
@@ -1915,7 +2124,7 @@ mod tests {
         let mut builder = InputContextBuilder::<Flying>::default();
         builder.bind::<Jump>(KeyCode::Space).hold(0.25);
         let plan = Arc::new({
-            let (bindings, class_bindings) = builder.finish();
+            let (bindings, class_bindings, _) = builder.finish();
             Plan::from_bindings(bindings, class_bindings)
         });
         let mut state = InputContextState::<Flying>::new(plan, None);
@@ -1979,7 +2188,7 @@ mod tests {
         builder.bind::<Jump>(KeyCode::Space).hold(10.0);
         builder.bind::<Jump>(GamepadButton::South);
         let plan = Arc::new({
-            let (bindings, class_bindings) = builder.finish();
+            let (bindings, class_bindings, _) = builder.finish();
             Plan::from_bindings(bindings, class_bindings)
         });
         let mut state = InputContextState::<Flying>::new(plan, None);
@@ -2029,7 +2238,7 @@ mod tests {
         let mut builder = InputContextBuilder::<Flying>::default();
         builder.bind::<Jump>(GamepadAxis::LeftStickY);
         let plan = Arc::new({
-            let (bindings, class_bindings) = builder.finish();
+            let (bindings, class_bindings, _) = builder.finish();
             Plan::from_bindings(bindings, class_bindings)
         });
         let mut state = InputContextState::<Flying>::new(plan, None);
@@ -2095,7 +2304,7 @@ mod tests {
         let mut builder = InputContextBuilder::<Flying>::default();
         builder.bind_characters::<CharacterInput>().consume();
         let plan = Arc::new({
-            let (bindings, class_bindings) = builder.finish();
+            let (bindings, class_bindings, _) = builder.finish();
             Plan::from_bindings(bindings, class_bindings)
         });
         let mut state = InputContextState::<Flying>::new(plan, None);
@@ -2139,7 +2348,7 @@ mod tests {
             .bind_class::<CharacterInput>(ControlClass::AnyButton)
             .consume();
         let plan = Arc::new({
-            let (bindings, class_bindings) = builder.finish();
+            let (bindings, class_bindings, _) = builder.finish();
             Plan::from_bindings(bindings, class_bindings)
         });
         let mut state = InputContextState::<Flying>::new(plan, None);
@@ -2169,7 +2378,7 @@ mod tests {
         let mut builder = InputContextBuilder::<Flying>::default();
         builder.bind_characters::<CharacterInput>();
         let plan = Arc::new({
-            let (bindings, class_bindings) = builder.finish();
+            let (bindings, class_bindings, _) = builder.finish();
             Plan::from_bindings(bindings, class_bindings)
         });
         let mut state = InputContextState::<Flying>::new(plan, None);
@@ -2217,7 +2426,7 @@ mod tests {
         builder.bind::<Jump>(input);
         InputContextState::<Flying>::new(
             Arc::new({
-                let (bindings, class_bindings) = builder.finish();
+                let (bindings, class_bindings, _) = builder.finish();
                 Plan::from_bindings(bindings, class_bindings)
             }),
             None,
