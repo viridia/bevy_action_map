@@ -28,7 +28,9 @@
 
 use bevy::ecs::schedule::SystemCondition;
 use bevy::prelude::*;
+use bevy::text::InlineBox;
 use bevy::ui::UiSystems;
+use bevy_action_map::device::{GamepadBrand, GamepadBrands};
 use bevy_action_map::prelude::*;
 
 /// Renders the control that would currently fire an action.
@@ -39,6 +41,18 @@ use bevy_action_map::prelude::*;
 #[derive(Component, Clone, Copy, Default)]
 #[require(TextSpan)]
 pub struct PromptSpan(pub ActionId);
+
+/// Renders the control that would currently fire an action as an icon, inline in a line of text.
+///
+/// Falls back to the same text [`PromptSpan`] would show, bracketed, wherever nothing has art for
+/// the control — an unrecognized pad brand, or a control the atlas simply does not cover — so a
+/// caption never goes blank for want of an icon. The brackets are only there for that fallback: an
+/// icon reads as a control on its own and does not need them, so a caller wraps neither in its own
+/// punctuation. No `#[require]`: which of `InlineImage` or `TextSpan` the entity carries is the
+/// fallback decision itself, so [`refresh_icon_prompts`] sets whichever applies rather than always
+/// carrying both.
+#[derive(Component, Clone, Copy, Default)]
+pub struct IconPromptSpan(pub ActionId);
 
 /// Which device family one span speaks for, overriding [`PromptDevice`].
 ///
@@ -75,14 +89,63 @@ pub struct PromptUnbound(pub String);
 
 /// Draws prompts, and keeps them true.
 pub fn plugin(app: &mut App) {
+    app.init_resource::<IconManifest>();
     // Ahead of every UI system, so a caption that changed this frame is laid out at the width it
     // will be drawn at rather than at the width it used to be.
     app.add_systems(
         PostUpdate,
-        refresh_prompts.before(UiSystems::Prepare).run_if(
-            resource_changed::<PromptGeneration>.or_else(any_match_filter::<Added<PromptSpan>>),
-        ),
+        (
+            refresh_prompts.run_if(
+                resource_changed::<PromptGeneration>.or_else(any_match_filter::<Added<PromptSpan>>),
+            ),
+            refresh_icon_prompts.run_if(
+                resource_changed::<PromptGeneration>
+                    .or_else(any_match_filter::<Added<IconPromptSpan>>),
+            ),
+        )
+            .before(UiSystems::Prepare),
     );
+}
+
+/// [`PromptDevice`]'s family, warning once if a game never set one.
+///
+/// Shared by [`refresh_prompts`] and [`refresh_icon_prompts`] so the warning fires from one call
+/// site rather than two.
+fn active_family(world: &World) -> Option<DeviceFamily> {
+    world.get_resource::<PromptDevice>().map_or_else(
+        || {
+            bevy::log::warn_once!(
+                "prompts are being drawn with no `PromptDevice`, so they name whichever control \
+                 was declared first rather than one this game chose. Insert \
+                 `PromptDevice(Some(scheme))` to say which device your prompts speak for, or \
+                 `PromptDevice(None)` to say that this game genuinely has no primary one."
+            );
+            None
+        },
+        |device| device.0,
+    )
+}
+
+/// The scope a prompt's own companions narrow it to, and which of possibly several answers it asks
+/// for — shared by [`refresh_prompts`] and [`refresh_icon_prompts`].
+fn scope_and_index(
+    device: Option<DeviceFamily>,
+    scheme: Option<&PromptFamily>,
+    class: Option<&PromptClass>,
+    pick: Option<&PromptPick>,
+) -> (PromptScope, usize) {
+    let mut scope = PromptScope::ANY;
+    if let Some(scheme) = scheme.map(|scheme| scheme.0).or(device) {
+        scope = scope.on(scheme);
+    }
+    if let Some(class) = class {
+        scope = scope.of(class.0);
+    }
+    let index = match pick.copied().unwrap_or_default() {
+        PromptPick::First => 0,
+        PromptPick::Nth(index) => usize::from(index),
+    };
+    (scope, index)
 }
 
 /// Everything one span needs in order to ask its question.
@@ -105,36 +168,13 @@ type PromptQuery = (
 /// Exclusive because the lookup reads the whole world. It walks every declared context, and the
 /// types of those are long gone by the time anything wants a prompt.
 fn refresh_prompts(world: &mut World) {
-    let device = world.get_resource::<PromptDevice>().map_or_else(
-        || {
-            bevy::log::warn_once!(
-                "prompts are being drawn with no `PromptDevice`, so they name whichever control \
-                 was declared first rather than one this game chose. Insert \
-                 `PromptDevice(Some(scheme))` to say which device your prompts speak for, or \
-                 `PromptDevice(None)` to say that this game genuinely has no primary one."
-            );
-            None
-        },
-        |device| device.0,
-    );
+    let device = active_family(world);
 
     let mut spans = world.query::<PromptQuery>();
     let captions: Vec<(Entity, String)> = spans
         .iter(world)
         .map(|(entity, span, scheme, class, pick, unbound)| {
-            let mut scope = PromptScope::ANY;
-            if let Some(scheme) = scheme.map(|scheme| scheme.0).or(device) {
-                scope = scope.on(scheme);
-            }
-            if let Some(class) = class {
-                scope = scope.of(class.0);
-            }
-
-            let index = match pick.copied().unwrap_or_default() {
-                PromptPick::First => 0,
-                PromptPick::Nth(index) => usize::from(index),
-            };
-
+            let (scope, index) = scope_and_index(device, scheme, class, pick);
             let text = BindingTable::new(world)
                 .prompts(span.0, scope)
                 .get(index)
@@ -153,10 +193,11 @@ fn refresh_prompts(world: &mut World) {
 
 /// One prompt as a string, whatever must be held alongside it and whatever timing it wants first.
 ///
-/// A binding that needs a modifier says so, because a prompt that dropped it would caption
-/// `Ctrl+S` as "S" — wrong rather than merely terse. A binding that only fires held says so too:
+/// A binding that needs a modifier says so, because a prompt that dropped it would caption `Ctrl+S`
+/// as "S" — wrong rather than merely terse. A binding that only fires held says so too:
 /// `prompt.condition` is `ConditionDescriptor::None` for almost everything, and where it is not,
-/// its fallback renderer is what turns "W" into "Hold W" rather than a bare, uninterpretable "Hold".
+/// its fallback renderer is what turns "W" into "Hold W" rather than a bare, uninterpretable
+/// "Hold".
 fn caption(prompt: &Prompt) -> String {
     let mut control = String::new();
     for held in &prompt.with {
@@ -165,4 +206,142 @@ fn caption(prompt: &Prompt) -> String {
     }
     control.push_str(&prompt.origin.fallback_label());
     prompt.condition.fallback_format(&control)
+}
+
+/// Which (tier, control) pairs have art, in both `assets/input_prompts/` and
+/// `assets/input_prompts_inline/` alike — the two mirror each other's coverage exactly, one
+/// downscaled copy per full-size original.
+///
+/// Parsed once from the manifest `scripts/import_input_prompts.py` writes, so resolution never
+/// opens a file to discover one is missing.
+#[derive(Resource)]
+struct IconManifest(std::collections::HashSet<String>);
+
+impl Default for IconManifest {
+    fn default() -> Self {
+        const MANIFEST: &str = include_str!("../../assets/input_prompts/manifest.txt");
+        Self(
+            MANIFEST
+                .lines()
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(str::to_string)
+                .collect(),
+        )
+    }
+}
+
+/// The path segment a tier's art is filed under.
+fn tier_str(tier: GlyphTier) -> &'static str {
+    match tier {
+        GlyphTier::KeyboardMouse => "keyboard_mouse",
+        GlyphTier::Gamepad(GamepadBrand::Xbox) => "xbox",
+        GlyphTier::Gamepad(GamepadBrand::PlayStation) => "playstation",
+        GlyphTier::Gamepad(GamepadBrand::Nintendo) => "nintendo",
+        GlyphTier::Gamepad(GamepadBrand::Generic) => "generic",
+    }
+}
+
+/// Where a resolved glyph's inline-sized art lives, for `AssetServer::load`.
+///
+/// `input_prompts_inline/`, not `input_prompts/`: Bevy's `InlineImage` sizes itself from the
+/// loaded image's own pixel dimensions with no resize hook (bevyengine/bevy#25710), so an inline
+/// glyph needs art pre-scaled to sit inline with a line of text rather than towering over it.
+fn inline_icon_path(glyph: Glyph) -> String {
+    let Glyph::Own(tier, control) = glyph else {
+        unreachable!("`Glyph` has one variant today");
+    };
+    format!(
+        "input_prompts_inline/{}/{}.png",
+        tier_str(tier),
+        control.name()
+    )
+}
+
+/// Everything one icon span needs in order to ask its question — mirrors [`PromptQuery`].
+type IconPromptQuery = (
+    Entity,
+    &'static IconPromptSpan,
+    Option<&'static PromptFamily>,
+    Option<&'static PromptClass>,
+    Option<&'static PromptPick>,
+    Option<&'static PromptUnbound>,
+);
+
+/// What one icon span resolved to: an image to load, or text to fall back to.
+enum Resolved {
+    Icon(String),
+    Text(String),
+}
+
+/// Rewrites every icon prompt on screen — the same staleness contract as [`refresh_prompts`],
+/// answering the same lookup, but choosing between an icon and text rather than only ever text.
+///
+/// Which gamepad's brand a control's icon draws in is read the way [`split_screen`]'s device label
+/// already does: the first connected pad's vendor id, since nothing here plays more than one at
+/// once. That does not survive an authority backend with no `Gamepad` component to query — the
+/// same gap chunk 113 exists to close.
+///
+/// [`split_screen`]: ../split_friction/split_screen/index.html
+fn refresh_icon_prompts(world: &mut World) {
+    let mut spans = world.query::<IconPromptQuery>();
+    // Nothing to draw, so nothing to ask `AssetServer` or `GamepadBrands` for either — a game that
+    // never spawns an `IconPromptSpan` should not have to carry either just because this system
+    // shares `PromptSpan`'s own staleness signal.
+    if spans.iter(world).next().is_none() {
+        return;
+    }
+
+    let device = active_family(world);
+    let brand = {
+        let mut gamepads = world.query::<&Gamepad>();
+        let vendor_id = gamepads.iter(world).next().and_then(Gamepad::vendor_id);
+        world.resource::<GamepadBrands>().resolve(vendor_id)
+    };
+    let manifest = &world.resource::<IconManifest>().0;
+    let resolved: Vec<(Entity, Resolved)> = spans
+        .iter(world)
+        .map(|(entity, span, scheme, class, pick, unbound)| {
+            let (scope, index) = scope_and_index(device, scheme, class, pick);
+            let prompts = BindingTable::new(world).prompts(span.0, scope);
+            let resolved = match prompts.get(index) {
+                None => {
+                    Resolved::Text(unbound.map_or_else(|| "—".to_string(), |text| text.0.clone()))
+                }
+                Some(prompt) => match prompt.origin {
+                    ControlOrigin::Ours(control) => {
+                        resolve_glyph(control, brand, |tier, control| {
+                            manifest.contains(&format!("{}/{}", tier_str(tier), control.name()))
+                        })
+                        .map_or_else(
+                            || Resolved::Text(caption(prompt)),
+                            |glyph| Resolved::Icon(inline_icon_path(glyph)),
+                        )
+                    }
+                    ControlOrigin::Foreign { .. } => Resolved::Text(caption(prompt)),
+                },
+            };
+            (entity, resolved)
+        })
+        .collect();
+
+    let asset_server = world.resource::<AssetServer>().clone();
+    for (entity, resolved) in resolved {
+        let mut entity = world.entity_mut(entity);
+        match resolved {
+            Resolved::Icon(path) => {
+                entity.remove::<TextSpan>();
+                entity.insert(InlineImage {
+                    image: asset_server.load(path),
+                    ..default()
+                });
+            }
+            Resolved::Text(text) => {
+                entity.remove::<(InlineImage, InlineBox)>();
+                // An icon reads as a control on its own — a small, self-contained badge — but bare
+                // text sitting in a button caption does not, so the fallback gets the visual
+                // grouping an icon does not need.
+                entity.insert(TextSpan::new(format!("[{text}]")));
+            }
+        }
+    }
 }

@@ -31,10 +31,12 @@
 use bevy::camera::{ScalingMode, Viewport};
 use bevy::prelude::*;
 use bevy::ui::UiSystems;
-use bevy_action_map::device::{DeviceHandle, GamepadBrand, GamepadBrands};
+use bevy_action_map::device::{DeviceFamily, DeviceHandle, GamepadBrand, GamepadBrands};
 use bevy_action_map::player::Paired;
+use bevy_action_map::prelude::InputAction;
 
-use crate::protagonist::Protagonist;
+use crate::common::prompt_ui::{PromptFamily, PromptSpan};
+use crate::protagonist::{Join, Protagonist};
 
 /// One of the two panes in the split-screen layout, and the camera it drives.
 #[derive(Component, Clone, Copy, Default, PartialEq, Eq)]
@@ -139,7 +141,7 @@ fn pane_ui(index: u8) -> impl Scene {
                 align_items: AlignItems::Center,
             }
             Children [
-                Text::new("Waiting to join\npress any button")
+                Text::new("Waiting to join\npress ")
                 TextFont { font_size: 18.0_f32 }
                 TextColor(Color::WHITE)
                 TextLayout::justify(Justify::Center)
@@ -148,6 +150,21 @@ fn pane_ui(index: u8) -> impl Scene {
                     max_width: Val::Percent(70.0),
                     padding: {UiRect::axes(Val::Px(12.0), Val::Px(8.0))},
                 }
+                Children [
+                    PromptSpan({Join::id()})
+                    ~{PromptFamily(DeviceFamily::Gamepad)}
+                    TextFont { font_size: 18.0_f32 }
+                    TextColor(Color::WHITE)
+                    --
+                    TextSpan::new(" or ")
+                    TextFont { font_size: 18.0_f32 }
+                    TextColor(Color::WHITE)
+                    --
+                    PromptSpan({Join::id()})
+                    ~{PromptFamily(DeviceFamily::KeyboardMouse)}
+                    TextFont { font_size: 18.0_f32 }
+                    TextColor(Color::WHITE)
+                ]
             ]
             --
             DeviceLabel(index)

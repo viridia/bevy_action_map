@@ -2,11 +2,11 @@
 //!
 //! Both read the same [`OnFoot`] context, bound to a stick and to arrow keys alike; what makes them
 //! independently controlled is [`Paired`], not two different contexts (chunk 26's device routing).
-//! Neither carries [`OnFoot`] or [`Paired`] at spawn. [`Lobby`] — a third context, bound only to the
-//! join gesture (chunk 66), never paired, so it reads every device — is what [`pair_on_join`]
-//! listens to: the first still-unclaimed device to press anything claims the next protagonist in
-//! spawn order, 0 then 1. This replaces chunk 68's hardcoded pairing (protagonist 1 always the
-//! keyboard, protagonist 2 always the first gamepad).
+//! Neither carries [`OnFoot`] or [`Paired`] at spawn. [`Lobby`] — a third context, bound only to
+//! [`Join`], never paired, so it reads every device — is what [`pair_on_join`] listens to: the
+//! first still-unclaimed device to press its button claims the next protagonist in spawn order, 0
+//! then 1. This replaces chunk 68's hardcoded pairing (protagonist 1 always the keyboard,
+//! protagonist 2 always the first gamepad).
 
 use bevy::image::TextureAtlasTemplate;
 use bevy::prelude::*;
@@ -34,12 +34,10 @@ pub struct OnFoot;
 #[context(path = "split_friction.lobby", tick = Render)]
 pub struct Lobby;
 
-/// "Any button, on any device" — the join gesture (chunk 66). [`Lobby`]'s only binding.
-struct Join;
-
-impl ClassBinding for Join {
-    const PATH: &'static str = "split_friction.join";
-}
+/// The join gesture (chunk 66). [`Lobby`]'s only binding — A on a pad, Enter on the keyboard.
+#[derive(InputAction)]
+#[action(path = "split_friction.join", output = bool, intent = Button)]
+pub struct Join;
 
 /// Which protagonist a sprite is — `0` or `1`, spawn order, and the order [`pair_on_join`] claims
 /// them in.
@@ -56,7 +54,8 @@ pub fn plugin(app: &mut App) {
         controls.bind::<Move>(DirectionalButtons::arrow_keys());
     });
     app.add_context::<Lobby>(|controls| {
-        controls.bind_class::<Join>(ControlClass::AnyButton);
+        controls.bind::<Join>(GamepadButton::South);
+        controls.bind::<Join>(KeyCode::Enter);
     });
 
     app.add_systems(FixedUpdate, walk);
@@ -126,8 +125,17 @@ fn walk(
     }
 }
 
-/// Claims one device for one protagonist the moment its "any button" press arrives, in spawn
-/// order — protagonist 0 first, then 1.
+/// Claims one device for one protagonist the moment [`Join`] fires, in spawn order — protagonist 0
+/// first, then 1.
+///
+/// `Fired<Join>` says the action fired, not which of its two bindings did — an ordinary action's
+/// value is device-agnostic by design, the same reason [`Move`] never says which stick moved it.
+/// So this reads the raw button state directly to find out, exactly the question [`Join`] itself
+/// cannot answer. **Not backend-safe**: `Gamepad` and `ButtonInput<KeyCode>` do not exist under a
+/// Steam authority (Roadmap's deferred table), so this works only against `gilrs`. Keyboard first:
+/// only one keyboard exists, where several pads might have pressed A the same tick, and picking the
+/// first found over picking the keyboard first would starve whichever pad lost the race on a tick
+/// both fired.
 ///
 /// A `Local` list of already-claimed devices rather than `join::is_claimed` against a
 /// `Query<&Paired>`: two protagonists' join presses landing in the same tick both fire before
@@ -135,12 +143,24 @@ fn walk(
 /// devices as still unclaimed and race for the same slot. The `Local` is updated synchronously
 /// inside the observer itself, so the second press to arrive already sees the first's claim.
 fn pair_on_join(
-    fired: On<ClassFired<Join>>,
+    _fired: On<Fired<Join>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<(Entity, &Gamepad)>,
     mut claimed: Local<Vec<DeviceHandle>>,
     protagonists: Query<(Entity, &Protagonist)>,
     mut commands: Commands,
 ) {
-    let device = fired.event.device();
+    let device = if keys.just_pressed(KeyCode::Enter) {
+        Some(DeviceHandle::KeyboardMouse)
+    } else {
+        gamepads
+            .iter()
+            .find(|(_, gamepad)| gamepad.just_pressed(GamepadButton::South))
+            .map(|(entity, _)| DeviceHandle::Gamepad(entity))
+    };
+    let Some(device) = device else {
+        return;
+    };
     if claimed.contains(&device) || claimed.len() >= 2 {
         return;
     }

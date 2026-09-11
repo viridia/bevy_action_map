@@ -34,7 +34,7 @@ use bevy_action_map::preset::Preset;
 use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
 use crate::actions::{Back, Confirm, Menu, Navigate, TURN_DEAD_ZONE_KEY, ToggleSettings, Turn};
-use crate::common::prompt_ui::{PromptFamily, PromptSpan};
+use crate::common::prompt_ui::{IconPromptSpan, PromptFamily, PromptSpan};
 use crate::common::widget_focus::{
     Adjusted, ButtonFocused, Stepper, decrement_pressed, increment_pressed,
 };
@@ -497,7 +497,7 @@ fn cancel_button() -> impl Scene {
         on(cancel_pressed)
         AutoFocus
         @focusable()
-        Text::new("Cancel (")
+        Text::new("Cancel ")
         TextFont { font_size: 15.0_f32 }
         TextColor(TITLE)
         BorderColor::all(FIXED)
@@ -507,12 +507,10 @@ fn cancel_button() -> impl Scene {
             padding: {UiRect::axes(Val::Px(16.0), Val::Px(4.0))},
         }
         Children [
-            PromptSpan({Back::id()})
+            IconPromptSpan({Back::id()})
             ~{PromptFamily(DeviceFamily::Gamepad)}
             TextFont { font_size: 15.0_f32 }
             TextColor(TITLE)
-            --
-            TextSpan::new(")") TextFont { font_size: 15.0_f32 } TextColor(TITLE)
         ]
     }
 }
@@ -523,7 +521,7 @@ fn confirm_button() -> impl Scene {
         Button
         on(confirm_pressed)
         @focusable()
-        Text::new("Confirm (")
+        Text::new("Confirm ")
         TextFont { font_size: 15.0_f32 }
         TextColor(TITLE)
         BorderColor::all(FIXED)
@@ -533,12 +531,10 @@ fn confirm_button() -> impl Scene {
             padding: {UiRect::axes(Val::Px(16.0), Val::Px(4.0))},
         }
         Children [
-            PromptSpan({Confirm::id()})
+            IconPromptSpan({Confirm::id()})
             ~{PromptFamily(DeviceFamily::Gamepad)}
             TextFont { font_size: 15.0_f32 }
             TextColor(TITLE)
-            --
-            TextSpan::new(")") TextFont { font_size: 15.0_f32 } TextColor(TITLE)
         ]
     }
 }

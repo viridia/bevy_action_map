@@ -386,7 +386,8 @@ pub mod prelude {
         declared_mappings, declared_tunables, mappings, tunables,
     };
     pub use crate::present::{
-        BindingTable, ControlOrigin, Prompt, PromptDevice, PromptGeneration, PromptScope, Prompts,
+        BindingTable, ControlOrigin, Glyph, GlyphTier, Prompt, PromptDevice, PromptGeneration,
+        PromptScope, Prompts, resolve_glyph,
     };
     // The derives share their names with the traits above, which is fine — a derive macro and a
     // trait live in different namespaces. Without these, a glob import of this prelude gives you

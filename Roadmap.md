@@ -418,10 +418,24 @@ is what R18.4's key was waiting to be checked against.
   `scripts/import_input_prompts.py` from what it wrote. A pair absent from it steps to the next
   tier; a missing path is never a load error, and nothing in the chain opens a file to discover it
   is not there.
-- **`IconPromptSpan`, not `IconPrompt`.** A block prompt is already a `Text` whose only child is a
-  span — `PromptSpan` has no block-level counterpart and needs none — so one component serves both.
-  It falls back to text inside the same span, which is what stops the fallback being a change of
-  layout kind.
+- **`IconPrompt` and `IconPromptSpan`, not one component for both.** An inline icon rides
+  `InlineImage` ([bevy#25710][], now in the pin) and a block one is its own node; each falls back to
+  text in its own layout kind rather than one component switching shape underneath its caller. The
+  two are not merged for the same reason a span and a block element are never one type generally —
+  their layout knobs differ, `InlineImage`'s are not all built yet, and a block prompt has to align
+  like any other block element on its screen, which a component built around the inline case cannot
+  promise. `IconPromptSpan` has landed; `IconPrompt` has not.
+- **`InlineImage` sizes itself from the loaded image's own pixels, with no resize hook** — measured
+  against a real window, not read off the PR: a 64px face-button icon inline with 15px text towers
+  over the line rather than sitting in it, and nothing on the component overrides that once the
+  asset loads. `assets/input_prompts_inline/` is the fix, a second copy of every entry pre-scaled by
+  `scripts/import_input_prompts.py` (`INLINE_SIZE`, currently 25px) rather than a size this crate
+  computes at runtime. One manifest still covers both directories, since they mirror each other's
+  coverage exactly. The resize itself needs care past a plain `-resize`: the source stores white
+  under full transparency, which a naive filter bleeds into the scaled edge as a halo, and a palette
+  small enough to compress well flattens the antialiasing into visible bands — full RGBA output,
+  composited over black and back rather than resized as one straight-alpha image, is what a smooth,
+  fringe-free edge at this size actually needs.
 - **Verified by Disasteroids' two gamepad prompt sites**, `Back` on `pad/East` and `Confirm` on
   `pad/West` in the settings screen. Face buttons are where brands diverge most visibly, so swapping
   a pad changes both glyphs; and because Generic ships no face-button art, an unrecognized pad falls
@@ -432,9 +446,6 @@ is what R18.4's key was waiting to be checked against.
 - **Not doing: the generic tier's stamped art.** Kenney's generic set is blank, unlabeled buttons,
   so a generic-tier icon needs a short text stamp authored onto it by hand. That is a content task
   with a known answer, and until it is done the generic tier resolves to text.
-- **Depends on [bevy#25710][] for the inline form only.** Until `InlineBox`/`InlineImage` merges, an
-  icon prompt can only be block-level. The identifier, the resolution and the manifest do not wait
-  on it.
 
 ---
 
@@ -683,6 +694,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | --- | --- |
 | **A real Steam backend, validated out of tree** | less than it looked. `docs/steam.md` S4 now says a borrowed app id does carry its own manifest from inside the client's bundle, and S13 answered R1.7 that way, so what is left needing an app id is only what S6 blocks: a configuration Steam actually applies. Whether that needs an app id at all, or only a windowed app Steam launches, is itself unmeasured. The shape is settled: a probe rather than a game, in its own repository, pinning `bevy_action_map` by git rev so it breaks only on a deliberate bump — and it is an audit rather than a gate, since it needs a client and a pad and cannot run in CI. `steam_probe/` is its gitignored seed and moves out when the repository exists. Nothing in this crate is blocked on it: per-family suppression is chunk 112, and the presentation half can be built against API signatures already verified to exist |
 | **Persisting calibration**, keyed to identity (R11.7, R14.11) | R11.5's stable device identity, which chunk 72 builds. Measured calibration lasts as long as the process |
+| **A backend-safe way to ask which device drove an ordinary action's current activation** | a real need, not just Split Friction's. `Fired`'s value is device-agnostic by design — the same reason `Move` never says which stick moved it — so `protagonist.rs`'s `pair_on_join` (chunk 66, restated when `Join` moved off a class binding) reads Bevy's `Gamepad` component and `ButtonInput<KeyCode>` directly to find out who pressed it. That query does not exist under a Steam authority (D22, suppression), so the example breaks under the one backend this crate means to support. Whatever answers this generalizes past one example: some notion of "which device is this activation's origin" carried alongside an ordinary action's value, not only a class binding's raw event |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it. Measured (`docs/steam.md` S17): `get_glyph_for_action_origin` resolves to an absolute filesystem path inside the client's own app bundle — `Contents/MacOS/controller_base/images/api/dark/shared_lstick_md.png` on macOS, not the `tenfoot/resource/...` path this row previously guessed — and the `dark` component says the glyphs are themed, so a light variant has to be selected rather than assumed. A Bevy `AssetPath` can carry it natively via `from_path_buf` — no string-escaping the drive letter or backslashes. The path is not to be opened as given: a custom `AssetSource` reader must canonicalize it and reject anything outside a known root before reading, rather than trust an external SDK's return value as a bare filesystem path. One scheme, one hard-coded root is the right size while only this one root is confirmed; a second scheme is warranted only if a second root with its own lifecycle surfaces (e.g. something ephemeral, which cannot share a stable root's caching and hot-reload assumptions) — not one scheme per SDK call that happens to return a path |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import |
 | **Netcode injection and reconciliation** | a networked target. The injection point is built: chunk 111 landed `delegate` and `AuthorityValues`, so a peer's resolved action already has somewhere to go (D71). Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. Injection targets L2 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs a remote player's resolved action to inject and a later correction to reconcile against it |

@@ -9,7 +9,7 @@ use bevy_action_map::prelude::*;
 #[path = "../examples/common/prompt_ui.rs"]
 mod prompt_ui;
 
-use prompt_ui::{PromptClass, PromptFamily, PromptPick, PromptSpan, PromptUnbound};
+use prompt_ui::{IconPromptSpan, PromptClass, PromptFamily, PromptPick, PromptSpan, PromptUnbound};
 
 #[derive(InputAction)]
 #[action(path = "prompt_ui_tests.jump", output = bool, intent = Button)]
@@ -29,6 +29,7 @@ fn app() -> App {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
+        bevy::asset::AssetPlugin::default(),
         bevy::input::InputPlugin,
         ActionMapPlugin,
         prompt_ui::plugin,
@@ -173,4 +174,15 @@ fn a_span_catches_up_when_the_answer_moves() {
 
     app.world_mut().remove_resource::<Flies>();
     assert_eq!(caption(&mut app, span), "—");
+}
+
+/// No art beats a blank caption: `IconPromptSpan` falls back to the same text `PromptSpan` would
+/// show, bracketed rather than bare — the visual grouping an icon does not need but bare text does.
+#[test]
+fn an_icon_prompt_falls_back_to_bracketed_text_when_nothing_fires_the_action() {
+    let mut app = app();
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
+
+    let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
+    assert_eq!(caption(&mut app, span), "[—]");
 }
