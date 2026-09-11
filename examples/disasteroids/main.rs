@@ -122,26 +122,21 @@ fn hint() -> impl Scene {
         // inherited from the `Text` above and a span that omits them is drawn at Bevy's default
         // size in white.
         Children [
-            (
-                PromptSpan({actions::ToggleOverlay::id()})
-                TextFont { font_size: 13.0_f32 }
-                TextColor(KEY)
-            ),
-            (
-                TextSpan::new(" debug overlay   ")
-                TextFont { font_size: 13.0_f32 }
-                TextColor(LABEL)
-            ),
-            (
-                PromptSpan({actions::ToggleSettings::id()})
-                TextFont { font_size: 13.0_f32 }
-                TextColor(KEY)
-            ),
-            (
-                TextSpan::new(" controls")
-                TextFont { font_size: 13.0_f32 }
-                TextColor(LABEL)
-            ),
+            PromptSpan({actions::ToggleOverlay::id()})
+            TextFont { font_size: 13.0_f32 }
+            TextColor(KEY)
+            --
+            TextSpan::new(" debug overlay   ")
+            TextFont { font_size: 13.0_f32 }
+            TextColor(LABEL)
+            --
+            PromptSpan({actions::ToggleSettings::id()})
+            TextFont { font_size: 13.0_f32 }
+            TextColor(KEY)
+            --
+            TextSpan::new(" controls")
+            TextFont { font_size: 13.0_f32 }
+            TextColor(LABEL)
         ]
     }
 }

@@ -93,7 +93,7 @@ fn map(layout: Handle<TextureAtlasLayout>, dungeon: &dungeon::Dungeon, seed: u64
         Transform::default()
         Visibility::default()
         Children [
-            {tiles},
+            {tiles}
         ]
     }
 }

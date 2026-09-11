@@ -424,71 +424,64 @@ fn screen(world: &World) -> impl Scene {
             row_gap: Val::Px(14.0),
         }
         Children [
-            (
-                Text::new("CONTROLS")
-                TextFont { font_size: 27.0_f32 }
-                TextColor(TITLE)
-            ),
-            (
-                Node { column_gap: Val::Px(48.0), align_items: AlignItems::Start }
+            Text::new("CONTROLS")
+            TextFont { font_size: 27.0_f32 }
+            TextColor(TITLE)
+            --
+            Node { column_gap: Val::Px(48.0), align_items: AlignItems::Start }
+            Children [
+                @{table("Keyboard & Mouse", rows(DeviceFamily::KeyboardMouse))}
+                --
+                Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0) }
                 Children [
-                    ({table("Keyboard & Mouse", rows(DeviceFamily::KeyboardMouse))}),
-                    (
-                        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0) }
-                        Children [
-                            ({table("Gamepad", rows(DeviceFamily::Gamepad))}),
-                            ({preset_row(&presets, selected)}),
-                            // Two rows' worth of control on one line, for now: the screen is
-                            // already at the height budget the window allows, and neither reads
-                            // worse side by side than stacked.
-                            (
-                                Node { column_gap: Val::Px(24.0) }
-                                Children [
-                                    ({dead_zone_row(dead_zone)}),
-                                    ({hold_or_toggle_row(hold_or_toggle)}),
-                                ]
-                            ),
-                        ]
-                    ),
+                    @{table("Gamepad", rows(DeviceFamily::Gamepad))}
+                    --
+                    @{preset_row(&presets, selected)}
+                    --
+                    // Two rows' worth of control on one line, for now: the screen is
+                    // already at the height budget the window allows, and neither reads
+                    // worse side by side than stacked.
+                    Node { column_gap: Val::Px(24.0) }
+                    Children [
+                        @{dead_zone_row(dead_zone)}
+                        --
+                        @{hold_or_toggle_row(hold_or_toggle)}
+                    ]
                 ]
-            ),
-            (
-                Node { column_gap: Val::Px(16.0), margin: {UiRect::top(Val::Px(4.0))} }
-                Children [
-                    // Cancel first in the tree as well as on screen, so that the one the selection
-                    // starts on is also the one the eye starts on.
-                    ({cancel_button()}),
-                    ({confirm_button()}),
-                ]
-            ),
+            ]
+            --
+            Node { column_gap: Val::Px(16.0), margin: {UiRect::top(Val::Px(4.0))} }
+            Children [
+                // Cancel first in the tree as well as on screen, so that the one the selection
+                // starts on is also the one the eye starts on.
+                @{cancel_button()}
+                --
+                @{confirm_button()}
+            ]
+            --
             // The one thing on this screen that has to know an action. A span rather than a
             // lookup formatted into the sentence: the question is what would fire it *now*, so
             // the answer skips a context that is switched off and a control something else has
             // taken — and it changes while the screen is up, once this screen can rebind.
-            (
-                Text::new(
-                    "Boxed cells are the ones this game offers for rebinding — press one, then \
-                     press what you want bound there; everything else is listed so you can see \
-                     what it does.\nPress "
-                )
-                Node {
-                    margin: UiRect::axes(percent(10), px(0))
-                }
+            Text::new(
+                "Boxed cells are the ones this game offers for rebinding — press one, then \
+                 press what you want bound there; everything else is listed so you can see \
+                 what it does.\nPress "
+            )
+            Node {
+                margin: UiRect::axes(percent(10), px(0))
+            }
+            TextFont { font_size: 13.0_f32 }
+            TextColor(FIXED)
+            Children [
+                PromptSpan({ToggleSettings::id()})
+                TextFont { font_size: 13.0_f32 }
+                TextColor(TITLE)
+                --
+                TextSpan::new(" to close.")
                 TextFont { font_size: 13.0_f32 }
                 TextColor(FIXED)
-                Children [
-                    (
-                        PromptSpan({ToggleSettings::id()})
-                        TextFont { font_size: 13.0_f32 }
-                        TextColor(TITLE)
-                    ),
-                    (
-                        TextSpan::new(" to close.")
-                        TextFont { font_size: 13.0_f32 }
-                        TextColor(FIXED)
-                    ),
-                ]
-            ),
+            ]
         ]
     }
 }
@@ -503,7 +496,7 @@ fn cancel_button() -> impl Scene {
         Button
         on(cancel_pressed)
         AutoFocus
-        focusable()
+        @focusable()
         Text::new("Cancel (")
         TextFont { font_size: 15.0_f32 }
         TextColor(TITLE)
@@ -514,13 +507,12 @@ fn cancel_button() -> impl Scene {
             padding: {UiRect::axes(Val::Px(16.0), Val::Px(4.0))},
         }
         Children [
-            (
-                PromptSpan({Back::id()})
-                template_value(PromptFamily(DeviceFamily::Gamepad))
-                TextFont { font_size: 15.0_f32 }
-                TextColor(TITLE)
-            ),
-            (TextSpan::new(")") TextFont { font_size: 15.0_f32 } TextColor(TITLE)),
+            PromptSpan({Back::id()})
+            ~{PromptFamily(DeviceFamily::Gamepad)}
+            TextFont { font_size: 15.0_f32 }
+            TextColor(TITLE)
+            --
+            TextSpan::new(")") TextFont { font_size: 15.0_f32 } TextColor(TITLE)
         ]
     }
 }
@@ -530,7 +522,7 @@ fn confirm_button() -> impl Scene {
     bsn! {
         Button
         on(confirm_pressed)
-        focusable()
+        @focusable()
         Text::new("Confirm (")
         TextFont { font_size: 15.0_f32 }
         TextColor(TITLE)
@@ -541,13 +533,12 @@ fn confirm_button() -> impl Scene {
             padding: {UiRect::axes(Val::Px(16.0), Val::Px(4.0))},
         }
         Children [
-            (
-                PromptSpan({Confirm::id()})
-                template_value(PromptFamily(DeviceFamily::Gamepad))
-                TextFont { font_size: 15.0_f32 }
-                TextColor(TITLE)
-            ),
-            (TextSpan::new(")") TextFont { font_size: 15.0_f32 } TextColor(TITLE)),
+            PromptSpan({Confirm::id()})
+            ~{PromptFamily(DeviceFamily::Gamepad)}
+            TextFont { font_size: 15.0_f32 }
+            TextColor(TITLE)
+            --
+            TextSpan::new(")") TextFont { font_size: 15.0_f32 } TextColor(TITLE)
         ]
     }
 }
@@ -577,7 +568,9 @@ fn preset_row(presets: &[Preset], selected: Option<&'static str>) -> impl Scene 
         .collect();
     bsn! {
         Node { column_gap: Val::Px(10.0) }
-        Children [{buttons}]
+        Children [
+            {buttons}
+        ]
     }
 }
 
@@ -596,8 +589,8 @@ fn preset_button(preset: &Preset, selected: bool) -> impl Scene + use<> {
     bsn! {
         Button
         on(preset_pressed)
-        focusable()
-        template_value(PresetButton(name))
+        @focusable()
+        ~{PresetButton(name)}
         Text::new(label)
         TextFont { font_size: 14.0_f32 }
         TextColor(TITLE)
@@ -621,8 +614,9 @@ fn dead_zone_row(value: TunableValue) -> impl Scene {
     bsn! {
         Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(3.0) }
         Children [
-            (Text::new("Turn dead zone") TextFont { font_size: 13.0_f32 } TextColor(HEADING)),
-            ({stepper(value)}),
+            Text::new("Turn dead zone") TextFont { font_size: 13.0_f32 } TextColor(HEADING)
+            --
+            @{stepper(value)}
         ]
     }
 }
@@ -643,7 +637,7 @@ fn stepper(value: f32) -> impl Scene {
     bsn! {
         Stepper
         on(apply_dead_zone_delta)
-        focusable()
+        @focusable()
         Node {
             width: Val::Px(130.0),
             justify_content: JustifyContent::SpaceBetween,
@@ -654,14 +648,14 @@ fn stepper(value: f32) -> impl Scene {
         }
         BorderColor::all(CHANGEABLE)
         Children [
-            (Button on(decrement_pressed) Text::new("<") TextFont { font_size: 15.0_f32 } TextColor(TITLE)),
-            (
-                DeadZoneValue
-                Text::new(dead_zone_label(value))
-                TextFont { font_size: 14.0_f32 }
-                TextColor(TITLE)
-            ),
-            (Button on(increment_pressed) Text::new(">") TextFont { font_size: 15.0_f32 } TextColor(TITLE)),
+            Button on(decrement_pressed) Text::new("<") TextFont { font_size: 15.0_f32 } TextColor(TITLE)
+            --
+            DeadZoneValue
+            Text::new(dead_zone_label(value))
+            TextFont { font_size: 14.0_f32 }
+            TextColor(TITLE)
+            --
+            Button on(increment_pressed) Text::new(">") TextFont { font_size: 15.0_f32 } TextColor(TITLE)
         ]
     }
 }
@@ -739,29 +733,26 @@ fn hold_or_toggle_row(active: bool) -> impl Scene {
     bsn! {
         Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(3.0) }
         Children [
-            (Text::new("Thrust") TextFont { font_size: 13.0_f32 } TextColor(HEADING)),
-            (
-                Button
-                on(hold_or_toggle_pressed)
-                focusable()
-                BorderColor::all(CHANGEABLE)
-                Node {
-                    width: Val::Px(130.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border: {UiRect::all(Val::Px(1.0))},
-                    border_radius: {BorderRadius::all(Val::Px(4.0))},
-                    padding: {UiRect::axes(Val::Px(8.0), Val::Px(3.0))},
-                }
-                Children [
-                    (
-                        HoldOrToggleValue
-                        Text::new(hold_or_toggle_label(active))
-                        TextFont { font_size: 14.0_f32 }
-                        TextColor(TITLE)
-                    ),
-                ]
-            ),
+            Text::new("Thrust") TextFont { font_size: 13.0_f32 } TextColor(HEADING)
+            --
+            Button
+            on(hold_or_toggle_pressed)
+            @focusable()
+            BorderColor::all(CHANGEABLE)
+            Node {
+                width: Val::Px(130.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border: {UiRect::all(Val::Px(1.0))},
+                border_radius: {BorderRadius::all(Val::Px(4.0))},
+                padding: {UiRect::axes(Val::Px(8.0), Val::Px(3.0))},
+            }
+            Children [
+                HoldOrToggleValue
+                Text::new(hold_or_toggle_label(active))
+                TextFont { font_size: 14.0_f32 }
+                TextColor(TITLE)
+            ]
         ]
     }
 }
@@ -959,8 +950,8 @@ fn focusable() -> impl Scene {
 /// `Activate` fired at release. Reclaiming after the fact is a visible blink whenever press and
 /// release land on different entities, which a widget with interactive children of its own (a
 /// stepper's two chevrons) makes routine rather than rare. This is
-/// `bevy_input_focus::tab_navigation::acquire_focus_tab_index`'s own fix, `AutoDirectionalNavigation`
-/// standing in for `TabIndex`.
+/// `bevy_input_focus::tab_navigation::acquire_focus_tab_index`'s own fix,
+/// `AutoDirectionalNavigation` standing in for `TabIndex`.
 fn acquire_focus_directional(
     mut acquire: On<AcquireFocus>,
     focusable: Query<(), With<AutoDirectionalNavigation>>,
@@ -1020,13 +1011,12 @@ fn table(title: &'static str, mut rows: Vec<ActionMapping>) -> impl Scene {
     bsn! {
         Node { flex_direction: FlexDirection::Column, row_gap: {Val::Px(ROW_GAP)} }
         Children [
-            (
-                Text::new(title)
-                TextFont { font_size: 17.0_f32 }
-                TextColor(TITLE)
-                Node { margin: {UiRect::bottom(Val::Px(4.0))} }
-            ),
-            {lines},
+            Text::new(title)
+            TextFont { font_size: 17.0_f32 }
+            TextColor(TITLE)
+            Node { margin: {UiRect::bottom(Val::Px(4.0))} }
+            --
+            {lines}
         ]
     }
 }
@@ -1170,7 +1160,9 @@ fn line(cells: Vec<Cell>, indent: f32) -> impl Scene {
     let cells: Vec<_> = cells.into_iter().map(cell).collect();
     bsn! {
         Node { column_gap: Val::Px(8.0), margin: {UiRect::left(Val::Px(indent))} }
-        Children [{cells}]
+        Children [
+            {cells}
+        ]
     }
 }
 
@@ -1188,15 +1180,15 @@ fn cell(cell: Cell) -> impl Scene {
             on(start_capture)
             on(captured)
             BackgroundColor(Color::NONE)
-            focusable()
+            @focusable()
         }
     });
-    // `template_value` rather than the bare tuple-constructor form `bsn!` otherwise expects: these
-    // two are plain data tags with no sensible `Default`, and `bsn!`'s own `Type(args)` syntax needs
-    // one (it patches a template, which `template_value` sidesteps by handing over an already-built
-    // value).
+    // `Option` only forwards `Scene`, not `Component`, so the tag is a one-entry `bsn!` of its own
+    // rather than a bare value. `~{}` inside it: these are plain data tags with no sensible
+    // `Default`, and the bare tuple-constructor form `bsn!` otherwise expects patches a `Template`,
+    // which needs one.
     let rebind_tag = if let CellRole::Changeable(family, key, slot) = cell.role {
-        Some(template_value(RebindCell(family, key, slot)))
+        Some(bsn! { ~{RebindCell(family, key, slot)} })
     } else {
         None
     };
@@ -1205,22 +1197,22 @@ fn cell(cell: Cell) -> impl Scene {
     // a `Fixed` row `RebindCell` was never attached to.
     let row_tag = match cell.role {
         CellRole::Changeable(family, key, slot) | CellRole::Fixed(family, key, slot) => {
-            Some(template_value(RowCell(family, key, slot)))
+            Some(bsn! { ~{RowCell(family, key, slot)} })
         }
         CellRole::Label | CellRole::Follower(..) => None,
     };
     let follower_tag = if let CellRole::Follower(family, key, slot, condition) = cell.role {
-        Some(template_value(FollowerCell(family, key, slot, condition)))
+        Some(bsn! { ~{FollowerCell(family, key, slot, condition)} })
     } else {
         None
     };
     // Every cell carries the same border and padding whether or not the border is visible, so the
     // columns line up down the table rather than shifting where a box begins.
     bsn! {
-        {selectable}
-        {rebind_tag}
-        {row_tag}
-        {follower_tag}
+        @selectable
+        @rebind_tag
+        @row_tag
+        @follower_tag
         Text({cell.text})
         TextFont { font_size: {ROW_FONT_SIZE} }
         TextColor({cell.color})

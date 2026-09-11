@@ -98,9 +98,11 @@ fn layout() -> impl Scene {
             height: Val::Percent(100.0),
         }
         Children [
-            (Pane(0) Node { flex_grow: 1.0 }),
-            (Divider Node { width: Val::Px(DIVIDER_WIDTH) } BackgroundColor(Color::BLACK)),
-            (Pane(1) Node { flex_grow: 1.0 }),
+            Pane(0) Node { flex_grow: 1.0 }
+            --
+            Divider Node { width: Val::Px(DIVIDER_WIDTH) } BackgroundColor(Color::BLACK)
+            --
+            Pane(1) Node { flex_grow: 1.0 }
         ]
     }
 }
@@ -130,38 +132,33 @@ fn pane_ui(index: u8) -> impl Scene {
             align_items: AlignItems::Center,
         }
         Children [
-            (
-                JoinPrompt(index)
-                Node {
-                    flex_grow: 1.0,
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                }
-                Children [
-                    (
-                        Text::new("Waiting to join\npress any button")
-                        TextFont { font_size: 18.0_f32 }
-                        TextColor(Color::WHITE)
-                        TextLayout::justify(Justify::Center)
-                        BackgroundColor({Color::BLACK.with_alpha(0.55)})
-                        Node {
-                            max_width: Val::Percent(70.0),
-                            padding: {UiRect::axes(Val::Px(12.0), Val::Px(8.0))},
-                        }
-                    ),
-                ]
-            ),
-            (
-                DeviceLabel(index)
-                Text::new("")
-                TextFont { font_size: 14.0_f32 }
+            JoinPrompt(index)
+            Node {
+                flex_grow: 1.0,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+            }
+            Children [
+                Text::new("Waiting to join\npress any button")
+                TextFont { font_size: 18.0_f32 }
                 TextColor(Color::WHITE)
+                TextLayout::justify(Justify::Center)
                 BackgroundColor({Color::BLACK.with_alpha(0.55)})
                 Node {
-                    margin: {UiRect::bottom(Val::Px(16.0))},
-                    padding: {UiRect::axes(Val::Px(10.0), Val::Px(4.0))},
+                    max_width: Val::Percent(70.0),
+                    padding: {UiRect::axes(Val::Px(12.0), Val::Px(8.0))},
                 }
-            ),
+            ]
+            --
+            DeviceLabel(index)
+            Text::new("")
+            TextFont { font_size: 14.0_f32 }
+            TextColor(Color::WHITE)
+            BackgroundColor({Color::BLACK.with_alpha(0.55)})
+            Node {
+                margin: {UiRect::bottom(Val::Px(16.0))},
+                padding: {UiRect::axes(Val::Px(10.0), Val::Px(4.0))},
+            }
         ]
     }
 }
@@ -172,8 +169,9 @@ fn cameras() -> impl Scene {
         Transform::default()
         Visibility::default()
         Children [
-            (PlayerCamera(0) Camera2d Camera { order: 1 }),
-            (PlayerCamera(1) Camera2d Camera { order: 2 }),
+            PlayerCamera(0) Camera2d Camera { order: 1 }
+            --
+            PlayerCamera(1) Camera2d Camera { order: 2 }
         ]
     }
 }

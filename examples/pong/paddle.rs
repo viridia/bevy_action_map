@@ -79,7 +79,7 @@ fn spawn(mut commands: Commands) {
 /// The scene both paddles are, whatever is driving them.
 pub fn paddle(side: Side, x: f32) -> impl Scene {
     bsn! {
-        template_value(side)
+        side
         Mesh2d(asset_value(Rectangle::new(WIDTH, HEIGHT)))
         MeshMaterial2d::<ColorMaterial>(asset_value(Color::WHITE))
         Transform::from_xyz(x, 0.0, 0.0)

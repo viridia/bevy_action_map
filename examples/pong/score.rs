@@ -51,28 +51,22 @@ fn scoreboard() -> impl Scene {
             justify_content: JustifyContent::Center,
         }
         Children [
-            (
-                Text::new("")
-                Children [
-                    (
-                        LeftScore
-                        TextSpan::new("0")
-                        TextFont { font_size: 40.0_f32 }
-                        TextColor(Color::WHITE)
-                    ),
-                    (
-                        TextSpan::new("   ")
-                        TextFont { font_size: 40.0_f32 }
-                        TextColor(Color::WHITE)
-                    ),
-                    (
-                        RightScore
-                        TextSpan::new("0")
-                        TextFont { font_size: 40.0_f32 }
-                        TextColor(Color::WHITE)
-                    ),
-                ]
-            )
+            Text::new("")
+            Children [
+                LeftScore
+                TextSpan::new("0")
+                TextFont { font_size: 40.0_f32 }
+                TextColor(Color::WHITE)
+                --
+                TextSpan::new("   ")
+                TextFont { font_size: 40.0_f32 }
+                TextColor(Color::WHITE)
+                --
+                RightScore
+                TextSpan::new("0")
+                TextFont { font_size: 40.0_f32 }
+                TextColor(Color::WHITE)
+            ]
         ]
     }
 }

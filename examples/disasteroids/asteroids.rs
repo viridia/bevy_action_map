@@ -125,9 +125,7 @@ fn shatter(commands: &mut Commands, rock: Entity, position: Vec2, size: Size) {
 fn asteroid(size: Size, position: Vec2, velocity: Vec2) -> impl Scene {
     bsn! {
         Asteroid
-        // `Size` is a runtime value rather than a variant written into the block, so it goes in as
-        // a template value. Naming the variant directly — `Size::Large` — would work too.
-        template_value(size)
+        size
         Mesh2d(asset_value(RegularPolygon::new(size.radius(), 7)))
         MeshMaterial2d::<ColorMaterial>(asset_value(Color::srgb(0.45, 0.45, 0.5)))
         // A patch, so the two fields that matter are set and `scale` keeps its default. This is why

@@ -71,8 +71,9 @@ pub fn spawn(layout: Handle<TextureAtlasLayout>, spawn: [Vec2; 2]) -> impl Scene
         Visibility::default()
         Lobby
         Children [
-            ({protagonist(layout.clone(), 0, tileset::PROTAGONIST_1, spawn[0])}),
-            ({protagonist(layout, 1, tileset::PROTAGONIST_2, spawn[1])}),
+            @{protagonist(layout.clone(), 0, tileset::PROTAGONIST_1, spawn[0])}
+            --
+            @{protagonist(layout, 1, tileset::PROTAGONIST_2, spawn[1])}
         ]
     }
 }

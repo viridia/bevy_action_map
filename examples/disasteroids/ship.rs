@@ -94,17 +94,15 @@ fn ship() -> impl Scene {
         Velocity
         Wraps
         Children [
-            (
-                Exhaust
-                // Symmetric about the nose-to-tail axis, or it burns off to one side.
-                Mesh2d(asset_value(Triangle2d::new(
-                    Vec2::new(-12.0, -6.0),
-                    Vec2::new(-12.0, 6.0),
-                    Vec2::new(-30.0, 0.0),
-                )))
-                MeshMaterial2d::<ColorMaterial>(asset_value(Color::srgb(1.0, 0.6, 0.2)))
-                Transform::from_scale(Vec3::ZERO)
-            )
+            Exhaust
+            // Symmetric about the nose-to-tail axis, or it burns off to one side.
+            Mesh2d(asset_value(Triangle2d::new(
+                Vec2::new(-12.0, -6.0),
+                Vec2::new(-12.0, 6.0),
+                Vec2::new(-30.0, 0.0),
+            )))
+            MeshMaterial2d::<ColorMaterial>(asset_value(Color::srgb(1.0, 0.6, 0.2)))
+            Transform::from_scale(Vec3::ZERO)
         ]
     }
 }
@@ -269,21 +267,17 @@ fn bomb_meter() -> impl Scene {
             justify_content: JustifyContent::Center,
         }
         Children [
-            (
-                Node {
-                    width: Val::Px(200.0),
-                    height: Val::Px(8.0),
-                    border: {UiRect::all(Val::Px(1.0))},
-                }
-                BorderColor::all(Color::srgb(0.5, 0.6, 0.6))
-                Children [
-                    (
-                        BombMeterFill
-                        Node { width: Val::Percent(0.0), height: Val::Percent(100.0) }
-                        BackgroundColor(Color::srgb(0.6, 0.85, 1.0))
-                    )
-                ]
-            )
+            Node {
+                width: Val::Px(200.0),
+                height: Val::Px(8.0),
+                border: {UiRect::all(Val::Px(1.0))},
+            }
+            BorderColor::all(Color::srgb(0.5, 0.6, 0.6))
+            Children [
+                BombMeterFill
+                Node { width: Val::Percent(0.0), height: Val::Percent(100.0) }
+                BackgroundColor(Color::srgb(0.6, 0.85, 1.0))
+            ]
         ]
     }
 }
