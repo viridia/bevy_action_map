@@ -281,10 +281,23 @@ so the requirement has a destination in `Requirements.md` and, until this chunk,
 
 - **Self-contained**, and independent of 94c — a different corner of the same requirements
   section, not a shared mechanism.
-- **Not doing: a mappable either.** The either-ness is declared in the chord's modifier at bind
-  time; capture reads one physical keypress and can only ever answer with `LeftCtrl` or `RightCtrl`,
-  never both. A row built this way is not something a rebind screen can produce, so it stays a
-  `Fixed` binding — a game wanting a rebindable "either" still writes two mappable rows by hand.
+- **Closed over the four keyboard modifiers, not generic.** A new `with_modifier(ChordModifier,
+  Side)` carries this, where `ChordModifier` is `Ctrl | Shift | Alt | Super` and `Side` is
+  `Left | Right | Either` — not `with_either(impl Into<ButtonControl>, impl Into<ButtonControl>)`
+  over two arbitrary controls. R12.3 sits under §12, "Keyboard specifics", and never asked for an
+  either-shaped bumper or any other pairing; a permissive signature would only add combinations
+  nobody asked for and nothing downstream can describe. `with` is unchanged for every other chord
+  entry.
+- **`Side::Either` is `Fixed`, and stays that way.** It is declared at bind time, not observed:
+  capture resolves one keypress to one concrete control, and no keypress means "either side" for it
+  to answer with. A rebind touching this row could only replace it with a concrete `Left` or
+  `Right`, never hand `Either` back, so the row carries no mapping. A game wanting a rebindable
+  "either" still writes two `Fixed` rows by hand, one physical key apiece.
+- **Presentation gets a chord-level `fallback_label`, and it is total.** A chord entry is either an
+  ordinary control (unchanged) or one of the four modifiers under `Either`, which reads as the bare
+  modifier name — `Shift`, not `Left Shift, Right Shift`. Every case is enumerated because the type
+  admits nothing else, so there is no pair this can fail to name and nothing for a caller to
+  decompose.
 
 ### 94c. A platform modifier
 
