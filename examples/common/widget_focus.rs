@@ -13,11 +13,15 @@
 //! the pad, this game disables `InputDispatchPlugin` entirely rather than split the seam between
 //! two mechanisms that would otherwise both be reaching for the same keys.
 
-use bevy::input_focus::InputFocus;
+use bevy::input_focus::{AcquireFocus, FocusCause, FocusGained, FocusLost, InputFocus};
 use bevy::prelude::*;
+use bevy::ui::auto_directional_navigation::AutoDirectionalNavigation;
 use bevy::ui_widgets::{Activate as WidgetActivate, Button};
 use bevy_action_map::prelude::*;
 use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
+
+/// The ring drawn around whatever [`AutoDirectionalNavigation`]'s selection is on.
+const FOCUS: Color = Color::srgb(1.0, 0.85, 0.3);
 
 /// A stable, well-known identifier for a widget's *kind*.
 ///
@@ -177,6 +181,63 @@ pub fn increment_pressed(
     chevron_pressed(pressed.entity, 1.0, &parents, &mut commands);
 }
 
+/// Everything a selection can land on carries these three.
+///
+/// [`AutoDirectionalNavigation`] is what makes an entity a candidate, and what
+/// [`acquire_focus_directional`] answers a click through; the [`Outline`] is the ring, kept
+/// colourless until the selection arrives so that showing it is a colour change rather than a
+/// component insertion; the two observers are what change it.
+pub fn focusable() -> impl Scene {
+    bsn! {
+        AutoDirectionalNavigation
+        Outline { width: Val::Px(2.0), offset: Val::Px(2.0), color: Color::NONE }
+        on(ring_on)
+        on(ring_off)
+    }
+}
+
+/// Draws and erases the ring around the selection.
+///
+/// The [`Outline`] is already on every focusable, holding [`Color::NONE`]; these two change its
+/// colour rather than inserting and removing the component, which is what Bevy's own documentation
+/// asks for — a ring that moves every time the player nudges the stick would otherwise be an
+/// archetype move every time as well.
+fn ring_on(gained: On<FocusGained>, mut outlines: Query<&mut Outline>) {
+    if let Ok(mut outline) = outlines.get_mut(gained.entity) {
+        outline.color = FOCUS;
+    }
+}
+
+fn ring_off(lost: On<FocusLost>, mut outlines: Query<&mut Outline>) {
+    if let Ok(mut outline) = outlines.get_mut(lost.entity) {
+        outline.color = Color::NONE;
+    }
+}
+
+/// Claims focus for a [`focusable`] widget the moment a pointer presses it, rather than after
+/// `Activate` fires at release.
+///
+/// `bevy_input_focus`'s own `click_to_focus` triggers a bubbling `AcquireFocus` on every pointer
+/// press, before `bevy_ui_widgets` has decided whether a click landed. A screen driven by
+/// [`AutoDirectionalNavigation`] rather than `TabIndex` intercepts nothing there — it bubbles all
+/// the way to the window and *clears* focus, restored only once `Activate` fires at release.
+/// Reclaiming after the fact is a visible blink whenever press and release land on different
+/// entities, which a widget with interactive children of its own (a stepper's two chevrons) makes
+/// routine rather than rare. This is `bevy_input_focus::tab_navigation::acquire_focus_tab_index`'s
+/// own fix, `AutoDirectionalNavigation` standing in for `TabIndex`.
+fn acquire_focus_directional(
+    mut acquire: On<AcquireFocus>,
+    focusable: Query<(), With<AutoDirectionalNavigation>>,
+    mut focus: ResMut<InputFocus>,
+) {
+    if focusable.contains(acquire.focused_entity) {
+        acquire.propagate(false);
+        if focus.get() != Some(acquire.focused_entity) {
+            focus.set(acquire.focused_entity, FocusCause::Pressed);
+        }
+    }
+}
+
 /// Wires up [`ButtonFocused`] and [`StepperFocused`], and spawns their one, permanent instance
 /// each.
 pub fn plugin(app: &mut App) {
@@ -185,6 +246,7 @@ pub fn plugin(app: &mut App) {
     // about *what a widget is* should not be something a call site can forget.
     app.register_required_components_with::<Button, WidgetKind>(|| WidgetKind::BUTTON);
     app.register_required_components_with::<Stepper, WidgetKind>(|| WidgetKind::STEPPER);
+    app.add_observer(acquire_focus_directional);
 
     app.add_context::<ButtonFocused>(|controls| {
         controls.active_if(focus_is(WidgetKind::BUTTON));

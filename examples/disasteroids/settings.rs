@@ -10,7 +10,8 @@
 //! different: keyboard allows rebinding of individual keys, while gamepad allows a choice of
 //! presets. This mirrors common practice.
 //!
-//! Selection movement is driven by [`AutoDirectionalNavigation`].
+//! Selection movement is driven by
+//! [`AutoDirectionalNavigation`](bevy::ui::auto_directional_navigation::AutoDirectionalNavigation).
 //!
 //! # Working copy
 //!
@@ -19,11 +20,11 @@
 //! place anything reads it back out and repaints a cell, run once per change rather than pushed by
 //! whatever changed it, the same way [`prompt_ui`](crate::common::prompt_ui) keeps prompts true.
 
-use bevy::input_focus::{AcquireFocus, AutoFocus, FocusCause, FocusGained, FocusLost, InputFocus};
+use bevy::input_focus::{AutoFocus, InputFocus};
 use bevy::math::CompassOctant;
 use bevy::prelude::*;
 use bevy::ui::UiSystems;
-use bevy::ui::auto_directional_navigation::{AutoDirectionalNavigation, AutoDirectionalNavigator};
+use bevy::ui::auto_directional_navigation::AutoDirectionalNavigator;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_action_map::mapping::{
     Tunable, TunableValue, declared_mappings, declared_tunables, fallback_label, tunables,
@@ -36,7 +37,7 @@ use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 use crate::actions::{Back, Confirm, Menu, Navigate, TURN_DEAD_ZONE_KEY, ToggleSettings, Turn};
 use crate::common::prompt_ui::{IconPromptSpan, PromptFamily, PromptSpan};
 use crate::common::widget_focus::{
-    Adjusted, ButtonFocused, Stepper, decrement_pressed, increment_pressed,
+    Adjusted, ButtonFocused, Stepper, decrement_pressed, focusable, increment_pressed,
 };
 use crate::pause::Simulating;
 
@@ -51,8 +52,6 @@ const FIXED: Color = Color::srgb(0.55, 0.6, 0.62);
 const SUBORDINATE: Color = Color::srgb(0.4, 0.44, 0.46);
 const HEADING: Color = Color::srgb(0.45, 0.7, 0.95);
 const TITLE: Color = Color::srgb(0.9, 0.95, 1.0);
-/// The ring drawn around whatever the selection is on.
-const FOCUS: Color = Color::srgb(1.0, 0.85, 0.3);
 /// The background a cell shows while it is listening for the next control — without this, a
 /// capture in progress and one that has not started look identical.
 const LISTENING: Color = Color::srgb(0.4, 0.28, 0.05);
@@ -112,7 +111,6 @@ struct PendingOverrides {
 pub fn plugin(app: &mut App) {
     app.init_state::<Settings>();
     app.init_resource::<PendingOverrides>();
-    app.add_observer(acquire_focus_directional);
     app.add_systems(OnEnter(Settings::Showing), (reset_pending, show));
     app.add_systems(OnExit(Settings::Showing), release_focus);
     // Ahead of every UI system, so a cell that changed this frame is laid out at the width its new
@@ -228,24 +226,6 @@ fn apply_and_close(world: &mut World) {
     world
         .resource_mut::<NextState<Settings>>()
         .set(Settings::Hidden);
-}
-
-/// Draws and erases the ring around the selection.
-///
-/// The [`Outline`] is already on every focusable, holding [`Color::NONE`]; these two change its
-/// colour rather than inserting and removing the component, which is what Bevy's own documentation
-/// asks for — a ring that moves every time the player nudges the stick would otherwise be an
-/// archetype move every time as well.
-fn ring_on(gained: On<FocusGained>, mut outlines: Query<&mut Outline>) {
-    if let Ok(mut outline) = outlines.get_mut(gained.entity) {
-        outline.color = FOCUS;
-    }
-}
-
-fn ring_off(lost: On<FocusLost>, mut outlines: Query<&mut Outline>) {
-    if let Ok(mut outline) = outlines.get_mut(lost.entity) {
-        outline.color = Color::NONE;
-    }
 }
 
 /// Every preset this game offers.
@@ -917,46 +897,6 @@ fn redraw_pending(world: &mut World) {
         let mut stepper = world.query_filtered::<&mut Text, With<DeadZoneValue>>();
         if let Ok(mut text) = stepper.single_mut(world) {
             *text = Text::new(dead_zone_label(value));
-        }
-    }
-}
-
-/// Everything a selection can land on carries these three.
-///
-/// [`AutoDirectionalNavigation`] is what makes an entity a candidate, and what
-/// [`acquire_focus_directional`] answers a click through; the [`Outline`] is the ring, kept
-/// colourless until the selection arrives so that showing it is a colour change rather than a
-/// component insertion; the two observers are what change it.
-fn focusable() -> impl Scene {
-    bsn! {
-        AutoDirectionalNavigation
-        Outline { width: Val::Px(2.0), offset: Val::Px(2.0), color: Color::NONE }
-        on(ring_on)
-        on(ring_off)
-    }
-}
-
-/// Claims focus for a [`focusable`] widget the moment a pointer presses it, rather than after
-/// `Activate` fires at release.
-///
-/// `bevy_input_focus`'s own `click_to_focus` triggers a bubbling `AcquireFocus` on every pointer
-/// press, before `bevy_ui_widgets` has decided whether a click landed. This screen's selection is
-/// driven by [`AutoDirectionalNavigation`] rather than `TabIndex`, so nothing intercepted that
-/// request — it bubbled all the way to the window and *cleared* focus, restored only once
-/// `Activate` fired at release. Reclaiming after the fact is a visible blink whenever press and
-/// release land on different entities, which a widget with interactive children of its own (a
-/// stepper's two chevrons) makes routine rather than rare. This is
-/// `bevy_input_focus::tab_navigation::acquire_focus_tab_index`'s own fix,
-/// `AutoDirectionalNavigation` standing in for `TabIndex`.
-fn acquire_focus_directional(
-    mut acquire: On<AcquireFocus>,
-    focusable: Query<(), With<AutoDirectionalNavigation>>,
-    mut focus: ResMut<InputFocus>,
-) {
-    if focusable.contains(acquire.focused_entity) {
-        acquire.propagate(false);
-        if focus.get() != Some(acquire.focused_entity) {
-            focus.set(acquire.focused_entity, FocusCause::Pressed);
         }
     }
 }

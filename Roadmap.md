@@ -227,6 +227,8 @@ pause and show a reconnect prompt** (nothing today).
   event that suppression has already stopped (`docs/steam.md`, appendix) — so reading Bevy's event
   directly leaves a whole class of device silently un-disconnectable. Whatever this chunk raises
   has to be raisable by something that is not `gilrs`.
+- **Depends on chunk 71's popup.** The pause-and-show-one-pane's-panel mechanism already exists
+  once 71 lands; this chunk adds a signal-triggered entry point to it rather than a second UI.
 
 ### 104. Named device-requirement sets at the join screen
 
@@ -249,11 +251,13 @@ would revive it.
   floated for Split Friction too, but nothing to show without a real platform SDK, and not yet worth
   a faked stub the way chunk 42 fakes a backend.
 
-### 71. Per-player presets
+### 71. Per-player presets, behind a pause popup
 
 Each protagonist selects its own preset, applied through `apply_overrides_for_with_preset`. The
 preset is a **southpaw swap** — the real thing players ask local co-op games for, and small enough
-that the point is the per-player selection, not the preset's own content.
+that the point is the per-player selection, not the preset's own content. It is offered from a
+per-pane popup, key-invoked, that pauses both panes while it is open; only one pane's popup can be
+open at a time.
 
 - **What it proves.** Chunk 67 built the per-entity apply path ahead of a need and nothing in tree
   has called it since — this is that caller. A preset is the cheapest override to select, so the
@@ -261,10 +265,29 @@ that the point is the per-player selection, not the preset's own content.
 - **It trips a deferred row on purpose.** "Per-entity presentation and prompts" is gated on a
   per-player settings display existing, and a per-pane preset selector is one. Expect it to validate
   that row's sketch or falsify it, and say which.
-- **Not a settings screen.** Selecting a preset is a join-screen or pause-menu affordance — a
-  button per pane, not a rebinding UI. That stays Disasteroids' territory.
-- **Verified by:** playing it — each pane selects independently, and the other pane's bindings do
-  not move.
+- **The popup's options**, stacked in a column: Select Preset, Reset Presets (back to the
+  compiled-in default), Disconnect (drops the pane's `Paired`, returning it to the join screen), and
+  Return to Game. Disconnect earns its place independent of the others — it is also the clean way to
+  reset a pane's device pairing between test runs, without touching a settings file or restarting.
+- **Chunk 103 reuses this shell.** The reconnect prompt its disconnect signal needs (R15.5) is the
+  same pause-and-show-one-pane's-panel mechanism, triggered by a signal instead of a key. This chunk
+  should make the trigger pluggable so 103 adds an entry point rather than a second popup.
+- **Not a settings screen.** The popup is a join-screen/pause-menu affordance, a button per pane —
+  Disasteroids' rebinding UI is untouched by this chunk.
+- **Reuses Disasteroids' machinery, not just its look.** The popup's buttons match Disasteroids'
+  style, and the same fix travels with them: `InputDispatchPlugin` only ever answers the keyboard
+  half of a focused button, so this chunk disables it here too and wires up `common::widget_focus`
+  (already shared under `examples/common/`) for the gamepad half.
+- **A single popup at a time is forced, not chosen.** `common::widget_focus` reads `Res<InputFocus>`
+  — one global resource — so a second pane's buttons would have nothing to tell them apart from the
+  first's. Bevy has no per-player focus (discussed among Bevy developers, currently back-burnered),
+  so simultaneous display is not this chunk's to build even if a later one wanted it.
+- **Releases the device it drops.** `pair_on_join`'s `claimed: Local<Vec<DeviceHandle>>`
+  (`protagonist.rs`) only ever grows; Disconnect needs it to forget a device too, or that device can
+  never rejoin. Likely fix: promote `claimed` to a resource both systems can reach.
+- **Verified by:** playing it — each pane opens its own popup independently, selecting or resetting
+  a preset there does not move the other pane's bindings, and Disconnect returns a pane cleanly to
+  the join screen.
 
 ---
 
