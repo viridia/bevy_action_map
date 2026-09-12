@@ -1377,6 +1377,27 @@ against whichever system did the inserting — a scheduled `Added<Gamepad>` syst
 an explicit `.after` on that system or Bevy's own auto-inserted `apply_deferred` sync points, and
 would also run every frame rather than only when a gamepad connects.
 
+### D73 — Connection signals derive from the raw gamepad event, not Bevy's own
+
+**Decided.** `DeviceDisconnected` and `DeviceConnected` (R15.5) are raised from
+`RawGamepadEvent::Connection` reaching the frame — the same vehicle `apply_frame` already reads to
+clear held state on disconnect (chunk 62) — rather than from Bevy's own `GamepadConnectionEvent`,
+which only `gilrs`'s plugin writes.
+
+**Rules out.** An app reading `GamepadConnectionEvent` directly, which `docs/issues.md` 1020 had
+already declined to endorse.
+
+**Reversal.** `docs/steam.md`'s appendix on disconnect measured that Steam emits no
+`GamepadConnectionEvent` at all; a backend already has to synthesize `RawGamepadEvent::Connection`
+to keep held-state clearing working under Steam. Reading Bevy's own event instead would leave every
+non-`gilrs` backend unable to raise either signal — the same one-backend trap D64 and D65 already
+refuse elsewhere in this group.
+
+**Note.** `DeviceDisconnected` is entity-targeted; `DeviceConnected` is not. The crate knows exactly
+which `Paired` a lost device belonged to, but not which pairing, if any, a newly connected one is
+*for* — per D53, that judgment is the app's, so the connect side is a plain, unscoped event rather
+than a guess.
+
 ---
 
 ## What the crate refuses to own

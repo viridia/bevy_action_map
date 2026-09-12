@@ -23,6 +23,7 @@ mod dungeon;
 mod overlay;
 mod popup;
 mod protagonist;
+mod reconnect;
 mod split_screen;
 mod tileset;
 
@@ -60,6 +61,7 @@ fn main() {
             split_screen::plugin,
             overlay::plugin,
             popup::plugin,
+            reconnect::plugin,
             widget_focus::plugin,
         ))
         .insert_resource(Seed(seed))

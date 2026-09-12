@@ -8,6 +8,11 @@ use core::ops::Deref;
 
 use crate::device::{DeviceHandle, DeviceHandleSet};
 
+#[cfg(feature = "gamepad")]
+use bevy_ecs::entity::Entity;
+#[cfg(feature = "gamepad")]
+use bevy_ecs::prelude::{Commands, EntityEvent, Event, Query, Res};
+
 /// The devices one occupant's contexts should read, and no others.
 ///
 /// Attach it beside [`InputContextState`](crate::context::InputContextState) to restrict which
@@ -45,6 +50,65 @@ impl Deref for Paired {
     }
 }
 
+/// A paired device stopped answering — a pad disconnecting mid-game, not a player leaving on
+/// purpose.
+///
+/// Triggered on the entity whose `Paired` named the device. `Paired` itself is untouched: keeping
+/// the slot open for a reconnect, or tearing the pairing down, is the app's call.
+#[cfg(feature = "gamepad")]
+#[derive(EntityEvent, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeviceDisconnected {
+    /// The entity carrying the `Paired` this device belonged to.
+    pub entity: Entity,
+    /// The device that went away.
+    pub device: DeviceHandle,
+}
+
+/// A gamepad became available.
+///
+/// Unscoped: the crate cannot tell a fresh join from an existing pairing's own device coming back,
+/// so it does not guess. Matching this to a waiting occupant, if any, is the app's call.
+#[cfg(feature = "gamepad")]
+#[derive(Event, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeviceConnected {
+    /// The device that connected.
+    pub device: DeviceHandle,
+}
+
+/// Turns `RawGamepadEvent::Connection` into [`DeviceDisconnected`] and [`DeviceConnected`].
+///
+/// Runs once, independent of any context type: `evaluate_context` runs once per context *type*, so
+/// raising a signal from inside it would fire once per context an occupant happens to carry rather
+/// than once per device.
+#[cfg(feature = "gamepad")]
+pub(crate) fn watch_gamepad_connections(
+    frame: Res<'_, crate::frame::InputFrame>,
+    paired: Query<'_, '_, (Entity, &Paired)>,
+    mut commands: Commands<'_, '_>,
+) {
+    use bevy_input::gamepad::{GamepadConnection, RawGamepadEvent};
+
+    for timed in frame.events_after(None) {
+        let crate::frame::RawEvent::Gamepad(RawGamepadEvent::Connection(connection)) = &timed.event
+        else {
+            continue;
+        };
+        let device = timed.event.device();
+        match connection.connection {
+            GamepadConnection::Disconnected => {
+                for (entity, pairing) in &paired {
+                    if pairing.contains(device) {
+                        commands.trigger(DeviceDisconnected { entity, device });
+                    }
+                }
+            }
+            GamepadConnection::Connected { .. } => {
+                commands.trigger(DeviceConnected { device });
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,5 +122,100 @@ mod tests {
             paired.owner_for(DeviceFamily::KeyboardMouse),
             Some(DeviceHandle::KeyboardMouse)
         );
+    }
+
+    #[cfg(feature = "gamepad")]
+    mod connections {
+        use alloc::vec::Vec;
+
+        use bevy_app::{App, Update};
+        use bevy_ecs::prelude::{On, Resource};
+        use bevy_input::gamepad::{GamepadConnection, GamepadConnectionEvent};
+
+        use super::*;
+        use crate::frame::RawEvent;
+
+        #[derive(Resource, Default)]
+        struct Disconnects(Vec<(Entity, DeviceHandle)>);
+
+        #[derive(Resource, Default)]
+        struct Connects(Vec<DeviceHandle>);
+
+        fn app() -> App {
+            let mut app = App::new();
+            app.init_resource::<crate::frame::InputFrame>();
+            app.init_resource::<Disconnects>();
+            app.init_resource::<Connects>();
+            app.add_systems(Update, watch_gamepad_connections);
+            app.add_observer(
+                |trigger: On<DeviceDisconnected>,
+                 mut log: bevy_ecs::prelude::ResMut<Disconnects>| {
+                    log.0.push((trigger.entity, trigger.device));
+                },
+            );
+            app.add_observer(
+                |trigger: On<DeviceConnected>, mut log: bevy_ecs::prelude::ResMut<Connects>| {
+                    log.0.push(trigger.device);
+                },
+            );
+            app
+        }
+
+        /// The owning pairing is told, and a pairing whose own device is unrelated is not — the
+        /// first half of R15.5, already true before this chunk, now with a signal attached to it.
+        #[test]
+        fn disconnect_signals_only_the_paired_entity() {
+            let mut app = app();
+            let lost = Entity::from_bits(1);
+            let survives = Entity::from_bits(2);
+            let waiting = app
+                .world_mut()
+                .spawn(Paired::to(DeviceHandle::Gamepad(lost)))
+                .id();
+            app.world_mut()
+                .spawn(Paired::to(DeviceHandle::Gamepad(survives)));
+
+            app.world_mut()
+                .resource_mut::<crate::frame::InputFrame>()
+                .record(RawEvent::Gamepad(
+                    bevy_input::gamepad::RawGamepadEvent::Connection(GamepadConnectionEvent::new(
+                        lost,
+                        GamepadConnection::Disconnected,
+                    )),
+                ));
+            app.update();
+
+            assert_eq!(
+                app.world().resource::<Disconnects>().0,
+                [(waiting, DeviceHandle::Gamepad(lost))]
+            );
+        }
+
+        /// Unscoped: fires whether or not anything is paired at all, since matching a newly
+        /// connected pad to a waiting occupant is the app's call (D53), not this system's.
+        #[test]
+        fn connect_signals_regardless_of_pairing() {
+            let mut app = app();
+            let arrived = Entity::from_bits(3);
+
+            app.world_mut()
+                .resource_mut::<crate::frame::InputFrame>()
+                .record(RawEvent::Gamepad(
+                    bevy_input::gamepad::RawGamepadEvent::Connection(GamepadConnectionEvent::new(
+                        arrived,
+                        GamepadConnection::Connected {
+                            name: "test pad".into(),
+                            vendor_id: None,
+                            product_id: None,
+                        },
+                    )),
+                ));
+            app.update();
+
+            assert_eq!(
+                app.world().resource::<Connects>().0,
+                [DeviceHandle::Gamepad(arrived)]
+            );
+        }
     }
 }

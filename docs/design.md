@@ -511,7 +511,24 @@ owner.
 (§9.2): a player with two gamepads paired is an edge case nothing in this crate ranks, and a game
 that cares reaches for `Paired`'s own devices and its own notion of which is current.
 
-### 7.5 Brand resolution
+### 7.5 Connection signals
+
+```rust
+pub struct DeviceDisconnected { pub entity: Entity, pub device: DeviceHandle }
+pub struct DeviceConnected { pub device: DeviceHandle }
+```
+
+A gamepad's connection state reaches the crate the same way a button press does —
+`RawGamepadEvent::Connection`, sampled into the frame before anything else sees it — so both fire
+under a backend synthesizing that event exactly as they do under `gilrs`.
+
+`DeviceDisconnected` triggers on whichever `Paired` entity's device set named the device that went
+away. `Paired` is left untouched: keeping the slot open for a reconnect, or tearing the pairing
+down, is the app's decision. `DeviceConnected` triggers once per gamepad that becomes available and
+names no entity — the crate cannot tell a fresh join from an existing pairing's own device coming
+back, so it does not choose between them.
+
+### 7.6 Brand resolution
 
 ```rust
 pub enum GamepadBrand { Xbox, PlayStation, Nintendo, Generic }
@@ -744,7 +761,7 @@ is a `ControlOrigin` rather than a `Control` for the same reason, and both varia
 and `fallback_label()`. `BindingTable` is the implementation that answers from this crate's own
 plans.
 
-**`Control::fallback_label_for_brand(GamepadBrand)`** (§7.5) answers the way `fallback_label` does,
+**`Control::fallback_label_for_brand(GamepadBrand)`** (§7.6) answers the way `fallback_label` does,
 except a gamepad's face buttons, bumpers, triggers, Select/Start and Mode read in that brand's own
 words — "Cross" rather than "South Button" on a PlayStation pad. Sticks and the D-pad read the
 same either way, and `GamepadBrand::Generic` falls through to the positional answer.

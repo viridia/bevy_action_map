@@ -202,19 +202,6 @@ the `no_std` interaction first rather than assuming it.
 
 [bevyengine/bevy#15030]: https://github.com/bevyengine/bevy/pull/15030
 
-### 1020 A device disconnecting raises no signal
-
-R15.5 (MUST) — on device loss the owning player must be identifiable, in-flight actions canceled,
-**and a signal raised so the app can pause and show a reconnect prompt**. The first two hold: a
-disconnect clears held state at `eval.rs:422` and the actions fall out of flight; the owner is
-identifiable by querying `Paired`. Nothing is raised. An app can read Bevy's own
-`GamepadConnectionEvent`, but no document says that is the intended answer, and a
-pause-on-disconnect prompt is a console certification item.
-
-R15.6 reaches chunk 72 through R11.5; R15.10 waits on 1015.
-
-_Fix:_ **chunk 103**.
-
 ### 1042 No named device-requirement sets
 
 R15.7 (SHOULD, split from 1020) — named device-requirement sets with required and optional devices.

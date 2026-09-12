@@ -302,6 +302,14 @@ impl bevy_app::Plugin for ActionMapPlugin {
             capture::run_captures.in_set(ActionMapSystems::Capture),
         );
 
+        // Once per render frame regardless of context type — see the system's own doc for why it
+        // is not folded into `evaluate_context`.
+        #[cfg(feature = "gamepad")]
+        app.add_systems(
+            bevy_app::PreUpdate,
+            player::watch_gamepad_connections.in_set(ActionMapSystems::Dispatch),
+        );
+
         // Two clearing points, per docs/design.md §5.2. The frame's starts everything from
         // nothing; the fixed one lets a schedule that runs several times decide afresh each run
         // while what `PreUpdate` claimed still stands. The exclusion ceiling (§5.3) clears at the

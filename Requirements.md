@@ -981,10 +981,10 @@ handle "two players on one keyboard" gracefully.
   enforced at L1/L2, not left to per-action filtering.
 - **R15.4 (MUST)** Join flow support: observe input from _unassigned_ devices (with bindings
   applied, so "press Start to join" works per device class) and assign on demand.
-- **R15.5 (MUST)** Leave / disconnect: on device loss, the owning player must be identifiable,
-  in-flight actions canceled (§7.R7.4), and a signal raised so the app can pause and show a
-  reconnect prompt (handling this is a common console certification requirement, though the specific
-  requirements documents are under NDA and cannot be cited here).
+- **R15.5 (MUST)** _(D73)_ Leave / disconnect: on device loss, the owning player must be
+  identifiable, in-flight actions canceled (§7.R7.4), and a signal raised so the app can pause and
+  show a reconnect prompt (handling this is a common console certification requirement, though the
+  specific requirements documents are under NDA and cannot be cited here).
 - **R15.6 (MUST)** Reconnect must be able to restore the previous assignment via persistent identity
   (§11.R11.5).
 - **R15.7 (SHOULD)** Control schemes: named device-requirement sets (KBM, Gamepad) with required and

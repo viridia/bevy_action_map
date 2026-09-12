@@ -97,6 +97,16 @@ impl ClaimedDevices {
             }
         }
     }
+
+    /// Points an already-claimed slot at a different device.
+    ///
+    /// What a broken pairing healing itself needs: the old device is gone, so `claim` — which
+    /// refuses a slot that already holds one — is not the right call here.
+    pub fn reassign(&mut self, slot: u8, device: DeviceHandle) {
+        if let Some(entry) = self.0.get_mut(slot as usize) {
+            *entry = Some(device);
+        }
+    }
 }
 
 /// Both protagonists, as one scene, plus the [`Lobby`] context that pairs them — spawned at

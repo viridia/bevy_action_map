@@ -176,6 +176,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 114 | Update Bevy, and migrate the BSN syntax               |
 | 113 | A device's brand is a component, not a lookup at every read |
 | 71  | Per-player presets, behind a pause popup              |
+| 103 | A disconnect signal and a reconnect prompt            |
 
 ---
 
@@ -220,42 +221,30 @@ putting each player back on the device they had.
   (`GamepadConnectionEvent::Connected`, the same source `Brand` already resolves from), not
   `DeviceHandle` itself: `DeviceHandle` stays Entity-based for gilrs and a Steam backend alike, and
   the persistent identity this chunk needs is a separate mapping kept beside it, not a new variant.
-- **Two pads of the same model collide on that key.** Vendor/product id, and the uuid derived from
-  them, name a model, not a unit, so two identical controllers at the table are indistinguishable by
-  it. Untested whether this is common enough to matter for Split Friction's two-player case; a
-  fallback (first-come-first-served among matches, say) is cheaper to write than to solve if it
-  never comes up in practice.
+- **Two pads of the same model collide on that key, and that is gilrs's gap, not an OS limit.**
+  Vendor/product id, and the uuid derived from them, name a model, not a unit, so two identical
+  controllers at the table are indistinguishable by it — but the OS itself can often tell them
+  apart. [gilrs#154][] has a maintainer confirming no per-unit id survives even a single
+  unplug/replug in the current API; [gilrs#158][] shows Windows' own Bluetooth device list
+  distinguishing two Joy-Cons that gilrs collapses into one identical name. Neither has a fix in
+  progress. Until one lands, first-come-first-served among matches is what this chunk falls back
+  to — exactly right for one waiting slot and one reconnecting pad, wrong only once more than one
+  of either is live at the same time.
 - **Steam's own identity is not the same shape, so the same key may not transfer.** `docs/steam.md`
   S8/S14 measured Steam's `InputHandle_t` staying stable across a transport swap while the
   vendor/product id it reported for the identical physical pad changed. What this chunk builds for
   gilrs's identity may need its own counterpart for a Steam backend rather than one shared scheme.
+- **Resist flattening Steam's identity down to gilrs's.** Steam's handle already survives a restart
+  without colliding; a single identity type shared across backends must not throw that away to
+  match gilrs's weaker guarantee. A small tagged shape — a `domain` plus an opaque `id`, or an enum
+  with one variant per backend — keeps each backend's real guarantee instead of averaging them.
+  Where the collision does need handling, the more honest place is probably the *lookup* rather
+  than the identity itself: "find the paired context for this identity among what's connected now"
+  answering no match, exactly one, or several candidates, so the app only has to think about
+  ambiguity at the rare moment it actually happens, on the same terms D53 already uses elsewhere.
+  Still needs thought before it is a decision.
 - **Verified by:** playing it, quitting, relaunching — the same protagonist on the same device
   without anyone pressing anything — and by unplugging a pad and plugging it back in.
-
-### 103. A disconnect signal and a reconnect prompt
-
-R15.5 (MUST) (`docs/issues.md` 1020): on device loss the owning player must be identifiable
-(already true), in-flight actions canceled (already true), **and a signal raised so the app can
-pause and show a reconnect prompt** (nothing today).
-
-- **Split Friction.** A pad disconnects mid-game; the app pauses and shows "player 2, reconnect to
-  resume" until the pad (or another) reappears.
-- **What the signal is** is this chunk's open question: Bevy's own `GamepadConnectionEvent` read
-  directly, or something this crate re-raises so a game does not have to know the pairing's own
-  bookkeeping to react correctly.
-- **A backend must be able to raise it too**, which settles that question by itself. Under a Steam
-  authority no `GamepadConnectionEvent` is ever emitted — the crate learns of a lost pad from a raw
-  event that suppression has already stopped (`docs/steam.md`, appendix) — so reading Bevy's event
-  directly leaves a whole class of device silently un-disconnectable. Whatever this chunk raises
-  has to be raisable by something that is not `gilrs`.
-- **Builds on chunk 71's popup** (`examples/split_friction/popup.rs`). The pause-and-show-one-pane's
-  panel mechanism already exists; this chunk adds a signal-triggered entry point to it rather than a
-  second UI.
-- **Needs chunk 72 for the reconnect half, not the disconnect half.** Identifying which player lost
-  a device and canceling its actions works off the still-live, still-`Paired` entity — no persistent
-  identity required for that. Recognizing that a device now pressing the reconnect control is the
-  *same* one that just left needs chunk 72's identity to exist first: gilrs's own runtime id is not
-  a safe way to tell, confirmed on this crate's own hardware ([gilrs#207][]).
 
 ### 104. Named device-requirement sets at the join screen
 
@@ -701,5 +690,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
 [bevy#25710]: https://github.com/bevyengine/bevy/pull/25710
 [gilrs#207]: https://gitlab.com/gilrs-project/gilrs/-/work_items/207
+[gilrs#154]: https://gitlab.com/gilrs-project/gilrs/-/work_items/154
+[gilrs#158]: https://gitlab.com/gilrs-project/gilrs/-/work_items/158
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678

@@ -318,6 +318,10 @@ fn reset_presets_pressed(
 
 /// Drops the pane's pairing and frees its device — the clean way to reset it between test runs,
 /// without touching a settings file or restarting.
+///
+/// Also drops `AwaitingReconnect`: a player choosing to leave while their old pad is still missing
+/// must not leave that marker standing, or a pad connecting later would silently resurrect a slot
+/// they meant to abandon.
 fn disconnect_pressed(
     activate: On<Activate>,
     targets: Query<&PopupTarget>,
@@ -334,9 +338,12 @@ fn disconnect_pressed(
             claimed.release(device);
         }
     }
-    commands
-        .entity(entity)
-        .remove::<(OnFoot, Paired, ActivePreset)>();
+    commands.entity(entity).remove::<(
+        OnFoot,
+        Paired,
+        ActivePreset,
+        crate::reconnect::AwaitingReconnect,
+    )>();
     next.set(Popup::Closed);
 }
 
