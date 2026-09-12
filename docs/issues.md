@@ -280,18 +280,6 @@ pieces exist; what is missing is a way to stop `InputFramePlugin` scheduling sam
 Floated as a companion to chunk 83's rewind; chunk 83 says to confirm the need before routing it
 there. Unrouted.
 
-### 1023 Sequences
-
-R6.4's ordered sequences — double-tap-dash, motion inputs, cheat codes — arriving in order within a
-time window.
-
-- **Fits the scratch record**, so this is a condition, not a redesign.
-- **R6.5's forgiveness windows do not carry here** and are withdrawn. The crossing point in both
-  directions is app-domain state the crate cannot see, and events plus elapsed time already give an
-  app what it needs to compose the pattern itself.
-
-_Fix:_ **chunk 34** — a Pong variant, a double-tap paddle speed-boost.
-
 ### 1047 Capability queries are absent for devices the crate already models
 
 R11.3 (MUST) · `device.rs`

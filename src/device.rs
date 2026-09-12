@@ -110,13 +110,17 @@ impl FromIterator<DeviceHandle> for DeviceHandleSet {
 #[cfg(feature = "gamepad")]
 use bevy_ecs::entity::Entity;
 #[cfg(feature = "gamepad")]
-use bevy_ecs::prelude::{Changed, Query, Resource};
+use bevy_ecs::lifecycle::Add;
+#[cfg(feature = "gamepad")]
+use bevy_ecs::prelude::{Changed, Commands, Component, On, Query, Res, Resource, Without};
 #[cfg(feature = "gamepad")]
 use bevy_input::gamepad::{
-    AxisSettings, ButtonAxisSettings, ButtonSettings, GamepadAxis, GamepadSettings,
+    AxisSettings, ButtonAxisSettings, ButtonSettings, Gamepad, GamepadAxis, GamepadSettings,
 };
 #[cfg(feature = "gamepad")]
 use bevy_platform::collections::HashMap;
+#[cfg(feature = "gamepad")]
+use core::ops::Deref;
 
 /// Where one gamepad axis rests, and how far it wanders there.
 ///
@@ -281,9 +285,8 @@ impl CalibrationSampling {
     }
 }
 
-/// Which manufacturer's conventions a connected gamepad follows (R11.6), for prompts and glyphs
-/// that want to say "A" on an Xbox pad and "Cross" on a PlayStation one rather than "South Button"
-/// on both.
+/// Which manufacturer's conventions a connected gamepad follows, for prompts and glyphs that want
+/// to say "A" on an Xbox pad and "Cross" on a PlayStation one rather than "South Button" on both.
 ///
 /// `vendor_id` is `Option` and often absent — wasm, some Linux setups — so `Generic` is the
 /// ordinary answer for an unrecognized or unreported pad, not an error.
@@ -315,9 +318,8 @@ impl core::fmt::Display for GamepadBrand {
 /// Resolves a connected gamepad's [`GamepadBrand`] from its `vendor_id`.
 ///
 /// Seeded with the three current-generation console makers' USB vendor ids, not
-/// SDL_GameControllerDB's full device list — a small table proves the seam, and
-/// [`insert`](Self::insert) is the app-overridable mapping R11.6 asks for, for hardware this crate
-/// does not ship pre-resolved.
+/// SDL_GameControllerDB's full device list. [`insert`](Self::insert) extends the table for
+/// hardware this crate does not ship pre-resolved.
 #[cfg(feature = "gamepad")]
 #[derive(Resource, Debug)]
 pub struct GamepadBrands {
@@ -347,6 +349,45 @@ impl GamepadBrands {
         vendor_id
             .and_then(|id| self.by_vendor.get(&id).copied())
             .unwrap_or(GamepadBrand::Generic)
+    }
+}
+
+/// A connected gamepad's [`GamepadBrand`], resolved once and attached to its entity.
+///
+/// Query this instead of reading a gamepad's `vendor_id` and asking [`GamepadBrands`] yourself: an
+/// entity carrying `Brand` needs nothing else to answer the question, which also means an entity a
+/// backend other than Bevy's own gamepad backend spawned works the same way, as long as that
+/// backend inserts the same component.
+#[cfg(feature = "gamepad")]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Brand(pub GamepadBrand);
+
+#[cfg(feature = "gamepad")]
+impl Deref for Brand {
+    type Target = GamepadBrand;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Attaches [`Brand`] to a gamepad's entity as soon as it connects, resolved from its `vendor_id`
+/// through [`GamepadBrands`].
+///
+/// Leaves an existing `Brand` alone, so inserting one yourself ahead of time overrides this for a
+/// pad you know better than the vendor id table does.
+#[cfg(feature = "gamepad")]
+pub fn resolve_gamepad_brand(
+    connected: On<Add<Gamepad>>,
+    mut commands: Commands,
+    gamepads: Query<&Gamepad, Without<Brand>>,
+    brands: Res<GamepadBrands>,
+) {
+    let entity = connected.entity;
+    if let Ok(gamepad) = gamepads.get(entity) {
+        commands
+            .entity(entity)
+            .insert(Brand(brands.resolve(gamepad.vendor_id())));
     }
 }
 
@@ -589,5 +630,53 @@ mod tests {
         // The seeded table is a default, not a fixture — an app can also correct it.
         brands.insert(0x045E, GamepadBrand::Generic);
         assert_eq!(brands.resolve(Some(0x045E)), GamepadBrand::Generic);
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn resolve_gamepad_brand_attaches_it_once_per_connection() {
+        use bevy_app::App;
+        use bevy_input::InputPlugin;
+        use bevy_input::gamepad::{GamepadConnection, GamepadConnectionEvent};
+
+        let mut app = App::new();
+        app.add_plugins(InputPlugin);
+        app.insert_resource(GamepadBrands::default());
+        app.add_observer(resolve_gamepad_brand);
+
+        let known = app.world_mut().spawn_empty().id();
+        let unreported = app.world_mut().spawn_empty().id();
+        // A pad this crate would otherwise call `Xbox` — a game that knows better inserts its own
+        // `Brand` ahead of the connection event, and the observer must leave it standing.
+        let overridden = app.world_mut().spawn(Brand(GamepadBrand::Nintendo)).id();
+
+        for (gamepad, vendor_id) in [
+            (known, Some(0x045E)),
+            (unreported, None),
+            (overridden, Some(0x045E)),
+        ] {
+            app.world_mut().write_message(GamepadConnectionEvent::new(
+                gamepad,
+                GamepadConnection::Connected {
+                    name: "test pad".into(),
+                    vendor_id,
+                    product_id: None,
+                },
+            ));
+        }
+        app.update();
+
+        assert_eq!(
+            app.world().get::<Brand>(known),
+            Some(&Brand(GamepadBrand::Xbox))
+        );
+        assert_eq!(
+            app.world().get::<Brand>(unreported),
+            Some(&Brand(GamepadBrand::Generic))
+        );
+        assert_eq!(
+            app.world().get::<Brand>(overridden),
+            Some(&Brand(GamepadBrand::Nintendo))
+        );
     }
 }

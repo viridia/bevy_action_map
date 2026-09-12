@@ -30,7 +30,7 @@ use bevy::ecs::schedule::SystemCondition;
 use bevy::prelude::*;
 use bevy::text::InlineBox;
 use bevy::ui::UiSystems;
-use bevy_action_map::device::{GamepadBrand, GamepadBrands};
+use bevy_action_map::device::{Brand, GamepadBrand};
 use bevy_action_map::prelude::*;
 
 /// Renders the control that would currently fire an action.
@@ -277,25 +277,25 @@ enum Resolved {
 /// answering the same lookup, but choosing between an icon and text rather than only ever text.
 ///
 /// Which gamepad's brand a control's icon draws in is read the way [`split_screen`]'s device label
-/// already does: the first connected pad's vendor id, since nothing here plays more than one at
-/// once. That does not survive an authority backend with no `Gamepad` component to query — the
-/// same gap chunk 113 exists to close.
+/// already does: the first connected pad's `Brand`, since nothing here plays more than one at once.
 ///
 /// [`split_screen`]: ../split_friction/split_screen/index.html
 fn refresh_icon_prompts(world: &mut World) {
     let mut spans = world.query::<IconPromptQuery>();
-    // Nothing to draw, so nothing to ask `AssetServer` or `GamepadBrands` for either — a game that
-    // never spawns an `IconPromptSpan` should not have to carry either just because this system
-    // shares `PromptSpan`'s own staleness signal.
+    // Nothing to draw, so nothing to ask `AssetServer` or `Brand` for either — a game that never
+    // spawns an `IconPromptSpan` should not have to carry either just because this system shares
+    // `PromptSpan`'s own staleness signal.
     if spans.iter(world).next().is_none() {
         return;
     }
 
     let device = active_family(world);
     let brand = {
-        let mut gamepads = world.query::<&Gamepad>();
-        let vendor_id = gamepads.iter(world).next().and_then(Gamepad::vendor_id);
-        world.resource::<GamepadBrands>().resolve(vendor_id)
+        let mut brands = world.query::<&Brand>();
+        brands
+            .iter(world)
+            .next()
+            .map_or(GamepadBrand::Generic, |brand| brand.0)
     };
     let manifest = &world.resource::<IconManifest>().0;
     let resolved: Vec<(Entity, Resolved)> = spans

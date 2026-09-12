@@ -1354,6 +1354,29 @@ generations would need a fourth axis — Xbox 360's "Back"/"Start" became Xbox O
 PS4's "Share" became PS5's "Create" — that R11.6 does not ask for and brand alone cannot resolve;
 committing to current-generation-only sidesteps guessing at it.
 
+### D72 — `Brand` is attached to the gamepad's own entity, by an observer on `Add<Gamepad>`
+
+**Decided.** The resolved `GamepadBrand` is cached as a `Brand` component on whichever entity
+`DeviceHandle::Gamepad` already names — Bevy's own gamepad entity for the built-in backend — rather
+than on an entity this crate spawns for the purpose. An observer on `Add<Gamepad>` attaches it,
+skipping an entity that already carries `Brand`.
+
+**Rules out.** A crate-owned device entity mirroring Bevy's, and a scheduled system filtered on
+`Added<Gamepad>` in place of the observer.
+
+**Reversal.** A crate-owned entity would need every consumer holding a `DeviceHandle::Gamepad` to go
+through a second mapping to reach it, and an authority backend would have to spawn and keep that
+mirror in sync instead of inserting one component on the entity it already controls — the
+`Query<&Brand>` read path D64 wants to survive an authority backend depends on there being no such
+indirection. The observer over the scheduled system is a smaller reversal: nothing outside this
+module can tell which one attached `Brand`, so switching back would touch only
+`resolve_gamepad_brand` and its registration, not any caller.
+
+**Note.** An observer fires the instant something inserts `Gamepad`, with no ordering to arrange
+against whichever system did the inserting — a scheduled `Added<Gamepad>` system would need either
+an explicit `.after` on that system or Bevy's own auto-inserted `apply_deferred` sync points, and
+would also run every frame rather than only when a gamepad connects.
+
 ---
 
 ## What the crate refuses to own

@@ -174,6 +174,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 108 | Focus loss, regated                                   |
 | 111 | An outside authority writes an action's value at L2   |
 | 114 | Update Bevy, and migrate the BSN syntax               |
+| 113 | A device's brand is a component, not a lookup at every read |
 
 ---
 
@@ -336,19 +337,6 @@ ordered topologically, and a cycle rejected at plan build with a diagnostic nami
   answer different questions — `follow` says the mapping is shared, a condition says the value is
   derived — but check when this lands whether the overlap is large enough that one should go, since
   carrying both when either would do is what an outside reader notices first.
-
-### 34. Sequences
-
-R6.4's ordered sequences — double-tap-dash, motion inputs, cheat codes — arriving in order within a
-time window.
-
-- **Depends on chunk 95.** The demo is a Pong variant: a double-tap on the move control gives that
-  paddle a brief speed boost — a sequence read off the same control the paddle already binds, not a
-  new one.
-- **Fits the scratch record**, so this is a condition, not a redesign.
-- **R6.5's forgiveness windows do not carry here** and are withdrawn. The crossing point in both
-  directions is app-domain state the crate cannot see, and events plus elapsed time already give an
-  app what it needs to compose the pattern itself.
 
 ### 35. Disabling an action
 
@@ -566,37 +554,6 @@ per-device policy D22 assumed, so what is left is a family switch.
   unmeasured, and `docs/steam.md` carries the question. This chunk suppresses what a backend
   actually owns and leaves that one open.
 - **Not doing: R0.4's per-action split**, which lives at L2 and is chunk 111's, already landed.
-
-### 113. A device's brand is a component, not a lookup at every read
-
-`GamepadBrand` is resolved from a vendor id at each read site today, and the read site has to reach
-into Bevy's `Gamepad` component to find one — `examples/split_friction/split_screen.rs` does
-exactly that. Resolution belongs once, where the knowledge is.
-
-- **A `Brand(GamepadBrand)` newtype component** on the device entity. A wrapper rather than
-  deriving `Component` on `GamepadBrand` itself, which is a value type used as a function
-  parameter throughout `present.rs` and should stay one.
-- **A system resolves and inserts it** on `Added<Gamepad>`, from `vendor_id` and the existing
-  `GamepadBrands` table. `GamepadBrands` stays what it is — the policy, still `insert`-able by a
-  game shipping a pad the defaults do not know — and gains the system that applies it. `resolve`
-  stays public.
-- **Consumers become `Query<&Brand>`** and stop caring what produced the entity. That is the point:
-  an entity spawned by an authority backend carries the same component, so a read path written
-  against it works for a device this crate never enumerated (`docs/steam.md`, appendix).
-- **Justified without Steam.** The coupling it removes is in a shipped example today, and the
-  per-read lookup it replaces runs every frame the split-screen HUD draws.
-- **Settle where the component lives.** Inserting onto Bevy's own gamepad entities is the obvious
-  reading and the one the examples want; an entity of this crate's own is the alternative, and the
-  choice wants making rather than falling out of whichever is easier to write.
-- **Verification is headless.** An `App` with a synthetic gamepad entity carrying a known
-  `vendor_id`, asserting `Brand` appears with the right value; a second entity with no `vendor_id`
-  asserting `Generic`; and one carrying `Brand` inserted directly, asserting the system leaves it
-  alone — the case a backend depends on.
-- **Not doing: prompts.** `present.rs` already takes a brand as a parameter rather than resolving
-  one, so nothing there changes.
-- **Not doing: `InputType` mapping.** Turning Steam's device taxonomy into a brand is the backend's
-  job and lossy either way (`docs/steam.md` S7); this chunk only makes somewhere for the answer to
-  live.
 
 ### 42. The authority backend, faked
 

@@ -516,6 +516,7 @@ that cares reaches for `Paired`'s own devices and its own notion of which is cur
 ```rust
 pub enum GamepadBrand { Xbox, PlayStation, Nintendo, Generic }
 pub struct GamepadBrands { /* vendor_id -> GamepadBrand */ }
+pub struct Brand(pub GamepadBrand);
 ```
 
 A device's brand is a fact about that one gamepad, resolved from its `vendor_id` — which is
@@ -523,6 +524,13 @@ A device's brand is a fact about that one gamepad, resolved from its `vendor_id`
 pad, not an error. `GamepadBrands` is a resource seeded with the three current-generation console
 makers' USB vendor ids and `init_resource`'d by `InputFramePlugin`; `insert` is the app-overridable
 mapping for hardware this crate does not ship pre-resolved.
+
+`Brand` is the resolved answer, attached once to the gamepad's own entity by an observer on
+`Add<Gamepad>` rather than re-derived at each read site. A read path holding that entity — from a
+`DeviceHandle::Gamepad`, say — queries `&Brand` directly; an entity a backend other than Bevy's
+gamepad backend spawned works the same way as long as that backend inserts the same component. The
+observer skips an entity that already carries `Brand`, so a game that knows a specific pad's brand
+ahead of the vendor id table can insert it first and have the observer leave it alone.
 
 Current-generation controllers only: DualSense, the Xbox Series pad, the Switch Pro Controller and
 Joy-Con. A brand alone cannot tell one console generation from another — Xbox 360's "Back"/"Start"

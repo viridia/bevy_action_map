@@ -401,6 +401,7 @@ impl Plugin for InputFramePlugin {
             app.add_message::<RawGamepadEvent>();
             app.init_resource::<crate::device::GamepadCalibration>();
             app.init_resource::<crate::device::GamepadBrands>();
+            app.add_observer(crate::device::resolve_gamepad_brand);
             app.add_systems(
                 PreUpdate,
                 crate::device::warn_on_unread_gamepad_settings

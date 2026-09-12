@@ -31,7 +31,7 @@
 use bevy::camera::{ScalingMode, Viewport};
 use bevy::prelude::*;
 use bevy::ui::UiSystems;
-use bevy_action_map::device::{DeviceFamily, DeviceHandle, GamepadBrand, GamepadBrands};
+use bevy_action_map::device::{Brand, DeviceFamily, DeviceHandle, GamepadBrand};
 use bevy_action_map::player::Paired;
 use bevy_action_map::prelude::InputAction;
 
@@ -254,8 +254,7 @@ fn sync_join_ui(
     protagonists: Query<(&Protagonist, Option<&Paired>)>,
     mut prompts: Query<(&JoinPrompt, &mut Visibility)>,
     mut labels: Query<(&DeviceLabel, &mut Text, &mut Visibility), Without<JoinPrompt>>,
-    gamepads: Query<&Gamepad>,
-    brands: Res<GamepadBrands>,
+    brands: Query<&Brand>,
 ) {
     let device_for = |index: u8| {
         protagonists
@@ -275,7 +274,7 @@ fn sync_join_ui(
     for (label, mut text, mut visibility) in &mut labels {
         match device_for(label.0) {
             Some(device) => {
-                text.0 = device_name(device, &gamepads, &brands).into();
+                text.0 = device_name(device, &brands).into();
                 *visibility = Visibility::Inherited;
             }
             None => *visibility = Visibility::Hidden,
@@ -283,22 +282,15 @@ fn sync_join_ui(
     }
 }
 
-fn device_name(
-    device: DeviceHandle,
-    gamepads: &Query<&Gamepad>,
-    brands: &GamepadBrands,
-) -> &'static str {
+fn device_name(device: DeviceHandle, brands: &Query<&Brand>) -> &'static str {
     match device {
         DeviceHandle::KeyboardMouse => "Keyboard",
-        DeviceHandle::Gamepad(entity) => {
-            let vendor_id = gamepads.get(entity).ok().and_then(Gamepad::vendor_id);
-            match brands.resolve(vendor_id) {
-                GamepadBrand::Xbox => "Xbox Controller",
-                GamepadBrand::PlayStation => "PlayStation Controller",
-                GamepadBrand::Nintendo => "Nintendo Controller",
-                GamepadBrand::Generic => "Gamepad",
-            }
-        }
+        DeviceHandle::Gamepad(entity) => match brands.get(entity).map(|brand| brand.0) {
+            Ok(GamepadBrand::Xbox) => "Xbox Controller",
+            Ok(GamepadBrand::PlayStation) => "PlayStation Controller",
+            Ok(GamepadBrand::Nintendo) => "Nintendo Controller",
+            Ok(GamepadBrand::Generic) | Err(_) => "Gamepad",
+        },
     }
 }
 

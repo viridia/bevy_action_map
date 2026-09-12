@@ -536,9 +536,23 @@ none of the above handle natively.
   three-way split is the clearest formulation found; adopt it or document a deliberate alternative.
 - **R6.3 (MUST)** All duration/interval thresholds are configurable per binding and expressed in
   simulated seconds (§9.R9.6).
-- **R6.4 (SHOULD)** Sequence/combo conditions (ordered inputs within a time window) — needed for
-  double-tap-dash, motion inputs, and cheat codes; if deferred, the condition trait must be able to
-  express them without a breaking change.
+- **R6.4 (WITHDRAWN)** ~~Sequence/combo conditions (ordered inputs within a time window) — needed
+  for double-tap-dash, motion inputs, and cheat codes; if deferred, the condition trait must be able
+  to express them without a breaking change.~~
+
+  Withdrawn because there is no single matching model to build, and not only in how a match is
+  timed: a discrete chain with a shared timeout fits a fighting-game motion or a cheat code, but not
+  a rhythm game's per-note tolerance or a gesture read continuously off an accelerometer. What
+  feedback to give while a sequence is still being built diverges the same way — a fighting game
+  shows nothing until it lands, a rhythm game grades every note as it happens — and so does what a
+  partial match is worth, since some games want the first correct step alone to do something and
+  most do not. A crate-native condition would have to settle all three for every game at once. The
+  primitives R6.5's withdrawal leans on below already cover whichever shape a game actually wants:
+  `Fired`, `Started`, `Completed` and `Canceled` (R3.2) carry the action's value, and elapsed time
+  is exposed in the same simulated clock every condition uses (R3.4), so an app records its own
+  timestamp off whichever events it cares about and drives its own matching, feedback and partial
+  credit from that. Double-tap-dash alone needs none of this — it is R6.1's `MultiTap` applied to
+  a movement control, already built.
 - **R6.5 (WITHDRAWN)** ~~Forgiveness windows, in both directions.~~ _Buffering_ accepts an input
   pressed slightly **before** it became valid and fires it when it does (pressing jump just before
   landing, queuing the next attack mid-swing). _Coyote time_ is the mirror image: accepting an input
@@ -552,8 +566,9 @@ none of the above handle natively.
   piece of it: "was this control active within the last N ms". R3.2's events and R3.4's elapsed
   time already give the app that piece — record a timestamp off an event already delivered, compare
   it against the app's own clock when its own domain-side transition happens — so there is no crate
-  surface left to build. R6.4's sequences are a different question, ordering the crate's own
-  actions rather than checking against app state, and stay live.
+  surface left to build. R6.4 above is withdrawn for the same reason, not a different one: ordering
+  several of the crate's own actions is no more one matching model than checking against app state
+  is.
 - **R6.6 (MUST)** Third-party conditions registerable, same constraints as R5.6/R5.7.
 - **R6.7 (MUST)** Conditions must not depend on real time or on frame count (§10).
 
