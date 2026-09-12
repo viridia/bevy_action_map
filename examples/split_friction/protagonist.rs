@@ -14,6 +14,7 @@ use bevy_action_map::device::DeviceHandle;
 use bevy_action_map::player::Paired;
 use bevy_action_map::prelude::*;
 
+use crate::popup::{ActivePreset, OpenMenu, Popup};
 use crate::tileset;
 
 /// Where a protagonist is trying to move, this tick.
@@ -47,19 +48,55 @@ pub struct Protagonist(pub u8);
 const SPEED: f32 = 90.0;
 
 pub fn plugin(app: &mut App) {
+    app.init_resource::<ClaimedDevices>();
     app.add_context::<OnFoot>(|controls| {
         controls
             .bind::<Move>(Stick::Left)
             .dead_zone(DeadZone::radial(0.2));
         controls.bind::<Move>(DirectionalButtons::arrow_keys());
+
+        controls.bind::<OpenMenu>(GamepadButton::Start);
+        controls.bind::<OpenMenu>(KeyCode::Escape);
     });
     app.add_context::<Lobby>(|controls| {
         controls.bind::<Join>(GamepadButton::South);
         controls.bind::<Join>(KeyCode::Enter);
     });
 
-    app.add_systems(FixedUpdate, walk);
+    app.add_systems(FixedUpdate, walk.run_if(in_state(Popup::Closed)));
     app.add_observer(pair_on_join);
+}
+
+/// Which device, if any, has claimed each of the two protagonist slots.
+///
+/// A resource rather than the `Local` a single-writer system could get away with: the popup's own
+/// Disconnect (`popup::disconnect_pressed`) needs to free a slot too, so both sides have to reach
+/// the same state. Indexed by slot rather than a flat list of claimed devices — a list can say
+/// *how many* are claimed, but once Disconnect can free one from the middle, only a slot can say
+/// *which* protagonist a freed device should be able to rejoin.
+#[derive(Resource, Default)]
+pub struct ClaimedDevices([Option<DeviceHandle>; 2]);
+
+impl ClaimedDevices {
+    /// Claims the first free slot for `device`, or `None` if it already holds one or both slots
+    /// are taken.
+    fn claim(&mut self, device: DeviceHandle) -> Option<u8> {
+        if self.0.contains(&Some(device)) {
+            return None;
+        }
+        let slot = self.0.iter().position(Option::is_none)?;
+        self.0[slot] = Some(device);
+        Some(slot as u8)
+    }
+
+    /// Frees whichever slot `device` holds, if any.
+    pub fn release(&mut self, device: DeviceHandle) {
+        for slot in &mut self.0 {
+            if *slot == Some(device) {
+                *slot = None;
+            }
+        }
+    }
 }
 
 /// Both protagonists, as one scene, plus the [`Lobby`] context that pairs them — spawned at
@@ -137,16 +174,16 @@ fn walk(
 /// first found over picking the keyboard first would starve whichever pad lost the race on a tick
 /// both fired.
 ///
-/// A `Local` list of already-claimed devices rather than `join::is_claimed` against a
-/// `Query<&Paired>`: two protagonists' join presses landing in the same tick both fire before
-/// either `Paired` insert (a deferred command) is actually applied, so a query would see both
-/// devices as still unclaimed and race for the same slot. The `Local` is updated synchronously
-/// inside the observer itself, so the second press to arrive already sees the first's claim.
+/// [`ClaimedDevices`] rather than `join::is_claimed` against a `Query<&Paired>`: two protagonists'
+/// join presses landing in the same tick both fire before either `Paired` insert (a deferred
+/// command) is actually applied, so a query would see both devices as still unclaimed and race for
+/// the same slot. `ClaimedDevices` is updated synchronously inside the observer itself, so the
+/// second press to arrive already sees the first's claim.
 fn pair_on_join(
     _fired: On<Fired<Join>>,
     keys: Res<ButtonInput<KeyCode>>,
     gamepads: Query<(Entity, &Gamepad)>,
-    mut claimed: Local<Vec<DeviceHandle>>,
+    mut claimed: ResMut<ClaimedDevices>,
     protagonists: Query<(Entity, &Protagonist)>,
     mut commands: Commands,
 ) {
@@ -161,13 +198,13 @@ fn pair_on_join(
     let Some(device) = device else {
         return;
     };
-    if claimed.contains(&device) || claimed.len() >= 2 {
+    let Some(slot) = claimed.claim(device) else {
         return;
-    }
-    let slot = claimed.len() as u8;
+    };
     let Some((entity, _)) = protagonists.iter().find(|(_, p)| p.0 == slot) else {
         return;
     };
-    commands.entity(entity).insert((OnFoot, Paired::to(device)));
-    claimed.push(device);
+    commands
+        .entity(entity)
+        .insert((OnFoot, Paired::to(device), ActivePreset::default()));
 }

@@ -175,6 +175,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 111 | An outside authority writes an action's value at L2   |
 | 114 | Update Bevy, and migrate the BSN syntax               |
 | 113 | A device's brand is a component, not a lookup at every read |
+| 71  | Per-player presets, behind a pause popup              |
 
 ---
 
@@ -208,6 +209,26 @@ putting each player back on the device they had.
 - **And the calibration step itself**, which has no in-tree caller: `CalibrationSampling` is driven
   end to end by tests but by no screen. A calibration a player performs and then loses on quit is
   worth little, so the screen and the persistence are one feature.
+- **A gilrs bug confirmed, not assumed.** On macOS, a Bluetooth pad's runtime id never survives a
+  disconnect — `padprobe` reproduced four fresh ids across four reconnects of the same physical pad,
+  uuid/vendor id/product id unchanged every time. Root cause is in gilrs-core's macOS backend, not
+  this crate, and is filed upstream as [gilrs#207][]; proceed on the assumption it gets fixed there
+  rather than building a permanent workaround for it here.
+- **Persistent identity is this chunk's to build regardless of that fix.** Even a fixed gilrs only
+  helps within one process's life — nothing survives a restart at the runtime-handle level by
+  definition, which is R11.5's actual ask. Key it off `vendor_id`/`product_id`
+  (`GamepadConnectionEvent::Connected`, the same source `Brand` already resolves from), not
+  `DeviceHandle` itself: `DeviceHandle` stays Entity-based for gilrs and a Steam backend alike, and
+  the persistent identity this chunk needs is a separate mapping kept beside it, not a new variant.
+- **Two pads of the same model collide on that key.** Vendor/product id, and the uuid derived from
+  them, name a model, not a unit, so two identical controllers at the table are indistinguishable by
+  it. Untested whether this is common enough to matter for Split Friction's two-player case; a
+  fallback (first-come-first-served among matches, say) is cheaper to write than to solve if it
+  never comes up in practice.
+- **Steam's own identity is not the same shape, so the same key may not transfer.** `docs/steam.md`
+  S8/S14 measured Steam's `InputHandle_t` staying stable across a transport swap while the
+  vendor/product id it reported for the identical physical pad changed. What this chunk builds for
+  gilrs's identity may need its own counterpart for a Steam backend rather than one shared scheme.
 - **Verified by:** playing it, quitting, relaunching — the same protagonist on the same device
   without anyone pressing anything — and by unplugging a pad and plugging it back in.
 
@@ -227,8 +248,14 @@ pause and show a reconnect prompt** (nothing today).
   event that suppression has already stopped (`docs/steam.md`, appendix) — so reading Bevy's event
   directly leaves a whole class of device silently un-disconnectable. Whatever this chunk raises
   has to be raisable by something that is not `gilrs`.
-- **Depends on chunk 71's popup.** The pause-and-show-one-pane's-panel mechanism already exists
-  once 71 lands; this chunk adds a signal-triggered entry point to it rather than a second UI.
+- **Builds on chunk 71's popup** (`examples/split_friction/popup.rs`). The pause-and-show-one-pane's
+  panel mechanism already exists; this chunk adds a signal-triggered entry point to it rather than a
+  second UI.
+- **Needs chunk 72 for the reconnect half, not the disconnect half.** Identifying which player lost
+  a device and canceling its actions works off the still-live, still-`Paired` entity — no persistent
+  identity required for that. Recognizing that a device now pressing the reconnect control is the
+  *same* one that just left needs chunk 72's identity to exist first: gilrs's own runtime id is not
+  a safe way to tell, confirmed on this crate's own hardware ([gilrs#207][]).
 
 ### 104. Named device-requirement sets at the join screen
 
@@ -250,44 +277,6 @@ would revive it.
 - **`docs/issues.md` 1044 (R15.9, opaque platform-user identity)** stays unrouted alongside this —
   floated for Split Friction too, but nothing to show without a real platform SDK, and not yet worth
   a faked stub the way chunk 42 fakes a backend.
-
-### 71. Per-player presets, behind a pause popup
-
-Each protagonist selects its own preset, applied through `apply_overrides_for_with_preset`. The
-preset is a **southpaw swap** — the real thing players ask local co-op games for, and small enough
-that the point is the per-player selection, not the preset's own content. It is offered from a
-per-pane popup, key-invoked, that pauses both panes while it is open; only one pane's popup can be
-open at a time.
-
-- **What it proves.** Chunk 67 built the per-entity apply path ahead of a need and nothing in tree
-  has called it since — this is that caller. A preset is the cheapest override to select, so the
-  general per-entity case is validated without a second rebinding UI.
-- **It trips a deferred row on purpose.** "Per-entity presentation and prompts" is gated on a
-  per-player settings display existing, and a per-pane preset selector is one. Expect it to validate
-  that row's sketch or falsify it, and say which.
-- **The popup's options**, stacked in a column: Select Preset, Reset Presets (back to the
-  compiled-in default), Disconnect (drops the pane's `Paired`, returning it to the join screen), and
-  Return to Game. Disconnect earns its place independent of the others — it is also the clean way to
-  reset a pane's device pairing between test runs, without touching a settings file or restarting.
-- **Chunk 103 reuses this shell.** The reconnect prompt its disconnect signal needs (R15.5) is the
-  same pause-and-show-one-pane's-panel mechanism, triggered by a signal instead of a key. This chunk
-  should make the trigger pluggable so 103 adds an entry point rather than a second popup.
-- **Not a settings screen.** The popup is a join-screen/pause-menu affordance, a button per pane —
-  Disasteroids' rebinding UI is untouched by this chunk.
-- **Reuses Disasteroids' machinery, not just its look.** The popup's buttons match Disasteroids'
-  style, and the same fix travels with them: `InputDispatchPlugin` only ever answers the keyboard
-  half of a focused button, so this chunk disables it here too and wires up `common::widget_focus`
-  (already shared under `examples/common/`) for the gamepad half.
-- **A single popup at a time is forced, not chosen.** `common::widget_focus` reads `Res<InputFocus>`
-  — one global resource — so a second pane's buttons would have nothing to tell them apart from the
-  first's. Bevy has no per-player focus (discussed among Bevy developers, currently back-burnered),
-  so simultaneous display is not this chunk's to build even if a later one wanted it.
-- **Releases the device it drops.** `pair_on_join`'s `claimed: Local<Vec<DeviceHandle>>`
-  (`protagonist.rs`) only ever grows; Disconnect needs it to forget a device too, or that device can
-  never rejoin. Likely fix: promote `claimed` to a resource both systems can reach.
-- **Verified by:** playing it — each pane opens its own popup independently, selecting or resetting
-  a preset there does not move the other pane's bindings, and Disconnect returns a pane cleanly to
-  the join screen.
 
 ---
 
@@ -697,7 +686,6 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **An initial delay distinct from the repeat rate** (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both. Two numbers is a small change; what is missing is a case where equal is wrong, and a two-table settings screen is not it |
 | **Free-form mutually-exclusive context sets** (R7.7 remainder) | nothing in tree needs two independently-exclusive contexts to coexist rather than one dominating the other by priority |
 | **Owner-scoped `ConsumedControls`/exclusion ceiling** (R15.3 remainder, and D13's own remainder) | a real in-tree case with a per-player exclusive context, or a binding consumed across two players' devices. Design if built: a claim visible only if made globally or by the viewer's own paired device; an exclusive context's shadow implicit in its own pairing rather than a separate flag |
-| **Per-entity presentation and prompts** (D52's remainder) | an actual per-player settings or prompt display — **chunk 71 is what this was waiting for**, so expect it met or falsified there rather than merely waiting |
 | **An authority backend's actions in rollback** (D22's remainder) | a snapshot to fit them into. `AuthorityValues` is a plain component and clones with the entity, but what a rewind has to reproduce is what the authority *said* on the tick being re-simulated, which is not in the frame. The available answer is recording the backend's output into the frame at sample time, at the cost of a larger frame |
 | **Sub-frame event timing** (D4's remainder) | [bevy#9087][] upstream. Gamepad stays frame-quantized regardless until gilrs polling is rewritten, so mixed fidelity across sources is permanent for now rather than an artifact |
 | **Schedule enforcement for tick domains** (D9's remainder) | Bevy giving a `SystemParam` a way to know its own schedule. A plugin-time validation pass and a debug assertion stand in |
@@ -712,5 +700,6 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
 [bevy#25710]: https://github.com/bevyengine/bevy/pull/25710
+[gilrs#207]: https://gitlab.com/gilrs-project/gilrs/-/work_items/207
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678

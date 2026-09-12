@@ -21,12 +21,15 @@ use bevy::prelude::*;
 mod collision;
 mod dungeon;
 mod overlay;
+mod popup;
 mod protagonist;
 mod split_screen;
 mod tileset;
 
 #[path = "../common/mod.rs"]
 mod common;
+
+use common::widget_focus;
 
 const WIDTH: usize = 64;
 const HEIGHT: usize = 64;
@@ -39,10 +42,26 @@ fn main() {
 
     App::new()
         .add_plugins((
-            DefaultPlugins.set(ImagePlugin::default_nearest()),
+            // Disabled rather than kept, on the same terms as Disasteroids: the popup's own
+            // gamepad-focus bridge (`widget_focus::plugin`) answers for the keyboard half too, so
+            // there is no seam between two mechanisms both reaching for the same keys.
+            DefaultPlugins
+                .set(ImagePlugin::default_nearest())
+                .build()
+                .disable::<bevy::input_focus::InputDispatchPlugin>(),
             bevy_action_map::ActionMapPlugin,
+            // Not in `DefaultPlugins`. The popup's automatic navigator consults its graph before
+            // falling back to on-screen position, so it has to exist even though nothing here ever
+            // writes an edge to it.
+            bevy::input_focus::directional_navigation::DirectionalNavigationPlugin,
         ))
-        .add_plugins((protagonist::plugin, split_screen::plugin, overlay::plugin))
+        .add_plugins((
+            protagonist::plugin,
+            split_screen::plugin,
+            overlay::plugin,
+            popup::plugin,
+            widget_focus::plugin,
+        ))
         .insert_resource(Seed(seed))
         .add_systems(Startup, setup)
         .run();

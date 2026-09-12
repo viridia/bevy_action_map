@@ -155,6 +155,24 @@ fn main() {
                 gilrs::EventType::ButtonReleased(b, code) => {
                     println!("[{id}] rel   {b:?}   (code {code})");
                 }
+                // gilrs's own doc for `Connected` says the whole story: "If gamepad's UUID
+                // doesn't match one of disconnected gamepads, newly connected gamepad will get
+                // new ID" — so whether a reconnect keeps its `id` is entirely a question of
+                // whether this uuid matches what was printed at the matching `DISCONNECTED`.
+                gilrs::EventType::Connected => {
+                    let pad = gilrs.gamepad(id);
+                    println!(
+                        "[{id}] CONNECTED {name:?}  uuid={uuid}  vendor={vendor:?}  \
+                         product={product:?}",
+                        name = pad.name(),
+                        uuid = uuid_str(pad.uuid()),
+                        vendor = pad.vendor_id(),
+                        product = pad.product_id(),
+                    );
+                }
+                gilrs::EventType::Disconnected => {
+                    println!("[{id}] DISCONNECTED");
+                }
                 other => println!("[{id}] {other:?}"),
             }
         }

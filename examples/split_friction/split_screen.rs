@@ -29,6 +29,7 @@
 //! window scale-factor conversion needed) sized and positioned to match the pane it belongs to.
 
 use bevy::camera::{ScalingMode, Viewport};
+use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::ui::UiSystems;
 use bevy_action_map::device::{Brand, DeviceFamily, DeviceHandle, GamepadBrand};
@@ -36,6 +37,7 @@ use bevy_action_map::player::Paired;
 use bevy_action_map::prelude::InputAction;
 
 use crate::common::prompt_ui::{PromptFamily, PromptSpan};
+use crate::popup::{self, ActivePreset, Popup};
 use crate::protagonist::{Join, Protagonist};
 
 /// One of the two panes in the split-screen layout, and the camera it drives.
@@ -53,6 +55,18 @@ const DIVIDER_WIDTH: f32 = 4.0;
 #[derive(Component, Clone, Copy, Default, PartialEq, Eq)]
 struct PlayerCamera(u8);
 
+/// A pane's own protagonist and camera, resolved once by [`link_panes`] rather than re-derived by
+/// matching [`Pane`]'s index against [`Protagonist`] or [`PlayerCamera`] every time something needs
+/// either — [`open_popup`] and [`follow`] just read the entities straight off this instead.
+///
+/// Does not also carry the join-UI root: nothing but the index-matching in [`sync_viewports`] and
+/// [`sync_join_ui`] needs it, and those already have their own index to work from.
+#[derive(Component, Clone, Copy)]
+struct PaneLinks {
+    protagonist: Entity,
+    camera: Entity,
+}
+
 /// "Waiting to join" over a pane's protagonist — visible until [`sync_join_ui`] finds it paired.
 #[derive(Component, Clone, Copy, Default, PartialEq, Eq)]
 struct JoinPrompt(u8);
@@ -67,6 +81,12 @@ struct DeviceLabel(u8);
 #[derive(Component, Clone, Copy, Default, PartialEq, Eq)]
 struct PaneRoot(u8);
 
+/// Marks a [`PaneRoot`] as the popup's own, rather than the permanent join UI's — both share the
+/// marker so [`sync_viewports`] positions either one the same way, but only this one is
+/// [`open_popup`]'s to spawn and [`close_popup`]'s to despawn.
+#[derive(Component, Clone, Copy, Default)]
+struct PopupRoot;
+
 /// Never shows fewer world units than this on either axis, so shrinking the window — or a pane
 /// simply being half the window wide — crops nothing; the view only ever gains more of the
 /// dungeon on whichever axis has room to spare. 20×15 tiles.
@@ -80,7 +100,92 @@ pub fn plugin(app: &mut App) {
     // two guarantees.
     app.add_systems(Startup, (cameras.spawn(), fit_view, join_ui).chain());
     app.add_systems(PostUpdate, sync_viewports.after(UiSystems::Layout));
-    app.add_systems(Update, (follow, sync_join_ui));
+    app.add_systems(Update, (link_panes, follow, sync_join_ui));
+    app.add_systems(OnEnter(Popup::Open(0)), open_popup(0));
+    app.add_systems(OnEnter(Popup::Open(1)), open_popup(1));
+    app.add_systems(OnEnter(Popup::Closed), close_popup);
+}
+
+/// Links each pane to its own protagonist and camera, once both exist.
+///
+/// A plain `Update` system rather than ordered `Startup` wiring, the same reason
+/// `overlay::target_panel_camera` is: protagonists (`protagonist.rs`) and cameras (this module) are
+/// spawned by two different plugins, and racing their `Startup` systems to land in the right order
+/// is more moving parts than running this every frame until it finds both and stops.
+fn link_panes(
+    mut commands: Commands,
+    panes: Query<(Entity, &Pane), Without<PaneLinks>>,
+    protagonists: Query<(Entity, &Protagonist)>,
+    cameras: Query<(Entity, &PlayerCamera)>,
+) {
+    for (pane_entity, pane) in &panes {
+        let Some((protagonist, _)) = protagonists.iter().find(|(_, p)| p.0 == pane.0) else {
+            continue;
+        };
+        let Some((camera, _)) = cameras.iter().find(|(_, c)| c.0 == pane.0) else {
+            continue;
+        };
+        commands.entity(pane_entity).insert(PaneLinks {
+            protagonist,
+            camera,
+        });
+    }
+}
+
+/// Spawns `index`'s pane's popup, targeted at its own camera and sized to its own pane on the same
+/// terms [`join_ui`] already established — see the module doc comment.
+///
+/// A closure rather than a plain fn: `OnEnter` needs one system per state value, and the two panes
+/// otherwise differ only in which index they close over.
+fn open_popup(index: u8) -> impl Fn(Query<(&Pane, &PaneLinks)>, Query<&ActivePreset>, Commands) {
+    move |panes: Query<(&Pane, &PaneLinks)>,
+          presets: Query<&ActivePreset>,
+          mut commands: Commands| {
+        let Some(links) = panes
+            .iter()
+            .find(|(pane, _)| pane.0 == index)
+            .map(|(_, links)| links)
+        else {
+            return;
+        };
+        let current = presets.get(links.protagonist).copied().unwrap_or_default();
+        commands
+            .spawn_scene(popup_root(index, links.protagonist, current))
+            .insert(UiTargetCamera(links.camera));
+    }
+}
+
+/// The invisible, full-pane wrapper `popup::menu` sits inside — [`PaneRoot`] is what
+/// [`sync_viewports`] reads to size and position it, the same as the join UI's own root.
+fn popup_root(index: u8, entity: Entity, current: ActivePreset) -> impl Scene {
+    bsn! {
+        PaneRoot(index)
+        PopupRoot
+        Node {
+            position_type: PositionType::Absolute,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+        }
+        Children [
+            @{popup::menu(entity, current)}
+        ]
+    }
+}
+
+/// Despawns whichever pane's popup was open, and releases the focus it held — left pointing at a
+/// now-gone entity, the rest of the app would dispatch keystrokes into a hole.
+///
+/// Also the app's very first transition: `Popup`'s default is `Closed`, so this runs once at
+/// startup with nothing to despawn, which is harmless.
+fn close_popup(
+    mut commands: Commands,
+    popups: Query<Entity, With<PopupRoot>>,
+    mut focus: ResMut<InputFocus>,
+) {
+    for entity in &popups {
+        commands.entity(entity).despawn();
+    }
+    focus.clear();
 }
 
 /// Renders nothing itself — see the module doc comment for why it exists.
@@ -205,6 +310,15 @@ fn fit_view(mut cameras: Query<&mut Projection, With<PlayerCamera>>) {
     }
 }
 
+/// A pane's own camera, borrowed disjointly from [`follow`]'s protagonist query — named so the
+/// query itself does not trip clippy's complexity lint.
+type CameraView<'w, 's> = Query<
+    'w,
+    's,
+    (&'static Camera, &'static Projection, &'static mut Transform),
+    (With<PlayerCamera>, Without<Protagonist>),
+>;
+
 /// Keeps each camera centered on the protagonist it shows, snapped to whichever world-space
 /// distance one screen pixel currently covers.
 ///
@@ -215,14 +329,18 @@ fn fit_view(mut cameras: Query<&mut Projection, With<PlayerCamera>>) {
 /// means how many world units one pixel covers depends on the pane's own current size, which is
 /// read back from the camera's own resolved [`OrthographicProjection::area`] rather than assumed.
 fn follow(
-    protagonists: Query<(&Protagonist, &Transform), Without<PlayerCamera>>,
-    mut cameras: Query<(&PlayerCamera, &Camera, &Projection, &mut Transform), Without<Protagonist>>,
+    panes: Query<&PaneLinks>,
+    protagonists: Query<&Transform, (With<Protagonist>, Without<PlayerCamera>)>,
+    mut cameras: CameraView,
 ) {
-    for (camera, view, projection, mut transform) in &mut cameras {
-        let Some((_, target)) = protagonists.iter().find(|(p, _)| p.0 == camera.0) else {
+    for links in &panes {
+        let Ok(target) = protagonists.get(links.protagonist) else {
             continue;
         };
         let target = target.translation.truncate();
+        let Ok((view, projection, mut transform)) = cameras.get_mut(links.camera) else {
+            continue;
+        };
 
         let world_per_pixel = world_per_pixel(view, projection);
         transform.translation.x = snap(target.x, world_per_pixel);
@@ -303,9 +421,9 @@ fn device_name(device: DeviceHandle, brands: &Query<&Brand>) -> &'static str {
 /// targets, so a percentage of that same window is what lands a pane-relative rect correctly
 /// without converting through the window's own scale factor.
 fn sync_viewports(
-    panes: Query<(&Pane, &ComputedNode, &UiGlobalTransform)>,
+    panes: Query<(&Pane, &PaneLinks, &ComputedNode, &UiGlobalTransform)>,
     divider: Query<(&ComputedNode, &UiGlobalTransform), With<Divider>>,
-    mut cameras: Query<(&PlayerCamera, &mut Camera)>,
+    mut cameras: Query<&mut Camera, With<PlayerCamera>>,
     mut roots: Query<(&PaneRoot, &mut Node)>,
     windows: Query<&Window>,
 ) {
@@ -327,7 +445,7 @@ fn sync_viewports(
     let divider_left = divider_transform.translation.x - half_width;
     let divider_right = divider_transform.translation.x + half_width;
 
-    for (pane, node, transform) in &panes {
+    for (pane, links, node, transform) in &panes {
         let size = node.size();
         if size.x <= 0.0 || size.y <= 0.0 {
             continue;
@@ -343,10 +461,7 @@ fn sync_viewports(
         let top_left = Vec2::new(left, top).max(Vec2::ZERO);
         let extent = Vec2::new(right - left, size.y);
 
-        for (camera, mut camera_component) in &mut cameras {
-            if camera.0 != pane.0 {
-                continue;
-            }
+        if let Ok(mut camera_component) = cameras.get_mut(links.camera) {
             camera_component.viewport = Some(Viewport {
                 physical_position: top_left.as_uvec2(),
                 physical_size: extent.as_uvec2(),
