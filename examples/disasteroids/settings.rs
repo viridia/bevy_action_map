@@ -447,8 +447,13 @@ fn screen(world: &World) -> impl Scene {
             Node { column_gap: Val::Px(16.0), margin: {UiRect::top(Val::Px(4.0))} }
             Children [
                 // Cancel first in the tree as well as on screen, so that the one the selection
-                // starts on is also the one the eye starts on.
+                // starts on is also the one the eye starts on — which is also why Reset is not
+                // first, since a selection landing on it would put the destructive one under the
+                // player's thumb before they had read the screen. Left to right they run by
+                // increasing commitment: leave, change everything back, commit.
                 @{cancel_button()}
+                --
+                @{reset_button()}
                 --
                 @{confirm_button()}
             ]
@@ -533,10 +538,43 @@ fn confirm_button() -> impl Scene {
     }
 }
 
+/// Puts every row, every tunable and the preset back to what the game declared.
+///
+/// No caption shortcut, unlike the two beside it: Cancel and Confirm answer a pad button of their
+/// own, and this is reached by selecting it and pressing A, the same as a preset button. A control
+/// that resets everything is not one to put a single press away.
+fn reset_button() -> impl Scene {
+    bsn! {
+        Button
+        on(reset_pressed)
+        @focusable()
+        Text::new("Reset")
+        TextFont { font_size: 15.0_f32 }
+        TextColor(TITLE)
+        BorderColor::all(FIXED)
+        Node {
+            border: {UiRect::all(Val::Px(1.0))},
+            border_radius: {BorderRadius::all(Val::Px(4.0))},
+            padding: {UiRect::axes(Val::Px(16.0), Val::Px(4.0))},
+        }
+    }
+}
+
 /// A mouse click or `Enter` on a focused Cancel — the pad's B reaches the same outcome through
 /// [`back`] instead, since B also has the mid-capture meaning Cancel does not.
 fn cancel_pressed(_: On<Activate>, mut next: ResMut<NextState<Settings>>) {
     next.set(Settings::Hidden);
+}
+
+/// Empties the working copy, which is what "everything the game declared" is: the default preset
+/// names no rows, and no captures lie over it.
+///
+/// Writes the working copy and nothing else, the same discipline every other control on this screen
+/// keeps. That is what lets this need no confirmation of its own — Cancel still walks away from it,
+/// and nothing has reached the running game until Confirm. [`redraw_pending`] repaints both tables,
+/// the preset row and the two tunables, because it repaints everything.
+fn reset_pressed(_: On<Activate>, mut pending: ResMut<PendingOverrides>) {
+    pending.0 = Controls::default();
 }
 
 /// A mouse click or `Enter` on a focused Confirm — the pad's X reaches the same outcome through
