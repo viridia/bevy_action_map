@@ -451,7 +451,7 @@ impl<'de> serde::Deserialize<'de> for SavedTunableValue {
 /// (R17.10, D59): a settings layer may place these fields beside an unrelated struct's under one
 /// shared table, so nothing here claims a name likely to collide with someone else's.
 #[cfg(feature = "serialize")]
-#[derive(Reflect, Clone, Debug, Default, PartialEq)]
+#[derive(Reflect, Clone, Debug, PartialEq)]
 pub struct SavedOverrides {
     /// This build's persistence-format version. See [`resolve_saved`].
     pub action_map_version: u32,
@@ -459,6 +459,22 @@ pub struct SavedOverrides {
     pub bindings: BTreeMap<String, BTreeMap<String, SavedRow>>,
     /// One table per family, each a map from a tunable's declared key to its saved value.
     pub tunables: BTreeMap<String, BTreeMap<String, SavedTunableValue>>,
+}
+
+/// A player who has changed nothing, written by the build reading it — not a zeroed version this
+/// build would then refuse.
+///
+/// A settings layer builds one of these for a game with no settings file yet, and hands it to
+/// [`resolve_saved`] on the first launch like any other.
+#[cfg(feature = "serialize")]
+impl Default for SavedOverrides {
+    fn default() -> Self {
+        Self {
+            action_map_version: FORMAT_VERSION,
+            bindings: BTreeMap::new(),
+            tunables: BTreeMap::new(),
+        }
+    }
 }
 
 /// Turns a live [`Overrides`] into its portable, reflectable shape, stamped with the version this
@@ -2037,8 +2053,8 @@ mod tests {
         use super::*;
 
         use bevy_input::gamepad::GamepadButton;
+        use bevy_reflect::FromReflect;
         use bevy_reflect::serde::{TypedReflectDeserializer, TypedReflectSerializer};
-        use bevy_reflect::{FromReflect, TypeRegistry};
         use serde::de::DeserializeSeed;
 
         #[derive(InputAction)]
@@ -2080,20 +2096,21 @@ mod tests {
                 .key
         }
 
-        /// A `TypeRegistry` carrying everything `SavedOverrides` reaches. What a real app builds
-        /// via `app.register_type::<T>()` per reachable type; a bare registry needs each one named
-        /// explicitly, container types included.
-        fn types() -> TypeRegistry {
-            let mut types = TypeRegistry::default();
-            types.register::<SavedOverrides>();
-            types.register::<SavedRow>();
-            types.register::<SavedTunableValue>();
-            types.register::<Vec<String>>();
-            types.register::<BTreeMap<String, SavedRow>>();
-            types.register::<BTreeMap<String, BTreeMap<String, SavedRow>>>();
-            types.register::<BTreeMap<String, SavedTunableValue>>();
-            types.register::<BTreeMap<String, BTreeMap<String, SavedTunableValue>>>();
-            types
+        /// The registry a running app actually has, built by `ActionMapPlugin` and not by naming
+        /// types here.
+        ///
+        /// Naming them here is what these tests used to do, and it hid a bug for a chunk: a nested
+        /// map's value type is not reached by registering the map that holds it, so the registration
+        /// a test wrote by hand was one a game did not have, and every saved binding was dropped on
+        /// load with no diagnostic anywhere. A fixture that can be more complete than the plugin is
+        /// a fixture that can pass while the crate is broken.
+        fn types() -> bevy_reflect::TypeRegistryArc {
+            let mut app = App::new();
+            app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+            app.world()
+                .resource::<bevy_ecs::reflect::AppTypeRegistry>()
+                .0
+                .clone()
         }
 
         const GOLDEN: &str = "action_map_version = 1\n\
@@ -2116,7 +2133,8 @@ mod tests {
         #[test]
         fn a_saved_override_set_round_trips_through_reflect() {
             let declared = declared();
-            let types = types();
+            let registry = types();
+            let types = registry.read();
             let mut overrides = Overrides::new();
             overrides.bind(
                 DeviceFamily::KeyboardMouse,
@@ -2400,6 +2418,81 @@ mod tests {
                     max: 0.5,
                 })
             );
+        }
+
+        /// The arrangement R17.10 and D59 anticipate: a game's own settings struct holding a
+        /// `SavedOverrides` beside fields of its own, which is what `bevy_settings` writes a group
+        /// from. TOML puts every plain value ahead of every table within a section, so the sibling
+        /// field lands above `[overrides]` and not inside it — pinned here because a document that
+        /// came out the other order would parse back as something else entirely.
+        #[derive(Reflect, Clone, Debug, Default, PartialEq)]
+        struct GroupWithOverrides {
+            preset: String,
+            overrides: SavedOverrides,
+        }
+
+        #[test]
+        fn a_saved_set_round_trips_as_one_field_of_a_settings_group() {
+            let registry = types();
+            registry.write().register::<GroupWithOverrides>();
+            let types = registry.read();
+
+            let mut overrides = Overrides::new();
+            overrides.tune(
+                DeviceFamily::Gamepad,
+                "persist_tests.move.stick_deadzone",
+                TunableValue::Range {
+                    value: 0.25,
+                    min: 0.0,
+                    max: 0.5,
+                },
+            );
+            let group = GroupWithOverrides {
+                preset: "persist_tests.southpaw".to_string(),
+                overrides: save_overrides(&overrides),
+            };
+
+            let serializer = TypedReflectSerializer::new(&group, &types);
+            let text = toml::to_string(&serializer).expect("serializes");
+            assert_eq!(
+                text,
+                "preset = \"persist_tests.southpaw\"\n\
+                 \n\
+                 [overrides]\n\
+                 action_map_version = 1\n\
+                 \n\
+                 [overrides.bindings]\n\
+                 \n\
+                 [overrides.tunables.gamepad]\n\
+                 \"persist_tests.move.stick_deadzone\" = 0.25\n"
+            );
+
+            let registration = types
+                .get(core::any::TypeId::of::<GroupWithOverrides>())
+                .unwrap();
+            let value: toml::Value = toml::from_str(&text).expect("parses");
+            let reflected = TypedReflectDeserializer::new(registration, &types)
+                .deserialize(value)
+                .expect("deserializes");
+            assert_eq!(
+                <GroupWithOverrides as FromReflect>::from_reflect(&*reflected)
+                    .expect("round-trips"),
+                group
+            );
+        }
+
+        /// What a settings layer hands over on a first launch, before any file exists — a
+        /// `Reflect`-driven one builds the group's default and applies whatever the file held onto
+        /// it, so a default stamped with no version at all would refuse every fresh install.
+        #[test]
+        fn a_default_saved_set_resolves_to_nothing_rather_than_a_refused_version() {
+            let (loaded, problems, unresolved) =
+                resolve_saved(&SavedOverrides::default(), &[], &[])
+                    .expect("a version this build wrote");
+
+            assert!(loaded.is_empty());
+            assert!(problems.is_empty(), "{problems:?}");
+            assert!(unresolved.is_empty(), "{unresolved:?}");
         }
     }
 }

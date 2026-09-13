@@ -292,21 +292,24 @@ context: it lists every binding without being told about any of them, can be nav
 from a gamepad, and applies a rebind live.
 
 ```sh
-cargo run --example disasteroids
+cargo run --features serialize --example disasteroids
 ```
 
 Fly with `W`/↑ and `A`/`D` (or ←/→), fire with `Space`, jump with `Left Shift`, pause with `Escape`.
+What you rebind is written to a settings file and applied again the next time you launch, which is
+what the `serialize` feature is for.
 
 ## Other examples
 
 Every example runs from a clean checkout with `cargo run --example <name>`, and between them they
 exercise every part of the crate. The three games are where it is worth starting; the rest are
-single-concept demos small enough to read in one sitting.
+single-concept demos small enough to read in one sitting. The two that keep something between runs
+need `--features serialize` as well, marked below.
 
 | Example           | Shows                                                                     |
 | ----------------- | ------------------------------------------------------------------------- |
-| `disasteroids`    | A full game with a rebinding settings screen, keyboard or gamepad          |
-| `split_friction`  | Split-screen co-op: two players, two cameras, a device paired to each      |
+| `disasteroids`    | A full game with a rebinding settings screen, keyboard or gamepad — `serialize` |
+| `split_friction`  | Split-screen co-op: two players, two cameras, a device paired to each — `serialize` |
 | `pong`            | Two players on one machine, the second pad claimed the moment it appears   |
 | `minimal`         | The smallest possible setup                                               |
 | `move_and_jump`   | Two device classes, two tick domains, dead zones, a rate conversion        |

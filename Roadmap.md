@@ -47,8 +47,6 @@ in `docs/decisions.md`, where each says what reversing it would cost.
 
 ### Never built
 
-- **Writing a saved override set to a file.** The crate serializes and deserializes one; where the
-  bytes go was always the app's decision — chunk 92.
 - **A snapshot of a context's state.** The shape is designed and written down; nothing has taken one
   — chunk 83.
 
@@ -176,6 +174,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 103 | A disconnect signal and a reconnect prompt            |
 | 72  | Device identity, and a pad that returns to the pane that lost it |
 | 72d | A pairing that survives a restart, through `bevy_settings`       |
+| 92  | Bindings that survive a restart, through `bevy_settings`         |
 
 ---
 
@@ -418,71 +417,6 @@ prompt and the generic tier's art, below.
 Both take the same state out of a context and put it back: one to a file between runs, one to
 memory between ticks.
 
-### 92. Persisting bindings through `bevy_settings`
-
-Chunk 23 wired `Overrides` into Disasteroids' settings screen; nothing has ever written one to disk.
-"Writing a saved override set to a file" is still listed as never built, the destination left to the
-app on purpose (D53). `bevy_settings` is that destination: register `SavedOverrides` (D59) as a
-`SettingsGroup` resource and let it merge into the game's one settings file alongside whatever else
-the app declares there.
-
-- **The mechanism is validated, not open.** A scratch test against
-  `bevy_settings::resources_to_toml` / `apply_settings_to_world` confirmed the whole path
-  round-trips correctly: `SavedOverrides`'s own fields are walked structurally (no stutter, no
-  bevy_settings change needed), and its nested `SavedRow`/`SavedTunableValue` fields bridge through
-  `#[reflect(Serialize, Deserialize)]` to their own hand-written encoding rather than bevy_reflect's
-  generic enum shape. This crate's own
-  `overrides::tests::persistence::a_saved_override_set_round_trips_through_reflect` pins the same
-  contract without a `bevy_settings` dependency. This chunk is the remaining wiring, not a risk to
-  chase.
-- **Load at startup, save on Confirm.** `apply_and_close` in `settings.rs` already applies a pending
-  `Overrides` to the running game; this chunk adds a startup system calling `resolve_saved` against
-  the loaded `SavedOverrides` resource before the first `apply_overrides`, and a `save_overrides`
-  call on Confirm feeding back into it.
-- **What gets stored is the preset's *name* plus the rows the player moved by hand, and that decides
-  `PendingOverrides`'s shape.** A preset is game content that changes between builds, so storing its
-  resolved rows freezes a player on the definition that shipped the day they chose it — and worse,
-  silently: after a patch those rows no longer match the new definition, `selected_preset` finds
-  nothing, and an explicit choice reads back as no preset at all. Storing the name keeps the choice
-  at the granularity the player made it.
-- **The way to get there is to stop merging the two in the first place.** `PendingOverrides` today
-  holds one bag — `rows`, "captures and a preset's rows alike" — so by the time anything is saved
-  the halves are indistinguishable. Splitting it into the selected preset's name and the captures
-  alone, merged into one `Overrides` only at apply time where
-  `apply_overrides_with_preset` already wants both, makes persistence those two fields and needs
-  nothing new from the crate: `set`, `iter`, `tune` and `iter_tunables` already build the merged
-  copy. No difference operation on `Overrides` is required, because nothing is ever merged that has
-  to be taken apart again.
-- **`selected_preset` goes, with `row_named`, `tunable_named` and `effective_tunable`.** Ninety
-  lines inferring which preset is applied, against a stored name that answers directly. This is most
-  of `docs/issues.md` 1051, resolved as a consequence rather than as work of its own.
-- **A stored name that matches no declared preset falls back to the default**, rather than erroring
-  or leaving the game unbound — a preset renamed or dropped in a patch is an ordinary thing for a
-  save file to have lived through.
-- **A dev-dependency of the examples, not the crate.** This crate publishes `SavedOverrides` and no
-  opinion about where the bytes go (D53). Chunk 72d already added the `bevy_settings` feature to the
-  `bevy` dev-dependency and wired it into Split Friction, so this chunk adds Disasteroids beside it
-  rather than the dependency itself. Disasteroids will need the same `[[example]]` entry with
-  `required-features = ["serialize"]` that Split Friction has — without it the settings group
-  compiles and panics at the first save, which is how chunk 72d found the trap.
-- **Split Friction's half already landed**, in chunk 72d: `bevy_settings` is wired into that example
-  and each pane's `DeviceId` survives a restart, which closes R11.5's persistence half and R15.6.
-  What is left here is the Disasteroids half — `SavedOverrides` as a settings group — and that is
-  what this chunk now means.
-- **The lookup stayed unbuilt, and the reason is now measured rather than guessed.** "Which
-  connected device does this stored identity name", answering no match, exactly one, or several, was
-  written for chunk 72 and withdrawn for want of a caller; chunk 72d did not need it either. Devices
-  arrive as connection events one at a time, including the ones already plugged in at launch, so
-  every caller has one device in hand and asks the inverse question. Two identical pads never
-  present themselves as a set to choose from. It gets built when something asks the question in that
-  direction, and not before.
-- **Not doing:** per-profile or per-scheme settings groups (R17.4), and Split Friction's two panes —
-  chunk 71 landed their preset selection and nothing persists it, which is chunk 92b.
-- **Retires the "Writing a saved override set to a file" row** in "Never built".
-- **Verified by:** rebinding a control, quitting Disasteroids, relaunching it, and finding the
-  binding still applied — and by picking a preset, editing its definition in the source,
-  relaunching, and getting the *edited* preset rather than the rows that shipped before.
-
 ### 92b. A pane's chosen preset survives a restart
 
 Split Friction offers presets and no per-row rebinding, and is not going to, so a pane's whole
@@ -494,9 +428,9 @@ remapping state is one name. Chunk 71 landed the choosing; nothing writes it dow
 - **The settings group is already there.** Chunk 72d's `PlayerOneSettings` / `PlayerTwoSettings`
   carry a `device` field, and `saved_pairings.rs`'s own module doc already says the preset belongs
   beside it. This is that field, saved on `ActivePreset` change and applied when a pane is claimed.
-- **Why it is not chunk 92's.** Different example, different settings groups, and an acceptance test
-  that needs two panes — and it depends on nothing 92 builds, since the name is stored rather than
-  derived. It can land before or after.
+- **Why it was not chunk 92's.** Different example, different settings groups, and an acceptance
+  test that needs two panes. It depends on nothing 92 built, since the name is stored rather than
+  derived; what 92 leaves behind is the shape to copy, in `disasteroids/saved_controls.rs`.
 - **Takes 92's fallback rule with it:** a stored name matching no declared preset drops to
   `CLASSIC` rather than leaving the pane on whatever was last applied.
 - **Verified by:** putting one pane on Southpaw, quitting, relaunching, and finding that pane still
@@ -684,6 +618,8 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | Area | Gated on |
 | --- | --- |
 | **A real Steam backend, validated out of tree** | less than it looked. `docs/steam.md` S4 now says a borrowed app id does carry its own manifest from inside the client's bundle, and S13 answered R1.7 that way, so what is left needing an app id is only what S6 blocks: a configuration Steam actually applies. Whether that needs an app id at all, or only a windowed app Steam launches, is itself unmeasured. The shape is settled: a probe rather than a game, in its own repository, pinning `bevy_action_map` by git rev so it breaks only on a deliberate bump — and it is an audit rather than a gate, since it needs a client and a pad and cannot run in CI. `steam_probe/` is its gitignored seed and moves out when the repository exists. Nothing in this crate is blocked on it: per-family suppression is chunk 112, and the presentation half can be built against API signatures already verified to exist |
+| **Named override profiles per user** (R17.4's first clause) | a game wanting more than one set of bindings under one player. The per-scheme half of R17.4 is already met — `Overrides` is keyed by family, so a keyboard remap cannot reach the gamepad layout — and chunk 92 stores one set per game, in one settings group. A second is another group, or a group holding several; which of those is right depends on whether profiles are switched at runtime, and nothing in tree switches one |
+| **Resolving a stored device identity to the connected devices that match it** | a caller asking in that direction. Written for chunk 72 and withdrawn for want of one; chunks 72d and 92 did not need it either. Devices arrive as connection events one at a time, the ones already plugged in at launch included, so every caller has one device in hand and asks the inverse question. Two identical pads never present themselves as a set to choose from |
 | **Persisting calibration**, keyed to identity (R11.7, R14.11) | nothing any more — chunk 72 built the identity, and chunk 72b owns re-keying calibration onto it. Measured calibration lasts as long as the process until then |
 | **A backend-safe way to ask which device drove an ordinary action's current activation** | a real need, not just Split Friction's. `Fired`'s value is device-agnostic by design — the same reason `Move` never says which stick moved it — so `protagonist.rs`'s `pair_on_join` (chunk 66, restated when `Join` moved off a class binding) reads Bevy's `Gamepad` component and `ButtonInput<KeyCode>` directly to find out who pressed it. That query does not exist under a Steam authority (D22, suppression), so the example breaks under the one backend this crate means to support. Whatever answers this generalizes past one example: some notion of "which device is this activation's origin" carried alongside an ordinary action's value, not only a class binding's raw event |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it. Measured (`docs/steam.md` S17): `get_glyph_for_action_origin` resolves to an absolute filesystem path inside the client's own app bundle — `Contents/MacOS/controller_base/images/api/dark/shared_lstick_md.png` on macOS, not the `tenfoot/resource/...` path this row previously guessed — and the `dark` component says the glyphs are themed, so a light variant has to be selected rather than assumed. A Bevy `AssetPath` can carry it natively via `from_path_buf` — no string-escaping the drive letter or backslashes. The path is not to be opened as given: a custom `AssetSource` reader must canonicalize it and reject anything outside a known root before reading, rather than trust an external SDK's return value as a bare filesystem path. One scheme, one hard-coded root is the right size while only this one root is confirmed; a second scheme is warranted only if a second root with its own lifecycle surfaces (e.g. something ephemeral, which cannot share a stable root's caching and hot-reload assumptions) — not one scheme per SDK call that happens to return a path |

@@ -30,6 +30,7 @@ mod asteroids;
 mod field;
 mod overlay;
 mod pause;
+mod saved_controls;
 mod settings;
 mod ship;
 
@@ -76,6 +77,9 @@ fn main() {
             pause::plugin,
             overlay::plugin,
             settings::plugin,
+            // After `settings::plugin`, which owns the resources its startup load writes into, and
+            // after `actions::plugin`, whose contexts it resolves a saved row against.
+            saved_controls::plugin,
             prompt_ui::plugin,
             widget_focus::plugin,
         ))

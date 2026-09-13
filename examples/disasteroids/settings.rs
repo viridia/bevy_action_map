@@ -19,6 +19,10 @@
 //! write into [`PendingOverrides`] — never into the view directly. [`redraw_pending`] is the one
 //! place anything reads it back out and repaints a cell, run once per change rather than pushed by
 //! whatever changed it, the same way [`prompt_ui`](crate::common::prompt_ui) keeps prompts true.
+//!
+//! The working copy is a preset's *name* and the rows the player moved by hand, kept apart — see
+//! [`Controls`]. Confirm merges them, applies the result, and hands the same two facts to
+//! [`saved_controls`](crate::saved_controls) to write down.
 
 use bevy::input_focus::{AutoFocus, InputFocus};
 use bevy::math::CompassOctant;
@@ -26,9 +30,7 @@ use bevy::prelude::*;
 use bevy::ui::UiSystems;
 use bevy::ui::auto_directional_navigation::AutoDirectionalNavigator;
 use bevy::ui_widgets::{Activate, Button};
-use bevy_action_map::mapping::{
-    Tunable, TunableValue, declared_mappings, declared_tunables, fallback_label, tunables,
-};
+use bevy_action_map::mapping::{Tunable, TunableValue, fallback_label, tunables};
 use bevy_action_map::overrides::{Override, Overrides, apply_overrides_with_preset};
 use bevy_action_map::prelude::*;
 use bevy_action_map::preset::Preset;
@@ -40,6 +42,7 @@ use crate::common::widget_focus::{
     Adjusted, ButtonFocused, Stepper, decrement_pressed, focusable, increment_pressed,
 };
 use crate::pause::Simulating;
+use crate::saved_controls;
 
 // Colors
 
@@ -90,28 +93,104 @@ pub enum Settings {
     Showing,
 }
 
+/// A choice of controls: the gamepad preset in effect, and the rows the player moved by hand.
+///
+/// The two are kept apart rather than accumulated into one override set, because they mean
+/// different things once written down. A preset is game content that changes between builds, so
+/// what survives a restart is the *name* the player picked — store its resolved rows instead and a
+/// patch that edits the preset leaves the player on the definition that shipped the day they chose
+/// it. A hand-moved row is the player's own, and survives as itself.
+///
+/// [`working_copy`] is where the two become the single [`Overrides`] the game actually runs on.
+///
+/// A name is a claim rather than a measurement, and that is the cost: the player is on Southpaw
+/// until they pick something else, however far they have since moved from it. A screen wanting to
+/// say "Southpaw (modified)" would have to compare the working copy against the preset's own rows,
+/// which nothing here does.
+#[derive(Clone)]
+pub(crate) struct Controls {
+    /// Always a preset this build declares — see [`resolve_preset`].
+    pub preset: &'static str,
+    /// The rows and tunables the player moved by hand, laid over whatever the preset says.
+    pub captures: Overrides,
+}
+
+impl Default for Controls {
+    fn default() -> Self {
+        Self {
+            preset: DEFAULT_PRESET,
+            captures: Overrides::new(),
+        }
+    }
+}
+
+/// What the game is running: written on Confirm, and what each visit to the screen starts from.
+///
+/// [`saved_controls`](crate::saved_controls) keeps the file-shaped copy of the same choice, loads
+/// it at startup and writes it back whenever this changes.
+#[derive(Resource, Default)]
+pub(crate) struct AppliedControls(pub Controls);
+
 /// Every change the player has made on this visit to the screen, unconfirmed.
 ///
-/// Reset empty whenever the screen opens. Confirm is the only path from here into the running game,
-/// via [`apply_overrides_with_preset`]. Every capture and every preset press writes into `rows` and
-/// nothing else — this is a model, and [`redraw_pending`] is the only thing that reads it back out
-/// to repaint a cell, so what a row shows is always what Confirm would commit without either writer
-/// having to know how to draw one.
+/// Seeded from [`AppliedControls`] whenever the screen opens. Confirm is the only path from here
+/// into the running game, via [`apply_overrides_with_preset`]. Every capture and every preset press
+/// writes here and nowhere else — this is a model, and [`redraw_pending`] is the only thing that
+/// reads it back out to repaint a cell, so what a row shows is always what Confirm would commit
+/// without either writer having to know how to draw one.
 #[derive(Resource, Default)]
-struct PendingOverrides {
-    /// Captures and a preset's rows alike, the whole working copy Confirm applies.
-    rows: Overrides,
-    /// The rows the currently selected preset authorized, replaced wholesale on each preset press
-    /// and never accumulated — picking a new preset supersedes the last rather than layering onto
-    /// it. Confirm hands this to [`apply_overrides_with_preset`] so a preset's own rows still move
-    /// even though the row they name is `Fixed` everywhere a capture can reach.
-    preset_rows: Overrides,
+struct PendingOverrides(Controls);
+
+/// The preset a player who has never picked one is on, and where a saved name this build no longer
+/// declares lands.
+pub(crate) const DEFAULT_PRESET: &str = "disasteroids.default";
+
+/// The preset `name` names, or [`DEFAULT_PRESET`] where nothing does — a preset renamed or dropped
+/// in a patch is an ordinary thing for a save file to have lived through.
+pub(crate) fn resolve_preset(world: &World, name: &str) -> &'static str {
+    presets(world)
+        .into_iter()
+        .find(|preset| preset.name == name)
+        .map_or(DEFAULT_PRESET, |preset| preset.name)
+}
+
+/// What the working copy would commit, and the selected preset's own rows beside it.
+///
+/// The merge is the preset's rows with the captures over them. A capture wins where the two name
+/// the same row, which on this screen they never do — every row a preset moves is `Fixed`, and a
+/// capture only reaches a `Changeable` one — but the order is stated rather than left to chance.
+///
+/// The preset's rows come back separately because [`apply_overrides_with_preset`] wants both: the
+/// merged set is what to apply, and the preset's own rows are what may bypass the "not rebindable
+/// here" refusal on the way in.
+pub(crate) fn working_copy(world: &World, controls: &Controls) -> (Overrides, Overrides) {
+    let preset_rows = presets(world)
+        .into_iter()
+        .find(|preset| preset.name == controls.preset)
+        .map_or_else(Overrides::new, |preset| preset.rows);
+
+    let mut merged = preset_rows.clone();
+    for (family, key, over) in controls.captures.iter() {
+        merged.set(family, key, over.clone());
+    }
+    for (family, key, value) in controls.captures.iter_tunables() {
+        merged.tune(family, key, value);
+    }
+    (merged, preset_rows)
+}
+
+/// [`working_copy`] against the unconfirmed copy, which is what everything on this screen draws.
+fn pending_copy(world: &World) -> Overrides {
+    working_copy(world, &world.resource::<PendingOverrides>().0).0
 }
 
 pub fn plugin(app: &mut App) {
     app.init_state::<Settings>();
     app.init_resource::<PendingOverrides>();
-    app.add_systems(OnEnter(Settings::Showing), (reset_pending, show));
+    app.init_resource::<AppliedControls>();
+    // Chained: `show` builds the screen out of the working copy, so it has to see the copy this
+    // visit starts from rather than the one the last visit left behind.
+    app.add_systems(OnEnter(Settings::Showing), (seed_pending, show).chain());
     app.add_systems(OnExit(Settings::Showing), release_focus);
     // Ahead of every UI system, so a cell that changed this frame is laid out at the width its new
     // text wants rather than the width it used to be — the same reason `prompt_ui` runs where it
@@ -134,9 +213,10 @@ pub fn plugin(app: &mut App) {
     app.configure_sets(FixedUpdate, Simulating.run_if(in_state(Settings::Hidden)));
 }
 
-/// Starts this visit with nothing changed.
-fn reset_pending(mut pending: ResMut<PendingOverrides>) {
-    *pending = PendingOverrides::default();
+/// Starts this visit from what the game is running, so a screen reopened after a Confirm shows the
+/// preset that was chosen and the rows that were moved rather than an empty slate.
+fn seed_pending(applied: Res<AppliedControls>, mut pending: ResMut<PendingOverrides>) {
+    pending.0 = applied.0.clone();
 }
 
 /// Opens the screen, and closes it again.
@@ -218,11 +298,16 @@ pub(crate) fn confirm(_: On<Fired<Confirm>>, mut commands: Commands) {
 }
 
 /// The two ways Confirm is reached — the action above, and the button below — end here.
+///
+/// The one place the working copy leaves this screen, so it is also the one place the choice is
+/// written down: to the running game, to [`AppliedControls`] for the next visit, and to the
+/// settings file for the next launch.
 fn apply_and_close(world: &mut World) {
-    let pending = world.resource::<PendingOverrides>();
-    let rows = pending.rows.clone();
-    let preset_rows = pending.preset_rows.clone();
-    apply_overrides_with_preset(world, &rows, &preset_rows);
+    let controls = world.resource::<PendingOverrides>().0.clone();
+    let (merged, preset_rows) = working_copy(world, &controls);
+    apply_overrides_with_preset(world, &merged, &preset_rows);
+    saved_controls::store(world, &controls);
+    world.resource_mut::<AppliedControls>().0 = controls;
     world
         .resource_mut::<NextState<Settings>>()
         .set(Settings::Hidden);
@@ -237,7 +322,7 @@ fn apply_and_close(world: &mut World) {
 fn presets(world: &World) -> Vec<Preset> {
     vec![
         Preset {
-            name: "disasteroids.default",
+            name: DEFAULT_PRESET,
             rows: Overrides::new(),
         },
         Preset::build(world, "disasteroids.southpaw", |southpaw| {
@@ -268,68 +353,6 @@ fn row_named(
 ) -> Option<&ActionMapping> {
     rows.iter()
         .find(|row| row.family == family && row.key == key)
-}
-
-/// The tunable named `family` and `key`, if any in the list is — [`row_named`] for tunables.
-fn tunable_named(tunables: &[Tunable], family: DeviceFamily, key: &'static str) -> Option<Tunable> {
-    tunables
-        .iter()
-        .copied()
-        .find(|tunable| tunable.family == family && tunable.key == key)
-}
-
-/// Which of `presets` currently matches what is bound, if any.
-///
-/// Checked against the union of every row and every tunable any preset in the list names, not just
-/// this preset's own — a preset that names nothing (`Default`) is a claim that none of *them* have
-/// moved, which is only answerable by looking at what the others would have changed. A row or
-/// tunable a preset does not name reads as its own declared default, the same rule [`effective`]
-/// already applies to a pending row nobody has touched.
-fn selected_preset(
-    presets: &[Preset],
-    declared: &[ActionMapping],
-    live: &[ActionMapping],
-    declared_tunables: &[Tunable],
-    live_tunables: &[Tunable],
-    pending: &Overrides,
-) -> Option<&'static str> {
-    let touched: Vec<(DeviceFamily, MappingKey)> = presets
-        .iter()
-        .flat_map(|preset| preset.rows.iter().map(|(family, key, _)| (family, key)))
-        .collect();
-    let touched_tunables: Vec<(DeviceFamily, &'static str)> = presets
-        .iter()
-        .flat_map(|preset| {
-            preset
-                .rows
-                .iter_tunables()
-                .map(|(family, key, _)| (family, key))
-        })
-        .collect();
-
-    presets
-        .iter()
-        .find(|preset| {
-            touched.iter().all(|&(family, key)| {
-                let Some(declared_row) = row_named(declared, family, key) else {
-                    return false;
-                };
-                let Some(live_row) = row_named(live, family, key) else {
-                    return false;
-                };
-                effective(declared_row, &preset.rows) == effective(live_row, pending)
-            }) && touched_tunables.iter().all(|&(family, key)| {
-                let Some(declared_tunable) = tunable_named(declared_tunables, family, key) else {
-                    return false;
-                };
-                let Some(live_tunable) = tunable_named(live_tunables, family, key) else {
-                    return false;
-                };
-                effective_tunable(&declared_tunable, &preset.rows)
-                    == effective_tunable(&live_tunable, pending)
-            })
-        })
-        .map(|preset| preset.name)
 }
 
 /// The whole screen, as a scene.
@@ -364,18 +387,9 @@ fn screen(world: &World) -> impl Scene {
     // story — the row of buttons below it is drawn distinct exactly where the current selection
     // reads as matching what is bound.
     let presets = presets(world);
-    let declared = declared_mappings(world);
-    let declared_tunable_rows = declared_tunables(world);
     let live_tunables = tunables(world);
-    let pending = world.resource::<PendingOverrides>().rows.clone();
-    let selected = selected_preset(
-        &presets,
-        &declared,
-        &all,
-        &declared_tunable_rows,
-        &live_tunables,
-        &pending,
-    );
+    let pending = pending_copy(world);
+    let selected = world.resource::<PendingOverrides>().0.preset;
     let dead_zone = dead_zone_tunable(world, &pending);
     let hold_or_toggle = live_tunables
         .iter()
@@ -537,10 +551,10 @@ fn confirm_pressed(_: On<Activate>, mut commands: Commands) {
 /// handed rather than holding onto it, but Rust 2024's default `impl Trait` capture rule would tie
 /// the result to `presets`'s borrow anyway, which does not outlive the caller's own local of the
 /// same name in [`screen`].
-fn preset_row(presets: &[Preset], selected: Option<&'static str>) -> impl Scene + use<> {
+fn preset_row(presets: &[Preset], selected: &str) -> impl Scene + use<> {
     let buttons: Vec<_> = presets
         .iter()
-        .map(|preset| preset_button(preset, Some(preset.name) == selected))
+        .map(|preset| preset_button(preset, preset.name == selected))
         .collect();
     bsn! {
         Node { column_gap: Val::Px(10.0) }
@@ -672,12 +686,12 @@ fn apply_dead_zone_delta(adjusted: On<Adjusted>, mut commands: Commands) {
         else {
             return;
         };
-        let mut pending = world.resource_mut::<PendingOverrides>();
-        let TunableValue::Range { value, min, max } = effective_tunable(&tunable, &pending.rows)
+        let TunableValue::Range { value, min, max } =
+            effective_tunable(&tunable, &pending_copy(world))
         else {
             return;
         };
-        pending.rows.tune(
+        world.resource_mut::<PendingOverrides>().0.captures.tune(
             tunable.family,
             tunable.key,
             TunableValue::Range {
@@ -752,13 +766,14 @@ fn hold_or_toggle_pressed(_: On<Activate>, mut commands: Commands) {
         else {
             return;
         };
-        let mut pending = world.resource_mut::<PendingOverrides>();
-        let TunableValue::Bool(active) = effective_tunable(&tunable, &pending.rows) else {
+        let TunableValue::Bool(active) = effective_tunable(&tunable, &pending_copy(world)) else {
             return;
         };
-        pending
-            .rows
-            .tune(tunable.family, tunable.key, TunableValue::Bool(!active));
+        world.resource_mut::<PendingOverrides>().0.captures.tune(
+            tunable.family,
+            tunable.key,
+            TunableValue::Bool(!active),
+        );
     });
 }
 
@@ -767,53 +782,38 @@ fn hold_or_toggle_pressed(_: On<Activate>, mut commands: Commands) {
 #[derive(Component, Clone, Copy)]
 struct PresetButton(&'static str);
 
-/// Writes the pressed preset's rows into the working copy. Nothing else — no cell this observer
-/// could name is touched directly; [`redraw_pending`] notices the change and repaints everything
-/// that might have moved, including every preset button's own highlight.
+/// Names the pressed preset in the working copy. Nothing else — no cell this observer could name is
+/// touched directly; [`redraw_pending`] notices the change and repaints everything that might have
+/// moved, including every preset button's own highlight.
 ///
-/// Every row and tunable *any* registered preset names is cleared first, not just the ones this
-/// preset itself names: picking a new preset supersedes whatever the last one wrote rather than
-/// layering onto it, and a preset that names nothing (`Default`) is a claim about all of them, the
-/// same reading [`selected_preset`] already gives that case. Skipping this step is exactly the bug
-/// an earlier version of this function had — `Default`'s own rows are empty, so writing only what
-/// it names wrote nothing at all, and whatever the last preset had moved simply stayed moved.
+/// Recording the name is the whole of it, because [`working_copy`] resolves the rows fresh every
+/// time it is asked. That is what makes picking a preset supersede the last rather than layer onto
+/// it, with no register of which rows any preset touches: `Default` names no rows, so switching
+/// back to it leaves nothing of Southpaw behind.
+///
+/// The captures the preset itself names are dropped, though — a preset press is a fresh statement
+/// about the rows it covers, and a player who nudged the dead zone and then pressed Southpaw again
+/// is asking for Southpaw's dead zone. Captures the preset does not name are left alone, which is
+/// what keeps a keyboard rebind from being thrown away by a gamepad preset.
 fn preset_pressed(activate: On<Activate>, buttons: Query<&PresetButton>, mut commands: Commands) {
     let Ok(&PresetButton(name)) = buttons.get(activate.entity) else {
         return;
     };
     commands.queue(move |world: &mut World| {
-        let presets = presets(world);
-        let Some(preset) = presets.iter().find(|preset| preset.name == name) else {
+        let Some(preset) = presets(world)
+            .into_iter()
+            .find(|preset| preset.name == name)
+        else {
             return;
         };
-        let touched: Vec<(DeviceFamily, MappingKey)> = presets
-            .iter()
-            .flat_map(|preset| preset.rows.iter().map(|(family, key, _)| (family, key)))
-            .collect();
-        let touched_tunables: Vec<(DeviceFamily, &'static str)> = presets
-            .iter()
-            .flat_map(|preset| {
-                preset
-                    .rows
-                    .iter_tunables()
-                    .map(|(family, key, _)| (family, key))
-            })
-            .collect();
-
         let mut pending = world.resource_mut::<PendingOverrides>();
-        for (family, key) in touched {
-            pending.rows.reset(family, key);
+        for (family, key, _) in preset.rows.iter() {
+            pending.0.captures.reset(family, key);
         }
-        for (family, key) in touched_tunables {
-            pending.rows.reset_tunable(family, key);
+        for (family, key, _) in preset.rows.iter_tunables() {
+            pending.0.captures.reset_tunable(family, key);
         }
-        for (family, key, over) in preset.rows.iter() {
-            pending.rows.set(family, key, over.clone());
-        }
-        for (family, key, value) in preset.rows.iter_tunables() {
-            pending.rows.tune(family, key, value);
-        }
-        pending.preset_rows = preset.rows.clone();
+        pending.0.preset = preset.name;
     });
 }
 
@@ -827,14 +827,12 @@ fn preset_pressed(activate: On<Activate>, buttons: Query<&PresetButton>, mut com
 /// same reason.
 ///
 /// Exclusive, because it reads every tagged cell in the table alongside the mapping list, the
-/// declared defaults, the preset list and the pending copy all at once.
+/// preset list and the pending copy all at once.
 fn redraw_pending(world: &mut World) {
     let live = mappings(world);
-    let declared = declared_mappings(world);
     let live_tunables = tunables(world);
-    let declared_tunable_rows = declared_tunables(world);
-    let presets = presets(world);
-    let pending = world.resource::<PendingOverrides>().rows.clone();
+    let pending = pending_copy(world);
+    let selected = world.resource::<PendingOverrides>().0.preset;
 
     let mut principals = world.query::<(&RowCell, &mut Text)>();
     for (cell, mut text) in principals.iter_mut(world) {
@@ -863,17 +861,9 @@ fn redraw_pending(world: &mut World) {
         );
     }
 
-    let selected = selected_preset(
-        &presets,
-        &declared,
-        &live,
-        &declared_tunable_rows,
-        &live_tunables,
-        &pending,
-    );
     let mut buttons = world.query::<(&PresetButton, &mut BorderColor, &mut BackgroundColor)>();
     for (button, mut border, mut background) in buttons.iter_mut(world) {
-        let is_selected = Some(button.0) == selected;
+        let is_selected = button.0 == selected;
         *border = BorderColor::all(if is_selected { SELECTED } else { FIXED });
         *background = BackgroundColor(if is_selected {
             SELECTED.with_alpha(0.25)
@@ -1268,25 +1258,28 @@ fn resolve_capture(
     else {
         return;
     };
+    // Conflicts are read against the merged copy, so a control a preset moved onto a row still
+    // counts as taken; the steal itself is written into the captures, since the player made it.
+    let working = pending_copy(world);
     let mut pending = world.resource_mut::<PendingOverrides>();
 
-    for clash in conflicts_pending(&all, &pending.rows, control, Some(key)) {
+    for clash in conflicts_pending(&all, &working, control, Some(key)) {
         let Some(other) = all
             .iter()
             .find(|row| row.family == family && row.key == clash.mapping)
         else {
             continue;
         };
-        let mut controls = effective(other, &pending.rows);
+        let mut controls = effective(other, &working);
         controls.retain(|&held| held != control);
-        pending.rows.bind(other.family, other.key, controls);
+        pending.0.captures.bind(other.family, other.key, controls);
     }
 
-    let mut controls = effective(&target, &pending.rows);
+    let mut controls = effective(&target, &working);
     if slot < controls.len() {
         controls[slot] = control;
     } else {
         controls.push(control);
     }
-    pending.rows.bind(target.family, target.key, controls);
+    pending.0.captures.bind(target.family, target.key, controls);
 }

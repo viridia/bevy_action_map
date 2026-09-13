@@ -966,12 +966,11 @@ rather than one the crate hands out.
 
 Passing a preset to `apply_overrides_with_preset` exempts exactly the rows that preset names from
 the `NotRebindable` refusal — which is what lets a preset move a `Fixed` row a capture screen never
-offers a button for. Every other refusal still applies. A preset is a starting point, not a layer:
-selecting one writes its rows into the same working copy a manual capture writes into, and there is
-no persisted "which preset is active" anywhere.
+offers a button for. Every other refusal still applies.
 
-There is no crate-owned registry of presets. A game keeps its own list, as it keeps its own working
-copy.
+There is no crate-owned registry of presets, and no record of which one is applied. A game keeps its
+own list and its own answer, as it keeps its own working copy; merging a preset's rows with the
+player's own captures into the one set to apply is the caller's job.
 
 ### 10.3 Serialization
 
@@ -1037,7 +1036,9 @@ rather than preserved unresolved.
 `action_map_version` is checked before any row is read: a `SavedOverrides` naming a version this
 build never shipped is refused as a whole (`UnsupportedVersion`) rather than resolved as the one
 version that exists today. There is no migration path yet, because there has never been a second
-version for one to convert from.
+version for one to convert from. `SavedOverrides::default()` stamps the version this build writes,
+so the empty set a settings layer builds for a game with no file yet resolves like any other rather
+than being refused on its first launch.
 
 ---
 

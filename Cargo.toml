@@ -71,11 +71,17 @@ trybuild = "1.0"
 # learns about outside that one test (§10.1).
 toml = "0.8"
 
-# Declared rather than auto-discovered, for the one line that matters: it stores a pairing, so it
-# needs `serialize`, which is not a default feature. The others are still picked up automatically.
+# Declared rather than auto-discovered, for the one line that matters: each stores something, so
+# each needs `serialize`, which is not a default feature. The others are still picked up
+# automatically.
 [[example]]
 name = "split_friction"
 path = "examples/split_friction/main.rs"
+required-features = ["serialize"]
+
+[[example]]
+name = "disasteroids"
+path = "examples/disasteroids/main.rs"
 required-features = ["serialize"]
 
 [features]

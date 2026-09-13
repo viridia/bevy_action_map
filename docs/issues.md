@@ -580,42 +580,6 @@ enumerates.
 
 Unrouted.
 
-### 1051 "Which preset is active" is answered twice, differently, and one answer costs ninety lines
-
-`settings.rs`'s `selected_preset` · `popup.rs`'s `ActivePreset` · D53
-
-D53 has the crate keep "no registry of presets and no record of which one is active." Both examples
-need that record, and they reach it from opposite ends:
-
-- **Split Friction stores it.** `ActivePreset` is a component inserted beside `Paired`, so there is
-  always an answer, and a redraw system keeps the label true to it.
-- **Disasteroids infers it.** `selected_preset` compares the live bindings against every row and
-  every tunable that *any* preset touches, because a preset naming nothing is a claim that none of
-  the others have moved. With its helpers — `row_named`, `tunable_named`, `effective`,
-  `effective_tunable` — that is about ninety lines to answer a question the other example answers
-  with a component.
-
-Neither is wrong. The inference is genuinely more correct — it stays true when something else
-rebinds a row out from under the stored answer, which the component does not — and that is the
-argument for the crate holding it rather than each game picking one of the two.
-
-D53's registry half is not in question: which presets exist is the game's. It is the *record of
-which one is applied* that both examples had to build, and that the crate is better placed to keep
-accurate, since it already sees every rewrite that would invalidate it.
-
-_Fix:_ **chunks 92 and 92b**, and neither by shipping the inference. Both examples store the chosen
-preset's name instead — 92 splits `PendingOverrides` so captures and preset rows stop being merged
-into one bag, and 92b persists Split Friction's `ActivePreset` — which deletes `selected_preset` and
-its three helpers rather than moving them into the crate. D53 needs no revisit: what the examples
-were missing was a record of the player's own choice, which is the game's to keep, not a record the
-crate should have been holding.
-
-The half that does not dissolve: a game that lets a player rebind rows a preset also touches still
-has to decide what "still on Southpaw" means once they have departed from it. Storing the name
-answers it by fiat — you are on Southpaw until you pick something else — which is a defensible
-answer and the one 92 takes, but it is a choice rather than a fact, and a screen wanting to show
-"Southpaw (modified)" would need the comparison back.
-
 ### 1053 The release itself has no destination
 
 `Roadmap.md` · `Cargo.toml`
