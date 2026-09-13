@@ -31,6 +31,13 @@
 //! Which slot a newly claimed device fills, how many slots there are, and whether a game wants
 //! "any button" or one particular control per family all stay ordinary binding declaration and
 //! ordinary application logic — not something this crate decides for you.
+//!
+//! Requiring a particular kind of device for a slot works the same way: check
+//! [`DeviceHandle::family`](crate::device::DeviceHandle::family) before claiming, and return
+//! without claiming if it is not the one this slot wants. A co-op mode where every player is on a
+//! gamepad is the usual reason. The crate never treats one family as a stand-in for another — a
+//! mouse and a stick aim nothing alike — so which substitutions your game accepts is yours to
+//! state.
 
 use crate::device::DeviceHandle;
 use crate::player::Paired;

@@ -212,38 +212,6 @@ explicit player-facing step. `DeviceId` is the identity to key it by, and it exi
 - **Verified by:** calibrating a drifting stick, quitting, relaunching, and finding the stick still
   corrected.
 
-### 104. Named device-requirement sets at the join screen
-
-R15.7 (SHOULD) (`docs/issues.md` 1042, split from 1020): named device-requirement sets with required
-and optional devices — nothing exists under this name anywhere in `src/`.
-
-- **Split Friction's join screen**, validating "this player needs a gamepad" versus "keyboard is
-  fine" before a pane is handed a protagonist, rather than silently accepting any device.
-- **This is the chunk that stops device families reading as interchangeable.** Split Friction
-  accepts whichever device pressed first and treats a keyboard as a pad's peer, which is true of a
-  game that simple and false in general: a mouse aims far more precisely than a stick, to the point
-  that shooters refuse to match the two. The crate itself takes no position — D53 has it refusing
-  to rank devices, and nothing in `src/` substitutes one family for another — so what is missing is
-  the vocabulary for a game to state its own requirement, not a default to correct.
-- **Write it for the two cases that are real**, rather than for Split Friction's: local co-op where
-  every player is on a gamepad, and network play where the client is one player, every device is
-  taken automatically, and nobody joins anything. The second wants no join screen at all, which the
-  crate already allows — a context with no `Paired` reads every device — so the requirement set has
-  to be optional rather than a step everything passes through.
-
-### 105. Auto-switching a player's active scheme
-
-R15.8 (SHOULD) (`docs/issues.md` 1043, split from 1020): auto-switching a player's active scheme on
-input, with hysteresis — nothing exists, and R18.6's withdrawal names this as the one thing that
-would revive it.
-
-- **Split Friction.** A player on a pad picks up the keyboard instead; control follows without a
-  menu trip. R18.6 stays withdrawn unless this chunk's hysteresis turns out not to hold up under
-  real play.
-- **`docs/issues.md` 1044 (R15.9, opaque platform-user identity)** stays unrouted alongside this —
-  floated for Split Friction too, but nothing to show without a real platform SDK, and not yet worth
-  a faked stub the way chunk 42 fakes a backend.
-
 ---
 
 ## Bindings and conditions
@@ -675,6 +643,8 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **An initial delay distinct from the repeat rate** (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both. Two numbers is a small change; what is missing is a case where equal is wrong, and a two-table settings screen is not it |
 | **Free-form mutually-exclusive context sets** (R7.7 remainder) | nothing in tree needs two independently-exclusive contexts to coexist rather than one dominating the other by priority |
 | **Owner-scoped `ConsumedControls`/exclusion ceiling** (R15.3 remainder, and D13's own remainder) | a real in-tree case with a per-player exclusive context, or a binding consumed across two players' devices. Design if built: a claim visible only if made globally or by the viewer's own paired device; an exclusive context's shadow implicit in its own pairing rather than a separate flag |
+| **Auto-switching which device a player is paired to** (R15.8) | a game where picking up the other device happens often enough that re-joining is a real cost. Split Friction joins once and a player who wants the keyboard instead can take it the same way they took the pad. Deferred rather than withdrawn alongside R15.7, because unlike R15.7 this is not something an app can write for itself: telling a deliberate grab from a drifting stick means reading the raw samples under a deadzone floor before any action fires, which an app watching `Fired` never sees. R18.6 stays withdrawn on it — if this lands, a prompt reads the player's paired device rather than tracking one of its own |
+| **Opaque platform-user identity** (R15.9) | a real platform SDK. Floated for Split Friction, but there is nothing to show without one, and not worth a faked stub the way chunk 42 fakes a backend |
 | **An authority backend's actions in rollback** (D22's remainder) | a snapshot to fit them into. `AuthorityValues` is a plain component and clones with the entity, but what a rewind has to reproduce is what the authority *said* on the tick being re-simulated, which is not in the frame. The available answer is recording the backend's output into the frame at sample time, at the cost of a larger frame |
 | **Sub-frame event timing** (D4's remainder) | [bevy#9087][] upstream. Gamepad stays frame-quantized regardless until gilrs polling is rewritten, so mixed fidelity across sources is permanent for now rather than an artifact |
 | **Schedule enforcement for tick domains** (D9's remainder) | Bevy giving a `SystemParam` a way to know its own schedule. A plugin-time validation pass and a debug assertion stand in |

@@ -202,26 +202,20 @@ the `no_std` interaction first rather than assuming it.
 
 [bevyengine/bevy#15030]: https://github.com/bevyengine/bevy/pull/15030
 
-### 1042 No named device-requirement sets
+### 1043 No auto-switching which device a player is paired to
 
-R15.7 (SHOULD, split from 1020) — named device-requirement sets with required and optional devices.
-Nothing. The concept does not exist under any name in `src/` — see 1030: `player.rs`'s own module
-doc claims it anyway.
-
-_Fix:_ **chunk 104**.
-
-### 1043 No auto-switching a player's active scheme
-
-R15.8 (SHOULD, split from 1020) — auto-switching a player's active scheme on input, with hysteresis.
+R15.8 (SHOULD, split from 1020) — auto-switching on input from another device, with hysteresis.
 Nothing — and R18.6's _withdrawal_ names this as the one thing that would revive it, so an unbuilt
 SHOULD is load-bearing for a withdrawn requirement staying withdrawn.
 
-_Fix:_ **chunk 105**.
+_Fix:_ **deferred**, with the gate stated in Roadmap's deferred table.
 
 ### 1044 No opaque platform-user identity
 
 R15.9 (SHOULD, split from 1020) — opaque platform-user identity attached to a player. Nothing to
-show without a real platform SDK behind it, unlike the rest of this group. Unrouted.
+show without a real platform SDK behind it, unlike the rest of this group.
+
+_Fix:_ **deferred**, with the gate stated in Roadmap's deferred table.
 
 ### 1021 Accessibility has no citation anywhere in the project
 
@@ -371,7 +365,7 @@ any one of them is misled about a mechanism.
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `lib.rs:174`                            | the `touch` feature is "Touch input as a binding source"                                                            | no `cfg(feature = "touch")` anywhere in `src/`; design §11 says _reserved_                                                                                                                                                                                                                             |
 | `device.rs` module doc                  | the module has persistent device identity and capability data                                                       | neither (R11.5, R11.3); the `DeviceHandle` doc eight lines below says the first is not built                                                                                                                                                                                                           |
-| `player.rs` module doc                  | the module "describes the named device requirements a game can assign players against"                              | it holds `Paired` and nothing else; that is R15.7, which is 1042. There is no `Scheme`-like type left in the crate at all to even partly answer this — chunk 48 renamed `Scheme` to `DeviceFamily`, which answers a different question (which family a control belongs to, not what a player requires) |
+| `player.rs` module doc                  | the module "describes the named device requirements a game can assign players against"                              | it holds `Paired` and nothing else. That was R15.7, now withdrawn, so this promises something the crate will never grow rather than something it owes — the sentence goes rather than waiting on a fix. Chunk 48 renamed the one `Scheme`-like type to `DeviceFamily`, which answers a different question (which family a control belongs to, not what a player requires) |
 | `inspect.rs:76`                         | `ActionDump::state` is "Value, phase, elapsed time and progress"                                                    | `ActionState` is `{ value, phase }`; the two extra numbers are 1014                                                                                                                                                                                                                                    |
 | `lib.rs:219`                            | `ActionMapSystems` is "System sets for the two stages of the input pipeline"                                        | four variants; the body names `Sample` and `Evaluate` and says nothing about `Capture` or `Dispatch`, both of which are public ordering targets                                                                                                                                                        |
 | `action.rs:497`                         | write `InputContext` by hand "if you need to configure the component differently; it is three associated constants" | the trait is not what makes the type a component — the derive emits `Component`, `Default`, `Clone` and `Copy` alongside it, and a hand-written impl gets none. `macros/src/lib.rs:131` says "four associated consts" for the same trait; four exist and three are required                            |

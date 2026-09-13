@@ -987,10 +987,18 @@ handle "two players on one keyboard" gracefully.
   specific requirements documents are under NDA and cannot be cited here).
 - **R15.6 (MUST)** Reconnect must be able to restore the previous assignment via persistent identity
   (§11.R11.5).
-- **R15.7 (SHOULD)** Control schemes: named device-requirement sets (KBM, Gamepad) with required and
-  optional devices, used for auto-assignment and prompt selection (§18).
-- **R15.8 (SHOULD)** Auto-switching of a player's active scheme on input, with hysteresis and a
-  noise/deadzone floor so a drifting stick does not flip prompts mid-sentence; and an opt-out.
+- **R15.7 (WITHDRAWN)** ~~Control schemes: named device-requirement sets (KBM, Gamepad) with
+  required and optional devices, used for auto-assignment and prompt selection (§18).~~ _Withdrawn:
+  taken from Unity's `InputControlScheme`, where a scheme also selects which of one asset's bindings
+  are live for a player. That job does not exist here — bindings resolve per device family at lookup
+  — and of the two consumers this named, prompt selection went with R18.6. What is left is
+  auto-assignment, which is the app's under D53: the join gesture (R15.4) hands the app the device
+  that pressed, the app owns the slot table, and "this slot needs a gamepad" is a test on that
+  device's family. What would revive this is a consumer inside the crate — something that must know
+  a player's device requirement where the app's own join code cannot answer for it._
+- **R15.8 (SHOULD)** Auto-switching which device a player is paired to when they pick up another
+  one, with hysteresis and a noise/deadzone floor so a drifting stick does not flip prompts
+  mid-sentence; and an opt-out.
 - **R15.9 (SHOULD)** Attach opaque platform-user identity (PSN/Xbox/Steam account handle) to a
   player without the crate depending on any platform SDK.
 - **R15.10 (MAY)** Split-screen: associate a player with a camera/viewport for pointer coordinate
@@ -1110,8 +1118,8 @@ the game. Unity `ToDisplayString` + `InputBinding.MaskByGroup`. Unreal's
   current layout at all, which is the same gap §10.3 records for `fallback_label`. It is a
   limitation of what can be observed rather than work left undone, and it becomes schedulable if
   winit surfaces the layout._
-- **R18.6 (WITHDRAWN)** ~~Track a per-player "most recently used device/scheme" for prompt
-  selection, subject to §15.R15.8 hysteresis.~~ _Superseded: which device a prompt speaks for is the
+- **R18.6 (WITHDRAWN)** ~~Track a per-player "most recently used device" for prompt selection,
+  subject to §15.R15.8 hysteresis.~~ _Superseded: which device a prompt speaks for is the
   app's call, supplied to the lookup rather than inferred by it. R18.1 already takes a device class,
   and an app knows why it is showing the prompt — which screen, opened how — where the crate would
   only be guessing from what was pressed last. Split-screen is where the difference stops being
@@ -1119,7 +1127,7 @@ the game. Unity `ToDisplayString` + `InputBinding.MaskByGroup`. Unreal's
   opened it, and "most recently used" would be answering a question nobody asked while both players
   are pressing things. What would revive this is R15.8's auto-switching,
   which is a §15 question about the player model rather than a presentation one: if that lands, a
-  prompt reads the active scheme rather than tracking one of its own._
+  prompt reads the player's paired device rather than tracking one of its own._
 - **R18.7 (SHOULD)** Support a confirm/cancel button-convention policy as one setting rather than
   scattered `if cfg!` checks. The case that forces this: on PlayStation in Japan, ○ (East) has
   historically meant confirm and ✕ (South) cancel, while the rest of the world uses the opposite —
