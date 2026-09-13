@@ -7,6 +7,11 @@ which session found it.
 whether it was confirmed by running something or only by reading. That last distinction is the
 important one, and it is stated per entry rather than assumed.
 
+**Line numbers are as of the scan, and several have since drifted** — `lib.rs:174` is now 201,
+`eval.rs:247` is now 257, and the two `cargo doc` sites in 1038 have moved and been fixed. Take a
+`file.rs:NNN` as "roughly here, find it by name"; the symbol named beside it is the part that is
+still good. Re-verify before acting on one.
+
 **Numbering.** Each entry's number is a flat, permanent identity, assigned once from a single
 counter and independent of which tier it sits in — the tier is where it's filed today, not what it
 is. A number is never reused: once an entry is fixed and its chunk has landed, the entry is retired
@@ -15,7 +20,7 @@ chunk's own commit, and `docs/design.md` or `docs/decisions.md` where anything a
 are the record. A gap in the sequence below is a retired finding, not an omission. The next
 unassigned number is stated here; keep it up to date when numbering new items.
 
-**Next: 1049.**
+**Next: 1055.**
 
 **The calibration warning, stated up front because it is fair.** Ask a model to find sixty problems
 and it will find sixty. Some of what follows is real and some is a rule nobody would ever violate.
@@ -74,17 +79,17 @@ of a movement composite means. Unrouted.
 mapping list entirely" · reasoned from that doc and from play-testing Split Friction, **not probed
 against a false-fire**
 
-Found reaching for `ControlClass::AnyStick` to fix a real papercut: Split Friction's join gesture
-(`protagonist.rs`, chunk 66) binds `Join` to `ControlClass::AnyButton` only, so a player picking up
-a gamepad and wiggling the stick — the natural first move — does not join; a button has to be found
-first. `AnyStick` looks like the fix, but a class binding's fold skips the modifier chain (§8, no
-dead zone stage), and `class_dispatch`'s own `actuated` check treats any nonzero axis reading as a
-match — so a stick whose rest position sits off true zero, which no calibration step catches before
-a device is paired, would fire `Join` on its own drift. The failure is silent: a device joins that
-nobody touched, and nothing says why.
+Found reaching for `ControlClass::AnyStick` to fix a real papercut: a player picking up a gamepad
+and wiggling the stick — the natural first move — has no way to join a game whose join gesture is a
+button. `AnyStick` looks like the fix, but a class binding's fold skips the modifier chain (§8, no
+dead zone stage), and `actuated` (`eval.rs`) treats any nonzero axis reading as a match — so a stick
+whose rest position sits off true zero, which no calibration step catches before a device is paired,
+would fire on its own drift. The failure is silent: a device joins that nobody touched, and nothing
+says why.
 
-No requirement currently asks for stick-triggered joining, so nothing in tree takes this path today
-— `AnyButton` alone is what chunk 66 shipped and what Split Friction still binds. The risk is
+No requirement asks for stick-triggered joining, and nothing in tree takes this path — Split
+Friction's `Join` is two concrete controls (`GamepadButton::South`, `KeyCode::Enter`) and no longer
+a class binding at all, so the analog case has no in-tree caller from either direction. The risk is
 latent: whoever reaches for `AnyStick` on a class binding next, for a join gesture or anything else
 wanting "any analog actuation", hits it with no warning.
 
@@ -98,38 +103,44 @@ _Fix, sketched:_ not a crate change. `Modifier` (`binding.rs:1256`) is a pure fu
 and its own `Scratch` — `scratch.prev` holds last tick's position, `scratch.count`/`scratch.time`
 can track reversals within a window — so a stateful "wiggle" modifier that outputs `Bool(false)`
 until enough movement has accumulated, then passes the real value through, is buildable entirely in
-`examples/` today via `.custom()` (`binding.rs:1885`). It has to ride an ordinary
-`.bind::<Join>(Stick::Left)` rather than the existing `bind_class::<Join>(ControlClass::AnyButton)`,
-since class bindings skip the modifier chain — so `pair_on_join` would need to observe both
-`On<ClassFired<Join>>` (buttons) and `On<Fired<Join>>` (the wiggle-gated stick), claiming through
-the same `is_claimed` check either way. Free parameters — window length, reversal count, how much
-movement counts — are a game's own design question, which is the reason this stays a worked example
-rather than a `BindingModifier` variant: baking in an intensity or a pattern would be guessing at
-what any particular game's grapple-escape or join gesture actually wants. Worth doing once Split
-Friction wants the polish; not routed to a chunk, since nothing here is missing from the crate.
+`examples/` today via `.custom()` (`binding.rs:1885`). Free parameters — window length, reversal
+count, how much movement counts — are a game's own design question, which is the reason this stays a
+worked example rather than a `BindingModifier` variant: baking in an intensity or a pattern would be
+guessing at what any particular game's grapple-escape or join gesture actually wants. It rides an
+ordinary `.bind::<Join>(Stick::Left)`, since class bindings skip the modifier chain, so a game
+wanting both gestures observes `Fired<Join>` for the wiggle beside whatever it already does for the
+button. Worth doing once Split Friction wants the polish; not routed to a chunk, since nothing here
+is missing from the crate.
+
+### 1049 The documented join recipe races two players for one slot
+
+`join.rs`'s module doc · **verified by reading**, and by the workaround Split Friction already
+carries
+
+The sketch in `join.rs` teaches: check `is_claimed`, return if the device is taken, otherwise "pick
+a slot and insert `Paired::to(device)` on it". Two devices pressing join on the same tick both pass
+`is_claimed` — correctly, they are different devices — and then both pick the same slot, because
+the first one's `Paired` insert is a deferred command that has not applied when the second observer
+runs. A game following the documented path hands both players protagonist 0.
+
+`is_claimed` is not wrong; it answers the question it is named for. What is missing is that the
+sketch's second half needs state the query cannot see yet, and nothing says so.
+
+Split Friction hit this and worked around it: `protagonist.rs`'s `ClaimedDevices` is a resource
+updated synchronously inside the observer, and its doc comment explains the race in full. So the
+crate's flagship multiplayer example does not use the crate's documented join recipe, for a reason
+the crate's documentation does not mention — in a crate whose stated purpose includes device
+routing for local multiplayer.
+
+_Fix:_ smallest is a paragraph in `join.rs` saying the slot table has to be updated synchronously
+and why. Better is a claim helper that sees queued claims, which would let the sketch stay as short
+as it reads. Unrouted.
 
 ---
 
 ## 3. Absent — a requirement says it should exist and nothing does
 
 Ordered by what a real game would miss first.
-
-### 1014 An action has no elapsed time and no progress, so a hold-to-confirm meter cannot be drawn
-
-R3.4 (MUST) and R3.5 · `action.rs:354`
-
-`ActionState` is still `{ value, phase }`. R3.4 wants elapsed time in the current state, in the same
-simulated seconds the action's own conditions count with; R3.5 wants progress toward firing, which
-is the number a charge bar or a hold-to-confirm ring is drawn from.
-
-**Both numbers already exist** — `Scratch::time` is the elapsed time and `BindingCondition::Hold`'s
-`duration` is R3.5's denominator — but the scratch is `pub(crate)` inside `InputContextState` with
-no read path out. So this is a plumbing job, not a design one.
-
-It is also R22.1's fifth cause: "condition Z at 40% progress" is the same number.
-
-_Fix:_ **chunk 99** — a Disasteroids smart bomb, hold-to-charge, with the progress number drawing
-its charge meter.
 
 ### 1015 Nothing can bind to where the pointer is
 
@@ -216,6 +227,48 @@ R15.9 (SHOULD, split from 1020) — opaque platform-user identity attached to a 
 show without a real platform SDK behind it, unlike the rest of this group.
 
 _Fix:_ **deferred**, with the gate stated in Roadmap's deferred table.
+
+### 1050 The one answer to "which device fired this" is unused by the example that needs it
+
+`protagonist.rs`'s `pair_on_join` · **verified**: its own doc says "Not backend-safe"
+
+An ordinary action's value is device-agnostic by design, so `Fired<Join>` cannot say which device
+pressed. The crate's answer is a class binding: `ClassFired` carries the untouched raw event, and
+`event.device()` names the device — which is what `join.rs` documents and what chunk 66 originally
+shipped.
+
+Split Friction no longer uses it. `Join` is bound to two concrete controls, and `pair_on_join` reads
+`ButtonInput<KeyCode>` and `Query<&Gamepad>` directly to find the presser — queries that do not
+exist under a Steam authority, which its own comment says in as many words. So the example
+demonstrates a device-routing crate failing to answer, on its own flagship screen, the question its
+device routing exists for, and it does so by reaching around the crate to Bevy.
+
+What is not recorded anywhere is **why** `Join` moved off the class binding. The move is real —
+chunk 66's roadmap entry was restated for it — and 1046 shows one cost of class bindings (no
+modifier chain), but nothing says whether that was the reason, whether the class path was found
+inadequate, or whether this was incidental. Deciding the deferred row's gate needs that answer.
+
+_Fix:_ the Roadmap's deferred row ("a backend-safe way to ask which device drove an ordinary
+action's current activation") is gated on "a real need, not just Split Friction's". Before that gate
+can be judged, establish whether the existing class-binding path already answers it — in which case
+the example should go back to it — or does not, in which case the gate has already been met.
+Unrouted.
+
+### 1052 Naming a device to the player has no requirement and no support
+
+`split_screen.rs`'s `device_name` · `Requirements.md` §11, §18
+
+R18.3 forbids hard-coding English for a control's display string and the crate supplies
+`fallback_label` so a game does not have to. A *device* has no equivalent: nothing returns a
+descriptor or a key for "Xbox Controller", and R11.6 covers brand *resolution* without saying
+anything about naming the result. So Split Friction's pane label hard-codes four English strings off
+`GamepadBrand`, which is exactly the shape R18.3 exists to prevent one step to the left.
+
+The gap is in `Requirements.md` first: no requirement covers it, so the crate is not failing one.
+Whether a device name is §18's business (a display string, like a control's) or §11's (a fact about
+the device, like its brand) is the question to settle before anything is built.
+
+Unrouted.
 
 ### 1021 Accessibility has no citation anywhere in the project
 
@@ -309,8 +362,10 @@ R22.4 (MUST) wants documented ordering and integration with `bevy_input::InputSy
 `bevy_input_focus` and `bevy_picking`. The `InputSystems` third is met and documented
 (`frame.rs:374`, design §1). The other two:
 
-- **`bevy_picking` has no mention anywhere in the tree** — not in `src/`, `examples/`, `docs/` or
-  `Roadmap.md`.
+- **`bevy_picking` is named once, about something else.** `docs/decisions.md` mentions it flattening
+  its generic `Pointer<E>`, which is a reversal note rather than an ordering. Nothing in `src/`,
+  `examples/` or `Roadmap.md` mentions it at all, and no ordering constraint anywhere relates the
+  two — which is the third R22.4 asks for.
 - **R22.11** (MUST) — focus changes must resolve before the same frame's actions are evaluated.
   `active_if` schedules `condition.pipe(apply_active::<C>)` in `PreUpdate` `.before(Evaluate)` with
   no constraint against whatever writes `InputFocus`, and `examples/common/widget_focus.rs`'s
@@ -366,7 +421,7 @@ any one of them is misled about a mechanism.
 | `lib.rs:174`                            | the `touch` feature is "Touch input as a binding source"                                                            | no `cfg(feature = "touch")` anywhere in `src/`; design §11 says _reserved_                                                                                                                                                                                                                             |
 | `device.rs` module doc                  | the module has persistent device identity and capability data                                                       | neither (R11.5, R11.3); the `DeviceHandle` doc eight lines below says the first is not built                                                                                                                                                                                                           |
 | `player.rs` module doc                  | the module "describes the named device requirements a game can assign players against"                              | it holds `Paired` and nothing else. That was R15.7, now withdrawn, so this promises something the crate will never grow rather than something it owes — the sentence goes rather than waiting on a fix. Chunk 48 renamed the one `Scheme`-like type to `DeviceFamily`, which answers a different question (which family a control belongs to, not what a player requires) |
-| `inspect.rs:76`                         | `ActionDump::state` is "Value, phase, elapsed time and progress"                                                    | `ActionState` is `{ value, phase }`; the two extra numbers are 1014                                                                                                                                                                                                                                    |
+| `inspect.rs:76`                         | `ActionDump::state` is "Value, phase, elapsed time and progress"                                                    | `ActionState` is `{ value, phase }`. The two extra numbers exist since chunk 99, but on `ContextActions::elapsed` and `progress`, not on the struct this doc comment is describing — so the sentence names four fields for a type that has two |
 | `lib.rs:219`                            | `ActionMapSystems` is "System sets for the two stages of the input pipeline"                                        | four variants; the body names `Sample` and `Evaluate` and says nothing about `Capture` or `Dispatch`, both of which are public ordering targets                                                                                                                                                        |
 | `action.rs:497`                         | write `InputContext` by hand "if you need to configure the component differently; it is three associated constants" | the trait is not what makes the type a component — the derive emits `Component`, `Default`, `Clone` and `Copy` alongside it, and a hand-written impl gets none. `macros/src/lib.rs:131` says "four associated consts" for the same trait; four exist and three are required                            |
 | `mapping.rs`, `ActionMapping::capacity` | "Meaningful only where `rebind_policy` is `Here`"                                                                   | a preset moving a `Fixed` row is refused `TooManyControls { capacity: Some(1), given: 2 }`, verified — capacity is the second thing `refusal` consults on exactly the rows the sentence excuses it from                                                                                                |
@@ -429,7 +484,9 @@ Unrouted.
 
 ### 1034 One prompt lookup walks every declared context
 
-`present.rs`, `BindingTable::prompts`, still calling `read_bindings::<C>` fresh per context per call
+`present.rs`, `BindingTable::prompts`, calling each declared context's own `bindings` fn fresh per
+context per call — the scan cited this as `read_bindings::<C>`, which the call now reaches
+indirectly through `DeclaredContexts`
 
 `prompts` rebuilds every declared context's binding list on every call — two fresh vectors per
 context, every binding and every part — then does an O(n²) scan for earlier claims and an O(n²)
@@ -445,19 +502,20 @@ while it lasted. Unrouted.
 ### 1035 R23.2 is unenforced, and the register's count of violations is stale
 
 `Roadmap.md` says two violations have reached the per-tick path and both were caught by reading. The
-scan found two more, both still present:
+scan found two more. One is gone: the `binding.source.controls()` call that allocated a
+`Vec<Control>` per consuming binding per tick no longer exists — `controls` has no caller in
+`eval.rs` at all now, and nothing recorded which chunk removed it. The other is still present:
 
-- `eval.rs:763` calls `binding.source.controls()`, allocating a `Vec<Control>` once per consuming
-  binding per tick it fires or is ongoing. `for_each_control` is the allocation-free form and its
-  doc says so in as many words; `eval.rs:763` is `controls`' only caller in the tree. **One line.**
-- `eval.rs:247` builds `let mut claims = Vec::new()` per instance per tick and allocates the moment
-  anything is claimed. `chord_claims` sits on `InputContextState` and cites R23.2 in its comment for
-  exactly this reason, and `dispatch_transitions` takes and hands back its log to keep the
-  allocation — so both idioms are established in the same file and `claims` follows neither.
+- `evaluate_context` builds `let mut claims = Vec::new()` per instance per tick (`eval.rs`, in the
+  loop that calls `apply_frame`) and allocates the moment anything is claimed. `chord_claims` sits
+  on `InputContextState` and cites R23.2 in its comment for exactly this reason, and
+  `dispatch_transitions` takes and hands back its log to keep the allocation — so both idioms are
+  established in the same file and `claims` follows neither.
 
-The finding is not really either line. It is that four violations have now been found by reading,
-which is what the register calls "a rule with no tooling behind it," and the count is the part that
-keeps going stale. Unrouted.
+The finding is not the line. It is that violations keep being found by reading and then quietly
+stop being true, which is what the register calls "a rule with no tooling behind it." This entry has
+now gone stale in exactly the way it complains about: it has been rewritten once for a count that
+moved, and it will need it again. Unrouted.
 
 ### 1036 Public items with no caller and no document
 
@@ -487,9 +545,10 @@ is already crate-private:
   nothing does.
 - `overrides.rs`: `Overrides::is_empty` — called only by its own test; design §10 enumerates twelve
   `Overrides` methods and this is not one.
-- `action.rs`: `ActionValue::from_output` — no caller in `src/`, `examples/` or the tests, and it
-  duplicates the four `From` impls twenty lines above it. `into_output` is called only by its own
-  tests. Four public names for two conversions.
+- `action.rs`: `ActionValue::from_output` — **now has a caller**, `backend.rs`'s
+  `AuthorityValues::set`, added by chunk 111 after the scan. It still duplicates the four `From`
+  impls twenty lines above it, and `into_output` is still called only by its own tests, so "four
+  public names for two conversions" holds; "no caller" no longer does.
 - `action.rs`: `ActionIntent::supports_output` — a public wrapper over `is_one_of`, which is the one
   the derive calls. Nothing else calls either.
 - `action.rs`: `ActionState::new` — a `const fn` constructor for a two-field struct with both fields
@@ -509,6 +568,72 @@ surface rather than describing it, so the sweep over those was a diff and came b
 eleven conditions, ten modifiers, six presentation methods, eleven `ActionMapping` fields, eight
 problem kinds, all matching one for one. The list above is concentrated where no document
 enumerates.
+
+Unrouted.
+
+### 1051 "Which preset is active" is answered twice, differently, and one answer costs ninety lines
+
+`settings.rs`'s `selected_preset` · `popup.rs`'s `ActivePreset` · D53
+
+D53 has the crate keep "no registry of presets and no record of which one is active." Both examples
+need that record, and they reach it from opposite ends:
+
+- **Split Friction stores it.** `ActivePreset` is a component inserted beside `Paired`, so there is
+  always an answer, and a redraw system keeps the label true to it.
+- **Disasteroids infers it.** `selected_preset` compares the live bindings against every row and
+  every tunable that *any* preset touches, because a preset naming nothing is a claim that none of
+  the others have moved. With its helpers — `row_named`, `tunable_named`, `effective`,
+  `effective_tunable` — that is about ninety lines to answer a question the other example answers
+  with a component.
+
+Neither is wrong. The inference is genuinely more correct — it stays true when something else
+rebinds a row out from under the stored answer, which the component does not — and that is the
+argument for the crate holding it rather than each game picking one of the two.
+
+D53's registry half is not in question: which presets exist is the game's. It is the *record of
+which one is applied* that both examples had to build, and that the crate is better placed to keep
+accurate, since it already sees every rewrite that would invalidate it.
+
+_Fix:_ a D53 revisit rather than an edit, and the cheaper half may be enough — shipping the
+inference as one crate function would stop it being written twice without the crate holding any
+state. Unrouted.
+
+### 1053 The release itself has no destination
+
+`Roadmap.md` · `Cargo.toml`
+
+Every Bevy dependency is a git dependency, resolved in `Cargo.lock` to a `0.20.0-dev` commit.
+crates.io rejects git dependencies, so the crate cannot be published until Bevy 0.20 ships — an
+external date, not a chunk.
+
+Nothing in `Roadmap.md` says so. There is no release chunk, no deferred row gated on the 0.20
+release, and no checklist of what must be true before the first publish, which by ground rule 5 is
+an item that will be dropped. The work that is release-shaped is scattered through chunks whose
+descriptions do not mention it: 110's sum type and 42's backend trait are both "cheap now, breaking
+later" and neither says that is a publishing deadline rather than a preference.
+
+_Fix:_ a deferred row gated on the Bevy 0.20 release would be the smallest thing that stops this
+being forgotten. What belongs in it is the ordering question rather than the date. Unrouted.
+
+### 1054 Deriving a pane's persistent identity is boilerplate every game rewrites
+
+`reconnect.rs`'s `remember_identity` and `KnownDevice`
+
+A game that saves pairings needs "which persistent `DeviceId` is this entity paired to". The crate
+supplies both halves — `Paired` names the runtime handles, `Identity` sits on the device entity —
+and joins neither, so the app writes the join: an `Insert<Paired>` observer, an `owner_for` call per
+family, a special case for the keyboard's constant identity, and a component to put the answer in.
+About twenty lines with exactly one correct implementation, which is the signal.
+
+`saved_pairings.rs` then watches `KnownDevice` rather than `Paired` precisely because it is the
+component that exists only once the identity is actually known — so the derived component is not
+incidental, it is what the persistence layer is built on.
+
+**Reviewed and left alone, in the same area**: the examples coordinate context priorities by hand
+and by comment — `PopupMenu` at 10 "matching Disasteroids' `Menu`", `ButtonFocused` at 20 so a
+focused button outranks both. Named bands would be cheap, but two examples agreeing is not yet
+evidence of a convention worth fixing in the crate, and a game with a different layering would want
+different numbers.
 
 Unrouted.
 
@@ -540,10 +665,15 @@ Unrouted.
 
 ### 1038 One command the Verification list does not run
 
-`cargo doc --no-deps --all-features` warns twice — `device.rs:22`, a redundant explicit link target,
-and `present.rs:511`, a link to `GamepadBrand::Generic` with nothing importing `GamepadBrand` into
-that scope. That command is the only one that reads doc comments, so it belongs in `CLAUDE.md`'s
-Verification list. Unrouted.
+`cargo doc --no-deps --all-features` warned twice when the scan ran — a redundant explicit link
+target in `device.rs`, and a link to `GamepadBrand::Generic` in `present.rs` with nothing importing
+`GamepadBrand` into that scope. **Both are fixed**: rebuilt from a touched `lib.rs`, the command is
+now warning-free.
+
+The finding survives the fix, because it was never really about the two warnings. That command is
+the only one in the project that reads doc comments at all, and it is not in `CLAUDE.md`'s
+Verification list — so nothing would have caught either warning, and nothing will catch the next.
+Unrouted.
 
 ---
 
@@ -575,7 +705,8 @@ proportionate.
 **Evaluation and storage.** R23.5's O(1) holds with no hash on that path. R23.3 holds: activation
 sets a flag and fills a vector. R23.7 holds by construction. R7.4's cancellation matches `Fired |
 Ongoing`, with the `Started` gap already in `Roadmap.md`. R8.1's chord pre-pass is a pure function
-of held state and `is_pressed` refuses a consumed control inside it. R10.2 holds but for 1014. The
+of held state and `is_pressed` refuses a consumed control inside it. R10.2 holds outright, now that
+chunk 99 has landed the read path its exception named. The
 three `Fold` kinds partition correctly. R7.5's default half holds for a newly spawned context by the
 empty held-state map rather than by the require-reset latch. R24.4's app-build / runtime split is
 honoured at both panics.
