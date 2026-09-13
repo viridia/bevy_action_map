@@ -287,6 +287,14 @@ impl bevy_app::Plugin for ActionMapPlugin {
         // it — but `run_captures` and context evaluation read `InputFrame` regardless.
         app.init_resource::<frame::InputFrame>();
 
+        // Here rather than beside the gamepad one in `InputFramePlugin`: `DeviceHandle::KeyboardMouse`
+        // exists whatever the device features say, so its identity does too.
+        #[cfg(feature = "bevy_reflect")]
+        {
+            use device::RegisterDeviceIdentity;
+            app.register_device_identity::<device::KeyboardMouseId>();
+        }
+
         app.init_resource::<binding::ButtonThreshold>();
         app.init_resource::<eval::ConsumedControls>();
         app.init_resource::<eval::ExclusionCeiling>();

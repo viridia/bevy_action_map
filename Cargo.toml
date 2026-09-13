@@ -59,13 +59,24 @@ smallvec = { version = "1", default-features = false }
 fixedbitset = "0.5"
 
 [dev-dependencies]
+# `bevy_settings` is not in the umbrella's default profiles. Split Friction is the only example
+# that stores anything, and where a game puts its bytes is the app's decision (D53), so this is a
+# dev-dependency feature rather than anything the crate itself knows about.
 bevy = { git = "https://github.com/bevyengine/bevy.git", features = [
   "dynamic_linking",
+  "bevy_settings",
 ] }
 trybuild = "1.0"
 # Picked as the concrete format for chunk 55's golden persistence test — a format this crate never
 # learns about outside that one test (§10.1).
 toml = "0.8"
+
+# Declared rather than auto-discovered, for the one line that matters: it stores a pairing, so it
+# needs `serialize`, which is not a default feature. The others are still picked up automatically.
+[[example]]
+name = "split_friction"
+path = "examples/split_friction/main.rs"
+required-features = ["serialize"]
 
 [features]
 default = ["std", "bevy_reflect", "keyboard", "mouse", "gamepad", "state"]

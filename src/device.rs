@@ -415,36 +415,112 @@ impl<'de> serde::de::Visitor<'de> for DeviceIdVisitor<'_> {
                 "a device identity holds one entry, not none",
             ));
         };
+        read_identity(&domain, &mut map, self.registry)
+    }
+}
 
-        // Domain to concrete type, through the registry rather than through a type path. A scan,
-        // because this runs once per stored identity at load time rather than per tick.
-        let registration = self
-            .registry
-            .iter()
-            .find(|registration| {
-                registration
-                    .data::<ReflectDeviceIdentity>()
-                    .is_some_and(|claimed| claimed.domain == domain)
-            })
-            .ok_or_else(|| {
-                A::Error::custom(alloc::format!(
-                    "no backend has claimed the device identity domain `{domain}`"
-                ))
-            })?;
-        let claimed = registration
-            .data::<ReflectDeviceIdentity>()
-            .expect("matched on it above")
-            .clone();
+/// Reads the payload half of a stored identity, once its domain has been taken off the map.
+///
+/// Shared by [`DeviceId`] and [`SavedDeviceId`], which differ only in whether an empty map is an
+/// error or an answer.
+#[cfg(feature = "serialize")]
+fn read_identity<'de, A: serde::de::MapAccess<'de>>(
+    domain: &str,
+    map: &mut A,
+    registry: &bevy_reflect::TypeRegistry,
+) -> Result<DeviceId, A::Error> {
+    use serde::de::Error as _;
 
-        let payload = map.next_value_seed(bevy_reflect::serde::TypedReflectDeserializer::new(
-            registration,
-            self.registry,
-        ))?;
-        (claimed.from_payload)(&*payload).ok_or_else(|| {
-            A::Error::custom(alloc::format!(
-                "the device identity domain `{domain}` did not accept its stored payload"
-            ))
+    // Domain to concrete type, through the registry rather than through a type path. A scan,
+    // because this runs once per stored identity at load time rather than per tick.
+    let registration = registry
+        .iter()
+        .find(|registration| {
+            registration
+                .data::<ReflectDeviceIdentity>()
+                .is_some_and(|claimed| claimed.domain == domain)
         })
+        .ok_or_else(|| {
+            A::Error::custom(alloc::format!(
+                "no backend has claimed the device identity domain `{domain}`"
+            ))
+        })?;
+    let claimed = registration
+        .data::<ReflectDeviceIdentity>()
+        .expect("matched on it above")
+        .clone();
+
+    let payload = map.next_value_seed(bevy_reflect::serde::TypedReflectDeserializer::new(
+        registration,
+        registry,
+    ))?;
+    (claimed.from_payload)(&*payload).ok_or_else(|| {
+        A::Error::custom(alloc::format!(
+            "the device identity domain `{domain}` did not accept its stored payload"
+        ))
+    })
+}
+
+/// A stored identity slot that may be empty.
+///
+/// A [`DeviceId`] says which device; this says "that device, or none yet", which is what a settings
+/// field holding a pairing actually needs — a player who has not picked up a pad still has a row in
+/// the file. Stored as the identity's own single entry, or as an empty table when there is none.
+///
+/// Reach for this rather than `Option<DeviceId>` in anything a settings layer writes. A reflected
+/// `Option` serializes its empty case as `none`, which TOML has no way to spell, and a settings
+/// crate that writes TOML will fail on it rather than leaving the field out.
+#[cfg(feature = "serialize")]
+#[derive(bevy_reflect::Reflect, Clone, Debug, Default, PartialEq)]
+#[reflect(opaque)]
+#[reflect(PartialEq, Debug)]
+#[reflect(SerializeWithRegistry, DeserializeWithRegistry)]
+pub struct SavedDeviceId(pub Option<DeviceId>);
+
+#[cfg(feature = "serialize")]
+impl bevy_reflect::serde::SerializeWithRegistry for SavedDeviceId {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+        registry: &bevy_reflect::TypeRegistry,
+    ) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        match &self.0 {
+            Some(device) => device.serialize(serializer, registry),
+            None => serializer.serialize_map(Some(0))?.end(),
+        }
+    }
+}
+
+#[cfg(feature = "serialize")]
+impl<'de> bevy_reflect::serde::DeserializeWithRegistry<'de> for SavedDeviceId {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+        registry: &bevy_reflect::TypeRegistry,
+    ) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(SavedDeviceIdVisitor { registry })
+    }
+}
+
+#[cfg(feature = "serialize")]
+struct SavedDeviceIdVisitor<'a> {
+    registry: &'a bevy_reflect::TypeRegistry,
+}
+
+#[cfg(feature = "serialize")]
+impl<'de> serde::de::Visitor<'de> for SavedDeviceIdVisitor<'_> {
+    type Value = SavedDeviceId;
+
+    fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("a device identity keyed by its backend's domain, or an empty table for none")
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let Some(domain) = map.next_key::<alloc::string::String>()? else {
+            return Ok(SavedDeviceId(None));
+        };
+        read_identity(&domain, &mut map, self.registry).map(|device| SavedDeviceId(Some(device)))
     }
 }
 
@@ -736,6 +812,31 @@ pub fn resolve_gamepad_brand(
     }
 }
 
+/// The keyboard and mouse, as a persistent identity.
+///
+/// Carries nothing, because there is nothing to carry: a machine has one keyboard as far as this
+/// crate is concerned, so naming it is the whole of identifying it. Store one to remember that a
+/// player was on the keyboard rather than a pad.
+///
+/// It follows that two players sharing one keyboard — one on the arrow keys, one on WASD — are not
+/// distinguishable by this, and nothing here divides a keyboard between them.
+///
+/// Whether the keyboard is something a player may be assigned *at all* is the game's question, not
+/// this crate's. A game where the mouse aims will not offer it beside a gamepad on equal terms, and
+/// most games never put a keyboard and a pad in the same pool to choose from.
+///
+/// Unlike a gamepad's, this identity is never attached to an entity and never has to be looked up —
+/// [`DeviceHandle::KeyboardMouse`] is always available and always means the same device. A game
+/// restoring a saved pairing acts on it at startup rather than waiting for the device to turn up.
+#[cfg(feature = "bevy_reflect")]
+#[derive(bevy_reflect::Reflect, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct KeyboardMouseId;
+
+#[cfg(feature = "bevy_reflect")]
+impl DeviceIdentity for KeyboardMouseId {
+    const DOMAIN: &'static str = "keyboard-mouse";
+}
+
 /// What Bevy's own gamepad backend can say about which device a pad is: the USB vendor and product
 /// ids it reported when it connected.
 ///
@@ -935,6 +1036,23 @@ mod tests {
         assert_eq!(stored.get(&other), None);
     }
 
+    /// The keyboard is a device too, and a player who joined on it has to come back to it. Its
+    /// identity carries nothing because there is nothing to carry, which is the one case where an
+    /// identity is equal to every other of its kind rather than to one piece of hardware.
+    #[cfg(feature = "bevy_reflect")]
+    #[test]
+    fn the_keyboard_has_an_identity_and_it_is_always_the_same_one() {
+        assert_eq!(
+            DeviceId::new(KeyboardMouseId),
+            DeviceId::new(KeyboardMouseId)
+        );
+        assert_eq!(DeviceId::new(KeyboardMouseId).domain(), "keyboard-mouse");
+        assert_ne!(
+            DeviceId::new(KeyboardMouseId),
+            DeviceId::new(PlatformDeviceId(0))
+        );
+    }
+
     #[cfg(feature = "bevy_reflect")]
     #[test]
     fn identities_from_two_backends_never_collide() {
@@ -1011,6 +1129,51 @@ mod tests {
             assert_eq!(
                 <DeviceId as bevy_reflect::FromReflect>::from_reflect(&*read).unwrap(),
                 id
+            );
+        }
+    }
+
+    /// A settings field holding a pairing has to be writable before the player has picked up a pad,
+    /// and `Option`'s empty case serializes as `none`, which TOML cannot spell at all. An empty
+    /// table can be written, read back, and edited by hand.
+    #[cfg(feature = "serialize")]
+    #[test]
+    fn an_empty_identity_slot_round_trips_as_an_empty_table() {
+        use bevy_reflect::serde::{TypedReflectDeserializer, TypedReflectSerializer};
+        use serde::de::DeserializeSeed;
+
+        let app = registered();
+        let types = app
+            .world()
+            .resource::<bevy_ecs::reflect::AppTypeRegistry>()
+            .read();
+        let registration = types.get(core::any::TypeId::of::<SavedDeviceId>()).unwrap();
+
+        // A settings layer writes a group's fields into a table, so the slot is exercised as one
+        // named field rather than as a document of its own.
+        for (slot, expected) in [
+            // An empty section, which is how TOML spells a table with nothing in it.
+            (SavedDeviceId(None), "[player]\n"),
+            (
+                SavedDeviceId(Some(DeviceId::new(PlatformDeviceId(7)))),
+                "[player]\nplatform = \"0000000000000007\"\n",
+            ),
+        ] {
+            let mut table = toml::map::Map::new();
+            table.insert(
+                "player".into(),
+                toml::Value::try_from(TypedReflectSerializer::new(&slot, &types)).unwrap(),
+            );
+            let text = toml::to_string(&toml::Value::Table(table)).unwrap();
+            assert_eq!(text, expected);
+
+            let value: toml::Value = toml::from_str(&text).unwrap();
+            let read = TypedReflectDeserializer::new(registration, &types)
+                .deserialize(value.get("player").unwrap().clone())
+                .expect("reads back");
+            assert_eq!(
+                <SavedDeviceId as bevy_reflect::FromReflect>::from_reflect(&*read).unwrap(),
+                slot
             );
         }
     }

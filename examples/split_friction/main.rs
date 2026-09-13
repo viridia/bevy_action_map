@@ -7,6 +7,13 @@
 //! presses first claims protagonist 0, the next distinct device claims protagonist 1 — see
 //! [`protagonist`]. Monsters arrive in later stages.
 //!
+//! **A keyboard and a gamepad are peers here, and that is this example's simplification.** It holds
+//! for a game this simple, where both devices do the same small job equally well. It does not hold
+//! generally — a mouse aims far more precisely than a stick, which is why shooters often refuse to
+//! match the two against each other — so a real game usually decides which devices a player may be
+//! assigned rather than accepting whatever pressed first. The crate takes no position: it reports
+//! which devices exist and refuses to rank them.
+//!
 //! Pass a seed on the command line to see a different layout: `cargo run --example split_friction --
 //! 7`. With none given, the layout is the same every run.
 //!
@@ -24,13 +31,14 @@ mod overlay;
 mod popup;
 mod protagonist;
 mod reconnect;
+mod saved_pairings;
 mod split_screen;
 mod tileset;
 
 #[path = "../common/mod.rs"]
 mod common;
 
-use common::widget_focus;
+use common::{prompt_ui, widget_focus};
 
 const WIDTH: usize = 64;
 const HEIGHT: usize = 64;
@@ -62,8 +70,14 @@ fn main() {
             overlay::plugin,
             popup::plugin,
             reconnect::plugin,
+            saved_pairings::plugin,
+            prompt_ui::plugin,
             widget_focus::plugin,
         ))
+        // No primary device to speak for: two panes may be on different ones, and every prompt
+        // here names the family it means. Saying so explicitly is what stops `prompt_ui` warning
+        // that a game forgot to.
+        .insert_resource(bevy_action_map::present::PromptDevice(None))
         .insert_resource(Seed(seed))
         .add_systems(Startup, setup)
         .run();

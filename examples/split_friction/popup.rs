@@ -338,11 +338,14 @@ fn disconnect_pressed(
             claimed.release(device);
         }
     }
+    // `KnownDevice` goes too, which is what separates leaving on purpose from a pad falling out:
+    // a pane that dropped its pad deliberately is not offered it again, this session or the next.
     commands.entity(entity).remove::<(
         OnFoot,
         Paired,
         ActivePreset,
         crate::reconnect::AwaitingReconnect,
+        crate::reconnect::KnownDevice,
     )>();
     next.set(Popup::Closed);
 }

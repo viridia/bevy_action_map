@@ -26,6 +26,8 @@
 //! prompt is a hint rather than a manual: "Press W to thrust" is the sentence, and "Press W or Up
 //! Arrow to thrust" is a worse one even where both are true.
 
+use std::borrow::Cow;
+
 use bevy::ecs::schedule::SystemCondition;
 use bevy::prelude::*;
 use bevy::text::InlineBox;
@@ -126,6 +128,36 @@ fn active_family(world: &World) -> Option<DeviceFamily> {
     )
 }
 
+/// Whichever connected pad's brand a prompt should speak in, `Generic` if none says.
+///
+/// The first one found: a game with two pads of different brands on one line has no answer that is
+/// right for both, and picking one beats naming none.
+fn connected_brand(world: &mut World) -> GamepadBrand {
+    let mut brands = world.query::<&Brand>();
+    brands
+        .iter(world)
+        .next()
+        .map_or(GamepadBrand::Generic, |brand| brand.0)
+}
+
+/// The brand a *text* prompt writes in, which is not quite the brand of the pad.
+///
+/// An unrecognized pad resolves to `Generic`, and `Generic` has no word of its own for a face
+/// button — so a prompt asking it plainly gets "South Button", which is not what anybody calls that
+/// button. Aftermarket PC pads are overwhelmingly Xbox-labelled, and on the pads that are not, the
+/// letter still points at the right physical button, so "A" is the better guess by a wide margin.
+///
+/// A presentation choice, and deliberately this side of the crate: `Generic` genuinely means "no
+/// brand-specific name", which is a fact. What to *show* when there is none is a game's call (D53).
+/// [`refresh_icon_prompts`] does not do this — art that says Xbox on an unrecognized pad would be
+/// claiming something, where a word is only labelling one.
+fn labelling_brand(world: &mut World) -> GamepadBrand {
+    match connected_brand(world) {
+        GamepadBrand::Generic => GamepadBrand::Xbox,
+        brand => brand,
+    }
+}
+
 /// The scope a prompt's own companions narrow it to, and which of possibly several answers it asks
 /// for — shared by [`refresh_prompts`] and [`refresh_icon_prompts`].
 fn scope_and_index(
@@ -169,6 +201,7 @@ type PromptQuery = (
 /// types of those are long gone by the time anything wants a prompt.
 fn refresh_prompts(world: &mut World) {
     let device = active_family(world);
+    let brand = labelling_brand(world);
 
     let mut spans = world.query::<PromptQuery>();
     let captions: Vec<(Entity, String)> = spans
@@ -180,7 +213,7 @@ fn refresh_prompts(world: &mut World) {
                 .get(index)
                 .map_or_else(
                     || unbound.map_or_else(|| "—".to_string(), |text| text.0.clone()),
-                    caption,
+                    |prompt| caption(prompt, brand),
                 );
             (entity, text)
         })
@@ -198,14 +231,25 @@ fn refresh_prompts(world: &mut World) {
 /// `prompt.condition` is `ConditionDescriptor::None` for almost everything, and where it is not,
 /// its fallback renderer is what turns "W" into "Hold W" rather than a bare, uninterpretable
 /// "Hold".
-fn caption(prompt: &Prompt) -> String {
+fn caption(prompt: &Prompt, brand: GamepadBrand) -> String {
     let mut control = String::new();
     for held in &prompt.with {
-        control.push_str(&held.fallback_label());
+        control.push_str(&branded(held, brand));
         control.push('+');
     }
-    control.push_str(&prompt.origin.fallback_label());
+    control.push_str(&branded(&prompt.origin, brand));
     prompt.condition.fallback_format(&control)
+}
+
+/// One control's name, in the pad's own words where it has any.
+///
+/// Only a control this crate knows can be renamed: a foreign one arrived with a label already, and
+/// whatever reported it is the only thing that knows what its buttons are called.
+fn branded(origin: &ControlOrigin, brand: GamepadBrand) -> Cow<'_, str> {
+    match origin {
+        ControlOrigin::Ours(control) => control.fallback_label_for_brand(brand),
+        other => other.fallback_label(),
+    }
 }
 
 /// Which (tier, control) pairs have art, in both `assets/input_prompts/` and
@@ -290,13 +334,11 @@ fn refresh_icon_prompts(world: &mut World) {
     }
 
     let device = active_family(world);
-    let brand = {
-        let mut brands = world.query::<&Brand>();
-        brands
-            .iter(world)
-            .next()
-            .map_or(GamepadBrand::Generic, |brand| brand.0)
-    };
+    // Two brands, deliberately: art is resolved from what the pad actually is, since a picture
+    // saying Xbox on a pad that is not one claims more than a word does. The text it falls back to
+    // is only a word, so it names buttons on the same terms `refresh_prompts` does.
+    let brand = connected_brand(world);
+    let labelled = labelling_brand(world);
     let manifest = &world.resource::<IconManifest>().0;
     let resolved: Vec<(Entity, Resolved)> = spans
         .iter(world)
@@ -313,11 +355,11 @@ fn refresh_icon_prompts(world: &mut World) {
                             manifest.contains(&format!("{}/{}", tier_str(tier), control.name()))
                         })
                         .map_or_else(
-                            || Resolved::Text(caption(prompt)),
+                            || Resolved::Text(caption(prompt, labelled)),
                             |glyph| Resolved::Icon(inline_icon_path(glyph)),
                         )
                     }
-                    ControlOrigin::Foreign { .. } => Resolved::Text(caption(prompt)),
+                    ControlOrigin::Foreign { .. } => Resolved::Text(caption(prompt, labelled)),
                 },
             };
             (entity, resolved)

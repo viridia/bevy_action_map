@@ -78,6 +78,10 @@ run_doctest_step() {
 run_step "cargo fmt --check" cargo fmt --check
 run_step "cargo check --all-features --tests --examples" \
     cargo check --all-features --tests --examples
+# The examples are what a reader runs, and they run them with the default features. Checking them
+# only under --all-features hid a settings group whose reflect type data was behind `serialize`:
+# it compiled either way and panicked at runtime in the build anyone would actually start.
+run_step "cargo check --examples" cargo check --examples
 run_step "cargo clippy --all-features --all-targets" cargo clippy --all-features --all-targets
 run_step "cargo clippy --no-default-features --features libm" \
     cargo clippy --no-default-features --features libm

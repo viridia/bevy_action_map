@@ -79,7 +79,42 @@ fn a_scheme_beside_the_span_overrides_the_games_device() {
         .id();
 
     assert_eq!(caption(&mut app, keyboard), "Space");
-    assert_eq!(caption(&mut app, pad), "South Button");
+    assert_eq!(caption(&mut app, pad), "A");
+}
+
+/// A gamepad button is named in the pad's own words, and an unrecognized pad is named in Xbox's.
+///
+/// "South Button" is what the crate calls that button when no brand is claiming it, and no player
+/// calls it that. Aftermarket PC pads mostly label themselves the Xbox way, and on the ones that do
+/// not, the letter still points at the button directly below the others — so guessing Xbox is right
+/// far more often than saying nothing is. The choice is this layer's, not the crate's: `Generic`
+/// genuinely means "no brand-specific name", which is a fact, and what to show instead is a game's.
+#[test]
+fn a_gamepad_button_is_named_in_its_pads_own_words() {
+    use bevy_action_map::device::{Brand, GamepadBrand};
+
+    for (connected, expected) in [
+        (None, "A"),
+        (Some(GamepadBrand::Generic), "A"),
+        (Some(GamepadBrand::Xbox), "A"),
+        (Some(GamepadBrand::PlayStation), "Cross"),
+        // Nintendo's face buttons sit mirrored, so physical South is B there — the prompt names
+        // the button the player is looking at rather than the one in the same place on a Xbox pad.
+        (Some(GamepadBrand::Nintendo), "B"),
+    ] {
+        let mut app = app();
+        app.insert_resource(PromptDevice(Some(DeviceFamily::Gamepad)));
+        app.add_context::<Flying>(|controls| {
+            controls.bind::<Jump>(GamepadButton::South);
+        });
+        app.world_mut().spawn(Flying);
+        if let Some(brand) = connected {
+            app.world_mut().spawn(Brand(brand));
+        }
+
+        let span = app.world_mut().spawn(PromptSpan(Jump::id())).id();
+        assert_eq!(caption(&mut app, span), expected, "brand {connected:?}");
+    }
 }
 
 /// A prompt with room to name a button and not a stick.

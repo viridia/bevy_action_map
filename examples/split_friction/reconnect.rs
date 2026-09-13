@@ -15,7 +15,7 @@
 //! shown at once (`popup`'s own doc comment).
 
 use bevy::prelude::*;
-use bevy_action_map::device::{DeviceFamily, DeviceHandle, DeviceId, Identity};
+use bevy_action_map::device::{DeviceFamily, DeviceHandle, DeviceId, Identity, KeyboardMouseId};
 use bevy_action_map::player::{DeviceConnected, DeviceDisconnected, Paired};
 
 use crate::popup::Popup;
@@ -28,9 +28,10 @@ use crate::protagonist::{ClaimedDevices, Protagonist};
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct AwaitingReconnect;
 
-/// Which physical pad this pane is on, remembered so a returning one can be told from a stranger's.
+/// Which device this pane is on, remembered so a returning pad can be told from a stranger's and so
+/// the pairing can be stored.
 ///
-/// Absent when the pane is on the keyboard, or on a pad whose platform reports no ids.
+/// Absent when the pane has claimed nothing, or is on a pad whose platform reports no ids.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct KnownDevice(pub DeviceId);
 
@@ -55,13 +56,15 @@ fn remember_identity(
     let Ok(pairing) = panes.get(paired.entity) else {
         return;
     };
-    let Some(DeviceHandle::Gamepad(device)) = pairing.owner_for(DeviceFamily::Gamepad) else {
-        return;
+    // The keyboard's identity is a constant — there is one, and it is always there — where a pad's
+    // has to be read off the entity the backend spawned for it.
+    let identity = match pairing.owner_for(DeviceFamily::Gamepad) {
+        Some(DeviceHandle::Gamepad(device)) => identities.get(device).ok().map(|id| id.0.clone()),
+        _ if pairing.contains(DeviceHandle::KeyboardMouse) => Some(DeviceId::new(KeyboardMouseId)),
+        _ => None,
     };
-    if let Ok(identity) = identities.get(device) {
-        commands
-            .entity(paired.entity)
-            .insert(KnownDevice(identity.0.clone()));
+    if let Some(identity) = identity {
+        commands.entity(paired.entity).insert(KnownDevice(identity));
     }
 }
 

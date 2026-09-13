@@ -591,6 +591,12 @@ release that has added or removed a field; a backend expecting its type to chang
 `#[reflect(Serialize, Deserialize)]` and owns the stored form, which is also the only way to store a
 value above `i64::MAX` in a format whose integers are `i64`.
 
+`SavedDeviceId` is an identity slot that may be empty, for a settings field that has to be writable
+before a player has picked up anything. It stores as the identity's own single entry, or as an empty
+table. It exists because a reflected `Option` writes its empty case as `none`, which TOML cannot
+spell — a settings crate writing TOML fails on the whole file rather than leaving the field out, so
+`Option<DeviceId>` is the wrong type for anything persisted.
+
 `Identity` is the resolved answer on the device's own entity, attached by an observer on
 `Add<Gamepad>` on the same terms as `Brand` — skipped when one is already present, so a backend that
 knows a device better than its USB ids do can insert its own first. `GamepadModelId` is what Bevy's

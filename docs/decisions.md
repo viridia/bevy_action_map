@@ -1398,6 +1398,56 @@ which `Paired` a lost device belonged to, but not which pairing, if any, a newly
 *for* — per D53, that judgment is the app's, so the connect side is a plain, unscoped event rather
 than a guess.
 
+### D74 — A persistent device identity carries the backend's own type, under a declared domain
+
+**Decided.** `DeviceId` wraps a payload the backend defines, and the backend declares a
+`DeviceIdentity` implementation carrying `const DOMAIN: &'static str`. The domain is the save key.
+Each backend keeps whatever guarantee its own identity actually has: Bevy's gamepad backend can
+offer only `GamepadModelId`, a vendor and product id, while Steam's `InputHandle_t` already survives
+a restart without colliding.
+
+`Clone`, `Eq` and `Hash` come from the trait's bounds and are captured as function pointers when a
+`DeviceId` is built — never from `reflect_clone`/`reflect_partial_eq`/`reflect_hash`.
+
+**Rules out.** One identity type shared across backends — a string, an enum with a variant per
+backend, or any shape that averages a strong guarantee down to a weak one. Also the Rust type path
+as the save key, and `Option<DeviceId>` as a stored field.
+
+**Reversal.** The domain and the payload's encoding are both save format, so changing either
+orphans every pairing and calibration a player has stored. The bounds are public API: a backend
+already implementing `DeviceIdentity` would stop compiling.
+
+**Why the bounds rather than reflection.** `Hash`, `PartialEq` and `Debug` are special-cased by the
+`Reflect` derive and generated into the type's own impl rather than stored as type data. Nothing can
+add them afterwards, and nothing can detect at registration that a backend left them out — so a
+reflection-sourced `Hash` compiles clean and panics the first time that device is plugged in. From
+the bounds, the same omission does not compile. This is the whole reason the trait has bounds at all
+rather than being a marker.
+
+**Accepted: identical controllers collide.** A vendor and product id names a model, not a unit, so
+two of the same pad are indistinguishable. That is gilrs's gap rather than an OS limit — [gilrs#154]
+has a maintainer confirming no per-unit id survives an unplug, and [gilrs#158] shows Windows itself
+distinguishing two Joy-Cons that gilrs collapses. Neither has a fix in progress. A separate macOS
+bug, [gilrs#207], loses the runtime id across every Bluetooth reconnect; persistent identity is
+needed regardless, since nothing at the runtime-handle level survives a restart by definition.
+
+**Accepted: an unreadable entry costs its whole field.** A domain no running backend claims fails to
+deserialize, the failure propagates out of whatever collection held it, and a settings layer that
+swallows a failed field drops the readable entries beside it. Settings may drop what they cannot
+read and revert to defaults, so this is priced rather than designed out.
+
+**Accepted: identity requires `bevy_reflect`.** The trait requires `Reflect`, so a build without
+that feature has no persistent identity at all.
+
+**The empty case is a table, not a null.** `SavedDeviceId` exists because a reflected `Option`
+writes its empty case as `none`, which TOML cannot spell — a settings layer writing TOML fails on
+the whole file rather than omitting the field. Anything persisted stores `SavedDeviceId`, never
+`Option<DeviceId>`.
+
+[gilrs#154]: https://gitlab.com/gilrs-project/gilrs/-/work_items/154
+[gilrs#158]: https://gitlab.com/gilrs-project/gilrs/-/work_items/158
+[gilrs#207]: https://gitlab.com/gilrs-project/gilrs/-/work_items/207
+
 ---
 
 ## What the crate refuses to own

@@ -80,7 +80,7 @@ pub struct ClaimedDevices([Option<DeviceHandle>; 2]);
 impl ClaimedDevices {
     /// Claims the first free slot for `device`, or `None` if it already holds one or both slots
     /// are taken.
-    fn claim(&mut self, device: DeviceHandle) -> Option<u8> {
+    pub fn claim(&mut self, device: DeviceHandle) -> Option<u8> {
         if self.0.contains(&Some(device)) {
             return None;
         }
@@ -214,7 +214,17 @@ fn pair_on_join(
     let Some((entity, _)) = protagonists.iter().find(|(_, p)| p.0 == slot) else {
         return;
     };
-    commands
-        .entity(entity)
-        .insert((OnFoot, Paired::to(device), ActivePreset::default()));
+    commands.queue(claim_slot(entity, device));
+}
+
+/// Puts a pane into play on a device.
+///
+/// What "claimed" means in one place, since a press is no longer the only way in: a pairing
+/// restored from settings starts a pane exactly the same way.
+pub(crate) fn claim_slot(pane: Entity, device: DeviceHandle) -> impl Command {
+    move |world: &mut World| {
+        world
+            .entity_mut(pane)
+            .insert((OnFoot, Paired::to(device), ActivePreset::default()));
+    }
 }

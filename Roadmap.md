@@ -47,9 +47,6 @@ in `docs/decisions.md`, where each says what reversing it would cost.
 
 ### Never built
 
-- **Glyphs.** The art is in `assets/input_prompts/` and the identifier scheme holds against it, but
-  no type names a glyph and nothing resolves one. R18.4 specifies the identifier; no code declares
-  it.
 - **Writing a saved override set to a file.** The crate serializes and deserializes one; where the
   bytes go was always the app's decision — chunk 92.
 - **A snapshot of a context's state.** The shape is designed and written down; nothing has taken one
@@ -177,6 +174,8 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 113 | A device's brand is a component, not a lookup at every read |
 | 71  | Per-player presets, behind a pause popup              |
 | 103 | A disconnect signal and a reconnect prompt            |
+| 72  | Device identity, and a pad that returns to the pane that lost it |
+| 72d | A pairing that survives a restart, through `bevy_settings`       |
 
 ---
 
@@ -198,93 +197,10 @@ Disasteroids is one player reading one set of bindings, so everything about devi
 invisible to it. Split Friction is the example that has to answer *which* device drove an
 action, and most of this section is what it needs.
 
-### 72. Device identity, and a pairing that survives a restart
-
-R11.5: stable persistent device identity, distinct from the runtime handle, and Split Friction
-putting each player back on the device they had.
-
-- **Split from chunk 72b**, which carries calibration onto the identity this one builds. Both halves
-  would have been one chunk; identity plus the lookup plus pairing restore is already a day's
-  reading, and each half demonstrates itself on its own — this one by a pairing surviving a restart,
-  72b by a calibration doing the same.
-- **A gilrs bug confirmed, not assumed.** On macOS, a Bluetooth pad's runtime id never survives a
-  disconnect — `padprobe` reproduced four fresh ids across four reconnects of the same physical pad,
-  uuid/vendor id/product id unchanged every time. Root cause is in gilrs-core's macOS backend, not
-  this crate, and is filed upstream as [gilrs#207][]; proceed on the assumption it gets fixed there
-  rather than building a permanent workaround for it here.
-- **Persistent identity is this chunk's to build regardless of that fix.** Even a fixed gilrs only
-  helps within one process's life — nothing survives a restart at the runtime-handle level by
-  definition, which is R11.5's actual ask. Key it off `vendor_id`/`product_id`
-  (`GamepadConnectionEvent::Connected`, the same source `Brand` already resolves from), not
-  `DeviceHandle` itself: `DeviceHandle` stays Entity-based for gilrs and a Steam backend alike, and
-  the persistent identity this chunk needs is a separate mapping kept beside it, not a new variant.
-- **Two pads of the same model collide on that key, and that is gilrs's gap, not an OS limit.**
-  Vendor/product id, and the uuid derived from them, name a model, not a unit, so two identical
-  controllers at the table are indistinguishable by it — but the OS itself can often tell them
-  apart. [gilrs#154][] has a maintainer confirming no per-unit id survives even a single
-  unplug/replug in the current API; [gilrs#158][] shows Windows' own Bluetooth device list
-  distinguishing two Joy-Cons that gilrs collapses into one identical name. Neither has a fix in
-  progress. Until one lands, first-come-first-served among matches is what this chunk falls back
-  to — exactly right for one waiting slot and one reconnecting pad, wrong only once more than one
-  of either is live at the same time.
-- **Steam's own identity is not the same shape, so the same key may not transfer.** `docs/steam.md`
-  S8/S14 measured Steam's `InputHandle_t` staying stable across a transport swap while the
-  vendor/product id it reported for the identical physical pad changed. What this chunk builds for
-  gilrs's identity may need its own counterpart for a Steam backend rather than one shared scheme.
-- **The identity carries a backend-defined payload, and the shape is settled.** A backend declares
-  its own identity type — `DeviceIdentity: Reflect + FromReflect + GetTypeRegistration + Clone + Eq
-  + Hash + Debug`, carrying `const DOMAIN: &'static str` — and `register_device_identity::<T>()`
-  puts a `ReflectDeviceIdentity` type data in the registry so a saved domain resolves back to a
-  concrete type. `DeviceId` wraps one as `#[reflect(opaque)]` with
-  `SerializeWithRegistry`/`DeserializeWithRegistry`, which is the only route to the `TypeRegistry`
-  from inside a field whose serializer writes no type information — and therefore the only way a
-  `bevy_settings` group can hold one. Nothing flattens: each backend keeps the guarantee its own
-  identity actually has.
-- **The `DOMAIN` is the save key, and the Rust type path never reaches the file (D6).** Writing
-  `{domain: payload}` rather than delegating to `ReflectSerializer` is the whole of it; the body
-  goes through `TypedReflectSerializer`, which writes no type information at all.
-- **`Clone`, `Eq` and `Hash` come from the trait bounds, never from `reflect_clone` /
-  `reflect_partial_eq` / `reflect_hash`.** Those three are special-cased in the `Reflect` derive and
-  generated into the type's own impl rather than stored as type data, so nothing can add them
-  afterwards and nothing can detect a backend that left them out. Taken from reflection they panic
-  the first time that pad is plugged in; taken from the bounds, the backend does not compile. `Eq`
-  rather than `PartialEq` because R11.7 makes an identity a map key, which also forbids a float in
-  one.
-- **A backend whose identity must outlive a schema change owns its encoding.** The structural
-  default breaks both ways — a gained field is missing from an old file and `FromReflect` refuses
-  the half-built value, a dropped field is an unknown field the struct deserializer rejects
-  outright. `#[reflect(Serialize, Deserialize)]` on the identity type is the escape hatch, the same
-  one `SavedRow` already uses, and the backend-facing docs say so rather than leaving it to be
-  found. It is also the only way to store a handle above `i64::MAX`, which TOML cannot hold as an
-  integer and Steam's `InputHandle_t` can reach.
-- **The lookup belongs to chunk 92, not here.** "Find the connected device this stored identity
-  names" reporting no match, exactly one, or several candidates is the right answer to the
-  identical-pads collision, and it was written and then withdrawn: the reconnect path asks the
-  inverse question — *this* pad arrived, whose was it — and compares two identities directly. A
-  lookup with no caller is API surface built on speculation, so it lands with the loading path that
-  needs it.
-- **Not doing:** retaining an unrecognized domain across a round trip. An entry the running build
-  cannot read fails, and because the failure propagates out of the `Vec` and `bevy_settings`
-  swallows a field that fails to deserialize, one unreadable entry costs every pairing in the file.
-  Settings may drop what they cannot read and revert to defaults, so this is accepted rather than
-  designed out — but it is stated, because the readable pairings go with it.
-- **Not doing:** the presentation half. Nothing here names a glyph or draws a device, and the
-  reconnect prompt chunk 103 built is what a restored pairing reuses.
-- **Not doing:** surviving a *restart*, which is the half of R11.5 that needs somewhere to put the
-  bytes. Nothing in the examples writes a settings file yet — chunk 92 is what wires `bevy_settings`
-  in — so this chunk builds the identity, makes it storable, and demonstrates it across a
-  disconnect. Chunk 92 stores it, and R15.6's restart case is written onto that chunk rather than
-  left here.
-- **Not doing:** an identity in a build without `bevy_reflect`. The trait requires `Reflect`, so a
-  no-reflect build has no persistent identity — acceptable while persistence is the whole point of
-  having one, but it does mean R11.5 is feature-gated rather than universal.
-- **Verified by:** unplugging a paired pad and plugging it back in, and watching that pane — not
-  whichever was waiting longest — get it back.
-
 ### 72b. Calibration that survives a restart, and a screen that measures one
 
 R11.7 and R14.11: stage-1 calibration stored per persistent device identity, and offered as an
-explicit player-facing step. Depends on chunk 72 for the identity to key it by.
+explicit player-facing step. `DeviceId` is the identity to key it by, and it exists.
 
 - **Chunk 22 built the measuring and the applying keyed to the runtime handle**, which is exactly
   what a persistent identity keys instead. `GamepadCalibration` and `CalibrationSampling` are keyed
@@ -303,6 +219,17 @@ and optional devices — nothing exists under this name anywhere in `src/`.
 
 - **Split Friction's join screen**, validating "this player needs a gamepad" versus "keyboard is
   fine" before a pane is handed a protagonist, rather than silently accepting any device.
+- **This is the chunk that stops device families reading as interchangeable.** Split Friction
+  accepts whichever device pressed first and treats a keyboard as a pad's peer, which is true of a
+  game that simple and false in general: a mouse aims far more precisely than a stick, to the point
+  that shooters refuse to match the two. The crate itself takes no position — D53 has it refusing
+  to rank devices, and nothing in `src/` substitutes one family for another — so what is missing is
+  the vocabulary for a game to state its own requirement, not a default to correct.
+- **Write it for the two cases that are real**, rather than for Split Friction's: local co-op where
+  every player is on a gamepad, and network play where the client is one player, every device is
+  taken automatically, and nobody joins anything. The second wants no join screen at all, which the
+  crate already allows — a context with no `Paired` reads every device — so the requirement set has
+  to be optional rather than a step everything passes through.
 
 ### 105. Auto-switching a player's active scheme
 
@@ -455,12 +382,12 @@ convenient.
 
 R18.4 and R18.9 (`docs/issues.md` retired 1016's sibling gates): glyph resolution returns an
 identifier keyed by (brand, control), the app supplies the atlas, and a fallback chain of
-brand → generic → text is required. Nothing declares a glyph type today; the only occurrence of
-"glyph" in `src/` is a doc comment.
+brand → generic → text is required.
 
-The art landed ahead of this and the key held against it: every one of the 164 entries in
-`assets/input_prompts/` resolves as `format!("input_prompts/{tier}/{}.png", control.name())`, which
-is what R18.4's key was waiting to be checked against.
+**The inline half has landed** — `Glyph`, `GlyphTier`, the fallback chain and `IconPromptSpan` all
+exist, and the art resolves against them: every one of the 164 entries in `assets/input_prompts/`
+answers to `format!("input_prompts/{tier}/{}.png", control.name())`. What is left is the block
+prompt and the generic tier's art, below.
 
 - **The identifier is one variant of a sum, not the whole type.** R18.9 requires it: a backend
   answers with an opaque handle, raw bytes, or a filesystem path instead, and Steam actually does
@@ -492,6 +419,10 @@ is what R18.4's key was waiting to be checked against.
   `pad/West` in the settings screen. Face buttons are where brands diverge most visibly, so swapping
   a pad changes both glyphs; and because Generic ships no face-button art, an unrecognized pad falls
   through to text in exactly those two spots. The fallback demonstrates itself.
+- **A letter is ambiguous where an icon is not**, which is the sharpest argument for this chunk and
+  is visible in Split Friction's lobby today: "press A or Enter" names a pad button and a key, and
+  nothing in the line says which is which. A real game uses the icon for exactly that reason. The
+  text path stays the fallback it is, rather than being made cleverer.
 - **Not doing: icons in the capture cells.** The settings table has no width to spare, and the two
   surfaces want different things anyway — a prompt is a hint, where a glyph reads fastest, while a
   capture cell is an editor showing the authoritative name of what is being changed.
@@ -528,15 +459,22 @@ the app declares there.
   the loaded `SavedOverrides` resource before the first `apply_overrides`, and a `save_overrides`
   call on Confirm feeding back into it.
 - **A dev-dependency of the examples, not the crate.** This crate publishes `SavedOverrides` and no
-  opinion about where the bytes go (D53); `bevy_settings` is wired into `examples/disasteroids`
-  only.
-- **Inherits chunk 72's restart half, and the lookup it withheld.** Chunk 72 built `DeviceId` and
-  made it storable but has nowhere to put it, so R11.5's "survives a restart" and R15.6's restart
-  case land here: Split Friction saves each pane's identity and, at startup, asks which connected
-  device each stored one names. That question — no match, exactly one, or several candidates, the
-  app choosing among several on D53's terms — is the lookup chunk 72 wrote and withdrew for want of
-  a caller. It is also the first place two identical pads can both answer at once, since at startup
-  every pad is connected at the same moment rather than arriving one at a time.
+  opinion about where the bytes go (D53). Chunk 72d already added the `bevy_settings` feature to the
+  `bevy` dev-dependency and wired it into Split Friction, so this chunk adds Disasteroids beside it
+  rather than the dependency itself. Disasteroids will need the same `[[example]]` entry with
+  `required-features = ["serialize"]` that Split Friction has — without it the settings group
+  compiles and panics at the first save, which is how chunk 72d found the trap.
+- **Split Friction's half already landed**, in chunk 72d: `bevy_settings` is wired into that example
+  and each pane's `DeviceId` survives a restart, which closes R11.5's persistence half and R15.6.
+  What is left here is the Disasteroids half — `SavedOverrides` as a settings group — and that is
+  what this chunk now means.
+- **The lookup stayed unbuilt, and the reason is now measured rather than guessed.** "Which
+  connected device does this stored identity name", answering no match, exactly one, or several, was
+  written for chunk 72 and withdrawn for want of a caller; chunk 72d did not need it either. Devices
+  arrive as connection events one at a time, including the ones already plugged in at launch, so
+  every caller has one device in hand and asks the inverse question. Two identical pads never
+  present themselves as a set to choose from. It gets built when something asks the question in that
+  direction, and not before.
 - **Not doing:** per-profile or per-scheme settings groups (R17.4), and anything Split Friction's
   two protagonists need — chunk 71 owns per-player preset selection once a settings group exists to
   read and write, this chunk owns getting one player's set to and from disk at all.
@@ -676,7 +614,12 @@ crate's `bevy_reflect` dependency is `default-features = false` and its own forw
 re-adds it.
 
 - **Derive `Reflect`** on the nine types named in 1019, same as `action.rs` and `frame.rs` already
-  do it.
+  do it. Add `Identity` to that list: chunk 72 gave it to a device's entity and left it, like
+  `Paired` beside it, without `Reflect`.
+- **`register_device_identity` is the one `register_type` call in tree now**, added by chunk 72
+  because a stored identity's domain has to resolve back to a concrete type at load. It stays
+  either way — it registers type data, not just the type — but it is no longer true that nothing
+  calls `register_type`.
 - **Add `bevy_reflect/auto_register_inventory`** to this crate's own `bevy_reflect` feature
   (`Cargo.toml:94-101`), so every type above — and every one derived after this chunk — registers
   itself, rather than adding a `register_type` call this chunk would immediately have to write nine
@@ -721,7 +664,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | Area | Gated on |
 | --- | --- |
 | **A real Steam backend, validated out of tree** | less than it looked. `docs/steam.md` S4 now says a borrowed app id does carry its own manifest from inside the client's bundle, and S13 answered R1.7 that way, so what is left needing an app id is only what S6 blocks: a configuration Steam actually applies. Whether that needs an app id at all, or only a windowed app Steam launches, is itself unmeasured. The shape is settled: a probe rather than a game, in its own repository, pinning `bevy_action_map` by git rev so it breaks only on a deliberate bump — and it is an audit rather than a gate, since it needs a client and a pad and cannot run in CI. `steam_probe/` is its gitignored seed and moves out when the repository exists. Nothing in this crate is blocked on it: per-family suppression is chunk 112, and the presentation half can be built against API signatures already verified to exist |
-| **Persisting calibration**, keyed to identity (R11.7, R14.11) | nothing any more — chunk 72b owns it, once chunk 72 has built the identity to key it by. Measured calibration lasts as long as the process until then |
+| **Persisting calibration**, keyed to identity (R11.7, R14.11) | nothing any more — chunk 72 built the identity, and chunk 72b owns re-keying calibration onto it. Measured calibration lasts as long as the process until then |
 | **A backend-safe way to ask which device drove an ordinary action's current activation** | a real need, not just Split Friction's. `Fired`'s value is device-agnostic by design — the same reason `Move` never says which stick moved it — so `protagonist.rs`'s `pair_on_join` (chunk 66, restated when `Join` moved off a class binding) reads Bevy's `Gamepad` component and `ButtonInput<KeyCode>` directly to find out who pressed it. That query does not exist under a Steam authority (D22, suppression), so the example breaks under the one backend this crate means to support. Whatever answers this generalizes past one example: some notion of "which device is this activation's origin" carried alongside an ordinary action's value, not only a class binding's raw event |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it. Measured (`docs/steam.md` S17): `get_glyph_for_action_origin` resolves to an absolute filesystem path inside the client's own app bundle — `Contents/MacOS/controller_base/images/api/dark/shared_lstick_md.png` on macOS, not the `tenfoot/resource/...` path this row previously guessed — and the `dark` component says the glyphs are themed, so a light variant has to be selected rather than assumed. A Bevy `AssetPath` can carry it natively via `from_path_buf` — no string-escaping the drive letter or backslashes. The path is not to be opened as given: a custom `AssetSource` reader must canonicalize it and reject anything outside a known root before reading, rather than trust an external SDK's return value as a bare filesystem path. One scheme, one hard-coded root is the right size while only this one root is confirmed; a second scheme is warranted only if a second root with its own lifecycle surfaces (e.g. something ephemeral, which cannot share a stable root's caching and hot-reload assumptions) — not one scheme per SDK call that happens to return a path |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import |
@@ -746,8 +689,5 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
 [bevy#25710]: https://github.com/bevyengine/bevy/pull/25710
-[gilrs#207]: https://gitlab.com/gilrs-project/gilrs/-/work_items/207
-[gilrs#154]: https://gitlab.com/gilrs-project/gilrs/-/work_items/154
-[gilrs#158]: https://gitlab.com/gilrs-project/gilrs/-/work_items/158
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678
