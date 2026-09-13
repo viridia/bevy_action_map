@@ -603,9 +603,18 @@ D53's registry half is not in question: which presets exist is the game's. It is
 which one is applied* that both examples had to build, and that the crate is better placed to keep
 accurate, since it already sees every rewrite that would invalidate it.
 
-_Fix:_ a D53 revisit rather than an edit, and the cheaper half may be enough — shipping the
-inference as one crate function would stop it being written twice without the crate holding any
-state. Unrouted.
+_Fix:_ **chunks 92 and 92b**, and neither by shipping the inference. Both examples store the chosen
+preset's name instead — 92 splits `PendingOverrides` so captures and preset rows stop being merged
+into one bag, and 92b persists Split Friction's `ActivePreset` — which deletes `selected_preset` and
+its three helpers rather than moving them into the crate. D53 needs no revisit: what the examples
+were missing was a record of the player's own choice, which is the game's to keep, not a record the
+crate should have been holding.
+
+The half that does not dissolve: a game that lets a player rebind rows a preset also touches still
+has to decide what "still on Southpaw" means once they have departed from it. Storing the name
+answers it by fiat — you are on Southpaw until you pick something else — which is a defensible
+answer and the one 92 takes, but it is a choice rather than a fact, and a screen wanting to show
+"Southpaw (modified)" would need the comparison back.
 
 ### 1053 The release itself has no destination
 
