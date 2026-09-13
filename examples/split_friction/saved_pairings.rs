@@ -1,18 +1,24 @@
-//! What each pane keeps between sessions — for now, which device it was on.
+//! What each pane keeps between sessions: which device it was on, and which preset it had chosen.
 //!
-//! The crate hands out a [`DeviceId`] and no opinion about where it goes; here it goes into
-//! `bevy_settings`, one section per pane:
+//! The crate hands out a [`DeviceId`] and a preset's name and no opinion about where either goes;
+//! here they go into `bevy_settings`, one section per pane:
 //!
 //! ```toml
+//! [player1]
+//! preset = "split_friction.southpaw"
+//!
 //! [player1.device.gamepad-model]
 //! product = 2835
 //! vendor = 1118
 //!
+//! [player2]
+//! preset = "split_friction.classic"
+//!
 //! [player2.device.keyboard-mouse]
 //! ```
 //!
-//! A section per pane rather than one shared one, because a pane's settings are not going to stay
-//! one field: the preset it had chosen belongs here too, beside the device it was on.
+//! A section per pane rather than one shared one, because a pane's settings are two facts and not
+//! one: the preset it had chosen, and the device it was on.
 //!
 //! An empty table is a pane with no device — see [`SavedDeviceId`], which exists because a reflected
 //! `Option` writes its empty case as something TOML cannot spell.
@@ -32,6 +38,7 @@
 
 use std::time::Duration;
 
+use bevy::ecs::system::Command;
 use bevy::prelude::*;
 use bevy::settings::{ReflectSettingsGroup, SaveSettingsDeferred, SettingsGroup, SettingsPlugin};
 use bevy_action_map::device::{DeviceHandle, DeviceId, Identity, KeyboardMouseId, SavedDeviceId};
@@ -50,6 +57,8 @@ const APP_ID: &str = "org.bevy.bevy_action_map.split_friction";
 struct PlayerOneSettings {
     /// The device this pane was on, empty until it has been on one.
     device: SavedDeviceId,
+    /// The preset this pane was on, empty until it has been on one.
+    preset: String,
 }
 
 /// What pane 1 keeps. A second group rather than an index into one, so each pane's settings read as
@@ -60,6 +69,8 @@ struct PlayerOneSettings {
 struct PlayerTwoSettings {
     /// The device this pane was on, empty until it has been on one.
     device: SavedDeviceId,
+    /// The preset this pane was on, empty until it has been on one.
+    preset: String,
 }
 
 pub fn plugin(app: &mut App) {
@@ -74,6 +85,49 @@ pub fn plugin(app: &mut App) {
     app.add_observer(restore_keyboard_on_spawn);
     app.add_observer(save_on_pair);
     app.add_observer(forget_on_unpair);
+}
+
+/// The preset a pane was last on, for [`claim_slot`] to start it there.
+///
+/// A pane that has never chosen one, and a name no preset answers to, both read as the empty string
+/// — [`popup::apply_preset`](crate::popup::apply_preset) resolves that to `CLASSIC`, so the
+/// fallback lives in one place rather than being decided twice.
+pub fn stored_preset(world: &World, pane: Entity) -> String {
+    let Some(&Protagonist(slot)) = world.get::<Protagonist>(pane) else {
+        return String::new();
+    };
+    match slot {
+        0 => world.resource::<PlayerOneSettings>().preset.clone(),
+        1 => world.resource::<PlayerTwoSettings>().preset.clone(),
+        _ => String::new(),
+    }
+}
+
+/// A pane changed preset, so the file learns it too.
+///
+/// Called from [`popup::apply_preset`](crate::popup::apply_preset), the one place a pane's preset
+/// changes, rather than watched for on the component. The device beside it *is* watched, and the
+/// difference is that the device has no such single place — [`reconnect`](crate::reconnect) inserts
+/// [`KnownDevice`] for reasons of its own — while the preset does.
+///
+/// Guarded on the value actually differing, and only the matching pane's resource is touched:
+/// `DerefMut` is what marks a resource changed and `bevy_settings` decides whether to write the
+/// file by asking exactly that, so a pane restored to the preset it was already on does not rewrite
+/// the file to say so.
+pub fn store_preset(world: &mut World, pane: Entity, preset: &'static str) {
+    let Some(&Protagonist(slot)) = world.get::<Protagonist>(pane) else {
+        return;
+    };
+    match slot {
+        0 if world.resource::<PlayerOneSettings>().preset != preset => {
+            world.resource_mut::<PlayerOneSettings>().preset = preset.to_string();
+        }
+        1 if world.resource::<PlayerTwoSettings>().preset != preset => {
+            world.resource_mut::<PlayerTwoSettings>().preset = preset.to_string();
+        }
+        _ => return,
+    }
+    SaveSettingsDeferred(Duration::from_secs_f32(0.5)).apply(world);
 }
 
 /// A pane that was on the keyboard takes it back as soon as it exists.

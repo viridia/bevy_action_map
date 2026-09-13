@@ -14,7 +14,8 @@ use bevy_action_map::device::DeviceHandle;
 use bevy_action_map::player::Paired;
 use bevy_action_map::prelude::*;
 
-use crate::popup::{ActivePreset, OpenMenu, Popup};
+use crate::popup::{self, OpenMenu, Popup};
+use crate::saved_pairings;
 use crate::tileset;
 
 /// Where a protagonist is trying to move, this tick.
@@ -223,8 +224,15 @@ fn pair_on_join(
 /// restored from settings starts a pane exactly the same way.
 pub(crate) fn claim_slot(pane: Entity, device: DeviceHandle) -> impl Command {
     move |world: &mut World| {
-        world
-            .entity_mut(pane)
-            .insert((OnFoot, Paired::to(device), ActivePreset::default()));
+        let preset = saved_pairings::stored_preset(world, pane);
+        // `OnFoot`'s state tables are attached by an `on_add` hook that queues the insert, and the
+        // queue is flushed as this statement ends — so the context is on the pane by the next line,
+        // which is what `apply_preset` needs. A per-entity apply reaching a pane with no context
+        // yet would skip it in silence.
+        world.entity_mut(pane).insert((OnFoot, Paired::to(device)));
+        // `apply_preset` is what inserts `ActivePreset`, so a pane is stamped once, with the preset
+        // it is actually bound to. Stamping a default here first would have the save observer write
+        // Classic over the stored name in the moment before the stored name was read back.
+        popup::apply_preset(world, pane, &preset);
     }
 }

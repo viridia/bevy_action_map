@@ -175,6 +175,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 72  | Device identity, and a pad that returns to the pane that lost it |
 | 72d | A pairing that survives a restart, through `bevy_settings`       |
 | 92  | Bindings that survive a restart, through `bevy_settings`         |
+| 92b | A pane's chosen preset survives a restart                        |
 
 ---
 
@@ -412,29 +413,10 @@ prompt and the generic tier's art, below.
 
 ---
 
-## Persistence and snapshots
+## Snapshots
 
-Both take the same state out of a context and put it back: one to a file between runs, one to
-memory between ticks.
-
-### 92b. A pane's chosen preset survives a restart
-
-Split Friction offers presets and no per-row rebinding, and is not going to, so a pane's whole
-remapping state is one name. Chunk 71 landed the choosing; nothing writes it down.
-
-- **The state already exists in the right shape.** `ActivePreset(&'static str)` sits on the pane
-  beside `Paired`, and `select_preset_pressed` passes the preset's rows as both the working copy and
-  the preset — so the working copy *is* the preset, and there is nothing else to store.
-- **The settings group is already there.** Chunk 72d's `PlayerOneSettings` / `PlayerTwoSettings`
-  carry a `device` field, and `saved_pairings.rs`'s own module doc already says the preset belongs
-  beside it. This is that field, saved on `ActivePreset` change and applied when a pane is claimed.
-- **Why it was not chunk 92's.** Different example, different settings groups, and an acceptance
-  test that needs two panes. It depends on nothing 92 built, since the name is stored rather than
-  derived; what 92 leaves behind is the shape to copy, in `disasteroids/saved_controls.rs`.
-- **Takes 92's fallback rule with it:** a stored name matching no declared preset drops to
-  `CLASSIC` rather than leaving the pane on whatever was last applied.
-- **Verified by:** putting one pane on Southpaw, quitting, relaunching, and finding that pane still
-  southpaw while the other is not.
+Taking a context's state out and putting it back, in memory between ticks. The other half of this
+section was persistence — the same move, to a file between runs — and chunks 92 and 92b landed it.
 
 ### 83. Rewind, without the network
 

@@ -27,6 +27,7 @@ use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
 use crate::common::widget_focus::focusable;
 use crate::protagonist::{ClaimedDevices, Move, OnFoot, Protagonist};
+use crate::saved_pairings;
 
 /// Whether a per-pane popup is open, and which pane's.
 #[derive(States, Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -77,8 +78,8 @@ const SOUTHPAW: &str = "split_friction.southpaw";
 
 /// Which preset a protagonist currently has applied.
 ///
-/// Inserted alongside `OnFoot` and `Paired` at pairing time (`protagonist::pair_on_join`) so there
-/// is always an answer, even for a protagonist that has never opened the popup.
+/// Inserted by [`apply_preset`], which `protagonist::claim_slot` calls as it puts a pane into play,
+/// so there is always an answer — even for a protagonist that has never opened the popup.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 pub struct ActivePreset(pub &'static str);
 
@@ -273,6 +274,26 @@ fn return_button() -> impl Scene {
     }
 }
 
+/// Puts one pane on `name`, both in what it is bound to and in what it says it is on.
+///
+/// The one place a pane's preset changes, so a press, a reset and a pairing restored from settings
+/// all reach the bindings the same way. A name no preset answers to falls back to [`CLASSIC`],
+/// which is what a save file written before a preset was renamed or dropped will hold.
+pub(crate) fn apply_preset(world: &mut World, pane: Entity, name: &str) {
+    let chosen = presets(world)
+        .into_iter()
+        .find(|preset| preset.name == name)
+        .unwrap_or(Preset {
+            name: CLASSIC,
+            rows: Overrides::new(),
+        });
+    // Per entity, so the other pane keeps whatever it was on and a pane joining later still gets
+    // the game's own declaration rather than this one's choice.
+    apply_overrides_for_with_preset(world, pane, &chosen.rows, &chosen.rows);
+    world.entity_mut(pane).insert(ActivePreset(chosen.name));
+    saved_pairings::store_preset(world, pane, chosen.name);
+}
+
 /// Cycles to the next preset in [`presets`], wrapping past the end back to the first.
 fn select_preset_pressed(
     activate: On<Activate>,
@@ -283,21 +304,17 @@ fn select_preset_pressed(
         return;
     };
     commands.queue(move |world: &mut World| {
-        let presets = presets(world);
+        let names: Vec<&'static str> = presets(world).iter().map(|preset| preset.name).collect();
         let current = world
             .get::<ActivePreset>(entity)
             .copied()
             .unwrap_or_default();
-        let mut names = presets.iter().map(|preset| preset.name).cycle();
-        names.find(|&name| name == current.0);
-        let Some(next_name) = names.next() else {
+        let mut cycle = names.iter().copied().cycle();
+        cycle.find(|&name| name == current.0);
+        let Some(next) = cycle.next() else {
             return;
         };
-        let Some(next) = presets.into_iter().find(|preset| preset.name == next_name) else {
-            return;
-        };
-        apply_overrides_for_with_preset(world, entity, &next.rows, &next.rows);
-        world.entity_mut(entity).insert(ActivePreset(next.name));
+        apply_preset(world, entity, next);
     });
 }
 
@@ -309,11 +326,7 @@ fn reset_presets_pressed(
     let Ok(&PopupTarget(entity)) = targets.get(activate.entity) else {
         return;
     };
-    commands.queue(move |world: &mut World| {
-        let empty = Overrides::new();
-        apply_overrides_for_with_preset(world, entity, &empty, &empty);
-        world.entity_mut(entity).insert(ActivePreset(CLASSIC));
-    });
+    commands.queue(move |world: &mut World| apply_preset(world, entity, CLASSIC));
 }
 
 /// Drops the pane's pairing and frees its device — the clean way to reset it between test runs,
