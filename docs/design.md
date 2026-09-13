@@ -554,6 +554,52 @@ Joy-Con. A brand alone cannot tell one console generation from another — Xbox 
 became Xbox One's "View"/"Menu", and PS4's "Share" became PS5's "Create" — so nothing here tracks
 an older pad's own labels.
 
+### 7.7 Persistent identity
+
+```rust
+pub trait DeviceIdentity: Reflect + FromReflect + GetTypeRegistration
+                        + Clone + Eq + Hash + Debug {
+    const DOMAIN: &'static str;
+}
+pub struct DeviceId { /* a boxed DeviceIdentity, plus its operations */ }
+pub struct Identity(pub DeviceId);
+pub struct GamepadModelId { pub vendor: u16, pub product: u16 }
+```
+
+A `DeviceHandle` names a device plugged in now; a `DeviceId` names the device itself. What counts as
+identity belongs to the backend, so the payload is the backend's own type and nothing in the crate
+inspects it. A backend declares one by implementing `DeviceIdentity` and calling
+`App::register_device_identity::<T>()`.
+
+`DOMAIN` is the name the identity is stored under, declared rather than derived from the Rust type
+path, on the same footing as an action's `PATH` (D6). It is also the discriminator: two identities
+whose domains differ are never equal, and the domain is hashed alongside the payload, so one
+backend can never answer for another's device.
+
+`Clone`, `Eq` and `Hash` come from the trait bounds and are captured as function pointers when the
+`DeviceId` is built, not from `reflect_clone`/`reflect_partial_eq`/`reflect_hash`. The derive
+special-cases those three into the type's own impl rather than storing them as type data, so their
+absence is undetectable at registration and would surface as a panic at the first use. Taken from
+the bounds, the same omission fails to compile.
+
+`DeviceId` is opaque to reflection — nothing implements `PartialReflect` for a boxed trait object —
+and carries `SerializeWithRegistry`/`DeserializeWithRegistry` instead. That pair is the only route
+to the `TypeRegistry` from inside a field whose serializer writes no type information, which is what
+lets a settings group hold one. The stored form is a single entry keyed by the domain, with the
+payload written by the typed serializer. A payload written field by field cannot be read by a
+release that has added or removed a field; a backend expecting its type to change gives it
+`#[reflect(Serialize, Deserialize)]` and owns the stored form, which is also the only way to store a
+value above `i64::MAX` in a format whose integers are `i64`.
+
+`Identity` is the resolved answer on the device's own entity, attached by an observer on
+`Add<Gamepad>` on the same terms as `Brand` — skipped when one is already present, so a backend that
+knows a device better than its USB ids do can insert its own first. `GamepadModelId` is what Bevy's
+gamepad backend can report, and it names a *model*: identical controllers report identical ids, so a
+match is a candidate rather than a proof. A pad whose platform reports neither id simply has no
+`Identity`. The signal ordering apps depend on holds by construction: `sample_input` runs
+`.after(InputSystems)`, and the sync point that implies is where Bevy's deferred `Gamepad` insert
+lands and where the observer runs — so `Identity` is attached before `DeviceConnected` fires.
+
 ---
 
 ## 8. Bindings

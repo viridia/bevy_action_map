@@ -191,6 +191,60 @@ mod tests {
             );
         }
 
+        /// An app matching a returning pad to the occupant that lost it reads [`Identity`] off the
+        /// device the signal names, so the identity has to be attached by the time the signal
+        /// arrives. It is — `sample_input` runs `.after(InputSystems)`, and the sync point that
+        /// order implies is where Bevy's own deferred `Gamepad` insert lands and where the observer
+        /// watching for it gets to run. Ordering nobody declared, so it is asserted rather than
+        /// assumed.
+        #[cfg(feature = "bevy_reflect")]
+        #[test]
+        fn a_connect_signal_arrives_after_the_identity_it_will_be_matched_on() {
+            use bevy_ecs::prelude::ResMut;
+
+            #[derive(Resource, Default)]
+            struct SawIdentity(Option<bool>);
+
+            let mut app = App::new();
+            app.add_plugins(bevy_input::InputPlugin);
+            app.add_plugins(crate::ActionMapPlugin);
+            app.init_resource::<SawIdentity>();
+            app.add_observer(
+                |connected: On<DeviceConnected>,
+                 identities: Query<&crate::device::Identity>,
+                 mut saw: ResMut<SawIdentity>| {
+                    let DeviceHandle::Gamepad(device) = connected.device else {
+                        return;
+                    };
+                    saw.0 = Some(identities.get(device).is_ok());
+                },
+            );
+
+            let pad = app.world_mut().spawn_empty().id();
+            let connected = GamepadConnectionEvent::new(
+                pad,
+                GamepadConnection::Connected {
+                    name: "test pad".into(),
+                    vendor_id: Some(0x054C),
+                    product_id: Some(0x05C4),
+                },
+            );
+            // Both messages, which is what a real backend writes: the raw one reaches the input
+            // frame, the connection one drives Bevy's own entity setup.
+            app.world_mut()
+                .write_message(bevy_input::gamepad::RawGamepadEvent::from(
+                    connected.clone(),
+                ));
+            app.world_mut().write_message(connected);
+            app.update();
+
+            assert_eq!(
+                app.world().resource::<SawIdentity>().0,
+                Some(true),
+                "an app cannot match a returning pad if the signal outruns its identity"
+            );
+        }
+
         /// Unscoped: fires whether or not anything is paired at all, since matching a newly
         /// connected pad to a waiting occupant is the app's call (D53), not this system's.
         #[test]

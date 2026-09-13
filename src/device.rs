@@ -4,6 +4,10 @@
 //! is written for, and a [`DeviceHandle`] is one unit of it plugged in right now. Alongside those
 //! are a persistent identity, and the capability data used by prompts, pairing, and calibration.
 
+// Named so the `#[reflect(..)]` attributes on `DeviceId` resolve; not referred to directly.
+#[cfg(feature = "serialize")]
+use bevy_reflect::serde::{ReflectDeserializeWithRegistry, ReflectSerializeWithRegistry};
+
 /// The set of devices a player is using, and the scope a rebinding is made in.
 ///
 /// Keyboard bindings and gamepad bindings are alternatives rather than competitors: a player is
@@ -19,10 +23,9 @@ pub enum DeviceFamily {
 
 /// A device as it exists right now, in this running process.
 ///
-/// Not persistent: a gamepad's [`Entity`] is reassigned by the backend
-/// on every reconnect, so nothing should compare a saved `DeviceHandle` against a live one across a
-/// restart. Surviving a reconnect needs a stable identity, which is a separate, not-yet-built
-/// mechanism.
+/// Not persistent: a gamepad's `Entity` is reassigned by the backend on every reconnect, so nothing
+/// should compare a saved `DeviceHandle` against a live one across a restart. Recognizing a device
+/// that comes back is [`DeviceId`]'s job, carried on the device's own entity as [`Identity`].
 ///
 /// The keyboard and mouse are modeled as one device, `KeyboardMouse`, since this crate has never
 /// treated them as separable.
@@ -107,20 +110,362 @@ impl FromIterator<DeviceHandle> for DeviceHandleSet {
     }
 }
 
+/// A device identity that outlives the process, defined by whatever backend knows how to produce
+/// one.
+///
+/// A [`DeviceHandle`] names a device plugged in right now. This names the device *itself*, so a
+/// pairing or a calibration can be stored against it and found again after a restart. What counts
+/// as identity is the backend's business — a USB vendor and product id, a platform handle, a serial
+/// number — so the payload is your own type and this crate never looks inside it.
+///
+/// ```
+/// # use bevy_action_map::device::DeviceIdentity;
+/// # use bevy_reflect::Reflect;
+/// #[derive(Reflect, Clone, Debug, PartialEq, Eq, Hash)]
+/// struct UsbDeviceId {
+///     vendor: u16,
+///     product: u16,
+/// }
+///
+/// impl DeviceIdentity for UsbDeviceId {
+///     const DOMAIN: &'static str = "usb";
+/// }
+/// ```
+///
+/// `DOMAIN` names your identity in a save file, and it is a name you choose rather than the Rust
+/// path of the type: renaming the type or moving it between modules must not orphan a player's
+/// saved pairings. Keep it short, specific to the backend, and fixed once you have shipped it.
+///
+/// `Eq` and `Hash` are required because saved settings are stored keyed by identity, so an identity
+/// holding a float cannot be used here. Take them from `derive`; an identity that is expensive to
+/// compare is an identity that is too big.
+///
+/// # Surviving a change to your own type
+///
+/// By default the payload is written field by field, which means a release that adds or removes a
+/// field can no longer read what the last one wrote. If you expect the type to change, give it its
+/// own `Serialize` and `Deserialize` and add `#[reflect(Serialize, Deserialize)]`: you then decide
+/// what the stored form looks like and what it tolerates, and a compact string is usually the
+/// easiest thing to keep reading. It is also the only way to store a value above `i64::MAX`, which
+/// some settings formats cannot hold as a number.
+#[cfg(feature = "bevy_reflect")]
+pub trait DeviceIdentity:
+    bevy_reflect::Reflect
+    + bevy_reflect::FromReflect
+    + bevy_reflect::GetTypeRegistration
+    + Clone
+    + Eq
+    + core::hash::Hash
+    + core::fmt::Debug
+{
+    /// The name this identity is stored under. Yours to choose, and stable once shipped.
+    const DOMAIN: &'static str;
+}
+
+/// What [`DeviceId`] needs from a payload whose type it has forgotten, captured while the type is
+/// still known.
+///
+/// Deliberately not routed through `reflect_clone`/`reflect_partial_eq`/`reflect_hash`: the derive
+/// special-cases those three and generates them into the type's own impl rather than storing them
+/// as type data, so a backend that omits `#[reflect(Hash)]` cannot be detected at registration and
+/// would instead panic the first time its device was plugged in. Taken from the trait bounds, the
+/// same mistake does not compile.
+#[cfg(feature = "bevy_reflect")]
+#[derive(Clone, Copy)]
+struct DeviceIdOps {
+    domain: &'static str,
+    hash: fn(&dyn bevy_reflect::Reflect, &mut dyn core::hash::Hasher),
+    eq: fn(&dyn bevy_reflect::Reflect, &dyn bevy_reflect::Reflect) -> bool,
+    clone: fn(&dyn bevy_reflect::Reflect) -> alloc::boxed::Box<dyn bevy_reflect::Reflect>,
+    debug: fn(&dyn bevy_reflect::Reflect, &mut core::fmt::Formatter<'_>) -> core::fmt::Result,
+}
+
+#[cfg(feature = "bevy_reflect")]
+impl DeviceIdOps {
+    fn of<T: DeviceIdentity>() -> Self {
+        // Every one of these is handed the payload it was built beside: `DeviceId::new` and the
+        // deserializer are the only sites that pair the two, and both are generic over this `T`.
+        fn cast<T: DeviceIdentity>(value: &dyn bevy_reflect::Reflect) -> &T {
+            debug_assert!(
+                value.downcast_ref::<T>().is_some(),
+                "`DeviceIdOps` was paired with a payload of another type"
+            );
+            value.downcast_ref::<T>().unwrap()
+        }
+
+        Self {
+            domain: T::DOMAIN,
+            // `&mut &mut dyn Hasher` is the sized receiver `Hash::hash` wants.
+            hash: |value, mut state| core::hash::Hash::hash(cast::<T>(value), &mut state),
+            eq: |left, right| {
+                right
+                    .downcast_ref::<T>()
+                    .is_some_and(|right| cast::<T>(left) == right)
+            },
+            clone: |value| alloc::boxed::Box::new(cast::<T>(value).clone()),
+            debug: |value, f| core::fmt::Debug::fmt(cast::<T>(value), f),
+        }
+    }
+}
+
+/// One device's persistent identity, whichever backend produced it.
+///
+/// Compare them, hash them, store them; this crate never inspects what is inside one. Build one
+/// from your own [`DeviceIdentity`] type with [`new`](Self::new), and ask [`domain`](Self::domain)
+/// which backend an identity came from.
+///
+/// Two identities from different backends are never equal, even if their payloads happen to hold
+/// the same bytes.
+#[cfg(feature = "bevy_reflect")]
+#[derive(bevy_reflect::Reflect)]
+#[reflect(opaque)]
+#[reflect(PartialEq, Hash, Debug)]
+#[cfg_attr(
+    feature = "serialize",
+    reflect(SerializeWithRegistry, DeserializeWithRegistry)
+)]
+pub struct DeviceId {
+    payload: alloc::boxed::Box<dyn bevy_reflect::Reflect>,
+    ops: DeviceIdOps,
+}
+
+#[cfg(feature = "bevy_reflect")]
+impl DeviceId {
+    /// Wraps a backend's own identity type.
+    pub fn new<T: DeviceIdentity>(identity: T) -> Self {
+        Self {
+            payload: alloc::boxed::Box::new(identity),
+            ops: DeviceIdOps::of::<T>(),
+        }
+    }
+
+    /// Which backend this identity belongs to — the [`DOMAIN`](DeviceIdentity::DOMAIN) of the type
+    /// it was built from.
+    pub fn domain(&self) -> &'static str {
+        self.ops.domain
+    }
+
+    /// The identity as the backend's own type, or `None` if it came from a different one.
+    pub fn get<T: DeviceIdentity>(&self) -> Option<&T> {
+        self.payload.downcast_ref::<T>()
+    }
+}
+
+#[cfg(feature = "bevy_reflect")]
+impl Clone for DeviceId {
+    fn clone(&self) -> Self {
+        Self {
+            payload: (self.ops.clone)(&*self.payload),
+            ops: self.ops,
+        }
+    }
+}
+
+#[cfg(feature = "bevy_reflect")]
+impl PartialEq for DeviceId {
+    fn eq(&self, other: &Self) -> bool {
+        self.ops.domain == other.ops.domain && (self.ops.eq)(&*self.payload, &*other.payload)
+    }
+}
+
+#[cfg(feature = "bevy_reflect")]
+impl Eq for DeviceId {}
+
+#[cfg(feature = "bevy_reflect")]
+impl core::hash::Hash for DeviceId {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        // The domain is hashed too, so two backends whose payloads encode alike do not collide.
+        core::hash::Hash::hash(self.ops.domain, state);
+        (self.ops.hash)(&*self.payload, state);
+    }
+}
+
+#[cfg(feature = "bevy_reflect")]
+impl core::fmt::Debug for DeviceId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}:", self.ops.domain)?;
+        (self.ops.debug)(&*self.payload, f)
+    }
+}
+
+/// Type data letting a stored [`DeviceId`] find its way back to a backend's own type.
+///
+/// Registered for you by
+/// [`register_device_identity`](RegisterDeviceIdentity::register_device_identity).
+#[cfg(feature = "bevy_reflect")]
+#[derive(Clone)]
+pub struct ReflectDeviceIdentity {
+    domain: &'static str,
+    // Only the deserializer rebuilds an identity from a loaded payload; without it this is a claim
+    // on the domain name and nothing more.
+    #[cfg(feature = "serialize")]
+    from_payload: fn(&dyn bevy_reflect::PartialReflect) -> Option<DeviceId>,
+}
+
+#[cfg(feature = "bevy_reflect")]
+impl ReflectDeviceIdentity {
+    fn of<T: DeviceIdentity>() -> Self {
+        Self {
+            domain: T::DOMAIN,
+            #[cfg(feature = "serialize")]
+            from_payload: |value| {
+                <T as bevy_reflect::FromReflect>::from_reflect(value).map(DeviceId::new)
+            },
+        }
+    }
+
+    /// The name identities of this type are stored under.
+    pub fn domain(&self) -> &'static str {
+        self.domain
+    }
+}
+
+/// Declares a backend's [`DeviceIdentity`] type to the app, so identities of it can be stored and
+/// read back.
+///
+/// A backend calls this once at startup for each identity type it produces. Without it, an identity
+/// of that type still compares and hashes, but a saved one cannot be loaded: nothing knows which
+/// type the stored [`DOMAIN`](DeviceIdentity::DOMAIN) refers to.
+#[cfg(feature = "bevy_reflect")]
+pub trait RegisterDeviceIdentity {
+    /// Registers `T` for reflection and claims its `DOMAIN`.
+    fn register_device_identity<T: DeviceIdentity>(&mut self) -> &mut Self;
+}
+
+#[cfg(feature = "bevy_reflect")]
+impl RegisterDeviceIdentity for bevy_app::App {
+    fn register_device_identity<T: DeviceIdentity>(&mut self) -> &mut Self {
+        self.register_type::<T>();
+        let registry = self
+            .world()
+            .resource::<bevy_ecs::reflect::AppTypeRegistry>();
+        let mut registry = registry.write();
+        if let Some(claimed) = registry
+            .iter()
+            .find_map(|registration| registration.data::<ReflectDeviceIdentity>())
+            .filter(|claimed| claimed.domain == T::DOMAIN)
+        {
+            // Two types answering to one name would make loading pick whichever the registry
+            // happened to yield first.
+            let _ = claimed;
+            log::warn!(
+                "the device identity domain `{}` is claimed by more than one type; a saved \
+                 identity will resolve to whichever was registered first",
+                T::DOMAIN
+            );
+        }
+        registry
+            .get_mut(core::any::TypeId::of::<T>())
+            .expect("just registered")
+            .insert(ReflectDeviceIdentity::of::<T>());
+        drop(registry);
+        self
+    }
+}
+
+#[cfg(feature = "serialize")]
+impl bevy_reflect::serde::SerializeWithRegistry for DeviceId {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+        registry: &bevy_reflect::TypeRegistry,
+    ) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        // The domain is the stored name, taken straight off the payload's own ops. The body goes
+        // through the *typed* serializer, which writes no type information — handing this to
+        // `ReflectSerializer` instead is what would put a Rust type path in a player's save file.
+        let mut map = serializer.serialize_map(Some(1))?;
+        map.serialize_entry(
+            self.ops.domain,
+            &bevy_reflect::serde::TypedReflectSerializer::new(&*self.payload, registry),
+        )?;
+        map.end()
+    }
+}
+
+#[cfg(feature = "serialize")]
+impl<'de> bevy_reflect::serde::DeserializeWithRegistry<'de> for DeviceId {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+        registry: &bevy_reflect::TypeRegistry,
+    ) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(DeviceIdVisitor { registry })
+    }
+}
+
+#[cfg(feature = "serialize")]
+struct DeviceIdVisitor<'a> {
+    registry: &'a bevy_reflect::TypeRegistry,
+}
+
+#[cfg(feature = "serialize")]
+impl<'de> serde::de::Visitor<'de> for DeviceIdVisitor<'_> {
+    type Value = DeviceId;
+
+    fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("a device identity: one entry keyed by its backend's domain")
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        use serde::de::Error as _;
+
+        let Some(domain) = map.next_key::<alloc::string::String>()? else {
+            return Err(A::Error::custom(
+                "a device identity holds one entry, not none",
+            ));
+        };
+
+        // Domain to concrete type, through the registry rather than through a type path. A scan,
+        // because this runs once per stored identity at load time rather than per tick.
+        let registration = self
+            .registry
+            .iter()
+            .find(|registration| {
+                registration
+                    .data::<ReflectDeviceIdentity>()
+                    .is_some_and(|claimed| claimed.domain == domain)
+            })
+            .ok_or_else(|| {
+                A::Error::custom(alloc::format!(
+                    "no backend has claimed the device identity domain `{domain}`"
+                ))
+            })?;
+        let claimed = registration
+            .data::<ReflectDeviceIdentity>()
+            .expect("matched on it above")
+            .clone();
+
+        let payload = map.next_value_seed(bevy_reflect::serde::TypedReflectDeserializer::new(
+            registration,
+            self.registry,
+        ))?;
+        (claimed.from_payload)(&*payload).ok_or_else(|| {
+            A::Error::custom(alloc::format!(
+                "the device identity domain `{domain}` did not accept its stored payload"
+            ))
+        })
+    }
+}
+
+// `Identity` is not gamepad-only: any backend's device can carry one.
+#[cfg(any(feature = "gamepad", feature = "bevy_reflect"))]
+use bevy_ecs::prelude::Component;
+#[cfg(any(feature = "gamepad", feature = "bevy_reflect"))]
+use core::ops::Deref;
+
 #[cfg(feature = "gamepad")]
 use bevy_ecs::entity::Entity;
 #[cfg(feature = "gamepad")]
 use bevy_ecs::lifecycle::Add;
 #[cfg(feature = "gamepad")]
-use bevy_ecs::prelude::{Changed, Commands, Component, On, Query, Res, Resource, Without};
+use bevy_ecs::prelude::{Changed, Commands, On, Query, Res, Resource, Without};
 #[cfg(feature = "gamepad")]
 use bevy_input::gamepad::{
     AxisSettings, ButtonAxisSettings, ButtonSettings, Gamepad, GamepadAxis, GamepadSettings,
 };
 #[cfg(feature = "gamepad")]
 use bevy_platform::collections::HashMap;
-#[cfg(feature = "gamepad")]
-use core::ops::Deref;
 
 /// Where one gamepad axis rests, and how far it wanders there.
 ///
@@ -169,9 +514,9 @@ impl AxisCalibration {
 /// exactly the behavior it had before. Fill it from [`CalibrationSampling`], or
 /// [`set`](Self::set) a value directly for a game that lets the player enter one.
 ///
-/// Keyed by the backend's entity for the pad, so nothing here survives a reconnect. Saving
-/// calibration across a restart needs a device identity that is stable across one, which this crate
-/// does not have yet.
+/// Keyed by the backend's entity for the pad, so nothing here survives a reconnect. Storing
+/// calibration against the pad itself means keying it by [`DeviceId`] instead, which this does not
+/// do yet.
 #[cfg(feature = "gamepad")]
 #[derive(Resource, Default, Debug)]
 pub struct GamepadCalibration {
@@ -391,6 +736,82 @@ pub fn resolve_gamepad_brand(
     }
 }
 
+/// What Bevy's own gamepad backend can say about which device a pad is: the USB vendor and product
+/// ids it reported when it connected.
+///
+/// **This names a model, not a unit.** Two identical controllers on the same table report the same
+/// vendor and product id and cannot be told apart by it, so treat a match as a candidate rather
+/// than an answer.
+///
+/// Not every platform reports these. They are absent on wasm and on some Linux setups, and a pad
+/// that reports neither has no identity of this kind at all.
+#[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
+#[derive(bevy_reflect::Reflect, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct GamepadModelId {
+    /// The USB vendor id.
+    pub vendor: u16,
+    /// The USB product id.
+    pub product: u16,
+}
+
+#[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
+impl DeviceIdentity for GamepadModelId {
+    const DOMAIN: &'static str = "gamepad-model";
+}
+
+#[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
+impl GamepadModelId {
+    /// The model id a connected pad reports, or `None` if it reports either half as absent.
+    pub fn of(gamepad: &Gamepad) -> Option<Self> {
+        Some(Self {
+            vendor: gamepad.vendor_id()?,
+            product: gamepad.product_id()?,
+        })
+    }
+}
+
+/// A connected device's persistent identity, resolved once and attached to its entity.
+///
+/// Query this rather than working an identity out from a gamepad's ids yourself: an entity carrying
+/// `Identity` needs nothing else to answer the question, which also means a device some other
+/// backend spawned works the same way as long as that backend inserts one.
+///
+/// A device that cannot report an identity simply has no `Identity`, which is why this is a
+/// component rather than a field.
+#[cfg(feature = "bevy_reflect")]
+#[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Identity(pub DeviceId);
+
+#[cfg(feature = "bevy_reflect")]
+impl Deref for Identity {
+    type Target = DeviceId;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Attaches [`Identity`] to a gamepad's entity as soon as it connects, built from the ids Bevy's
+/// gamepad backend reported.
+///
+/// Leaves an existing `Identity` alone, so a backend that knows a device better than its USB ids do
+/// can insert its own ahead of this and keep it.
+#[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
+pub fn resolve_gamepad_identity(
+    connected: On<Add<Gamepad>>,
+    mut commands: Commands,
+    gamepads: Query<&Gamepad, Without<Identity>>,
+) {
+    let entity = connected.entity;
+    if let Ok(gamepad) = gamepads.get(entity)
+        && let Some(model) = GamepadModelId::of(gamepad)
+    {
+        commands
+            .entity(entity)
+            .insert(Identity(DeviceId::new(model)));
+    }
+}
+
 /// Warns about gamepad settings this crate does not honour.
 ///
 /// Bevy's own `GamepadSettings` deadzones and thresholds are applied when it converts a raw gamepad
@@ -441,6 +862,199 @@ fn is_customized(settings: &GamepadSettings) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "serialize")]
+    use bevy_reflect::{ReflectDeserialize, ReflectSerialize};
+
+    /// Two backends' identity types, as different as the real ones are: one structural, one a
+    /// single opaque handle.
+    #[cfg(feature = "bevy_reflect")]
+    #[derive(bevy_reflect::Reflect, Clone, Debug, PartialEq, Eq, Hash)]
+    struct UsbDeviceId {
+        vendor: u16,
+        product: u16,
+    }
+
+    #[cfg(feature = "bevy_reflect")]
+    impl DeviceIdentity for UsbDeviceId {
+        const DOMAIN: &'static str = "usb";
+    }
+
+    /// The second backend also owns its stored form, which is what the docs tell a backend to do
+    /// when its type may change — and what lets a handle above `i64::MAX` be stored at all.
+    #[cfg(feature = "bevy_reflect")]
+    #[derive(bevy_reflect::Reflect, Clone, Debug, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serialize", reflect(Serialize, Deserialize))]
+    struct PlatformDeviceId(u64);
+
+    #[cfg(feature = "serialize")]
+    impl serde::Serialize for PlatformDeviceId {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(&alloc::format!("{:016x}", self.0))
+        }
+    }
+
+    #[cfg(feature = "serialize")]
+    impl<'de> serde::Deserialize<'de> for PlatformDeviceId {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let text = <alloc::string::String as serde::Deserialize>::deserialize(deserializer)?;
+            u64::from_str_radix(&text, 16)
+                .map(Self)
+                .map_err(serde::de::Error::custom)
+        }
+    }
+
+    #[cfg(feature = "bevy_reflect")]
+    impl DeviceIdentity for PlatformDeviceId {
+        const DOMAIN: &'static str = "platform";
+    }
+
+    #[cfg(feature = "bevy_reflect")]
+    #[test]
+    fn an_identity_compares_and_hashes_as_its_own_payload_does() {
+        use bevy_platform::collections::HashMap;
+
+        let pad = UsbDeviceId {
+            vendor: 0x054C,
+            product: 0x05C4,
+        };
+        let same = DeviceId::new(pad.clone());
+        let other = DeviceId::new(UsbDeviceId {
+            vendor: 0x045E,
+            product: 0x028E,
+        });
+
+        assert_eq!(DeviceId::new(pad.clone()), same);
+        assert_ne!(same, other);
+        assert_eq!(same.clone(), same);
+
+        // The use this exists for: settings stored against an identity and found again.
+        let mut stored: HashMap<DeviceId, f32> = HashMap::default();
+        stored.insert(DeviceId::new(pad.clone()), 0.1);
+        assert_eq!(stored.get(&same), Some(&0.1));
+        assert_eq!(stored.get(&other), None);
+    }
+
+    #[cfg(feature = "bevy_reflect")]
+    #[test]
+    fn identities_from_two_backends_never_collide() {
+        // Payloads that could encode alike. The domain is what keeps them apart, in equality and in
+        // the hash both, so one backend can never answer for another's device.
+        let platform = DeviceId::new(PlatformDeviceId(7));
+        let usb = DeviceId::new(UsbDeviceId {
+            vendor: 0,
+            product: 7,
+        });
+
+        assert_ne!(platform, usb);
+        assert_eq!(platform.domain(), "platform");
+        assert_eq!(usb.domain(), "usb");
+    }
+
+    #[cfg(feature = "bevy_reflect")]
+    #[test]
+    fn an_identity_hands_back_its_own_type_and_no_other() {
+        let id = DeviceId::new(PlatformDeviceId(7));
+
+        assert_eq!(id.get::<PlatformDeviceId>(), Some(&PlatformDeviceId(7)));
+        assert_eq!(id.get::<UsbDeviceId>(), None);
+        // Debug names the backend first, so a log line says which one an identity came from.
+        assert!(alloc::format!("{id:?}").starts_with("platform:"));
+    }
+
+    /// A registry carrying both backends, built the way an app builds one.
+    #[cfg(feature = "serialize")]
+    fn registered() -> bevy_app::App {
+        let mut app = bevy_app::App::new();
+        app.register_device_identity::<UsbDeviceId>();
+        app.register_device_identity::<PlatformDeviceId>();
+        app
+    }
+
+    /// What a settings layer does with a stored identity: write it, read it, get the same one back
+    /// — and never write the Rust path of a type into a player's file, so that moving the type
+    /// between modules does not orphan what they saved.
+    #[cfg(feature = "serialize")]
+    #[test]
+    fn a_stored_identity_round_trips_under_its_declared_domain() {
+        use bevy_reflect::serde::{TypedReflectDeserializer, TypedReflectSerializer};
+        use serde::de::DeserializeSeed;
+
+        let app = registered();
+        let types = app
+            .world()
+            .resource::<bevy_ecs::reflect::AppTypeRegistry>()
+            .read();
+        let registration = types.get(core::any::TypeId::of::<DeviceId>()).unwrap();
+
+        for (id, expected) in [
+            (
+                DeviceId::new(UsbDeviceId {
+                    vendor: 0x054C,
+                    product: 0x05C4,
+                }),
+                "[usb]\nvendor = 1356\nproduct = 1476\n",
+            ),
+            (
+                // Above `i64::MAX`, which only the backend's own encoding can store.
+                DeviceId::new(PlatformDeviceId(0x9214_0000_0000_0001)),
+                "platform = \"9214000000000001\"\n",
+            ),
+        ] {
+            let text = toml::to_string(&TypedReflectSerializer::new(&id, &types)).unwrap();
+            assert_eq!(text, expected);
+
+            let value: toml::Value = toml::from_str(&text).unwrap();
+            let read = TypedReflectDeserializer::new(registration, &types)
+                .deserialize(value)
+                .expect("reads back");
+            assert_eq!(
+                <DeviceId as bevy_reflect::FromReflect>::from_reflect(&*read).unwrap(),
+                id
+            );
+        }
+    }
+
+    /// A file written by a build that had a backend this one does not. Refusing is the point: the
+    /// alternative is resolving a stored identity to whichever type happened to be registered, and
+    /// answering for somebody else's device.
+    #[cfg(feature = "serialize")]
+    #[test]
+    fn an_unclaimed_domain_is_refused_rather_than_guessed_at() {
+        use bevy_reflect::serde::{TypedReflectDeserializer, TypedReflectSerializer};
+        use serde::de::DeserializeSeed;
+
+        let written = {
+            let app = registered();
+            let types = app
+                .world()
+                .resource::<bevy_ecs::reflect::AppTypeRegistry>()
+                .read();
+            toml::to_string(&TypedReflectSerializer::new(
+                &DeviceId::new(PlatformDeviceId(7)),
+                &types,
+            ))
+            .unwrap()
+        };
+
+        // The same app, minus the backend that wrote it.
+        let mut app = bevy_app::App::new();
+        app.register_device_identity::<UsbDeviceId>();
+        let types = app
+            .world()
+            .resource::<bevy_ecs::reflect::AppTypeRegistry>()
+            .read();
+        let registration = types.get(core::any::TypeId::of::<DeviceId>()).unwrap();
+
+        let value: toml::Value = toml::from_str(&written).unwrap();
+        let error = TypedReflectDeserializer::new(registration, &types)
+            .deserialize(value)
+            .expect_err("an unclaimed domain must not resolve to another backend's type");
+        assert!(
+            alloc::format!("{error}").contains("platform"),
+            "the error should name the domain nobody claimed: {error}"
+        );
+    }
 
     #[test]
     fn a_set_deduplicates_and_reports_containment() {
@@ -630,6 +1244,57 @@ mod tests {
         // The seeded table is a default, not a fixture — an app can also correct it.
         brands.insert(0x045E, GamepadBrand::Generic);
         assert_eq!(brands.resolve(Some(0x045E)), GamepadBrand::Generic);
+    }
+
+    #[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
+    #[test]
+    fn resolve_gamepad_identity_attaches_what_the_pad_reported() {
+        use bevy_app::App;
+        use bevy_input::InputPlugin;
+        use bevy_input::gamepad::{GamepadConnection, GamepadConnectionEvent};
+
+        let mut app = App::new();
+        app.add_plugins(InputPlugin);
+        app.add_observer(resolve_gamepad_identity);
+
+        let reported = app.world_mut().spawn_empty().id();
+        let silent = app.world_mut().spawn_empty().id();
+        // A backend that knows this device better than its USB ids do, having said so first.
+        let claimed = app
+            .world_mut()
+            .spawn(Identity(DeviceId::new(PlatformDeviceId(7))))
+            .id();
+
+        for (gamepad, vendor_id, product_id) in [
+            (reported, Some(0x054C), Some(0x05C4)),
+            // Absent on wasm and some Linux setups: no ids, so no identity of this kind.
+            (silent, None, None),
+            (claimed, Some(0x054C), Some(0x05C4)),
+        ] {
+            app.world_mut().write_message(GamepadConnectionEvent::new(
+                gamepad,
+                GamepadConnection::Connected {
+                    name: "test pad".into(),
+                    vendor_id,
+                    product_id,
+                },
+            ));
+        }
+        app.update();
+
+        assert_eq!(
+            app.world().get::<Identity>(reported).map(|id| id.0.clone()),
+            Some(DeviceId::new(GamepadModelId {
+                vendor: 0x054C,
+                product: 0x05C4
+            }))
+        );
+        assert_eq!(app.world().get::<Identity>(silent), None);
+        assert_eq!(
+            app.world().get::<Identity>(claimed).map(|id| id.0.clone()),
+            Some(DeviceId::new(PlatformDeviceId(7))),
+            "an identity inserted ahead of the observer should stand"
+        );
     }
 
     #[cfg(feature = "gamepad")]

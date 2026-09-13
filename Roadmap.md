@@ -203,13 +203,10 @@ action, and most of this section is what it needs.
 R11.5: stable persistent device identity, distinct from the runtime handle, and Split Friction
 putting each player back on the device they had.
 
-- **Now carries calibration's persistence too.** Chunk 22 built the measuring and the applying keyed
-  to the runtime handle, which is exactly what a persistent identity would key instead. This chunk
-  carries `GamepadCalibration` across a restart alongside the pairing, or says why the two want
-  different storage.
-- **And the calibration step itself**, which has no in-tree caller: `CalibrationSampling` is driven
-  end to end by tests but by no screen. A calibration a player performs and then loses on quit is
-  worth little, so the screen and the persistence are one feature.
+- **Split from chunk 72b**, which carries calibration onto the identity this one builds. Both halves
+  would have been one chunk; identity plus the lookup plus pairing restore is already a day's
+  reading, and each half demonstrates itself on its own — this one by a pairing surviving a restart,
+  72b by a calibration doing the same.
 - **A gilrs bug confirmed, not assumed.** On macOS, a Bluetooth pad's runtime id never survives a
   disconnect — `padprobe` reproduced four fresh ids across four reconnects of the same physical pad,
   uuid/vendor id/product id unchanged every time. Root cause is in gilrs-core's macOS backend, not
@@ -234,17 +231,70 @@ putting each player back on the device they had.
   S8/S14 measured Steam's `InputHandle_t` staying stable across a transport swap while the
   vendor/product id it reported for the identical physical pad changed. What this chunk builds for
   gilrs's identity may need its own counterpart for a Steam backend rather than one shared scheme.
-- **Resist flattening Steam's identity down to gilrs's.** Steam's handle already survives a restart
-  without colliding; a single identity type shared across backends must not throw that away to
-  match gilrs's weaker guarantee. A small tagged shape — a `domain` plus an opaque `id`, or an enum
-  with one variant per backend — keeps each backend's real guarantee instead of averaging them.
-  Where the collision does need handling, the more honest place is probably the *lookup* rather
-  than the identity itself: "find the paired context for this identity among what's connected now"
-  answering no match, exactly one, or several candidates, so the app only has to think about
-  ambiguity at the rare moment it actually happens, on the same terms D53 already uses elsewhere.
-  Still needs thought before it is a decision.
-- **Verified by:** playing it, quitting, relaunching — the same protagonist on the same device
-  without anyone pressing anything — and by unplugging a pad and plugging it back in.
+- **The identity carries a backend-defined payload, and the shape is settled.** A backend declares
+  its own identity type — `DeviceIdentity: Reflect + FromReflect + GetTypeRegistration + Clone + Eq
+  + Hash + Debug`, carrying `const DOMAIN: &'static str` — and `register_device_identity::<T>()`
+  puts a `ReflectDeviceIdentity` type data in the registry so a saved domain resolves back to a
+  concrete type. `DeviceId` wraps one as `#[reflect(opaque)]` with
+  `SerializeWithRegistry`/`DeserializeWithRegistry`, which is the only route to the `TypeRegistry`
+  from inside a field whose serializer writes no type information — and therefore the only way a
+  `bevy_settings` group can hold one. Nothing flattens: each backend keeps the guarantee its own
+  identity actually has.
+- **The `DOMAIN` is the save key, and the Rust type path never reaches the file (D6).** Writing
+  `{domain: payload}` rather than delegating to `ReflectSerializer` is the whole of it; the body
+  goes through `TypedReflectSerializer`, which writes no type information at all.
+- **`Clone`, `Eq` and `Hash` come from the trait bounds, never from `reflect_clone` /
+  `reflect_partial_eq` / `reflect_hash`.** Those three are special-cased in the `Reflect` derive and
+  generated into the type's own impl rather than stored as type data, so nothing can add them
+  afterwards and nothing can detect a backend that left them out. Taken from reflection they panic
+  the first time that pad is plugged in; taken from the bounds, the backend does not compile. `Eq`
+  rather than `PartialEq` because R11.7 makes an identity a map key, which also forbids a float in
+  one.
+- **A backend whose identity must outlive a schema change owns its encoding.** The structural
+  default breaks both ways — a gained field is missing from an old file and `FromReflect` refuses
+  the half-built value, a dropped field is an unknown field the struct deserializer rejects
+  outright. `#[reflect(Serialize, Deserialize)]` on the identity type is the escape hatch, the same
+  one `SavedRow` already uses, and the backend-facing docs say so rather than leaving it to be
+  found. It is also the only way to store a handle above `i64::MAX`, which TOML cannot hold as an
+  integer and Steam's `InputHandle_t` can reach.
+- **The lookup belongs to chunk 92, not here.** "Find the connected device this stored identity
+  names" reporting no match, exactly one, or several candidates is the right answer to the
+  identical-pads collision, and it was written and then withdrawn: the reconnect path asks the
+  inverse question — *this* pad arrived, whose was it — and compares two identities directly. A
+  lookup with no caller is API surface built on speculation, so it lands with the loading path that
+  needs it.
+- **Not doing:** retaining an unrecognized domain across a round trip. An entry the running build
+  cannot read fails, and because the failure propagates out of the `Vec` and `bevy_settings`
+  swallows a field that fails to deserialize, one unreadable entry costs every pairing in the file.
+  Settings may drop what they cannot read and revert to defaults, so this is accepted rather than
+  designed out — but it is stated, because the readable pairings go with it.
+- **Not doing:** the presentation half. Nothing here names a glyph or draws a device, and the
+  reconnect prompt chunk 103 built is what a restored pairing reuses.
+- **Not doing:** surviving a *restart*, which is the half of R11.5 that needs somewhere to put the
+  bytes. Nothing in the examples writes a settings file yet — chunk 92 is what wires `bevy_settings`
+  in — so this chunk builds the identity, makes it storable, and demonstrates it across a
+  disconnect. Chunk 92 stores it, and R15.6's restart case is written onto that chunk rather than
+  left here.
+- **Not doing:** an identity in a build without `bevy_reflect`. The trait requires `Reflect`, so a
+  no-reflect build has no persistent identity — acceptable while persistence is the whole point of
+  having one, but it does mean R11.5 is feature-gated rather than universal.
+- **Verified by:** unplugging a paired pad and plugging it back in, and watching that pane — not
+  whichever was waiting longest — get it back.
+
+### 72b. Calibration that survives a restart, and a screen that measures one
+
+R11.7 and R14.11: stage-1 calibration stored per persistent device identity, and offered as an
+explicit player-facing step. Depends on chunk 72 for the identity to key it by.
+
+- **Chunk 22 built the measuring and the applying keyed to the runtime handle**, which is exactly
+  what a persistent identity keys instead. `GamepadCalibration` and `CalibrationSampling` are keyed
+  by `Entity` today; this chunk re-keys the stored half to `DeviceId` while the live half stays on
+  the handle, or says why the two want different storage.
+- **The calibration step has no in-tree caller.** `CalibrationSampling` is driven end to end by
+  tests and by no screen. A calibration a player performs and then loses on quit is worth little, so
+  the screen and the persistence are one feature.
+- **Verified by:** calibrating a drifting stick, quitting, relaunching, and finding the stick still
+  corrected.
 
 ### 104. Named device-requirement sets at the join screen
 
@@ -480,6 +530,13 @@ the app declares there.
 - **A dev-dependency of the examples, not the crate.** This crate publishes `SavedOverrides` and no
   opinion about where the bytes go (D53); `bevy_settings` is wired into `examples/disasteroids`
   only.
+- **Inherits chunk 72's restart half, and the lookup it withheld.** Chunk 72 built `DeviceId` and
+  made it storable but has nowhere to put it, so R11.5's "survives a restart" and R15.6's restart
+  case land here: Split Friction saves each pane's identity and, at startup, asks which connected
+  device each stored one names. That question — no match, exactly one, or several candidates, the
+  app choosing among several on D53's terms — is the lookup chunk 72 wrote and withdrew for want of
+  a caller. It is also the first place two identical pads can both answer at once, since at startup
+  every pad is connected at the same moment rather than arriving one at a time.
 - **Not doing:** per-profile or per-scheme settings groups (R17.4), and anything Split Friction's
   two protagonists need — chunk 71 owns per-player preset selection once a settings group exists to
   read and write, this chunk owns getting one player's set to and from disk at all.
@@ -664,7 +721,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | Area | Gated on |
 | --- | --- |
 | **A real Steam backend, validated out of tree** | less than it looked. `docs/steam.md` S4 now says a borrowed app id does carry its own manifest from inside the client's bundle, and S13 answered R1.7 that way, so what is left needing an app id is only what S6 blocks: a configuration Steam actually applies. Whether that needs an app id at all, or only a windowed app Steam launches, is itself unmeasured. The shape is settled: a probe rather than a game, in its own repository, pinning `bevy_action_map` by git rev so it breaks only on a deliberate bump — and it is an audit rather than a gate, since it needs a client and a pad and cannot run in CI. `steam_probe/` is its gitignored seed and moves out when the repository exists. Nothing in this crate is blocked on it: per-family suppression is chunk 112, and the presentation half can be built against API signatures already verified to exist |
-| **Persisting calibration**, keyed to identity (R11.7, R14.11) | R11.5's stable device identity, which chunk 72 builds. Measured calibration lasts as long as the process |
+| **Persisting calibration**, keyed to identity (R11.7, R14.11) | nothing any more — chunk 72b owns it, once chunk 72 has built the identity to key it by. Measured calibration lasts as long as the process until then |
 | **A backend-safe way to ask which device drove an ordinary action's current activation** | a real need, not just Split Friction's. `Fired`'s value is device-agnostic by design — the same reason `Move` never says which stick moved it — so `protagonist.rs`'s `pair_on_join` (chunk 66, restated when `Join` moved off a class binding) reads Bevy's `Gamepad` component and `ButtonInput<KeyCode>` directly to find out who pressed it. That query does not exist under a Steam authority (D22, suppression), so the example breaks under the one backend this crate means to support. Whatever answers this generalizes past one example: some notion of "which device is this activation's origin" carried alongside an ordinary action's value, not only a class binding's raw event |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it. Measured (`docs/steam.md` S17): `get_glyph_for_action_origin` resolves to an absolute filesystem path inside the client's own app bundle — `Contents/MacOS/controller_base/images/api/dark/shared_lstick_md.png` on macOS, not the `tenfoot/resource/...` path this row previously guessed — and the `dark` component says the glyphs are themed, so a light variant has to be selected rather than assumed. A Bevy `AssetPath` can carry it natively via `from_path_buf` — no string-escaping the drive letter or backslashes. The path is not to be opened as given: a custom `AssetSource` reader must canonicalize it and reject anything outside a known root before reading, rather than trust an external SDK's return value as a bare filesystem path. One scheme, one hard-coded root is the right size while only this one root is confirmed; a second scheme is warranted only if a second root with its own lifecycle surfaces (e.g. something ephemeral, which cannot share a stable root's caching and hot-reload assumptions) — not one scheme per SDK call that happens to return a path |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import |

@@ -8,12 +8,14 @@
 //! the popup's opening and closing in one place regardless of what caused it — a lost pad here, or
 //! the existing Disconnect button.
 //!
-//! Matching a newly connected pad to a waiting pane is first-come-first-served: telling a returning
-//! pad apart from a stranger's needs a persistent device identity, which does not exist yet, and in
-//! practice at most one pane is ever waiting at a time, since only one popup can be shown at once
-//! (`popup`'s own doc comment).
+//! A pad that comes back goes to the pane that lost it, matched on [`Identity`]. Two panes whose
+//! pads report the same identity — identical controllers, which report identical ids on every
+//! platform measured — still fall back to first-come-first-served, and so does a pad that reports
+//! no identity at all. In practice at most one pane is ever waiting, since only one popup can be
+//! shown at once (`popup`'s own doc comment).
 
 use bevy::prelude::*;
+use bevy_action_map::device::{DeviceFamily, DeviceHandle, DeviceId, Identity};
 use bevy_action_map::player::{DeviceConnected, DeviceDisconnected, Paired};
 
 use crate::popup::Popup;
@@ -26,11 +28,41 @@ use crate::protagonist::{ClaimedDevices, Protagonist};
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct AwaitingReconnect;
 
+/// Which physical pad this pane is on, remembered so a returning one can be told from a stranger's.
+///
+/// Absent when the pane is on the keyboard, or on a pad whose platform reports no ids.
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct KnownDevice(pub DeviceId);
+
 pub fn plugin(app: &mut App) {
+    app.add_observer(remember_identity);
     app.add_observer(on_lost);
     app.add_observer(on_available);
     app.add_observer(open_popup_for_lost_device);
     app.add_observer(close_popup_when_resolved);
+}
+
+/// Records the identity behind whatever a pane just claimed.
+///
+/// An observer on the pairing rather than a line at each site that pairs: joining and reconnecting
+/// both insert `Paired`, and neither should have to remember to do this.
+fn remember_identity(
+    paired: On<Insert<Paired>>,
+    panes: Query<&Paired>,
+    identities: Query<&Identity>,
+    mut commands: Commands,
+) {
+    let Ok(pairing) = panes.get(paired.entity) else {
+        return;
+    };
+    let Some(DeviceHandle::Gamepad(device)) = pairing.owner_for(DeviceFamily::Gamepad) else {
+        return;
+    };
+    if let Ok(identity) = identities.get(device) {
+        commands
+            .entity(paired.entity)
+            .insert(KnownDevice(identity.0.clone()));
+    }
 }
 
 /// The crate's signal becomes this app's model: the pane starts waiting.
@@ -38,14 +70,26 @@ fn on_lost(lost: On<DeviceDisconnected>, mut commands: Commands) {
     commands.entity(lost.entity).insert(AwaitingReconnect);
 }
 
-/// The first still-waiting pane claims a newly connected pad.
+/// The pane that lost *this* pad takes it back; failing that, the first pane still waiting takes
+/// whatever turned up.
 fn on_available(
     connected: On<DeviceConnected>,
-    waiting: Query<(Entity, &Protagonist), With<AwaitingReconnect>>,
+    waiting: Query<(Entity, &Protagonist, Option<&KnownDevice>), With<AwaitingReconnect>>,
+    identities: Query<&Identity>,
     mut claimed: ResMut<ClaimedDevices>,
     mut commands: Commands,
 ) {
-    let Some((entity, protagonist)) = waiting.iter().next() else {
+    let arrived = match connected.device {
+        DeviceHandle::Gamepad(device) => identities.get(device).ok(),
+        _ => None,
+    };
+
+    let returning = arrived.and_then(|arrived| {
+        waiting
+            .iter()
+            .find(|(.., known)| known.is_some_and(|known| known.0 == arrived.0))
+    });
+    let Some((entity, protagonist, _)) = returning.or_else(|| waiting.iter().next()) else {
         return;
     };
     claimed.reassign(protagonist.0, connected.device);

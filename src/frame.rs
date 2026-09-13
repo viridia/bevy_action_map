@@ -402,6 +402,12 @@ impl Plugin for InputFramePlugin {
             app.init_resource::<crate::device::GamepadCalibration>();
             app.init_resource::<crate::device::GamepadBrands>();
             app.add_observer(crate::device::resolve_gamepad_brand);
+            #[cfg(feature = "bevy_reflect")]
+            {
+                use crate::device::RegisterDeviceIdentity;
+                app.register_device_identity::<crate::device::GamepadModelId>();
+                app.add_observer(crate::device::resolve_gamepad_identity);
+            }
             app.add_systems(
                 PreUpdate,
                 crate::device::warn_on_unread_gamepad_settings
