@@ -70,7 +70,7 @@ const FOLLOWER_INDENT: f32 = 20.0;
 // numbers that add up to a row's height.
 const ROW_FONT_SIZE: f32 = 13.0;
 /// The vertical gap between one row and the next within a table.
-const ROW_GAP: f32 = 1.0;
+const ROW_GAP: f32 = 4.0;
 /// The vertical padding inside a cell's border, above and below its text.
 const ROW_PADDING_V: f32 = 0.0;
 

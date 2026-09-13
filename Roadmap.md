@@ -299,16 +299,29 @@ control the player was already holding.
 - **Why it exists as its own chunk.** A `MUST` whose only record of a destination was in the log is
   exactly what ground rule 5 forbids.
 
-### 102. A global timing scale
+### 115. A timing declared as a tunable
 
-R20.4 (`docs/issues.md` 1045, split from 1021): every hold duration, tap window and repeat rate
-globally scalable by one user preference, where today only per-mapping tunables exist.
+R20.7 (`docs/issues.md` 1045): a hold duration, tap window, multi-tap gap or pulse interval offered
+to the player as a named tunable, the way `tunable_dead_zone` already offers a dead zone.
 
-- **Disasteroids' settings screen**, as an accessibility slider — "input timing ×1.5" — applied
-  across every declared hold/tap/repeat value at once rather than one at a time.
-- **Crate work, not only an example.** Scaling every timing by hand from the app side is exactly
-  what R20.4 says a game should not have to do, so the scale factor's application point is a design
-  question for this chunk rather than something the example alone can supply.
+- **Replaces chunk 102**, which would have built R20.4's global scale. That requirement is withdrawn
+  for applying one factor to two floors and three ceilings, which cannot move both toward
+  forgiveness at once.
+- **The evaluator does not change, and confirming that is this chunk's own review surface rather
+  than an assumption to carry in.** A `Range` tunable is applied by rewriting the declared value and
+  recompiling the plan (`builder.rs`'s `TunableDecl`, "by rewriting `modifiers[modifier_index]` and
+  recompiling"), so `BindingCondition::Hold` keeps reading a constant — one that arrived from a
+  saved override rather than from the source. Nothing new is read per tick, and no scratch cell is
+  needed: a `Bool` tunable takes one because `hold_or_toggle` latches, and a `Range` tunable takes
+  none.
+- **What does change is what a `TunableDecl` can point at.** It carries a `modifier_index`, and a
+  timing lives in a condition rather than a modifier, so it has to say which of the two it
+  addresses. That is the whole delta, and it is where this chunk's cost actually sits.
+- **Not doing: a game-wide "more forgiving" control.** That needs the crate to hold a per-threshold
+  direction of forgiveness — the half of R20.4 that was coherent — and it has its own deferred row
+  with a gate rather than riding along here.
+- **Verified by:** Disasteroids' settings screen offering one timing beside the dead-zone slider it
+  already has, and the changed value still applied after a quit and relaunch.
 
 ---
 
@@ -643,6 +656,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **An initial delay distinct from the repeat rate** (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both. Two numbers is a small change; what is missing is a case where equal is wrong, and a two-table settings screen is not it |
 | **Free-form mutually-exclusive context sets** (R7.7 remainder) | nothing in tree needs two independently-exclusive contexts to coexist rather than one dominating the other by priority |
 | **Owner-scoped `ConsumedControls`/exclusion ceiling** (R15.3 remainder, and D13's own remainder) | a real in-tree case with a per-player exclusive context, or a binding consumed across two players' devices. Design if built: a claim visible only if made globally or by the viewer's own paired device; an exclusive context's shadow implicit in its own pairing rather than a separate flag |
+| **A game-wide "more forgiving timings" control** (R20.4's withdrawal) | a game with enough timings that setting them one at a time is the complaint. One player-facing control across a whole game needs the crate to know which way forgiveness runs per threshold — down for `Hold` and `HoldAndRelease`'s floors, up for `Tap` and `MultiTap`'s ceilings and `Pulse`'s interval — which is the one part of this a game cannot get right without hand-checking five signs, and the reason the row exists rather than the idea being dropped with the requirement. Chunk 115's per-timing tunables come first regardless: they are what a game would expose the control *through*, and they may turn out to be all anyone wants |
 | **Auto-switching which device a player is paired to** (R15.8) | a game where picking up the other device happens often enough that re-joining is a real cost. Split Friction joins once and a player who wants the keyboard instead can take it the same way they took the pad. Deferred rather than withdrawn alongside R15.7, because unlike R15.7 this is not something an app can write for itself: telling a deliberate grab from a drifting stick means reading the raw samples under a deadzone floor before any action fires, which an app watching `Fired` never sees. R18.6 stays withdrawn on it — if this lands, a prompt reads the player's paired device rather than tracking one of its own |
 | **Opaque platform-user identity** (R15.9) | a real platform SDK. Floated for Split Friction, but there is nothing to show without one, and not worth a faked stub the way chunk 42 fakes a backend |
 | **An authority backend's actions in rollback** (D22's remainder) | a snapshot to fit them into. `AuthorityValues` is a plain component and clones with the entity, but what a rewind has to reproduce is what the authority *said* on the tick being re-simulated, which is not in the frame. The available answer is recording the backend's output into the frame at sample time, at the cost of a larger frame |

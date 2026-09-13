@@ -276,19 +276,28 @@ Unrouted.
 and `CLAUDE.md`. The section's own preamble calls these "cheap to accommodate now and expensive to
 retrofit," which is the argument for looking at it before more is built on top.
 
-R20.2 and R20.5 are built (chunk 64) and R20.1 holds by construction. R20.4 is 1045. **R20.6** (MAY,
-sticky modifiers / one-handed support) is **reviewed and left alone**: no in-tree pressure and no
-case behind it — not worth a chunk unless one shows up.
+R20.2 and R20.5 are built (chunk 64) and R20.1 holds by construction. R20.4 is withdrawn, and R20.7,
+the narrower requirement that replaced it, is 1045. **R20.6** (MAY, sticky modifiers / one-handed
+support) is **reviewed and left alone**: no in-tree pressure and no case behind it — not worth a
+chunk unless one shows up.
 
 R20.3's sequential alternative to chords is 1023 by content and by no other link.
 
-### 1045 No global timing scale
+### 1045 No timing threshold can be offered to the player at all
 
-R20.4 (split from 1021) — every hold duration, tap window and repeat rate globally scalable by one
-user preference. The crate's only scaling is a per-mapping tunable, so a game wanting "all timings
-×1.5" sets every one of them by hand.
+R20.7 (was R20.4, withdrawn; split from 1021) · `binding/builder.rs`
 
-_Fix:_ **chunk 102**.
+`tunable_dead_zone` lets a game expose a dead zone as a named, bounded, persisted value. Nothing
+does the same for a duration: `hold`, `tap`, `multi_tap` and `pulse` each take a compile-time
+constant, and `TunableValue`'s own doc says its two shapes cover "both tunables this crate declares
+anywhere in-tree". So a game wanting to offer a longer double-tap window cannot, at any granularity.
+
+The finding used to be R20.4's global scale. That requirement is withdrawn — its thresholds do not
+share a sign, so one factor cannot move them all toward forgiveness — and what is absent survives
+the withdrawal in a narrower form: not "a game cannot move all the timings at once" but "a game
+cannot move one".
+
+_Fix:_ **chunk 115**.
 
 ### 1022 A backend-owned row cannot be told apart from an ordinary fixed one
 

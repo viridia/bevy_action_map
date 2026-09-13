@@ -259,14 +259,16 @@ pub fn plugin(app: &mut App) {
         controls
             .bind::<Adjust>(AxisButtons::new(KeyCode::Minus, KeyCode::Equal))
             .pulse(ADJUST_REPEAT)
-            .consume();
+            .consume()
+            .private();
         controls
             .bind::<Adjust>(AxisButtons::new(
                 GamepadButton::DPadLeft,
                 GamepadButton::DPadRight,
             ))
             .pulse(ADJUST_REPEAT)
-            .consume();
+            .consume()
+            .private();
     });
     app.add_systems(Startup, (button_focused.spawn(), stepper_focused.spawn()));
 }

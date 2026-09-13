@@ -1329,12 +1329,24 @@ Video Accessibility Act, which reaches game communication features).
   per action by the game.
 - **R20.3 (SHOULD)** No action should _require_ simultaneous inputs that cannot be re-expressed as a
   sequence; chord conditions must therefore have a sequential alternative.
-- **R20.4 (SHOULD)** All timing thresholds (hold duration, double-tap window, repeat rate) must be
-  globally scalable by a user preference.
+- **R20.4 (WITHDRAWN)** ~~All timing thresholds (hold duration, double-tap window, repeat rate) must
+  be globally scalable by a user preference.~~ _Withdrawn: the thresholds do not share a sign, so no
+  one factor moves them all toward forgiveness. `Hold` and `HoldAndRelease` take a floor the player
+  must exceed, where scaling up means holding longer; `Tap` and `MultiTap` take a ceiling the player
+  must stay under, and `Pulse` an interval, where scaling up means more time. One slider would
+  lengthen a hold-to-confirm for the same player whose double-tap window it just widened. The two
+  that move the wrong way are also the two R20.2 answers better, by converting a hold to a toggle
+  rather than lengthening it. Which timings a game can afford to move at all is a balance question —
+  a wider multi-tap gap is a different fighting game — so it belongs to the game: R20.7. What would
+  revive this is the crate holding a per-threshold direction of forgiveness, which is the half of
+  this that was coherent and which nothing has asked for._
 - **R20.5 (SHOULD)** Sensitivity and deadzone must be user-adjustable per device without editing
   bindings — via named tunables (§19.R19.11), which is the mechanism that makes this possible
   without exposing the modifier chain.
 - **R20.6 (MAY)** Sticky-modifier / one-handed support at the mapping layer.
+- **R20.7 (SHOULD)** A timing threshold — hold duration, tap window, multi-tap gap, pulse interval —
+  must be declarable as a named tunable (§19.R19.11), on the same terms as a dead zone, so a game
+  can offer the player whichever timings it judges safe to move, each bounded by a range it chooses.
 
 ---
 
