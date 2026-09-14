@@ -132,9 +132,9 @@ crate's flagship multiplayer example does not use the crate's documented join re
 the crate's documentation does not mention — in a crate whose stated purpose includes device
 routing for local multiplayer.
 
-_Fix:_ smallest is a paragraph in `join.rs` saying the slot table has to be updated synchronously
-and why. Better is a claim helper that sees queued claims, which would let the sketch stay as short
-as it reads. Unrouted.
+_Fix:_ **chunk 116**, which rewrites `join.rs`'s recipe wholesale and takes this paragraph with it.
+A claim helper that sees queued claims would let the sketch stay as short as it reads, and is the
+better fix if the rewritten recipe still reads long.
 
 ---
 
@@ -243,16 +243,14 @@ exist under a Steam authority, which its own comment says in as many words. So t
 demonstrates a device-routing crate failing to answer, on its own flagship screen, the question its
 device routing exists for, and it does so by reaching around the crate to Bevy.
 
-What is not recorded anywhere is **why** `Join` moved off the class binding. The move is real —
-chunk 66's roadmap entry was restated for it — and 1046 shows one cost of class bindings (no
-modifier chain), but nothing says whether that was the reason, whether the class path was found
-inadequate, or whether this was incidental. Deciding the deferred row's gate needs that answer.
+**Why** `Join` moved off the class binding is recorded, in chunk 110's commit message rather than in
+any document: a class binding has no Steam expression, and the join caption needed a concrete
+control to name instead of a hardcoded "press any button". Neither reason expires, so going back to
+the class binding is not the fix — 1046 adds a third against it.
 
-_Fix:_ the Roadmap's deferred row ("a backend-safe way to ask which device drove an ordinary
-action's current activation") is gated on "a real need, not just Split Friction's". Before that gate
-can be judged, establish whether the existing class-binding path already answers it — in which case
-the example should go back to it — or does not, in which case the gate has already been met.
-Unrouted.
+_Fix:_ **chunk 116**, which answers the question by pairing the context that hears the press rather
+than by carrying an origin on the action. The deferred row ("a backend-safe way to ask which device
+drove an ordinary action's current activation") is withdrawn there rather than met.
 
 ### 1052 Naming a device to the player has no requirement and no support
 

@@ -212,6 +212,71 @@ explicit player-facing step. `DeviceId` is the identity to key it by, and it exi
 - **Verified by:** calibrating a drifting stick, quitting, relaunching, and finding the stick still
   corrected.
 
+### 116. A device pool that does not depend on gilrs, and a lobby per device
+
+`protagonist.rs`'s `pair_on_join` reads `ButtonInput<KeyCode>` and `Query<&Gamepad>` to find out
+which device pressed `Join`, because `Fired<Join>` cannot say. Under a Steam authority the action
+fires from `AuthorityValues` on an entity the backend spawned, while both reads report Bevy's own
+view of the hardware — a gilrs entity no Steam pairing names, or nothing where gilrs is absent.
+Either way the example answers with a different device than the one that pressed. `docs/issues.md`
+1050.
+
+The answer is not to carry an origin on the action. It is to pair the context that hears the press,
+so the device is already on the entity the event arrives at.
+
+- **`ConnectedGamepad`, a marker this crate owns**, in `device.rs` and exported from the prelude, on
+  the same entity `DeviceHandle::Gamepad` names. No payload: the entity carrying it *is* the handle.
+  The `gilrs` side is an observer pair mirroring `On<Add<Gamepad>>` and `On<Remove<Gamepad>>`, which
+  is direct because Bevy removes and re-adds that component rather than despawning the entity; a
+  backend that owns the family inserts the marker on the entities it spawns instead.
+  `Query<Entity, With<ConnectedGamepad>>` is the pool, and add/remove is the lifecycle — symmetric
+  because ECS makes it so, with no second event and no cache to drift.
+- **Not Bevy's `Gamepad`, which is raw state rather than presence.** Its four fields are
+  `pub(crate)` and reachable only by emitting `RawGamepadEvent`s for
+  `gamepad_event_processing_system` to fold in, which an L2 authority has none of; its identity half
+  is USB ids Steam cannot supply (`docs/steam.md` S7). A backend writing `GamepadConnectionEvent`
+  would get an entity carrying a permanently empty `Gamepad` — `just_pressed` always false — which
+  fails silently rather than loudly. It is also suppression-blind: chunk 112 guards `sample_input`
+  and leaves `GilrsPlugin` installed, so under a Steam authority `Query<&Gamepad>` returns the
+  backend's pads and gilrs's silent ones alike.
+- **The gap this closes is the unclaimed device.** `DeviceDisconnected` is an `EntityEvent` raised
+  once per `Paired` holding the device, so a pad nobody has claimed going away raises nothing — and
+  that is exactly the pad a lobby is showing a prompt for.
+- **`DeviceConnected` and `DeviceDisconnected` are unchanged.** They answer which player lost a
+  device, performing R15.1's fan-out — one device may be shared by several players — once on every
+  consumer's behalf. The pool answers which devices exist. D73's note explains why the *payload*
+  differs between the two events; the fan-out is why the *scope* should, and it wants writing down.
+- **The keyboard is not in the pool.** It never connects or disconnects, and `bevy_input` has no
+  keyboard connection concept to raise it from, so its lobby is spawned once at startup. A
+  deliberate asymmetry: a keyboard entity would model a constant as a variable to buy a uniformity
+  worth one line.
+- **Split Friction spawns one `Lobby` per device**, each `Paired` to it, from those observers plus
+  the startup keyboard. `Fired<Join>` then arrives on an entity whose `Paired` names the presser, so
+  `pair_on_join` reads the trigger instead of Bevy. `ClaimedDevices` stays, for the reason its own
+  comment gives: two presses in one tick still race a deferred insert.
+- **Consumption is device-blind, and the recipe has to say so.** `ConsumedControls` is keyed by
+  `Control` alone, so a context replicated per device must not `consume()` — the first instance to
+  evaluate would take the control from the rest. Nothing in tree does, and `OnFoot` is already two
+  instances under the same rule.
+- **`join.rs`'s module doc is rewritten around this**, replacing the class-binding recipe it teaches
+  now. `docs/issues.md` 1049 goes with it: that sketch's "pick a slot and insert `Paired`" hands two
+  simultaneous presses the same slot, and the paragraph saying why the slot table is updated
+  synchronously belongs in the recipe rather than only in the example that discovered it.
+- **R15.11 is what this meets**, and nothing meets it today.
+- **The deferred row goes.** "A backend-safe way to ask which device drove an ordinary action's
+  current activation" is withdrawn rather than met, because the question stops being asked. That
+  wants a decision entry naming what it forecloses, since an origin threaded through `Transition` is
+  what someone proposes next.
+- **Not doing: an origin on the action.** No device on `Fired<A>`, no `origin` on `Transition`, no
+  per-device held state. The held tables are keyed by control rather than by `(device, control)`,
+  and re-keying them charges every context on the per-tick path for one screen's question. It also
+  answers nothing at L2, where `AuthorityValues` carries no device either.
+- **Not doing: a `ConnectedDevice` spanning both families**, or an entity for the keyboard. Both buy
+  uniformity by inventing a lifecycle the keyboard does not have.
+- **Verified by:** a headless test that a synthetic pad's connect and disconnect drive the marker,
+  including for a pad no `Paired` holds; and in Split Friction, joining on the keyboard and on two
+  pads with each claiming its own pane, then unplugging an unclaimed pad and watching its prompt go.
+
 ---
 
 ## Bindings and conditions

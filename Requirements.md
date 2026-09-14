@@ -1003,6 +1003,8 @@ handle "two players on one keyboard" gracefully.
   player without the crate depending on any platform SDK.
 - **R15.10 (MAY)** Split-screen: associate a player with a camera/viewport for pointer coordinate
   mapping.
+- **R15.11 (MUST)** The devices of a family must be enumerable without knowing which backend
+  supplies them, and their arrival and departure observable on the same terms.
 
 ---
 
