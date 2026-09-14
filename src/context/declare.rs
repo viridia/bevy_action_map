@@ -86,6 +86,25 @@ fn attach_context_state<C: InputContext + Component>(
     world.commands().entity(context.entity).insert(state);
 }
 
+/// Takes the state off again when the component goes, so a context is live exactly while its
+/// entity carries it.
+///
+/// Without this the state evaluates on past its own declaration, and because an app dropping a
+/// context usually drops `Paired` in the same breath, it does so reading *every* device instead of
+/// the one it had — a character that walks on someone else's stick.
+///
+/// `try_remove`, because the component also goes when the entity is despawned, and then there is
+/// nothing left to take it off.
+fn detach_context_state<C: InputContext + Component>(
+    mut world: DeferredWorld<'_>,
+    context: HookContext,
+) {
+    world
+        .commands()
+        .entity(context.entity)
+        .try_remove::<InputContextState<C>>();
+}
+
 /// Warns when a `#[derive(InputContext)]` component is spawned before `add_context` declared it.
 ///
 /// `attach_context_state` cannot catch this by itself: `add_context` is the only thing that
@@ -862,6 +881,7 @@ fn declare_context<C: InputContext + Component>(
         world
             .register_component_hooks::<C>()
             .try_on_add(attach_context_state::<C>)
+            .and_then(|hooks| hooks.try_on_remove(detach_context_state::<C>))
             .is_some(),
         "context {} is already declared, or its component already has an on_add hook",
         C::PATH
@@ -1044,6 +1064,41 @@ mod tests {
 
     use crate::binding::{DirectionalButtons, MouseMove};
     use crate::frame::InputFrame;
+
+    /// Taking the component off takes the context off with it, which is the other half of "a
+    /// declared context is live as soon as an entity carries it".
+    ///
+    /// Left behind, the state keeps evaluating — and because pairing usually comes off at the same
+    /// time, it does so against *every* device rather than the one it had. A game dropping a player
+    /// mid-session gets a character that still walks, driven by whoever else is holding a stick.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn removing_the_component_removes_the_context_state() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.bind::<Move>(DirectionalButtons::wasd());
+        });
+
+        let entity = app.world_mut().spawn(FreeLook).id();
+        app.update();
+        assert!(
+            app.world()
+                .get::<InputContextState<FreeLook>>(entity)
+                .is_some(),
+            "spawning should have attached the state"
+        );
+
+        app.world_mut().entity_mut(entity).remove::<FreeLook>();
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<InputContextState<FreeLook>>(entity)
+                .is_none(),
+            "the context outlived the component that declared it"
+        );
+    }
 
     /// The full handover, both ways. Pausing works by hand and unpausing does not, if the two
     /// directions differ in a way the pause direction happens to tolerate.

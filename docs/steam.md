@@ -404,12 +404,12 @@ layers.
 | Context | Tick | Instances |
 | --- | --- | --- |
 | `Debug` | Render | one, unpaired |
-| `Lobby` | Render | one, unpaired; its only binding is a class binding for the join gesture |
+| `Inviting` | Render | one per available device, each `Paired` to its own; its only binding is the join gesture |
 | `OnFoot` | Fixed | one per protagonist, each `Paired` to a device |
 
-All three are live together — `Lobby` keeps waiting for player two while player one is already
-walking around under `OnFoot`. So they share a single set, and the interesting dimension is not
-sets at all:
+All three are live together — an `Inviting` instance keeps waiting for player two while player one
+is already walking around under `OnFoot`. So they share a single set, and the interesting dimension
+is not sets at all:
 
 **Two players are two controllers, not two action sets.** `ActivateActionSet` and every data read
 take an `InputHandle_t`, so one set is activated separately per controller and each player's values
@@ -418,12 +418,18 @@ per-player case needs nothing from Steam's set mechanism.
 
 Two problems surface here that Disasteroids never reaches:
 
-**The join gesture has no Steam counterpart, and that is survivable.** `Lobby`'s only binding is
-`bind_class::<Join>(ControlClass::AnyButton)` — "any button, on any device". Steam reports actions
-you declared and nothing else, so there is no way to ask it about an unbound press. A Steam build
-declares a `join` action instead and prompts for it by name. That is what shipped console games do
-— Split Fiction asks for A on Switch — so it is a change of gesture rather than a loss. Class
-bindings remain the one part of this crate's binding vocabulary with no Steam expression.
+**A class-bound join gesture has no Steam counterpart, and that is survivable.** Steam reports
+actions you declared and nothing else, so there is no way to ask it about an unbound press, and
+`bind_class::<Join>(ControlClass::AnyButton)` — "any button, on any device" — has no expression.
+A build declares a `join` action instead and prompts for it by name, which is what shipped console
+games do: Split Fiction asks for A on Switch. Split Friction moved to exactly that in chunk 110 and
+no longer depends on the class path here, so what is left is general: class bindings remain the one
+part of this crate's binding vocabulary with no Steam expression.
+
+**Which device pressed join is answered by pairing, not by the action.** `Inviting` is one instance
+per device, so a Steam backend writes `AuthorityValues` on the instance belonging to the
+`InputHandle_t` it polled, and the observer reads the presser off that entity's `Paired`. Nothing in
+the path asks for a raw button state, which is what makes it work here at all.
 
 **Pairing lives in Steam's namespace, and `DeviceHandle` extends to say so.** `Paired` holds a
 `DeviceHandle` naming a Bevy gamepad, where Steam offers an `InputHandle_t`, and `S3` and `S14`

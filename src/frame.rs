@@ -402,6 +402,8 @@ impl Plugin for InputFramePlugin {
             app.init_resource::<crate::device::GamepadCalibration>();
             app.init_resource::<crate::device::GamepadBrands>();
             app.add_observer(crate::device::resolve_gamepad_brand);
+            app.add_observer(crate::device::mark_gamepad_connected);
+            app.add_observer(crate::device::mark_gamepad_disconnected);
             #[cfg(feature = "bevy_reflect")]
             {
                 use crate::device::RegisterDeviceIdentity;

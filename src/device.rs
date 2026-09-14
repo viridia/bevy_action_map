@@ -533,7 +533,7 @@ use core::ops::Deref;
 #[cfg(feature = "gamepad")]
 use bevy_ecs::entity::Entity;
 #[cfg(feature = "gamepad")]
-use bevy_ecs::lifecycle::Add;
+use bevy_ecs::lifecycle::{Add, Remove};
 #[cfg(feature = "gamepad")]
 use bevy_ecs::prelude::{Changed, Commands, On, Query, Res, Resource, Without};
 #[cfg(feature = "gamepad")]
@@ -911,6 +911,53 @@ pub fn resolve_gamepad_identity(
             .entity(entity)
             .insert(Identity(DeviceId::new(model)));
     }
+}
+
+/// A gamepad that is connected and whose input this crate will deliver.
+///
+/// Query it to enumerate the pads available right now, and observe `Add` and `Remove` on it to
+/// learn when one arrives or goes away. It carries nothing, because the entity it sits on is
+/// already the answer: [`DeviceHandle::Gamepad`] is built from that entity.
+///
+/// ```ignore
+/// fn pads(pads: Query<Entity, With<ConnectedGamepad>>) {
+///     for entity in &pads {
+///         let device = DeviceHandle::Gamepad(entity);
+///     }
+/// }
+/// ```
+///
+/// Bevy's own `Gamepad` component is a different thing, and not a substitute for this one. It holds
+/// a pad's live button and axis readings, which only a backend feeding raw device messages can fill
+/// in; a platform input service that reports finished actions has no such readings to offer, so a
+/// pad it supplies would carry an empty one and read as though nobody were touching it. Enumerating
+/// through this component instead is what lets one game work on either kind of backend.
+///
+/// Bevy's gamepad backend gets this attached for you. A backend of your own inserts it on the
+/// entities it spawns, and removes it when a pad goes away.
+#[cfg(feature = "gamepad")]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct ConnectedGamepad;
+
+/// Attaches [`ConnectedGamepad`] to a pad Bevy's own gamepad backend connected, so it enumerates
+/// alongside any other backend's.
+#[cfg(feature = "gamepad")]
+pub fn mark_gamepad_connected(connected: On<Add<Gamepad>>, mut commands: Commands) {
+    commands.entity(connected.entity).insert(ConnectedGamepad);
+}
+
+/// Removes [`ConnectedGamepad`] when Bevy's own gamepad backend loses a pad.
+///
+/// Watches the component rather than the entity because that backend keeps the entity alive across
+/// a disconnect — it removes `Gamepad` and re-adds it on reconnect, so the entity outlives any
+/// single connection and despawning is never the signal.
+#[cfg(feature = "gamepad")]
+pub fn mark_gamepad_disconnected(disconnected: On<Remove<Gamepad>>, mut commands: Commands) {
+    // `try_` because a game is free to despawn a pad's entity outright, which removes `Gamepad` on
+    // the way out and would leave this addressing something already gone.
+    commands
+        .entity(disconnected.entity)
+        .try_remove::<ConnectedGamepad>();
 }
 
 /// Warns about gamepad settings this crate does not honour.
@@ -1458,6 +1505,56 @@ mod tests {
             Some(DeviceId::new(PlatformDeviceId(7))),
             "an identity inserted ahead of the observer should stand"
         );
+    }
+
+    /// The pool follows a pad nobody has claimed, which is the case `DeviceDisconnected` cannot
+    /// report: that is an entity event raised once per `Paired` holding the device, so an unclaimed
+    /// pad going away signals nothing at all — and an unclaimed pad is exactly what a join screen
+    /// is prompting for.
+    ///
+    /// Through `ActionMapPlugin` rather than by adding the observers here, so the wiring is under
+    /// test alongside the behaviour.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn the_marker_follows_a_pad_with_no_pairing_behind_it() {
+        use bevy_app::App;
+        use bevy_input::InputPlugin;
+        use bevy_input::gamepad::{GamepadConnection, GamepadConnectionEvent};
+
+        let mut app = App::new();
+        app.add_plugins(InputPlugin);
+        app.add_plugins(crate::ActionMapPlugin);
+
+        let pad = app.world_mut().spawn_empty().id();
+        app.world_mut().write_message(GamepadConnectionEvent::new(
+            pad,
+            GamepadConnection::Connected {
+                name: "test pad".into(),
+                vendor_id: None,
+                product_id: None,
+            },
+        ));
+        app.update();
+
+        assert!(
+            app.world().get::<ConnectedGamepad>(pad).is_some(),
+            "a connected pad never entered the pool"
+        );
+
+        app.world_mut().write_message(GamepadConnectionEvent::new(
+            pad,
+            GamepadConnection::Disconnected,
+        ));
+        app.update();
+
+        assert!(
+            app.world().get::<ConnectedGamepad>(pad).is_none(),
+            "a pad left without leaving the pool"
+        );
+        // Bevy keeps the entity across a disconnect and re-adds `Gamepad` on reconnect, so the
+        // entity outliving the connection is why the marker rather than the entity is what a pool
+        // reads.
+        assert!(app.world().get_entity(pad).is_ok());
     }
 
     #[cfg(feature = "gamepad")]

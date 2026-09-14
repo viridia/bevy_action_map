@@ -1,36 +1,59 @@
-//! Join gesture: telling an unassigned device's press from everyone else's.
+//! Join gesture: telling which device just asked to play.
 //!
-//! Nothing here is a new mechanism. A game declares "join" as an ordinary action on an ordinary
-//! context, using [`bind_class`](crate::binding::InputContextBuilder::bind_class) to bind it to
-//! [`ControlClass::AnyButton`](crate::capture::ControlClass::AnyButton) (or to whichever class
-//! fits) rather than to one named control. Left with no [`Paired`] of its own, that context reads
-//! every device, the same way any other unpaired context does.
-//!
-//! [`ClassFired`](crate::event::ClassFired)'s event is the untouched raw event, not an action's
-//! collapsed value, so `event.device()` still says which device pressed it.
+//! Nothing here is a new mechanism. A game declares "join" as an ordinary action on a context it
+//! spawns **once per available device**, each [`Paired`] to its own. A press then arrives on an
+//! entity that already names who pressed it — an ordinary action's value is device-agnostic, so
+//! pairing the listener is what answers the question, rather than asking the action.
 //!
 //! ```ignore
+//! #[derive(InputAction)]
+//! #[action(path = "menu.join", output = bool, intent = Button)]
 //! struct Join;
-//! impl ClassBinding for Join {
-//!     const PATH: &'static str = "menu.join";
-//! }
 //!
-//! controls.bind_class::<Join>(ControlClass::AnyButton);
+//! #[derive(InputContext)]
+//! #[context(path = "menu.join_listener", tick = Render)]
+//! struct JoinListener;
+//!
+//! // Both bindings on every instance: pairing does the sorting, so the keyboard's listener never
+//! // sees a pad event and each pad's listener never sees a key.
+//! app.add_context::<JoinListener>(|controls| {
+//!     controls.bind::<Join>(GamepadButton::South);
+//!     controls.bind::<Join>(KeyCode::Enter);
+//! });
+//!
+//! // The keyboard is always here; a pad comes and goes with `ConnectedGamepad`.
+//! app.add_systems(Startup, |mut commands: Commands| {
+//!     commands.spawn((JoinListener, Paired::to(DeviceHandle::KeyboardMouse)));
+//! });
+//! app.add_observer(|pad: On<Add<ConnectedGamepad>>, mut commands: Commands| {
+//!     commands.spawn((JoinListener, Paired::to(DeviceHandle::Gamepad(pad.entity))));
+//! });
 //!
 //! app.add_observer(
-//!     |fired: On<ClassFired<Join>>, paired: Query<&Paired>, mut commands: Commands| {
-//!         let device = fired.event.device();
-//!         if bevy_action_map::join::is_claimed(&paired, device) {
-//!             return; // some other player already owns this device
-//!         }
-//!         // pick a slot and insert `Paired::to(device)` on it — the game's own call
+//!     |fired: On<Fired<Join>>,
+//!      listeners: Query<&Paired, With<JoinListener>>,
+//!      mut slots: ResMut<MySlotTable>| {
+//!         let Ok(pairing) = listeners.get(fired.entity) else { return };
+//!         let Some(device) = pairing.iter().next() else { return };
+//!         // claim a slot for `device` — the game's own call, and see the warning below
 //!     },
 //! );
 //! ```
 //!
-//! Which slot a newly claimed device fills, how many slots there are, and whether a game wants
-//! "any button" or one particular control per family all stay ordinary binding declaration and
-//! ordinary application logic — not something this crate decides for you.
+//! # Claiming a slot, and the race that is easy to miss
+//!
+//! Decide whether a device is already taken from state your own code updates **synchronously**, not
+//! from a `Query<&Paired>`. Two devices pressing join on the same tick both fire before either
+//! `Paired` insert — a deferred command — has been applied, so a query sees both as unclaimed and
+//! hands them the same slot. A table you write inside the observer itself is already correct by the
+//! time the second press arrives. [`is_claimed`] answers the question it is named for and does not
+//! rescue you from this one, because the data it reads has not caught up yet.
+//!
+//! # The rest is yours
+//!
+//! Which slot a newly claimed device fills, how many slots there are, whether a listener survives
+//! its device being claimed, and which control means "join" on each family are all ordinary
+//! declaration and ordinary application logic.
 //!
 //! Requiring a particular kind of device for a slot works the same way: check
 //! [`DeviceHandle::family`](crate::device::DeviceHandle::family) before claiming, and return

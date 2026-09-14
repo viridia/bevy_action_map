@@ -498,11 +498,12 @@ is a plain value type; `Paired` is the component that attaches one to a context 
 `apply_frame` takes an optional `&Paired` and drops any event whose device the pairing does not
 claim, before anything else sees it. A context with no `Paired` reads every device.
 
-**Joining** needs no separate evaluation path. A game declares "press anything to join" as an
-ordinary action, bound with `bind_class` to `ControlClass::AnyButton` on a context with no `Paired`
-of its own, so it reads every device. `ClassFired`'s untouched `RawEvent` names the device, and
-`join::is_claimed` checks it against the world's `Paired` set so two waiting slots never race for
-one device.
+**Joining** needs no separate evaluation path. A game declares "join" as an ordinary action on a
+context it spawns once per available device, each `Paired` to its own, so a press arrives on an
+entity whose `Paired` names the presser. `join::is_claimed` tests a device against the world's
+`Paired` set; it does not settle a race between two presses in one tick, because the `Paired`
+inserts behind it are deferred commands, so a game decides that from state it updates
+synchronously.
 
 `ConsumedControls` and `ExclusionCeiling` are computed once per context type and are not scoped by
 owner.
@@ -527,6 +528,25 @@ away. `Paired` is left untouched: keeping the slot open for a reconnect, or tear
 down, is the app's decision. `DeviceConnected` triggers once per gamepad that becomes available and
 names no entity — the crate cannot tell a fresh join from an existing pairing's own device coming
 back, so it does not choose between them.
+
+Both answer "which player lost a device", and neither enumerates. Because `DeviceDisconnected` is
+entity-targeted it says nothing at all about a device no `Paired` holds, which is the device a join
+screen is waiting on. That question is `ConnectedGamepad`'s:
+
+```rust
+pub struct ConnectedGamepad;   // component, no payload
+```
+
+The entity carrying it is the one `DeviceHandle::Gamepad` is built from, so `Query<Entity,
+With<ConnectedGamepad>>` is the set of gamepads available right now and `Add`/`Remove` on it is
+their arrival and departure — symmetric, and covering claimed and unclaimed alike. Bevy's gamepad
+backend gets the marker attached by observers mirroring `Add<Gamepad>` and `Remove<Gamepad>`; any
+other backend inserts it on the entities it spawns.
+
+It is not Bevy's `Gamepad`, which holds a pad's live button and axis readings behind private fields
+that only raw device messages fill. A backend supplying resolved actions has no such readings, so
+a pad it supplies would carry an empty one and read as untouched. The keyboard has no entry here:
+it never connects or disconnects, so `DeviceHandle::KeyboardMouse` is available unconditionally.
 
 ### 7.6 Brand resolution
 

@@ -2,11 +2,14 @@
 //!
 //! Both read the same [`OnFoot`] context, bound to a stick and to arrow keys alike; what makes them
 //! independently controlled is [`Paired`], not two different contexts (chunk 26's device routing).
-//! Neither carries [`OnFoot`] or [`Paired`] at spawn. [`Lobby`] — a third context, bound only to
-//! [`Join`], never paired, so it reads every device — is what [`pair_on_join`] listens to: the
-//! first still-unclaimed device to press its button claims the next protagonist in spawn order, 0
-//! then 1. This replaces chunk 68's hardcoded pairing (protagonist 1 always the keyboard,
-//! protagonist 2 always the first gamepad).
+//! Neither carries [`OnFoot`] or [`Paired`] at spawn.
+//!
+//! What claims them is [`Inviting`]: one instance per available device, each [`Paired`] to its own.
+//! A [`Join`] press therefore arrives on an entity that already names who pressed it, which is what
+//! [`pair_on_join`] reads. An ordinary action's value is device-agnostic — the same reason [`Move`]
+//! never says which stick moved it — so pairing the invitation is what answers "who pressed this",
+//! rather than asking the action. The first still-unclaimed device to press claims the next
+//! protagonist in spawn order, 0 then 1.
 
 use bevy::image::TextureAtlasTemplate;
 use bevy::prelude::*;
@@ -30,13 +33,17 @@ pub struct Move;
 #[context(path = "split_friction.on_foot", tick = Fixed)]
 pub struct OnFoot;
 
-/// One context, never paired, that reads every device until [`pair_on_join`] claims it for a
-/// protagonist.
+/// An open invitation on one device: "press this and you are in".
+///
+/// One instance per available device, each [`Paired`] to its own — the keyboard's spawned at
+/// startup and a pad's with the pad. It stays after its device is claimed, so a second press is
+/// refused by [`ClaimedDevices`] rather than unheard; what a game does about one is policy, and
+/// leaving the invitation standing is what keeps that the game's choice.
 #[derive(InputContext)]
-#[context(path = "split_friction.lobby", tick = Render)]
-pub struct Lobby;
+#[context(path = "split_friction.inviting", tick = Render)]
+pub struct Inviting;
 
-/// The join gesture (chunk 66). [`Lobby`]'s only binding — A on a pad, Enter on the keyboard.
+/// The join gesture (chunk 66). [`Inviting`]'s only binding — A on a pad, Enter on the keyboard.
 #[derive(InputAction)]
 #[action(path = "split_friction.join", output = bool, intent = Button)]
 pub struct Join;
@@ -59,13 +66,50 @@ pub fn plugin(app: &mut App) {
         controls.bind::<OpenMenu>(GamepadButton::Start);
         controls.bind::<OpenMenu>(KeyCode::Escape);
     });
-    app.add_context::<Lobby>(|controls| {
+    // Both bindings on every instance, because pairing does the sorting: the keyboard's invitation
+    // never sees a pad event, so its `South` binding is inert, and each pad's `Enter` likewise.
+    app.add_context::<Inviting>(|controls| {
         controls.bind::<Join>(GamepadButton::South);
         controls.bind::<Join>(KeyCode::Enter);
     });
 
+    app.add_systems(Startup, invite_the_keyboard);
+    app.add_observer(invite_a_pad);
+    app.add_observer(withdraw_a_pad);
     app.add_systems(FixedUpdate, walk.run_if(in_state(Popup::Closed)));
     app.add_observer(pair_on_join);
+}
+
+/// The keyboard is always here, so its invitation is spawned once and never withdrawn.
+fn invite_the_keyboard(mut commands: Commands) {
+    commands.spawn((Inviting, Paired::to(DeviceHandle::KeyboardMouse)));
+}
+
+/// A pad arrives, and gets an invitation of its own.
+///
+/// `ConnectedGamepad` rather than Bevy's `Gamepad`: the crate's marker is the one a backend other
+/// than Bevy's own gamepad backend also inserts, so this observer does not care which supplied the
+/// pad.
+fn invite_a_pad(connected: On<Add<ConnectedGamepad>>, mut commands: Commands) {
+    commands.spawn((
+        Inviting,
+        Paired::to(DeviceHandle::Gamepad(connected.entity)),
+    ));
+}
+
+/// A pad goes away, and its invitation goes with it — including one nobody ever accepted, which is
+/// the case an entity-targeted `DeviceDisconnected` cannot reach.
+fn withdraw_a_pad(
+    lost: On<Remove<ConnectedGamepad>>,
+    inviting: Query<(Entity, &Paired), With<Inviting>>,
+    mut commands: Commands,
+) {
+    let device = DeviceHandle::Gamepad(lost.entity);
+    for (entity, pairing) in &inviting {
+        if pairing.contains(device) {
+            commands.entity(entity).despawn();
+        }
+    }
 }
 
 /// Which device, if any, has claimed each of the two protagonist slots.
@@ -110,13 +154,12 @@ impl ClaimedDevices {
     }
 }
 
-/// Both protagonists, as one scene, plus the [`Lobby`] context that pairs them — spawned at
-/// `spawn[0]` and `spawn[1]` respectively, neither claimed yet.
+/// Both protagonists, as one scene — spawned at `spawn[0]` and `spawn[1]` respectively, neither
+/// claimed yet. The invitations that claim them live on their own entities, one per device.
 pub fn spawn(layout: Handle<TextureAtlasLayout>, spawn: [Vec2; 2]) -> impl Scene {
     bsn! {
         Transform::default()
         Visibility::default()
-        Lobby
         Children [
             @{protagonist(layout.clone(), 0, tileset::PROTAGONIST_1, spawn[0])}
             --
@@ -176,14 +219,12 @@ fn walk(
 /// Claims one device for one protagonist the moment [`Join`] fires, in spawn order — protagonist 0
 /// first, then 1.
 ///
-/// `Fired<Join>` says the action fired, not which of its two bindings did — an ordinary action's
-/// value is device-agnostic by design, the same reason [`Move`] never says which stick moved it.
-/// So this reads the raw button state directly to find out, exactly the question [`Join`] itself
-/// cannot answer. **Not backend-safe**: `Gamepad` and `ButtonInput<KeyCode>` do not exist under a
-/// Steam authority (Roadmap's deferred table), so this works only against `gilrs`. Keyboard first:
-/// only one keyboard exists, where several pads might have pressed A the same tick, and picking the
-/// first found over picking the keyboard first would starve whichever pad lost the race on a tick
-/// both fired.
+/// `Fired<Join>` says the action fired, not which device did — an ordinary action's value is
+/// device-agnostic by design, the same reason [`Move`] never says which stick moved it. What
+/// answers it is where the event landed: every [`Inviting`] instance is [`Paired`] to exactly one
+/// device, so the entity the observer was triggered on names the presser. Nothing here reads Bevy's
+/// `Gamepad` or `ButtonInput`, which is what makes it work under a backend supplying actions rather
+/// than raw device messages.
 ///
 /// [`ClaimedDevices`] rather than `join::is_claimed` against a `Query<&Paired>`: two protagonists'
 /// join presses landing in the same tick both fire before either `Paired` insert (a deferred
@@ -191,22 +232,16 @@ fn walk(
 /// the same slot. `ClaimedDevices` is updated synchronously inside the observer itself, so the
 /// second press to arrive already sees the first's claim.
 fn pair_on_join(
-    _fired: On<Fired<Join>>,
-    keys: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<(Entity, &Gamepad)>,
+    fired: On<Fired<Join>>,
+    inviting: Query<&Paired, With<Inviting>>,
     mut claimed: ResMut<ClaimedDevices>,
     protagonists: Query<(Entity, &Protagonist)>,
     mut commands: Commands,
 ) {
-    let device = if keys.just_pressed(KeyCode::Enter) {
-        Some(DeviceHandle::KeyboardMouse)
-    } else {
-        gamepads
-            .iter()
-            .find(|(_, gamepad)| gamepad.just_pressed(GamepadButton::South))
-            .map(|(entity, _)| DeviceHandle::Gamepad(entity))
+    let Ok(pairing) = inviting.get(fired.entity) else {
+        return;
     };
-    let Some(device) = device else {
+    let Some(device) = pairing.iter().next() else {
         return;
     };
     let Some(slot) = claimed.claim(device) else {
