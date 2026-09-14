@@ -1604,6 +1604,14 @@ a capture accepting it refused every key and never ended, and a prompt scope nar
 empty. `contains` carried a variant it could never say yes to, and `contains_event` existed only to
 work around that. Reversing this brings all of it back.
 
+**Measured, not documented.** The filter's shape comes from `examples/ime_diagnostic.rs` on macOS
+rather than from Winit's documentation: a kana source delivers each keystroke as its own `Pressed`
+with `text: Some(...)`, and no `Pressed` carries `text: None` mid-composition. A dead key (Option+I
+then A) looked like a counterexample — through the bare diagnostic window it arrived as two plain
+letters — but the same keystroke through Bevy's own text-input example produced one composed
+character, so the gap was that window lacking IME composition, not a shape the filter misses.
+Committing a multi-candidate kana-to-kanji conversion from an IME popup was never measured.
+
 ### D66 — Control classes are a closed set
 
 **Decided.** The classes a binding can name (button-like, character-producing, and so on) are a

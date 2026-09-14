@@ -155,27 +155,17 @@ impl ClassFilter {
     }
 }
 
-// Measured against real input with `examples/ime_diagnostic.rs` (macOS), rather than reasoned from
-// documentation. A kana input source composed correctly: every keystroke arrived as its own
-// `Pressed` `KeyboardInput` with `text: Some(single kana character)`, and the matching `Released`
-// always carried `text: None` — no `Pressed` event with `text: None` mid-composition. That is
-// exactly what this predicate assumes.
+// Measured with `examples/ime_diagnostic.rs` on macOS, not reasoned from documentation — changing
+// this predicate means measuring again. A kana source delivers each keystroke as its own `Pressed`
+// with `text: Some(...)`; there is no `Pressed` carrying `text: None` mid-composition, and releases
+// always carry `text: None`. Composition upstream arrives already composed in one event, single- or
+// multi-character alike.
 //
-// A dead key (Option+I then A, which should compose to `â`) looked like a counterexample at first —
-// through this crate's bare diagnostic window it arrived as two independent plain letters, `i` then
-// `a` — but the same keystroke through Bevy's own text-input example produced one composed
-// character. So the gap was the diagnostic window not having IME composition enabled on it, not a
-// shape this predicate fails to handle: wherever composition happens upstream, it already lands as
-// one `KeyboardInput` with `text: Some(the composed character)`, single- or multi-character alike,
-// which this predicate already recognizes without change.
+// `Pressed` only, so a release never re-fires a class binding — the same rule every other binding
+// follows, stated here because there is no per-control state to fall back on.
 //
-// Gated to `Pressed` so a release never re-fires a class binding — the same rule every other
-// binding follows, just stated once here since there is no per-control state to fall back on.
-//
-// Left genuinely unmeasured: committing a multi-candidate conversion (kana to kanji) via an IME's
-// candidate popup. Reasoned rather than measured: it should be fine, since that commit happens
-// through ordinary keystrokes this predicate already judges independently. Revisit if that turns
-// out wrong.
+// Unmeasured: committing a multi-candidate kana-to-kanji conversion from an IME popup. Expected to
+// hold, since it commits through ordinary keystrokes this already judges independently.
 #[cfg(feature = "keyboard")]
 fn character_producing(event: &crate::frame::RawEvent) -> bool {
     matches!(
@@ -702,11 +692,13 @@ pub fn run_captures(
     }
 }
 
+// No test here spawns an instance of the context being rebound, except where one is the point.
+// Capture reads the frame rather than a binding, so a settings screen works from the main menu
+// before a game starts — R19.1, D40.
 #[cfg(all(test, feature = "keyboard"))]
 mod tests {
     use super::*;
 
-    use alloc::vec;
     use bevy_app::App;
     use bevy_ecs::prelude::On;
     use bevy_input::keyboard::{Key, KeyCode, KeyboardInput};
@@ -724,18 +716,31 @@ mod tests {
     struct Jump;
 
     #[derive(InputAction)]
+    #[action(path = "capture_tests.crouch", output = bool, intent = Button)]
+    struct Crouch;
+
+    #[derive(InputAction)]
     #[action(path = "capture_tests.settings", output = bool, intent = Button)]
     struct OpenSettings;
+
+    #[derive(InputAction)]
+    #[action(path = "capture_tests.confirm", output = bool, intent = Button)]
+    struct Confirm;
 
     #[derive(InputContext)]
     #[context(path = "capture_tests.on_foot", tick = Render)]
     struct OnFoot;
+
+    #[derive(InputContext)]
+    #[context(path = "capture_tests.menu", tick = Render)]
+    struct Menu;
 
     /// Everything a captured or refused control was reported as, in order.
     #[derive(Resource, Default)]
     struct Heard {
         captured: Vec<Control>,
         slots: Vec<usize>,
+        rows: Vec<Option<MappingKey>>,
         refused: Vec<(Control, RefusedReason)>,
     }
 
@@ -746,6 +751,7 @@ mod tests {
         app.add_observer(|event: On<ControlCaptured>, mut heard: ResMut<'_, Heard>| {
             heard.captured.push(event.control);
             heard.slots.push(event.slot);
+            heard.rows.push(event.mapping);
         });
         app.add_observer(|event: On<CaptureRefused>, mut heard: ResMut<'_, Heard>| {
             heard.refused.push((event.control, event.reason));
@@ -754,23 +760,36 @@ mod tests {
             controls
                 .bind::<Move>(crate::binding::DirectionalButtons::wasd())
                 .mappable();
-            // Room for a secondary, with only the primary shipped — so the tests below have both
-            // a full slot and an empty one to aim at.
-            controls.bind::<Jump>(KeyCode::Space).mappable_upto(2);
+            // One default in a row with room for three: enough to address a filled slot, the next
+            // empty one, and one that would leave a hole behind it.
+            controls.bind::<Jump>(KeyCode::Space).mappable_upto(3);
+            // Two defaults, so a row has a secondary for conflict detection to find.
+            controls.bind::<Crouch>(KeyCode::KeyC).mappable();
+            controls.bind::<Crouch>(KeyCode::KeyV).mappable();
             controls.bind::<OpenSettings>(KeyCode::F1).reserved();
+        });
+        // A second context sharing a control with the first, so a conflict can be reported across
+        // contexts as well as within one.
+        app.add_context::<Menu>(|controls| {
+            controls.bind::<Confirm>(KeyCode::KeyC).mappable();
         });
         app
     }
 
-    fn press(app: &mut App, key: KeyCode) {
-        app.world_mut().write_message(KeyboardInput {
-            key_code: key,
+    fn key_event(code: KeyCode, state: ButtonState) -> KeyboardInput {
+        KeyboardInput {
+            key_code: code,
             logical_key: Key::Space,
-            state: ButtonState::Pressed,
+            state,
             text: None,
             repeat: false,
             window: Entity::PLACEHOLDER,
-        });
+        }
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        app.world_mut()
+            .write_message(key_event(code, ButtonState::Pressed));
     }
 
     fn mapping(app: &App, key: &str) -> ActionMapping {
@@ -780,10 +799,10 @@ mod tests {
             .expect("no such mapping")
     }
 
-    /// The whole point: what comes back is the control's identity, which a binding would have
+    /// The whole protocol: what comes back is the control's *identity*, which a binding would have
     /// turned into a value and discarded.
     #[test]
-    fn a_capture_reports_the_control_that_was_pressed() {
+    fn a_session_arms_answers_once_and_then_is_gone() {
         let mut app = app();
         let target = mapping(&app, "capture_tests.move.up");
         let row = app
@@ -791,11 +810,15 @@ mod tests {
             .spawn(CaptureSession::for_mapping(&target).expect("a button mapping"))
             .id();
 
-        // The frame it arms in takes nothing, which is what stops it binding the key that opened it.
+        // The frame it arms in takes nothing, which is what stops it binding the key the player
+        // opened the row with.
         press(&mut app, KeyCode::Enter);
         app.update();
         assert!(app.world().resource::<Heard>().captured.is_empty());
-        assert!(app.world().get::<CaptureSession>(row).is_some());
+        assert!(
+            app.world().get::<CaptureSession>(row).is_some(),
+            "still listening"
+        );
 
         press(&mut app, KeyCode::KeyT);
         app.update();
@@ -806,47 +829,270 @@ mod tests {
         // Answered once, and the component is gone — which is how a screen knows it has stopped
         // listening without being told separately.
         assert!(app.world().get::<CaptureSession>(row).is_none());
+
+        // Cancelling is removing the component, and a cancelled session hears nothing more.
+        let cancelled = app
+            .world_mut()
+            .spawn(CaptureSession::accepting(ControlClass::AnyButton))
+            .id();
+        app.update();
+        app.world_mut()
+            .entity_mut(cancelled)
+            .remove::<CaptureSession>();
+        press(&mut app, KeyCode::KeyM);
+        app.update();
+        assert_eq!(
+            app.world().resource::<Heard>().captured.len(),
+            1,
+            "the cancelled session heard nothing"
+        );
     }
 
-    /// The reason capture reads the frame rather than a binding: no context is spawned here at
-    /// all, and capture does not notice.
+    /// An observer may do anything to the entity it is handed, despawning it included — a settings
+    /// row that closes on being answered is an ordinary thing to write. A guard rather than a
+    /// reproduction: the bug this was written for showed up under `DefaultPlugins`, because whether
+    /// an observer's deferred commands run before or after those already queued depends on the
+    /// executor. This states the contract.
     #[test]
-    fn capture_works_with_no_context_spawned() {
-        let mut app = app();
-        assert!(crate::mapping::mappings(app.world()).len() > 1);
+    fn an_observer_owns_the_entity_by_the_time_it_runs() {
+        #[derive(Resource, Default)]
+        struct StillListening(Option<bool>);
 
-        app.world_mut()
-            .spawn(CaptureSession::accepting(ControlClass::AnyButton));
+        let mut app = app();
+        app.init_resource::<StillListening>();
+        // Anything the crate does wrong to a despawned entity arrives through the error handler,
+        // which warns by default and would let this pass unnoticed.
+        app.set_error_handler(bevy_ecs::error::panic);
+        app.add_observer(
+            |captured: On<ControlCaptured>,
+             sessions: Query<'_, '_, &CaptureSession>,
+             mut seen: ResMut<'_, StillListening>,
+             mut commands: Commands<'_, '_>| {
+                seen.0 = Some(sessions.get(captured.entity).is_ok());
+                // Deferred rather than inline, which is what an observer wanting the whole world
+                // has to do — reading `conflicts` needs `&World` — and is the shape the failure
+                // arrived in.
+                let entity = captured.entity;
+                commands.queue(move |world: &mut World| {
+                    world.despawn(entity);
+                });
+            },
+        );
+
+        let row = app
+            .world_mut()
+            .spawn(CaptureSession::accepting(ControlClass::AnyButton))
+            .id();
         app.update();
-        press(&mut app, KeyCode::KeyQ);
+        press(&mut app, KeyCode::KeyP);
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<StillListening>().0,
+            Some(false),
+            "the component is already removed when the observer runs"
+        );
+        assert!(app.world().get_entity(row).is_err(), "the observer had it");
+        // And a second frame, in case anything was left queued against it.
+        app.update();
+    }
+
+    /// Two rows can listen at once, which is what a split screen needs and what a single global
+    /// session could not have offered.
+    #[test]
+    fn two_sessions_capture_independently() {
+        let mut app = app();
+        let first = app
+            .world_mut()
+            .spawn(CaptureSession::accepting(ControlClass::AnyButton))
+            .id();
+        let second = app
+            .world_mut()
+            .spawn(CaptureSession::accepting(ControlClass::AnyButton))
+            .id();
+        app.update();
+
+        press(&mut app, KeyCode::KeyN);
         app.update();
 
         assert_eq!(
             app.world().resource::<Heard>().captured,
-            [Control::PhysicalKey(KeyCode::KeyQ)]
+            alloc::vec![Control::PhysicalKey(KeyCode::KeyN); 2]
+        );
+        assert!(app.world().get::<CaptureSession>(first).is_none());
+        assert!(app.world().get::<CaptureSession>(second).is_none());
+    }
+
+    /// Each of these reaches a listening session and must produce neither a capture nor a refusal:
+    /// an excluded control because it is still doing its normal job, the rest because nobody chose
+    /// anything. Capturing on a release would take a key the player is still holding, and a repeat
+    /// would bind the same key over and over while they waited.
+    #[test]
+    fn what_capture_passes_over_in_silence() {
+        let mut app = app();
+        app.world_mut().spawn(
+            CaptureSession::accepting(ControlClass::AnyButton)
+                .excluding([Control::PhysicalKey(KeyCode::Escape)]),
+        );
+        app.update();
+
+        /// One thing arriving at a session, as the test drives it.
+        type Arrival = fn(&mut App);
+
+        let cases: [(&str, Arrival); 3] = [
+            ("an excluded control", |app| press(app, KeyCode::Escape)),
+            ("a key release", |app| {
+                app.world_mut()
+                    .write_message(key_event(KeyCode::KeyJ, ButtonState::Released));
+            }),
+            ("a key repeat", |app| {
+                let mut held = key_event(KeyCode::KeyJ, ButtonState::Pressed);
+                held.repeat = true;
+                app.world_mut().write_message(held);
+            }),
+        ];
+
+        for (what, arrive) in cases {
+            arrive(&mut app);
+            app.update();
+            let heard = app.world().resource::<Heard>();
+            assert!(heard.captured.is_empty(), "{what} was captured");
+            assert!(heard.refused.is_empty(), "{what} was refused");
+        }
+
+        #[cfg(feature = "mouse")]
+        {
+            app.world_mut()
+                .write_message(bevy_input::mouse::MouseButtonInput {
+                    button: bevy_input::mouse::MouseButton::Middle,
+                    state: ButtonState::Released,
+                    window: Entity::PLACEHOLDER,
+                });
+            app.update();
+            let heard = app.world().resource::<Heard>();
+            assert!(heard.captured.is_empty(), "a mouse button release");
+            assert!(heard.refused.is_empty(), "a mouse button release");
+        }
+
+        // And the session is still listening through all of it.
+        press(&mut app, KeyCode::KeyY);
+        app.update();
+        assert_eq!(
+            app.world().resource::<Heard>().captured,
+            [Control::PhysicalKey(KeyCode::KeyY)]
         );
     }
 
-    /// Reserving would be worth little if the screen key merely had no mapping of its own —
-    /// anything else could still be bound over the top of it.
+    /// The keyboard-and-mouse family is one family, so a mouse button fills a mapping a key holds —
+    /// what a player expects of "fire on left click", and what a check comparing devices rather
+    /// than families would get wrong. Motion has no resting position, so only a deliberate sweep
+    /// counts.
+    #[cfg(feature = "mouse")]
     #[test]
-    fn a_reserved_control_is_refused_out_loud() {
+    fn what_the_mouse_offers_capture() {
+        use bevy_input::mouse::{MouseButton, MouseButtonInput, MouseMotion};
+
+        let mut clicking = app();
+        let target = mapping(&clicking, "capture_tests.jump");
+        clicking
+            .world_mut()
+            .spawn(CaptureSession::for_mapping(&target).expect("a button mapping"));
+        clicking.update();
+        clicking.world_mut().write_message(MouseButtonInput {
+            button: MouseButton::Left,
+            state: ButtonState::Pressed,
+            window: Entity::PLACEHOLDER,
+        });
+        clicking.update();
+        assert_eq!(
+            clicking.world().resource::<Heard>().captured,
+            [Control::MouseButton(MouseButton::Left)]
+        );
+
+        let mut moving = app();
+        moving
+            .world_mut()
+            .spawn(CaptureSession::accepting(ControlClass::AnyDelta));
+        moving.update();
+
+        // A hand resting on the desk moves the mouse a pixel at a time without anybody choosing
+        // anything.
+        moving.world_mut().write_message(MouseMotion {
+            delta: bevy_math::Vec2::new(MOUSE_MOTION - 1.0, 0.0),
+        });
+        moving.update();
+        assert!(
+            moving.world().resource::<Heard>().captured.is_empty(),
+            "short of the threshold"
+        );
+
+        moving.world_mut().write_message(MouseMotion {
+            delta: bevy_math::Vec2::new(MOUSE_MOTION, 0.0),
+        });
+        moving.update();
+        assert_eq!(
+            moving.world().resource::<Heard>().captured,
+            [Control::MouseMotion]
+        );
+    }
+
+    /// A control can be refusable twice over, and the reason it gets is the one it is owed: a
+    /// player who pressed the settings key wants to hear that it is spoken for, not that its
+    /// channel is wrong. The order is checked on the predicate as well, because a saved file is
+    /// answered from the same rule and the two must not disagree.
+    #[test]
+    fn a_refusal_names_its_reason_and_leaves_the_session_listening() {
+        assert_eq!(
+            admissible(
+                Control::PhysicalKey(KeyCode::F1),
+                None,
+                ControlClass::AnyAxis,
+                true
+            ),
+            Err(RefusedReason::Reserved),
+            "reserved is answered before shape"
+        );
+
         let mut app = app();
         let target = mapping(&app, "capture_tests.jump");
         app.world_mut()
             .spawn(CaptureSession::for_mapping(&target).expect("a button mapping"));
         app.update();
 
+        // Reserving would be worth little if the screen key merely had no mapping of its own —
+        // anything else could still be bound over the top of it.
         press(&mut app, KeyCode::F1);
         app.update();
-
         assert!(app.world().resource::<Heard>().captured.is_empty());
         assert_eq!(
             app.world().resource::<Heard>().refused,
             [(Control::PhysicalKey(KeyCode::F1), RefusedReason::Reserved)]
         );
 
-        // And the session is still listening, so the player can pick something else.
+        // A mapping is rebound within its family, so the pad cannot answer for the keyboard.
+        #[cfg(feature = "gamepad")]
+        {
+            use bevy_input::gamepad::{GamepadButton, RawGamepadButtonChangedEvent};
+
+            app.world_mut()
+                .write_message(bevy_input::gamepad::RawGamepadEvent::Button(
+                    RawGamepadButtonChangedEvent::new(
+                        Entity::PLACEHOLDER,
+                        GamepadButton::South,
+                        1.0,
+                    ),
+                ));
+            app.update();
+            assert_eq!(
+                app.world().resource::<Heard>().refused[1],
+                (
+                    Control::GamepadButton(GamepadButton::South),
+                    RefusedReason::Family
+                )
+            );
+        }
+
+        // Refused, not cancelled: the player can pick something else.
         press(&mut app, KeyCode::KeyE);
         app.update();
         assert_eq!(
@@ -855,90 +1101,99 @@ mod tests {
         );
     }
 
-    /// A control can be refusable twice over, and the reason it gets is the one it is owed: a
-    /// player who pressed the settings key wants to hear that it is spoken for, not that its
-    /// channel is wrong. Tested on the predicate rather than through capture because overrides
-    /// answers a saved file from the same rule, and the two must not disagree.
+    /// A settings screen reached from a pause menu has the context it is rebinding live behind it,
+    /// and what the player presses there must not also play the game. Asserting the claim alone
+    /// never showed that: with no instance of the context spawned, nothing could have fired anyway.
     #[test]
-    fn reserved_answers_before_shape() {
-        assert_eq!(
-            admissible(
-                Control::PhysicalKey(KeyCode::F1),
-                None,
-                ControlClass::AnyAxis,
-                true
-            ),
-            Err(RefusedReason::Reserved)
-        );
-    }
+    fn a_capture_suppresses_the_live_context_it_is_rebinding() {
+        use crate::event::Fired;
 
-    /// An excluded control is not refused, it is invisible — which is what lets the key that
-    /// cancels a capture reach the thing that cancels it.
-    #[test]
-    fn an_excluded_control_is_passed_over_in_silence() {
-        let mut app = app();
-        app.world_mut().spawn(
-            CaptureSession::accepting(ControlClass::AnyButton)
-                .excluding([Control::PhysicalKey(KeyCode::Escape)]),
-        );
-        app.update();
-
-        press(&mut app, KeyCode::Escape);
-        app.update();
-
-        let heard = app.world().resource::<Heard>();
-        assert!(heard.captured.is_empty());
-        assert!(heard.refused.is_empty(), "silent, not refused");
-    }
-
-    /// A mapping is rebound within its family, so the pad cannot answer for the keyboard.
-    #[cfg(feature = "gamepad")]
-    #[test]
-    fn a_control_from_the_other_family_is_refused() {
-        use bevy_input::gamepad::{GamepadButton, RawGamepadButtonChangedEvent};
+        #[derive(Resource, Default)]
+        struct Fires(usize);
 
         let mut app = app();
-        let target = mapping(&app, "capture_tests.jump");
-        app.world_mut()
-            .spawn(CaptureSession::for_mapping(&target).expect("a button mapping"));
-        app.update();
+        app.init_resource::<Fires>();
+        app.add_observer(|_: On<Fired<Jump>>, mut fires: ResMut<'_, Fires>| {
+            fires.0 += 1;
+        });
 
-        app.world_mut()
-            .write_message(bevy_input::gamepad::RawGamepadEvent::Button(
-                RawGamepadButtonChangedEvent::new(Entity::PLACEHOLDER, GamepadButton::South, 1.0),
-            ));
-        app.update();
-
-        assert_eq!(
-            app.world().resource::<Heard>().refused,
-            [(
-                Control::GamepadButton(GamepadButton::South),
-                RefusedReason::Family
-            )]
-        );
-    }
-
-    /// What the player presses at a rebinding screen must not also play the game.
-    #[test]
-    fn a_captured_control_is_taken_from_the_game() {
-        let mut app = app();
+        app.world_mut().spawn(OnFoot);
         app.world_mut()
             .spawn(CaptureSession::accepting(ControlClass::AnyButton));
         app.update();
 
+        // Space is Jump's default binding, so an unsuppressed press would fire it.
         press(&mut app, KeyCode::Space);
         app.update();
 
+        assert_eq!(
+            app.world().resource::<Heard>().captured,
+            [Control::PhysicalKey(KeyCode::Space)]
+        );
         assert_eq!(
             app.world()
                 .resource::<crate::eval::ConsumedControls>()
                 .claimant(Control::PhysicalKey(KeyCode::Space)),
             Some("capture")
         );
+        assert_eq!(
+            app.world().resource::<Fires>().0,
+            0,
+            "the control was taken from the game, not merely booked"
+        );
     }
 
+    /// A mapping holds an ordered list, so a capture says which slot it fills — otherwise the
+    /// answer has nowhere to go but the front of the row and a secondary column could never be
+    /// filled. Capacity is a ceiling, not permission to skip: the next empty slot is reachable and
+    /// the one after it is not, because filling that would leave the slot between them empty for
+    /// good.
     #[test]
-    fn conflicts_name_the_slots_that_already_hold_a_control() {
+    fn a_row_is_addressed_by_slot() {
+        let mut app = app();
+        let jump = mapping(&app, "capture_tests.jump");
+        assert_eq!(jump.slots.len(), 1, "one default…");
+        assert_eq!(jump.capacity, Some(3), "…in a row with room for three");
+
+        // What a single-column table gets without asking.
+        assert_eq!(
+            CaptureSession::for_mapping(&jump)
+                .expect("a button mapping")
+                .slot(),
+            0
+        );
+        assert!(CaptureSession::for_slot(&jump, 1).is_some(), "the next one");
+        assert!(
+            CaptureSession::for_slot(&jump, 2).is_none(),
+            "within capacity, but it would leave slot 1 empty behind it"
+        );
+        assert!(CaptureSession::for_slot(&jump, 3).is_none(), "past the end");
+
+        // A plain `mappable` said nothing about wanting a second, so only the one is addressable.
+        let up = mapping(&app, "capture_tests.move.up");
+        assert_eq!(up.capacity, Some(1));
+        assert!(CaptureSession::for_slot(&up, 0).is_some());
+        assert!(CaptureSession::for_slot(&up, 1).is_none());
+
+        // And the slot the session was made for is what reaches the observer.
+        app.world_mut()
+            .spawn(CaptureSession::for_slot(&jump, 1).expect("the empty second slot"));
+        app.update();
+        press(&mut app, KeyCode::KeyK);
+        app.update();
+
+        let heard = app.world().resource::<Heard>();
+        assert_eq!(heard.captured, [Control::PhysicalKey(KeyCode::KeyK)]);
+        assert_eq!(heard.slots, [1]);
+        // The row travels with the slot: without it a screen knows which column was filled and not
+        // which line of the table it belongs to.
+        assert_eq!(heard.rows, [Some(jump.key)]);
+    }
+
+    /// A row holds a list, so *any* slot of it holding the control is a clash — a secondary binding
+    /// is no less bound than a primary one.
+    #[test]
+    fn conflicts_name_the_mappings_that_hold_a_control() {
         let app = app();
         let jump = mapping(&app, "capture_tests.jump").key;
 
@@ -955,11 +1210,29 @@ mod tests {
             "both are bound in on_foot, so they are certainly in each other's way"
         );
 
+        // The secondary of a two-default row, which a `==` against a single control would miss.
+        let secondary = conflicts(app.world(), Control::PhysicalKey(KeyCode::KeyV), Some(jump));
+        assert_eq!(secondary.len(), 1);
+        assert_eq!(secondary[0].action_path, "capture_tests.crouch");
+
+        // Asked from the menu's side, the same control is held by a row in another context — a menu
+        // key and a gameplay key can share one quite deliberately, and whether that matters is a
+        // question about the game's own activation rules.
+        let confirm = mapping(&app, "capture_tests.confirm").key;
+        let across = conflicts(
+            app.world(),
+            Control::PhysicalKey(KeyCode::KeyC),
+            Some(confirm),
+        );
+        assert_eq!(across.len(), 1);
+        assert_eq!(across[0].action_path, "capture_tests.crouch");
+        assert_eq!(across[0].overlap, ConflictOverlap::OtherContext);
+
         // Nothing holds this one.
         assert!(conflicts(app.world(), Control::PhysicalKey(KeyCode::KeyZ), Some(jump)).is_empty());
 
         // And a mapping does not conflict with itself, so rebinding a control to where it already
-        // reports nothing rather than reporting the row the player is looking at.
+        // is reports nothing rather than reporting the row the player is looking at.
         assert!(
             conflicts(
                 app.world(),
@@ -970,37 +1243,11 @@ mod tests {
         );
     }
 
-    /// A row holds a list, so *any* slot of it holding the control is a clash — a secondary binding
-    /// is no less bound than a primary one.
+    /// A screen's own unconfirmed choice has to be able to clash with another one, and `conflicts`
+    /// alone cannot see it because nothing has been applied. A row someone else owns is read the
+    /// way applying reads it: neither cleared nor free.
     #[test]
-    fn a_conflict_is_found_in_any_slot_of_a_row() {
-        #[derive(InputContext)]
-        #[context(path = "capture_tests.two_defaults", tick = Render)]
-        struct TwoDefaults;
-
-        let mut app = App::new();
-        app.add_plugins((InputPlugin, ActionMapPlugin));
-        app.add_context::<TwoDefaults>(|controls| {
-            controls.bind::<Jump>(KeyCode::Space).mappable();
-            controls.bind::<Jump>(KeyCode::Enter).mappable();
-            controls.bind::<OpenSettings>(KeyCode::F1).mappable();
-        });
-
-        let settings = crate::mapping::mappings(app.world())[1].key;
-        // The secondary, which a `==` against a single control would have missed.
-        let found = conflicts(
-            app.world(),
-            Control::PhysicalKey(KeyCode::Enter),
-            Some(settings),
-        );
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].action_path, "capture_tests.jump");
-    }
-
-    /// The whole point of a pending-aware query: a screen's own unconfirmed choice has to be able to
-    /// clash with another one, and `conflicts` alone cannot see it because nothing has been applied.
-    #[test]
-    fn conflicts_pending_sees_a_row_the_player_has_not_confirmed_yet() {
+    fn conflicts_pending_sees_what_has_not_been_confirmed() {
         let app = app();
         let mappings = crate::mapping::mappings(app.world());
         let up = mapping(&app, "capture_tests.move.up").key;
@@ -1015,7 +1262,6 @@ mod tests {
 
         // Still on Space in the world, so the world-only query hears nothing.
         assert!(conflicts(app.world(), Control::PhysicalKey(KeyCode::KeyW), Some(up)).is_empty());
-
         let found = conflicts_pending(
             &mappings,
             &pending,
@@ -1024,27 +1270,20 @@ mod tests {
         );
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].action_path, "capture_tests.jump");
-    }
-
-    /// Read the same way applying does: a row someone else owns is neither cleared nor untouched,
-    /// and a pending `NotOurs` must not read as freeing up its control.
-    #[test]
-    fn a_pending_not_ours_row_still_holds_its_control() {
-        let app = app();
-        let mappings = crate::mapping::mappings(app.world());
-        let jump = mapping(&app, "capture_tests.jump").key;
-        let up = mapping(&app, "capture_tests.move.up").key;
 
         let mut pending = Overrides::new();
         pending.set(DeviceFamily::KeyboardMouse, jump, Override::NotOurs);
-        let found = conflicts_pending(
-            &mappings,
-            &pending,
-            Control::PhysicalKey(KeyCode::Space),
-            Some(up),
+        assert_eq!(
+            conflicts_pending(
+                &mappings,
+                &pending,
+                Control::PhysicalKey(KeyCode::Space),
+                Some(up)
+            )
+            .len(),
+            1,
+            "NotOurs leaves the row reading as it did"
         );
-        assert_eq!(found.len(), 1, "NotOurs leaves the row reading as it did");
-        assert_eq!(found[0].action_path, "capture_tests.jump");
 
         // Contrast with `Cleared`, which does free the control.
         pending.set(DeviceFamily::KeyboardMouse, jump, Override::Cleared);
@@ -1059,154 +1298,28 @@ mod tests {
         );
     }
 
-    /// A mapping holds a list, so a capture says which slot it fills — otherwise the answer has
-    /// nowhere to go but the front of the row and a secondary column could never be filled.
-    #[test]
-    fn a_capture_reports_the_slot_it_was_made_for() {
-        let mut app = app();
-        let target = mapping(&app, "capture_tests.jump");
-        assert_eq!(target.slots.len(), 1, "one default…");
-        assert_eq!(target.capacity, Some(2), "…two slots");
-
-        app.world_mut()
-            .spawn(CaptureSession::for_slot(&target, 1).expect("the empty second slot"));
-        app.update();
-        press(&mut app, KeyCode::KeyK);
-        app.update();
-
-        let heard = app.world().resource::<Heard>();
-        assert_eq!(heard.captured, [Control::PhysicalKey(KeyCode::KeyK)]);
-        assert_eq!(heard.slots, [1]);
-    }
-
-    /// The default, and what a single-column table gets without asking.
-    #[test]
-    fn a_capture_for_a_mapping_is_a_capture_for_its_first_slot() {
-        let app = app();
-        let target = mapping(&app, "capture_tests.jump");
-        assert_eq!(
-            CaptureSession::for_mapping(&target)
-                .expect("a button mapping")
-                .slot(),
-            0
-        );
-    }
-
-    /// A slot the mapping does not have gets no capture, rather than one whose answer is dropped
-    /// or would leave a hole in a list whose order is what primary and secondary mean.
-    #[test]
-    fn a_slot_the_mapping_does_not_have_has_no_capture() {
-        let app = app();
-        let jump = mapping(&app, "capture_tests.jump");
-        // Two slots, so the third is past the end of the row.
-        assert!(CaptureSession::for_slot(&jump, 2).is_none());
-
-        // And one slot, so only the one is addressable — a plain `mappable` said nothing about
-        // wanting a second.
-        let up = mapping(&app, "capture_tests.move.up");
-        assert_eq!(up.capacity, Some(1));
-        assert!(CaptureSession::for_slot(&up, 0).is_some());
-        assert!(CaptureSession::for_slot(&up, 1).is_none());
-    }
-
-    /// Capacity is a ceiling, not permission to skip: the next empty slot is reachable and the one
-    /// after it is not, because filling that one would leave the slot between them empty for good.
-    #[test]
-    fn a_capture_cannot_leave_a_hole_in_the_row() {
-        #[derive(InputContext)]
-        #[context(path = "capture_tests.roomy", tick = Render)]
-        struct Roomy;
-
-        let mut app = App::new();
-        app.add_plugins((InputPlugin, ActionMapPlugin));
-        app.add_context::<Roomy>(|controls| {
-            controls.bind::<Jump>(KeyCode::Space).mappable_upto(3);
-        });
-
-        let target = &crate::mapping::mappings(app.world())[0];
-        assert!(
-            CaptureSession::for_slot(target, 1).is_some(),
-            "the next one"
-        );
-        assert!(
-            CaptureSession::for_slot(target, 2).is_none(),
-            "within capacity, but it would leave slot 2 empty behind it"
-        );
-    }
-
-    /// The keyboard-and-mouse family is one family, so a mouse button fills a mapping a key holds.
-    /// That is what a player expects of "fire on left click" and what a family check would get
-    /// wrong if it compared devices rather than families.
-    #[cfg(feature = "mouse")]
-    #[test]
-    fn a_mouse_button_can_be_captured_for_a_keyboard_mapping() {
-        use bevy_input::mouse::{MouseButton, MouseButtonInput};
-
-        let mut app = app();
-        let target = mapping(&app, "capture_tests.jump");
-        app.world_mut()
-            .spawn(CaptureSession::for_mapping(&target).expect("a button mapping"));
-        app.update();
-
-        app.world_mut().write_message(MouseButtonInput {
-            button: MouseButton::Left,
-            state: ButtonState::Pressed,
-            window: Entity::PLACEHOLDER,
-        });
-        app.update();
-
-        assert_eq!(
-            app.world().resource::<Heard>().captured,
-            [Control::MouseButton(MouseButton::Left)]
-        );
-    }
-
-    /// A release is not a choice, for the same reason a key's is not: capturing on one would take a
-    /// button the player is still holding down.
-    #[cfg(feature = "mouse")]
-    #[test]
-    fn releasing_a_mouse_button_is_not_a_capture() {
-        use bevy_input::mouse::{MouseButton, MouseButtonInput};
-
-        let mut app = app();
-        app.world_mut()
-            .spawn(CaptureSession::accepting(ControlClass::AnyButton));
-        app.update();
-
-        app.world_mut().write_message(MouseButtonInput {
-            button: MouseButton::Middle,
-            state: ButtonState::Released,
-            window: Entity::PLACEHOLDER,
-        });
-        app.update();
-
-        let heard = app.world().resource::<Heard>();
-        assert!(heard.captured.is_empty());
-        assert!(heard.refused.is_empty());
-    }
-
     /// A class is a property, not a list.
     #[test]
-    fn classes_are_decided_by_the_channel_a_control_reports_on() {
+    fn a_control_class_is_decided_by_channel_shape() {
         assert!(ControlClass::AnyButton.contains(Control::PhysicalKey(KeyCode::KeyA)));
         assert!(!ControlClass::AnyButton.contains(Control::MouseMotion));
         assert!(ControlClass::AnyDelta.contains(Control::MouseMotion));
 
-        assert_eq!(
-            ControlClass::of(ChannelShape::Button),
-            ControlClass::AnyButton
-        );
-        assert_eq!(
-            ControlClass::of(ChannelShape::Axis2),
-            ControlClass::AnyStick
-        );
+        for (shape, class) in [
+            (ChannelShape::Button, ControlClass::AnyButton),
+            (ChannelShape::Axis1, ControlClass::AnyAxis),
+            (ChannelShape::Axis2, ControlClass::AnyStick),
+            (ChannelShape::Delta2, ControlClass::AnyDelta),
+        ] {
+            assert_eq!(ControlClass::of(shape), class, "{shape:?}");
+        }
     }
 
-    /// `ClassFilter::Characters` cannot be decided from a bare control, only from the event.
-    #[cfg(feature = "keyboard")]
+    /// `ClassFilter::Characters` cannot be decided from a bare control, only from the event: the
+    /// same key is a dead key on one press and a plain letter on the next.
     #[test]
-    fn character_producing_is_a_property_of_the_event_not_the_control() {
-        let key = |text: Option<&str>, state: ButtonState| {
+    fn the_character_class_is_decided_by_the_event() {
+        let typed = |text: Option<&str>, state: ButtonState| {
             crate::frame::RawEvent::Keyboard(KeyboardInput {
                 key_code: KeyCode::KeyA,
                 logical_key: Key::Character(text.unwrap_or_default().into()),
@@ -1217,26 +1330,27 @@ mod tests {
             })
         };
 
-        assert!(ClassFilter::Characters.matches(&key(Some("a"), ButtonState::Pressed)));
+        assert!(ClassFilter::Characters.matches(&typed(Some("a"), ButtonState::Pressed)));
         // A dead key on this press: same `KeyCode`, no text yet.
-        assert!(!ClassFilter::Characters.matches(&key(None, ButtonState::Pressed)));
+        assert!(!ClassFilter::Characters.matches(&typed(None, ButtonState::Pressed)));
         // Release is not a choice, the same rule every other binding follows.
-        assert!(!ClassFilter::Characters.matches(&key(Some("a"), ButtonState::Released)));
+        assert!(!ClassFilter::Characters.matches(&typed(Some("a"), ButtonState::Released)));
 
         // The shape classes read straight off the event's own control, same as `contains`.
         assert!(
             ClassFilter::Shape(ControlClass::AnyButton)
-                .matches(&key(Some("a"), ButtonState::Pressed))
+                .matches(&typed(Some("a"), ButtonState::Pressed))
         );
         assert!(
             !ClassFilter::Shape(ControlClass::AnyDelta)
-                .matches(&key(Some("a"), ButtonState::Pressed))
+                .matches(&typed(Some("a"), ButtonState::Pressed))
         );
     }
 
-    /// A stick bound whole is now a rebinding row like any other: pushing it is what a settings
-    /// screen offers, and `Control::GamepadStick` is what comes back — never the bare axis that
-    /// happened to cross the threshold first.
+    /// A stick bound whole is a rebinding row like any other: pushing it is what a settings screen
+    /// offers, and `Control::GamepadStick` is what comes back — never the bare axis that happened
+    /// to cross the threshold first. A trigger deflects too and is not this stick; a continuous
+    /// reading that does not fit is passed over in silence rather than complained about.
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_pushed_stick_is_captured_whole() {
@@ -1264,20 +1378,17 @@ mod tests {
         let target = &crate::mapping::mappings(app.world())[0];
         assert_eq!(target.accepts, ChannelShape::Axis2);
         app.world_mut()
-            .spawn(CaptureSession::for_mapping(target).expect("a stick mapping now captures"));
+            .spawn(CaptureSession::for_mapping(target).expect("a stick mapping"));
         app.update();
 
-        // A trigger deflects too, and is not this stick: a continuous reading past its threshold
-        // is refused in silence, the same as everything else that shape does not fit (`DEFLECTION`
-        // and `MOUSE_MOTION`'s own doc explains why nothing is said out loud for these).
         app.world_mut()
             .write_message(bevy_input::gamepad::RawGamepadEvent::Axis(
                 RawGamepadAxisChangedEvent::new(Entity::PLACEHOLDER, GamepadAxis::LeftZ, 1.0),
             ));
         app.update();
         let heard = app.world().resource::<Heard>();
-        assert!(heard.captured.is_empty());
-        assert!(heard.refused.is_empty());
+        assert!(heard.captured.is_empty(), "a trigger is not this stick");
+        assert!(heard.refused.is_empty(), "and is not complained about");
 
         app.world_mut()
             .write_message(bevy_input::gamepad::RawGamepadEvent::Axis(
@@ -1322,128 +1433,5 @@ mod tests {
                 .context,
             "capture_tests.on_foot"
         );
-    }
-
-    /// Nothing about capture depends on a mapping, so a game can ask "what did they just press" for
-    /// its own reasons.
-    #[test]
-    fn a_session_without_a_slot_reports_no_slot() {
-        let mut app = app();
-        app.world_mut()
-            .spawn(CaptureSession::accepting(ControlClass::AnyButton));
-        app.update();
-        press(&mut app, KeyCode::KeyB);
-        app.update();
-
-        assert_eq!(
-            app.world().resource::<Heard>().captured,
-            [Control::PhysicalKey(KeyCode::KeyB)]
-        );
-    }
-
-    /// An observer may do anything to the entity it is handed, despawning it included — a settings
-    /// row that closes on being answered is an ordinary thing to write.
-    ///
-    /// This is a guard, not a reproduction: the bug this was written for showed up under
-    /// `DefaultPlugins` and not here, because whether an observer's deferred commands run before
-    /// or after the ones already queued depends on the executor. The test below is the one that
-    /// actually fails without the fix; this one states the contract.
-    #[test]
-    fn an_observer_may_despawn_the_entity_it_is_answered_on() {
-        let mut app = app();
-        // Anything the crate does wrong to a despawned entity arrives through the error handler,
-        // which warns by default and would let this pass unnoticed.
-        app.set_error_handler(bevy_ecs::error::panic);
-        app.add_observer(
-            |captured: On<ControlCaptured>, mut commands: Commands<'_, '_>| {
-                // Deferred rather than inline, which is what an observer wanting the whole world has to
-                // do — reading `conflicts` needs `&World` — and is the shape the failure arrived in.
-                let entity = captured.entity;
-                commands.queue(move |world: &mut World| {
-                    world.despawn(entity);
-                });
-            },
-        );
-
-        let row = app
-            .world_mut()
-            .spawn(CaptureSession::accepting(ControlClass::AnyButton))
-            .id();
-        app.update();
-        press(&mut app, KeyCode::KeyP);
-        app.update();
-
-        assert!(app.world().get_entity(row).is_err(), "the observer had it");
-        // And a second frame, in case anything was left queued against it.
-        app.update();
-    }
-
-    /// The component is gone by the time the observer runs, so "is this row still listening" reads
-    /// the same inside the observer as anywhere else.
-    #[test]
-    fn the_session_is_already_removed_when_the_observer_runs() {
-        #[derive(Resource, Default)]
-        struct StillThere(Option<bool>);
-
-        let mut app = app();
-        app.init_resource::<StillThere>();
-        app.add_observer(
-            |captured: On<ControlCaptured>,
-             sessions: Query<'_, '_, &CaptureSession>,
-             mut seen: ResMut<'_, StillThere>| {
-                seen.0 = Some(sessions.get(captured.entity).is_ok());
-            },
-        );
-
-        app.world_mut()
-            .spawn(CaptureSession::accepting(ControlClass::AnyButton));
-        app.update();
-        press(&mut app, KeyCode::KeyR);
-        app.update();
-
-        assert_eq!(app.world().resource::<StillThere>().0, Some(false));
-    }
-
-    /// Cancelling is removing the component, and a cancelled session hears nothing more.
-    #[test]
-    fn removing_the_component_cancels() {
-        let mut app = app();
-        let row = app
-            .world_mut()
-            .spawn(CaptureSession::accepting(ControlClass::AnyButton))
-            .id();
-        app.update();
-
-        app.world_mut().entity_mut(row).remove::<CaptureSession>();
-        press(&mut app, KeyCode::KeyM);
-        app.update();
-
-        assert!(app.world().resource::<Heard>().captured.is_empty());
-    }
-
-    /// Two rows can listen at once, which is what a split screen needs and what a single global
-    /// session could not have offered.
-    #[test]
-    fn two_sessions_capture_independently() {
-        let mut app = app();
-        let first = app
-            .world_mut()
-            .spawn(CaptureSession::accepting(ControlClass::AnyButton))
-            .id();
-        let second = app
-            .world_mut()
-            .spawn(CaptureSession::accepting(ControlClass::AnyButton))
-            .id();
-        app.update();
-
-        press(&mut app, KeyCode::KeyN);
-        app.update();
-
-        assert_eq!(
-            app.world().resource::<Heard>().captured,
-            vec![Control::PhysicalKey(KeyCode::KeyN); 2]
-        );
-        assert!(app.world().get::<CaptureSession>(first).is_none());
-        assert!(app.world().get::<CaptureSession>(second).is_none());
     }
 }
