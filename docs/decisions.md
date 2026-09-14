@@ -574,15 +574,27 @@ identify *which* device is the emulation.
 build knows it does; it tells this crate to stop recording a whole device family at L0, and the
 sampler skips that family's events. Wholesale rather than per device because per device is not
 implementable, not because it is cheaper — if Valve ever exposes a handle-to-device mapping the
-policy narrows and nothing above L0 notices. Declared rather than detected, because a Steam build
-launched with Steam not running must still read its pads, and a suppression that silently turns
-itself on and off between runs is the worst kind of input bug to diagnose. The same switch is what
-lets a replay backend mute live hardware, which is what this decision wanted from it all along.
+policy narrows and nothing above L0 notices. Declared rather than detected, because a suppression
+that silently turns itself on and off between runs is the worst kind of input bug to diagnose.
 
-**Not a Cargo feature.** Suppression is a runtime fact — the same binary runs with the client up and
-with it absent — so no compile-time flag can express it. It would also be a feature that *removes*
-behaviour, which Cargo's additive-feature rule forbids: one crate in the graph enabling it would
-silence gamepads for every other.
+**Replay is what the switch is for; Steam is the contingent case.** A replay backend mutes live
+hardware in a build that compiled the driver in, switching at runtime, and no build configuration
+expresses that (R0.6, R10.8). Steam may need nothing here: Bevy's `gamepad` and `bevy_gilrs` are
+separate features and `bevy_gilrs` enables `gamepad` rather than the reverse, so a Steam build can
+take the types and the connection systems without the driver — and then no hardware event is
+produced to suppress. Per-channel builds are the expected shape, a storefront SDK being a coupled
+integration that already ships a dylib another channel's build does not.
+
+**Not a Cargo feature on this crate.** A feature that *removes* behaviour breaks Cargo's additive
+rule: one crate in the graph enabling it would silence gamepads for every other. A game declining
+`bevy/bevy_gilrs` is the opposite shape and is fine. What that costs is feature unification — any
+dependency asking for the driver turns it back on for the whole graph — which is build discipline
+rather than a rule violation, and `cargo tree` shows it.
+
+**One reason here was assumed, not measured.** This decision argued that a Steam build launched with
+the client absent must still read its pads, and therefore that one binary has to serve both. Nothing
+established that, unlike S1 and S3 beside it, and `docs/steam.md` now carries the question. Recorded
+so it is not re-derived: the switch stands on replay, which does not depend on the answer.
 
 **The gap this leaves** is keyboard and mouse. Steam creates emulated devices for both alongside the
 pad (S1), and suppressing the gamepad family does not touch them. Whether a configuration can emit

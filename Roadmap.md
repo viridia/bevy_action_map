@@ -236,9 +236,8 @@ so the device is already on the entity the event arrives at.
   `gamepad_event_processing_system` to fold in, which an L2 authority has none of; its identity half
   is USB ids Steam cannot supply (`docs/steam.md` S7). A backend writing `GamepadConnectionEvent`
   would get an entity carrying a permanently empty `Gamepad` — `just_pressed` always false — which
-  fails silently rather than loudly. It is also suppression-blind: chunk 112 guards `sample_input`
-  and leaves `GilrsPlugin` installed, so under a Steam authority `Query<&Gamepad>` returns the
-  backend's pads and gilrs's silent ones alike.
+  fails silently rather than loudly. True however the build is configured, so it does not depend on
+  whether a Steam build compiles the `gilrs` driver out.
 - **The gap this closes is the unclaimed device.** `DeviceDisconnected` is an `EntityEvent` raised
   once per `Paired` holding the device, so a pad nobody has claimed going away raises nothing — and
   that is exactly the pad a lobby is showing a prompt for.
@@ -533,11 +532,15 @@ per-device policy D22 assumed, so what is left is a family switch.
 - **A resource naming the suppressed families**, read by `sample_input` (`frame.rs:304`) as a guard
   around each family's own `MessageReader` loop. Nothing above L1 changes, because a suppressed
   family simply never reaches the frame.
-- **Declared by the game, not detected.** A Steam build launched with the client absent must read
-  its pads normally, and a suppression that turns itself on and off between runs is the worst kind
-  of input bug to diagnose. The backend's own plugin sets it once its init succeeds.
-- **Not a Cargo feature**, for the two reasons D22 now records: it is a runtime fact, and a feature
-  that removes behaviour is not additive.
+- **Declared by the game, not detected**, because a suppression that turns itself on and off between
+  runs is the worst kind of input bug to diagnose. The backend's own plugin sets it once its init
+  succeeds.
+- **Replay is what justifies this, not Steam.** A replay backend mutes live hardware in a build that
+  compiled the driver in (R0.6, R10.8), which no build configuration expresses. A Steam build can
+  instead take `bevy/gamepad` without `bevy_gilrs` and produce no hardware event to suppress; D22
+  records why the chunk stands anyway, and which of its old reasons was assumed rather than
+  measured.
+- **Not a Cargo feature on this crate**, because a feature that removes behaviour is not additive.
 - **Per family rather than per device** because per device is not implementable, not because it is
   cheaper. S3: Steam hands out an `InputHandle_t` and nothing relates it to an OS device. If Valve
   ever exposes that mapping the policy narrows and nothing above L0 notices.
