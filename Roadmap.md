@@ -187,6 +187,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 117i | Disasteroids' working-copy refrain, and the capture examples      |
 | 117j | The other examples and `tests/`, and the last chunk references    |
 | 117k | The public docs that contradicted the code                        |
+| 117l | `devfmt` holds YAML frontmatter verbatim                          |
 
 ---
 
@@ -610,43 +611,6 @@ re-adds it.
   `docs/issues.md` 1038, which named only the all-features build.
 - **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
   look at the module pages the way a stranger would.
-
-### 117. The comment sweep
-
-A grooming pass that turned out to be more than one. The style violations were minor; what the scan
-found was prose describing a crate that no longer exists, and single conclusions written out three
-and four times across a field comment, a method doc, a test doc and `docs/design.md`.
-
-**Parts a, c, d, e, f, g, h, i, j and k have landed:** the prose that was wrong rather than verbose,
-`src/focus.rs`'s deletion, the crate root's stale join recipe, Disasteroids' overview, the
-evaluator's three duplication clusters, the context group, the persistence docs, the device and
-frame group, the binding group's listing, capacity, rescale and toggle clusters, the presentation
-group's naming, follower and prompt clusters, Disasteroids' own working-copy refrain, and the other
-examples' and `tests/`' citations. **No public-item citation is left anywhere in the tree, and no
-chunk reference at all**; the citations that remain are internal `//` comments in `src/`, which keep
-theirs. `docs/issues.md` 1030 is routed and retired — its capability clause is the one thing it
-promised that the crate still owes, and 1047 now carries the obligation to restore the sentence.
-What is left is 117l's `devfmt` fix. 117k also took the last two candidates the recon lists still
-held — Disasteroids' settings screen describing its own rebinding in the future tense, and a
-figurative "reach for" 117h had missed — so
-[notes/chunk-117-candidates.md](./notes/chunk-117-candidates.md) is spent; delete it when 117l
-lands.
-
-**How to run a part.** Invoke the `comment-grooming` skill, which carries the dial, the six
-categories and the reader rule. One part is one group and one commit: read that group's candidate
-list, verify each entry against the code before acting on it — a list entry is a candidate, not a
-finding — then `devfmt --diff` and `scripts/verify.sh`.
-
-- **117l — teach `devfmt` about YAML frontmatter.** It reads `---` and the `name:`/`description:`
-  keys as prose and rewraps the block into one paragraph, which breaks any skill file it touches.
-  The fix is in `reflow_file`'s `"md"` arm (`tools/devfmt/src/main.rs:269`): split a leading
-  frontmatter block off and pass the body with its real starting line, or `--diff` reflows the wrong
-  paragraphs.
-
-**Deliberate omissions.** No code changes beyond `src/focus.rs`, deleted in 117a. `docs/design.md`,
-`docs/decisions.md` and `Requirements.md` are not touched: where a comment duplicates one of them,
-the comment yields and the document stays. Chunk 28 owns the README and the crate-level `//!`
-rewrite — 117 fixes what is *wrong* in `lib.rs`, not what is thin.
 
 ---
 

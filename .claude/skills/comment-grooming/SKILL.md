@@ -154,28 +154,13 @@ cargo run --manifest-path tools/devfmt/Cargo.toml --quiet -- --diff
 alone. Run the style pass *before* devfmt, never after, or the same paragraph gets reformatted
 twice.
 
-Three traps that cost time in the first sweep.
+Two traps that cost time in the first sweep.
 
 `awk 'length>100'` counts **bytes**, so an em-dash reads as three columns and reports violations
 that are not there. Shell `${#var}` does the same under this shell. Measure characters, or just
 trust devfmt.
 
 BSD `sed` has no `\b`, so a comment-wide rename needs `perl`, not `sed`. `sed` fails silently here.
-
-**devfmt destroys YAML frontmatter, and bare `--diff` will find this file by itself.** No document in
-the project proper has frontmatter, so devfmt reads the `---` delimiters and the
-`name:`/`description:` keys as prose and rewraps the block into one paragraph, which breaks the
-skill. It is not enough to avoid naming the file: once it is staged, `--diff` picks it up from
-`git diff` like any other changed markdown. It did that to this file twice in the session that wrote
-it. Until chunk 117l teaches devfmt to pass frontmatter through, always filter the paths:
-
-```sh
-cargo run --manifest-path tools/devfmt/Cargo.toml --quiet -- --diff src/ examples/ tests/ *.md
-```
-
-`--diff` takes path arguments as a filter, so this reflows the changed paragraphs and leaves
-`.claude/` alone. The files in this directory are maintained by hand, and `--check` reports them as
-needing a reflow forever.
 
 ### 6. Finish
 

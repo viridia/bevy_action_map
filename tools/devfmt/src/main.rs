@@ -31,6 +31,8 @@
 //!   commented-out code from an explanatory comment — do not point it at a tree that leaves
 //!   commented-out code lying around.
 //! - Block comments (`/* */`) are left alone entirely.
+//! - A markdown file opening with a `---` line has YAML frontmatter, held verbatim up to the
+//!   closing `---`. A `---` anywhere else is an ordinary line.
 //! - A paragraph whose lines already fit the width is reproduced exactly as written, never
 //!   repacked to a tighter fit — matching hand-editing practice: only an actual violation gets
 //!   touched, and fixing it only ever pushes trailing words forward onto later lines, never pulls
@@ -266,7 +268,7 @@ fn reflow_file(
 
     let reflowed = match ext {
         "rs" => reflow_rust(&normalized, width, touched),
-        "md" => reflow_paragraphs(&normalized, width, "", 1, touched),
+        "md" => reflow_markdown(&normalized, width, touched),
         _ => return Ok(None),
     };
 
@@ -285,6 +287,32 @@ fn reflow_file(
     } else {
         Ok(Some(result))
     }
+}
+
+/// Reflows a markdown file, holding any YAML frontmatter verbatim. The body is reflowed from its
+/// real line number so that `--diff` scoping still lines up with what `git diff` reported.
+fn reflow_markdown(text: &str, width: usize, touched: Option<&HashSet<usize>>) -> String {
+    let (frontmatter, body, body_start) = split_frontmatter(text);
+    let mut out = frontmatter.to_string();
+    out.push_str(&reflow_paragraphs(body, width, "", body_start, touched));
+    out
+}
+
+/// Splits a leading YAML frontmatter block off `text`, returning it verbatim, the body after it,
+/// and the line number the body starts on. Frontmatter is recognized only at the very start of
+/// the file, which is what keeps a `---` thematic break further down from opening one.
+fn split_frontmatter(text: &str) -> (&str, &str, usize) {
+    let Some(rest) = text.strip_prefix("---\n") else {
+        return ("", text, 1);
+    };
+    let mut end = "---\n".len();
+    for (line_no, line) in (2usize..).zip(rest.lines()) {
+        end = (end + line.len() + 1).min(text.len());
+        if line.trim_end() == "---" {
+            return (&text[..end], &text[end..], line_no + 1);
+        }
+    }
+    ("", text, 1)
 }
 
 /// Walks `path`, appending every `.rs`/`.md` file found to `out`. A bare file is appended
@@ -777,6 +805,38 @@ mod tests {
     fn markdown_headings_and_blank_lines_pass_through() {
         let input = "# Title\n\nSome text.\n";
         assert_eq!(reflow_paragraphs(input, 100, "", 1, None), input);
+    }
+
+    #[test]
+    fn frontmatter_is_held_verbatim() {
+        let input = "---\nname: comment-grooming\ndescription: Sweep comments and doc comments for house-style violations and duplicated explanations, using recon subagents.\n---\n\n# Heading\n";
+        assert_eq!(reflow_markdown(input, 100, None), input);
+    }
+
+    #[test]
+    fn the_body_after_frontmatter_still_reflows() {
+        let input = "---\nname: x\n---\n\naaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp qqqq\n";
+        let out = reflow_markdown(input, 40, None);
+        assert!(out.starts_with("---\nname: x\n---\n\n"));
+        assert!(out.lines().skip(4).all(|l| l.chars().count() <= 40));
+    }
+
+    #[test]
+    fn frontmatter_does_not_shift_the_body_line_numbers() {
+        let input = "---\nname: x\n---\n\naaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp qqqq\n";
+        // The paragraph is on line 5, not line 1 of a body counted from scratch.
+        let touched: HashSet<usize> = [5].into_iter().collect();
+        assert_ne!(reflow_markdown(input, 40, Some(&touched)), input);
+        let touched: HashSet<usize> = [2].into_iter().collect();
+        assert_eq!(reflow_markdown(input, 40, Some(&touched)), input);
+    }
+
+    #[test]
+    fn an_unterminated_leading_marker_is_not_frontmatter() {
+        let input = "---\naaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp qqqq\n";
+        let out = reflow_markdown(input, 40, None);
+        assert_ne!(out, input);
+        assert!(out.lines().all(|l| l.chars().count() <= 40));
     }
 
     #[test]
