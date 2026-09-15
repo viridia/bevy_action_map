@@ -2081,11 +2081,10 @@ mod tests {
         /// The registry a running app actually has, built by `ActionMapPlugin` rather than by
         /// naming types here.
         ///
-        /// Hand-registering them is what hid a real bug: a nested map's value type is not reached
-        /// by registering the map that holds it, so a test's own registration was one no game had,
-        /// and every saved binding was dropped on load with no diagnostic anywhere. A fixture that
-        /// can be more complete than the plugin is a fixture that can pass while the crate is
-        /// broken.
+        /// Hand-registering them is what hid a real bug: the fixture named eight types by hand,
+        /// two of which no running app had, and every saved binding was dropped on load with no
+        /// diagnostic anywhere while these tests passed. A fixture that can be more complete than
+        /// the plugin is a fixture that can pass while the crate is broken.
         fn types() -> bevy_reflect::TypeRegistryArc {
             let mut app = App::new();
             app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));

@@ -288,19 +288,11 @@ impl bevy_app::Plugin for ActionMapPlugin {
         }
 
         // So a `Reflect`-based settings layer can load a saved override set with nothing registered
-        // but the app's own settings group. The nested map types are named one by one because
-        // registering the outer map does not reach the inner one's value type, and a value type the
-        // deserializer cannot find is not an error a caller sees — it is the whole field, silently
-        // dropped, and a game that loses every rebind on restart with no diagnostic anywhere.
+        // but the app's own settings group. A value type the deserializer cannot find is not an
+        // error a caller sees — it is the whole field, silently dropped, and a game that loses every
+        // rebind on restart with no diagnostic anywhere.
         #[cfg(feature = "serialize")]
-        {
-            use alloc::collections::BTreeMap;
-            use alloc::string::String;
-
-            app.register_type::<overrides::SavedOverrides>();
-            app.register_type::<BTreeMap<String, overrides::SavedRow>>();
-            app.register_type::<BTreeMap<String, overrides::SavedTunableValue>>();
-        }
+        app.register_type::<overrides::SavedOverrides>();
 
         app.init_resource::<binding::ButtonThreshold>();
         app.init_resource::<eval::ConsumedControls>();
