@@ -341,6 +341,65 @@ to the player as a named tunable, the way `tunable_dead_zone` already offers a d
 
 What the player is shown, once the crate knows what is bound.
 
+### 118a. Capacity is the app's business, and one ceiling replaces it
+
+`ActionMapping::capacity` goes, with `mappable_upto`, `mappable_any` and `mapping::widest`. A
+mapping is an ordered list; how long it ought to be is the settings screen's decision — how many
+columns to draw, whether a row may grow, what a blank cell offers.
+
+- **Measured before deciding.** `mappable_any` — the growable-list case D29 was written for — is
+  reached once in tree, by a unit test asserting `capacity == None`. No example uses it.
+  `mappable_upto` is used twice, both `upto(2)`, both meaning "ship one default, draw a blank second
+  cell"; and Disasteroids takes `max` across the table (`settings.rs:922`), so the per-row widths
+  capacity exists to express are read by no screen in tree.
+- **One ceiling, everywhere, rather than only on load.** A `MAX_SLOTS` constant enforced at three
+  points: the derivation in `mappings_of` as a plan-build diagnostic, `refusal` on the apply path,
+  and `for_slot`. `TooManyControls` is repurposed rather than deleted — `capacity: Option<usize>`
+  becomes a plain `limit: usize` — so a damaged save naming ten thousand controls for one row is
+  still refused once capacity has stopped doing it by accident.
+- **Chunk 81 is reversed.** A rebound row keeping its declared capacity was the whole of that chunk,
+  and `current_rows`' widening exception goes with the field it widened.
+- **D29 is half-reversed, and R19.9's capacity paragraph withdrawn.** The ordered list survives;
+  "capacity is inferred from the defaults and raisable by the author" does not, and the withdrawal
+  keeps enough to stop a per-mapping width being re-proposed.
+- **`for_slot` keeps its `Option`**, and its doc says density rather than capacity: the save format
+  is a dense list until 118b, so a skipped slot still has nowhere to go.
+- **Not doing: holes**, which are 118b. Nor `RebindPolicy`, which answers a different question and
+  already carries the "may this cell be captured into" half a screen needs.
+- **Verified by:** Disasteroids' settings screen unchanged on screen, with `slots_in` replaced by a
+  screen-owned constant and its `exists` test folded into the `changeable` one.
+
+### 118b. A slot may be empty
+
+`Vec<Option<Control>>` through `ActionMapping::slots` and `Override::Controls`, so a player emptying
+the primary leaves a gap rather than promoting the secondary into it.
+
+- **Why the container rather than a sentinel.** A `Control::Empty` variant would cost every consumer
+  of `Control` an arm meaning "not a control" — the frame, prompts, `fallback_label`, `admissible`,
+  conflict comparison — and `conflicts` acquires a bug the first time two empty slots compare equal.
+  A `BTreeMap<usize, Control>` answers a sparse-at-index-9000 question nobody asked and gives up the
+  scalar shorthand §10.3 keeps on purpose.
+- **The wire word already exists.** Every real control name carries a `/`, which is what lets
+  `"cleared"` and `"external"` be bare words that cannot collide with one (R17.7). An empty slot
+  inside a list is `"cleared"` — one word meaning the same thing at both levels, no JSON `null`, and
+  a file a player can still edit by hand.
+- **Trailing empties are not written.** A row normalizes to its last filled slot before
+  serialization, so a two-column table whose secondaries are mostly blank does not fill a settings
+  file with the word; a short list read back means the rest are empty. Deliberately less orthogonal
+  than writing them out, because the file is a thing people open. `[Some(x), None]` therefore still
+  takes the scalar shorthand, and `[None]` still folds to `Cleared`.
+- **`rewrite` grows a fourth case, and it is issue 1010's.** `slot` indexes both the override list
+  and `contributors`, which is dense by construction — an author cannot declare a gap — so the new
+  arm is "the override emptied a slot the defaults fill", which drops one binding mid-row. That is
+  the shape that empties the other three rows of a composite. **1010 is routed here**, and this
+  chunk owns the design question it was unrouted for: dropping per part rather than per binding, or
+  refusing the clear outright.
+- **D48's three slot cases become four**, and D29 gains the empty slot.
+- **Not doing: a per-slot reset.** `reset` is per row, and whether "restore just this cell" means
+  the declared control or an empty one is a question no screen in tree asks.
+- **Verified by:** clearing Disasteroids' primary and keeping the secondary, saved and reloaded with
+  the gap intact; and a composite's other three directions surviving one of them being emptied.
+
 ### 73. A key rendered through a catalogue
 
 Every `fallback_label` call in tree is unconditional: nineteen sites across `examples/`, not one
@@ -645,6 +704,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **R16.3's suspend/resume** (mobile, console) | a platform target that needs it. Nothing in this crate's supported platforms emits a suspend signal or has a device re-enumeration step to hook |
 | **Split Friction's monsters, spawners and missiles** | a mechanic that would exercise input this crate has not already proven. Kept as a row rather than deleted because the sprites, the dungeon's region aspects and a `Fire`-shaped action all exist, so changing our mind is cheap |
 | **Guardian migration** | porting it from Bevy 0.16.1 with `bevy_enhanced_input` 0.12 to 0.20-dev — four versions, and a port plus a rewrite. Doing both at once would confuse "action_map is wrong" with "0.20 moved this" |
+| **A devfmt usage log, to catch the misses nobody notices** | **hand reflows still happening now that repacking is canonical.** Measured before deferring: 350 loose breaks in tree against 6 pure rewraps in 60 commits, so the aftermath of a devfmt run lives in working-tree churn and not in history — `git log` cannot be mined for it, and devfmt is the only thing positioned to see it. The shape, if it revives: devfmt appends to a gitignored log from the process already being run, costing no approval and no tokens; per paragraph it records a hash of the word sequence and a hash of the physical lines, so a later run finding the same words under different line breaks has caught a miss and can attribute it to its own earlier decision. Worth building only with a mechanical trigger to read it — one line of output when the count crosses a threshold — since a log nobody opens is cost with no signal |
 | **A physical binding's label matching the current layout** (R12.2, R12.7) | winit exposing a physical-to-logical query and a layout-change signal, requested as [winit#4606][] and tracked by the broader [winit#2678][], open since February 2023 and unimplemented. A workaround was scoped and set aside: `run_captures` already sees the logical key at capture time, but keeping it means a new field on `ControlCaptured`, a session table `present.rs` consults ahead of the static fallback, and an honest answer on whether it survives a save — which drags in the still-deferred binding-definition serialization (R17.6, R22.16) for a fix that only covers controls a player has personally rebound. A landed query supersedes it outright, for every physical binding rather than only captured ones, so the workaround is not worth building ahead of it |
 
 ---
