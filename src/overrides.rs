@@ -101,7 +101,7 @@ impl Overrides {
         Self::default()
     }
 
-    /// Whether the player has changed nothing.
+    /// Whether every mapping and tunable is still what the game declared.
     pub fn is_empty(&self) -> bool {
         self.rows.is_empty() && self.tunables.is_empty()
     }
@@ -212,8 +212,8 @@ impl Overrides {
 
 /// A row an override set named that could not be used, and why.
 ///
-/// Reported rather than dropped: a saved set outlives the build that wrote it, and a player whose
-/// binding quietly vanished is owed better than silence.
+/// A player whose binding quietly vanished is owed better than silence, so a row this build cannot
+/// use is reported rather than dropped.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OverrideProblem {
     /// The family the row was filed under.
@@ -226,8 +226,8 @@ pub struct OverrideProblem {
 
 /// What was wrong with an override row.
 ///
-/// No longer `Copy` once a loaded control name has to be carried — clone a `kind` you want to hold
-/// onto rather than moving it out from behind a reference.
+/// Not `Copy`, since a variant can carry a loaded control's name: clone a `kind` you want to keep
+/// rather than moving it out from behind a reference.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum OverrideProblemKind {
@@ -284,15 +284,13 @@ pub enum OverrideProblemKind {
     },
 }
 
-/// This crate's own persistence-format version.
-///
-/// Only one has ever shipped, so there is no migration to run — a [`SavedOverrides`] naming any
-/// other version is refused outright by [`resolve_saved`] rather than resolved as this one (D58).
+/// This crate's own persistence-format version. Any other is refused outright rather than resolved
+/// as this one — see [`UnsupportedVersion`] (D58).
 #[cfg(feature = "serialize")]
 const FORMAT_VERSION: u32 = 1;
 
-/// The name a saved file uses for a device family, stable independent of [`DeviceFamily`]'s own variant
-/// names.
+/// The name a saved file uses for a device family, stable independent of [`DeviceFamily`]'s own
+/// variant names.
 #[cfg(feature = "serialize")]
 const fn family_name(family: DeviceFamily) -> &'static str {
     match family {
@@ -312,12 +310,9 @@ fn family_from_name(name: &str) -> Option<DeviceFamily> {
 
 /// A row's saved value: the portable counterpart to [`Override`].
 ///
-/// Reached only as a value inside [`SavedOverrides::bindings`]'s nested map, never as a document's
-/// own top level. That placement is what makes the reflect bridge below apply: a `Reflect`-based
-/// deserializer defers to a registered type's own `Deserialize` for a *field's* value (confirmed
-/// against `bevy_reflect`'s map deserializer, which reconstructs a map's value type the same way it
-/// would any other field), which is what keeps the wire form the three compact shapes below rather
-/// than bevy_reflect's own generic enum representation — `{"Controls": [...]}` and the like.
+/// Written only as a value inside [`SavedOverrides::bindings`]'s nested map, never as a document's
+/// own top level. That placement is what keeps the wire form the three compact shapes below rather
+/// than bevy_reflect's generic enum representation, `{"Controls": [...]}` and the like.
 #[cfg(feature = "serialize")]
 #[derive(Reflect, Clone, Debug, PartialEq)]
 #[reflect(Serialize, Deserialize)]
@@ -440,16 +435,15 @@ impl<'de> serde::Deserialize<'de> for SavedTunableValue {
 
 /// The portable, reflectable shape of an override set.
 ///
-/// [`Overrides`] itself cannot be this shape: its fields hold a [`MappingKey`], constructible only
-/// from a `&'static str` the game already compiled in, which no generic reflection walk can
-/// manufacture from loaded data. `SavedOverrides` is what a save file or a `Reflect`-based settings
-/// layer (`bevy_settings` and similar) actually stores — plain, owned strings, needing no context to
-/// construct. Turning one into a live [`Overrides`] is [`resolve_saved`]; the reverse is
+/// [`Overrides`] itself cannot be this shape: its rows are keyed by [`MappingKey`], which only a
+/// game's own compiled-in strings can construct. `SavedOverrides` is the stand-in a save file or a
+/// `Reflect`-based settings layer (`bevy_settings` and similar) stores instead, holding plain owned
+/// strings. Turning one into a live [`Overrides`] is [`resolve_saved`]; the reverse is
 /// [`save_overrides`].
 ///
-/// `action_map_version` rather than a bare `version`, and no field beyond `bindings`/`tunables`
-/// (R17.10, D59): a settings layer may place these fields beside an unrelated struct's under one
-/// shared table, so nothing here claims a name likely to collide with someone else's.
+/// `action_map_version` rather than a bare `version`, and no field beyond `bindings`/`tunables`: a
+/// settings layer may place these fields beside an unrelated struct's under one shared table, so
+/// nothing here claims a name likely to collide with someone else's.
 #[cfg(feature = "serialize")]
 #[derive(Reflect, Clone, Debug, PartialEq)]
 pub struct SavedOverrides {
@@ -530,14 +524,12 @@ pub enum UnresolvedKind {
 
 /// A row a saved file named that this build cannot place at all.
 ///
-/// Distinct from [`OverrideProblem`]: every `OverrideProblem` names a mapping this build has, and
-/// this one specifically does not. A [`MappingKey`] or a tunable's key can only ever be one the
-/// game's own declarations already hold — each is derived from a `&'static` string the game
-/// compiled in, not manufactured from a loaded one — so a name a save wrote for an action or tunable
-/// since renamed or removed has nothing to become. A tunable row lands here too when the value on
-/// file is the wrong shape for it, a bool where the declared tunable wants a number, most likely a
-/// save written against an older declaration. Reported rather than dropped in silence, which is what
-/// carrying the raw text here does; a rewritten save simply omits it.
+/// Distinct from [`OverrideProblem`], which always names a mapping this build still has. A name
+/// matching no current mapping or tunable has nothing to become: what an action renamed or removed
+/// since the file was written looks like from inside an older save. A tunable row lands here too
+/// when the value on file is the wrong shape for it, a bool where the declared tunable wants a
+/// number. The raw text is carried so the row is reported rather than dropped in silence; a
+/// rewritten save omits it.
 #[cfg(feature = "serialize")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Unresolved {
@@ -551,10 +543,10 @@ pub struct Unresolved {
 
 /// A [`SavedOverrides`] named a persistence-format version this build never shipped.
 ///
-/// Returned by [`resolve_saved`] instead of resolving anything — the case is a rollback, a second
+/// Returned by [`resolve_saved`] instead of resolving anything. The case is a rollback, a second
 /// machine, or a Steam beta branch: a save from a build that came later, read by one that came
-/// before it (D58). There is no migration path, because there has never been a second version for
-/// one to convert from.
+/// before it. There is no migration path, because there has never been a second version for one to
+/// convert from.
 #[cfg(feature = "serialize")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UnsupportedVersion {
@@ -578,7 +570,7 @@ pub type ResolvedOverrides = (Overrides, Vec<OverrideProblem>, Vec<Unresolved>);
 /// *did* resolve and there is a row to file the problem against.
 ///
 /// A version this build never shipped refuses the whole set at once, rather than resolving whatever
-/// rows happen to look familiar (D58) — see [`UnsupportedVersion`].
+/// rows happen to look familiar — see [`UnsupportedVersion`].
 ///
 /// ```ignore
 /// let declared = declared_mappings(world);
@@ -599,9 +591,7 @@ pub fn resolve_saved(
         });
     }
 
-    // Cloned so the loop below can move rows out of it exactly as it would an owned document —
-    // `data` is a live resource a caller may want to keep, not a just-deserialized value this
-    // function is free to consume.
+    // `data` may be a live resource the caller keeps, so the rows are cloned rather than moved out.
     let bindings = data.bindings.clone();
     let tunables = data.tunables.clone();
 
@@ -656,8 +646,8 @@ pub fn resolve_saved(
                 }
             }
             if all_known {
-                // An empty list and `Cleared` mean the same thing (§10.1); `bind` already folds one
-                // into the other, so a hand-edited `[]` reads exactly like the dedicated word does.
+                // `bind` folds an empty list into `Cleared`, so a hand-edited `[]` reads exactly
+                // like the dedicated word does.
                 overrides.bind(family, mapping.key, controls);
             }
         }
@@ -713,9 +703,7 @@ pub fn resolve_saved(
 /// Makes a running game agree with an override set.
 ///
 /// Every context, every instance, effective on the next tick. This is the only way an override
-/// reaches a game, and loading a saved set at startup is simply the first call — there is no
-/// separate startup path, because a backend that owns its bindings can rewrite them while the game
-/// runs and a startup-only path would be wrong on the platform that needs it most.
+/// reaches a game; loading a saved set at startup is the first call rather than a path of its own.
 ///
 /// Applying an override to a context cancels whatever it had in flight and makes each of its actions
 /// wait to be seen at rest once, exactly as switching the context off and on again does. A player
@@ -794,8 +782,7 @@ fn apply_for_entity_with(
         problems.extend(apply(world, entity, overrides, preset));
     }
 
-    // Same diagnostic `apply_with` reports, for the same reason: from inside any one context every
-    // other context's rows look exactly as missing as a row that is genuinely gone.
+    // Same diagnostic `apply_with` reports, for the same reason.
     let declared = crate::mapping::declared_mappings(world);
     problems.extend(
         overrides
@@ -1092,8 +1079,8 @@ fn rewrite_followers(
     let riders: Vec<usize> = followers_of(declared, leaders, leader)
         .map(|(index, _)| index)
         .collect();
-    // A follower reads exactly what its leader reads — that identity is how the link was resolved
-    // in the first place — so keeping it true is an assignment rather than a second rewrite.
+    // A follower reads exactly what its leader reads, which is how the link was resolved in the
+    // first place.
     for rider in riders {
         variant[rider].input = variant[leader].input;
     }
@@ -1312,8 +1299,8 @@ mod tests {
         );
     }
 
-    /// Clearing is not the same as never having touched the row: the action stays declared and
-    /// readable, and nothing fires it.
+    /// Clearing leaves the row on screen and the action still bound, which is what distinguishes it
+    /// from an action nothing binds at all.
     #[test]
     fn a_cleared_row_leaves_the_action_bound_but_silent() {
         let mut app = app();
@@ -1588,8 +1575,8 @@ mod tests {
         assert!(after > before, "a rebind said nothing about prompts");
     }
 
-    /// A saved set outlives the build that wrote it, so every one of these is a thing a file can
-    /// say — and each is reported rather than dropped, while everything else still applies.
+    /// Four ways a row can fail, in one apply: each reported, and each refused whole rather than
+    /// half-applied.
     #[test]
     fn every_unusable_row_is_reported_rather_than_dropped() {
         let mut app = app();
@@ -1668,8 +1655,7 @@ mod tests {
         );
     }
 
-    /// A southpaw preset swaps the two sticks — the canonical thing a preset is for, and the case
-    /// that was refused as `WrongShape` before `Control` could name a stick whole.
+    /// A southpaw preset swaps the two sticks, the canonical thing a preset is for.
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_southpaw_preset_swaps_the_sticks() {
@@ -1720,8 +1706,8 @@ mod tests {
         );
     }
 
-    /// Removing a row *is* the reset, which is the whole benefit of storing a diff — and it works
-    /// at each of the four granularities: one row, one action, one context, or everything.
+    /// Resetting works at each of the four granularities: one row, one action, one context, or
+    /// everything.
     #[test]
     fn resetting_puts_a_row_back_to_what_the_game_declared() {
         let mut app = app();
@@ -1823,10 +1809,8 @@ mod tests {
         );
     }
 
-    /// A movement row grows only when the whole composite does: a second "forward" key is one part
-    /// of a second set of four. Copying the composite instead would put the other three directions
-    /// in their own rows twice over — "Move Down: S | S" — which is a wrong screen rather than an
-    /// untidy one, so the row is refused and the shipped controls stand.
+    /// One direction of a composite cannot grow a slot alone: a second "forward" key is one part of
+    /// a second set of four, so the row is refused whole and the shipped controls stand.
     #[test]
     fn one_direction_of_a_composite_cannot_grow_a_slot_on_its_own() {
         #[derive(InputContext)]
@@ -1872,7 +1856,7 @@ mod tests {
     }
 
     /// The remedy the refusal above points at, and proof it is a real one: a second composite is
-    /// how a two-column movement table is actually written, and each direction then rebinds its own
+    /// how a two-column movement table is written, and each direction then rebinds its own
     /// secondary independently.
     #[test]
     fn a_second_composite_is_how_a_movement_row_gets_a_secondary() {
@@ -1928,10 +1912,8 @@ mod tests {
         );
     }
 
-    /// Capacity is raised by the author and never lowered by a player (R19.9): two `mappable()`
-    /// bindings of one action merge into a two-slot row, and rebinding it down to one control must
-    /// not narrow that back to one — `current_rows` used to take the derived row's capacity as-is,
-    /// and the derived row only sees the one binding that survived the rebind.
+    /// Capacity is raised by the author and never lowered by a player (R19.9): rebinding a two-slot
+    /// row down to one control must leave the vacated slot fillable.
     #[test]
     fn rebinding_a_row_down_does_not_shrink_its_capacity() {
         #[derive(InputContext)]
@@ -1969,9 +1951,9 @@ mod tests {
         );
     }
 
-    /// The other shape of the same rule, already right by accident: a row cleared to nothing finds
-    /// no derived row to widen against and falls back to the declared one whole, capacity included.
-    /// A test of its own so the accident does not become a regression once the case above is fixed.
+    /// The other shape of the same rule, right by accident: a cleared row finds no derived row to
+    /// widen against and falls back to the declared one whole, capacity included. A test of its own
+    /// so the accident cannot quietly stop being true.
     #[test]
     fn clearing_a_row_does_not_shrink_its_capacity() {
         #[derive(InputContext)]
@@ -2096,14 +2078,14 @@ mod tests {
                 .key
         }
 
-        /// The registry a running app actually has, built by `ActionMapPlugin` and not by naming
-        /// types here.
+        /// The registry a running app actually has, built by `ActionMapPlugin` rather than by
+        /// naming types here.
         ///
-        /// Naming them here is what these tests used to do, and it hid a bug for a chunk: a nested
-        /// map's value type is not reached by registering the map that holds it, so the registration
-        /// a test wrote by hand was one a game did not have, and every saved binding was dropped on
-        /// load with no diagnostic anywhere. A fixture that can be more complete than the plugin is
-        /// a fixture that can pass while the crate is broken.
+        /// Hand-registering them is what hid a real bug: a nested map's value type is not reached
+        /// by registering the map that holds it, so a test's own registration was one no game had,
+        /// and every saved binding was dropped on load with no diagnostic anywhere. A fixture that
+        /// can be more complete than the plugin is a fixture that can pass while the crate is
+        /// broken.
         fn types() -> bevy_reflect::TypeRegistryArc {
             let mut app = App::new();
             app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
@@ -2191,9 +2173,7 @@ mod tests {
             assert_eq!(loaded, overrides);
         }
 
-        /// A version this build never shipped — newer, from a build that came later, or simply
-        /// wrong — refuses the whole set at once rather than resolving whatever rows happen to
-        /// look familiar (D58).
+        /// A version this build never shipped refuses the whole set at once (D58).
         #[test]
         fn an_unrecognized_version_refuses_the_whole_set() {
             let declared = declared();

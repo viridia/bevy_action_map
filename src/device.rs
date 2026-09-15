@@ -1,8 +1,9 @@
-//! Devices: families, enumeration, identity, capabilities, and calibration.
+//! Devices: families, enumeration, identity, brand, and calibration.
 //!
 //! This module models devices at two grains: a [`DeviceFamily`] is the class of hardware a binding
 //! is written for, and a [`DeviceHandle`] is one unit of it plugged in right now. Alongside those
-//! are a persistent identity, and the capability data used by prompts, pairing, and calibration.
+//! are a persistent identity that survives a reconnect, the brand a prompt names a pad's buttons
+//! from, and per-device calibration.
 
 // Named so the `#[reflect(..)]` attributes on `DeviceId` resolve; not referred to directly.
 #[cfg(feature = "serialize")]
@@ -165,11 +166,10 @@ pub trait DeviceIdentity:
 /// What [`DeviceId`] needs from a payload whose type it has forgotten, captured while the type is
 /// still known.
 ///
-/// Deliberately not routed through `reflect_clone`/`reflect_partial_eq`/`reflect_hash`: the derive
-/// special-cases those three and generates them into the type's own impl rather than storing them
-/// as type data, so a backend that omits `#[reflect(Hash)]` cannot be detected at registration and
-/// would instead panic the first time its device was plugged in. Taken from the trait bounds, the
-/// same mistake does not compile.
+/// Taken from the trait bounds rather than from
+/// `reflect_clone`/`reflect_partial_eq`/`reflect_hash`: the derive special-cases those three, so a
+/// backend that omits `#[reflect(Hash)]` cannot be detected at registration and would instead panic
+/// the first time its device was plugged in. See docs/design.md §7.7.
 #[cfg(feature = "bevy_reflect")]
 #[derive(Clone, Copy)]
 struct DeviceIdOps {
@@ -345,8 +345,7 @@ impl RegisterDeviceIdentity for bevy_app::App {
             .find_map(|registration| registration.data::<ReflectDeviceIdentity>())
             .filter(|claimed| claimed.domain == T::DOMAIN)
         {
-            // Two types answering to one name would make loading pick whichever the registry
-            // happened to yield first.
+            // Bound only to test for a claim; the warning carries the consequence.
             let _ = claimed;
             log::warn!(
                 "the device identity domain `{}` is claimed by more than one type; a saved \
@@ -467,7 +466,7 @@ fn read_identity<'de, A: serde::de::MapAccess<'de>>(
 /// field holding a pairing actually needs — a player who has not picked up a pad still has a row in
 /// the file. Stored as the identity's own single entry, or as an empty table when there is none.
 ///
-/// Reach for this rather than `Option<DeviceId>` in anything a settings layer writes. A reflected
+/// Use this rather than `Option<DeviceId>` in anything a settings layer writes. A reflected
 /// `Option` serializes its empty case as `none`, which TOML has no way to spell, and a settings
 /// crate that writes TOML will fail on it rather than leaving the field out.
 #[cfg(feature = "serialize")]
@@ -587,12 +586,10 @@ impl AxisCalibration {
 /// What each connected gamepad's axes do when nobody is touching them.
 ///
 /// Empty by default, which reads as "every axis is honest": a game that never touches this gets
-/// exactly the behavior it had before. Fill it from [`CalibrationSampling`], or
-/// [`set`](Self::set) a value directly for a game that lets the player enter one.
+/// raw readings unchanged. Fill it from [`CalibrationSampling`], or [`set`](Self::set) a value
+/// directly for a game that lets the player enter one.
 ///
-/// Keyed by the backend's entity for the pad, so nothing here survives a reconnect. Storing
-/// calibration against the pad itself means keying it by [`DeviceId`] instead, which this does not
-/// do yet.
+/// Keyed by the backend's entity for the pad, so nothing here survives a reconnect.
 #[cfg(feature = "gamepad")]
 #[derive(Resource, Default, Debug)]
 pub struct GamepadCalibration {
@@ -775,10 +772,8 @@ impl GamepadBrands {
 
 /// A connected gamepad's [`GamepadBrand`], resolved once and attached to its entity.
 ///
-/// Query this instead of reading a gamepad's `vendor_id` and asking [`GamepadBrands`] yourself: an
-/// entity carrying `Brand` needs nothing else to answer the question, which also means an entity a
-/// backend other than Bevy's own gamepad backend spawned works the same way, as long as that
-/// backend inserts the same component.
+/// Query this instead of reading a gamepad's `vendor_id` and asking [`GamepadBrands`] yourself, so
+/// that a pad from any backend answers the same way.
 #[cfg(feature = "gamepad")]
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Brand(pub GamepadBrand);
@@ -820,10 +815,6 @@ pub fn resolve_gamepad_brand(
 ///
 /// It follows that two players sharing one keyboard — one on the arrow keys, one on WASD — are not
 /// distinguishable by this, and nothing here divides a keyboard between them.
-///
-/// Whether the keyboard is something a player may be assigned *at all* is the game's question, not
-/// this crate's. A game where the mouse aims will not offer it beside a gamepad on equal terms, and
-/// most games never put a keyboard and a pad in the same pool to choose from.
 ///
 /// Unlike a gamepad's, this identity is never attached to an entity and never has to be looked up —
 /// [`DeviceHandle::KeyboardMouse`] is always available and always means the same device. A game
@@ -873,11 +864,10 @@ impl GamepadModelId {
 
 /// A connected device's persistent identity, resolved once and attached to its entity.
 ///
-/// Query this rather than working an identity out from a gamepad's ids yourself: an entity carrying
-/// `Identity` needs nothing else to answer the question, which also means a device some other
-/// backend spawned works the same way as long as that backend inserts one.
+/// Query this rather than working an identity out from a gamepad's ids yourself, so that a device
+/// from any backend answers the same way.
 ///
-/// A device that cannot report an identity simply has no `Identity`, which is why this is a
+/// A device that cannot report an identity has no `Identity` at all, which is why this is a
 /// component rather than a field.
 #[cfg(feature = "bevy_reflect")]
 #[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
@@ -962,12 +952,11 @@ pub fn mark_gamepad_disconnected(disconnected: On<Remove<Gamepad>>, mut commands
 
 /// Warns about gamepad settings this crate does not honour.
 ///
-/// Bevy's own `GamepadSettings` deadzones and thresholds are applied when it converts a raw gamepad
-/// message into a processed one. This crate reads the raw message instead — a clamp applied below
-/// you cannot be undone above you, and owning the whole chain is the only way a game can ask for a
-/// deadzone smaller than the one someone underneath already applied. The cost is that a game which
-/// configures `GamepadSettings` and expects it to reach a binding gets silence, so this says so
-/// once.
+/// This crate reads raw gamepad messages, which Bevy emits before its own `GamepadSettings`
+/// deadzones and thresholds are applied: a clamp applied below you cannot be undone above you, and
+/// owning the whole chain is the only way a game can ask for a deadzone smaller than the one
+/// someone underneath already applied. A game that configures `GamepadSettings` and expects it to
+/// reach a binding would otherwise get silence, so this says so once.
 #[cfg(feature = "gamepad")]
 pub fn warn_on_unread_gamepad_settings(
     settings: Query<&GamepadSettings, Changed<GamepadSettings>>,
@@ -1180,9 +1169,8 @@ mod tests {
         }
     }
 
-    /// A settings field holding a pairing has to be writable before the player has picked up a pad,
-    /// and `Option`'s empty case serializes as `none`, which TOML cannot spell at all. An empty
-    /// table can be written, read back, and edited by hand.
+    /// The empty slot is the case `SavedDeviceId` exists for, so it is the half worth pinning down:
+    /// written as an empty table, read back, and editable by hand.
     #[cfg(feature = "serialize")]
     #[test]
     fn an_empty_identity_slot_round_trips_as_an_empty_table() {
@@ -1291,13 +1279,12 @@ mod tests {
         // where float subtraction says it does, and nothing should be built on which side.
         assert!(drifting.apply(0.15) > 0.0);
 
-        // Outside it, the reading is corrected but not stretched: a deadzone that rescaled here
-        // would leave the binding's own threshold denoting no particular stick position.
+        // Outside it, the reading is corrected but not stretched.
         assert!((drifting.apply(0.5) - 0.4).abs() < 1e-6);
         assert!((drifting.apply(-0.5) - -0.6).abs() < 1e-6);
 
-        // Recentring pushes full deflection past the end of the range, which is clamped rather
-        // than passed on — a binding's own rescale would otherwise hand an action more than 1.0.
+        // Recentring pushes full deflection past the end of the range, and it is clamped rather
+        // than passed on.
         assert_eq!(drifting.apply(-1.0), -1.0);
 
         // An uncalibrated axis is left exactly alone, which is what an empty set has to mean.
@@ -1319,8 +1306,7 @@ mod tests {
 
         let measured = calibration.get(pad, GamepadAxis::LeftStickX);
         assert!((measured.center - 0.10).abs() < 1e-6);
-        // Half the observed spread, widened: a few seconds of samples is a floor on what a stick
-        // resting for hours will do.
+        // Half the observed spread, widened by `REST_MARGIN`.
         assert!((measured.rest - 0.02 * REST_MARGIN).abs() < 1e-6);
         // And the whole point of measuring: the rest position now reads as untouched.
         assert_eq!(measured.apply(0.10), 0.0);
@@ -1366,8 +1352,7 @@ mod tests {
             },
         );
 
-        // A pad reports an axis only when it changes, so a step during which one stick never moves
-        // measures nothing about it. That must not read as "measured zero drift".
+        // A step during which one stick never moves measures nothing about it.
         let mut sampling = CalibrationSampling::default();
         sampling.observe(pad, GamepadAxis::LeftStickY, 0.0);
         sampling.finish(&mut calibration);
@@ -1397,8 +1382,7 @@ mod tests {
         assert!(is_customized(&per_axis));
 
         // The two global fields: setting a threshold for every button at once, rather than one
-        // button at a time, is the ordinary way to configure `GamepadSettings`, and chunk 88 is
-        // what makes it caught.
+        // button at a time, is the ordinary way to configure `GamepadSettings`.
         let global_button = GamepadSettings {
             default_button_settings: ButtonSettings::new(0.9, 0.1).unwrap(),
             ..Default::default()
@@ -1551,9 +1535,8 @@ mod tests {
             app.world().get::<ConnectedGamepad>(pad).is_none(),
             "a pad left without leaving the pool"
         );
-        // Bevy keeps the entity across a disconnect and re-adds `Gamepad` on reconnect, so the
-        // entity outliving the connection is why the marker rather than the entity is what a pool
-        // reads.
+        // The entity outlives the connection, which is why a pool reads the marker rather than the
+        // entity.
         assert!(app.world().get_entity(pad).is_ok());
     }
 

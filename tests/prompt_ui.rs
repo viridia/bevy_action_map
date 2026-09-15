@@ -84,11 +84,8 @@ fn a_scheme_beside_the_span_overrides_the_games_device() {
 
 /// A gamepad button is named in the pad's own words, and an unrecognized pad is named in Xbox's.
 ///
-/// "South Button" is what the crate calls that button when no brand is claiming it, and no player
-/// calls it that. Aftermarket PC pads mostly label themselves the Xbox way, and on the ones that do
-/// not, the letter still points at the button directly below the others — so guessing Xbox is right
-/// far more often than saying nothing is. The choice is this layer's, not the crate's: `Generic`
-/// genuinely means "no brand-specific name", which is a fact, and what to show instead is a game's.
+/// Guessing Xbox for an unrecognized pad is a presentation choice, and one this layer makes rather
+/// than the crate — see `prompt_ui::labelling_brand`.
 #[test]
 fn a_gamepad_button_is_named_in_its_pads_own_words() {
     use bevy_action_map::device::{Brand, GamepadBrand};
@@ -169,9 +166,9 @@ fn an_action_nothing_fires_renders_a_placeholder() {
     assert_eq!(caption(&mut app, told), "unbound");
 }
 
-/// R18.3's condition half: a binding that only fires held says so in the caption, and the whole
-/// formula rather than a bare qualifier — "Hold Space" tells a player what to do; "Hold" alone tells
-/// them nothing they could act on.
+/// A binding that only fires held says so in the caption, and as the whole formula rather than a
+/// bare qualifier — "Hold Space" tells a player what to do; "Hold" alone tells them nothing they
+/// could act on.
 #[test]
 fn a_held_binding_says_so_in_the_caption() {
     let mut app = app();
@@ -185,7 +182,7 @@ fn a_held_binding_says_so_in_the_caption() {
     assert_eq!(caption(&mut app, span), "Hold Space");
 }
 
-/// R18.5, which is the whole reason the crate raises a signal: a prompt that was right when it was
+/// The whole reason the crate raises a staleness signal: a prompt that was right when it was
 /// spawned has to stop being wrong on its own.
 #[test]
 fn a_span_catches_up_when_the_answer_moves() {
@@ -212,7 +209,7 @@ fn a_span_catches_up_when_the_answer_moves() {
 }
 
 /// No art beats a blank caption: `IconPromptSpan` falls back to the same text `PromptSpan` would
-/// show, bracketed rather than bare — the visual grouping an icon does not need but bare text does.
+/// show, bracketed.
 #[test]
 fn an_icon_prompt_falls_back_to_bracketed_text_when_nothing_fires_the_action() {
     let mut app = app();

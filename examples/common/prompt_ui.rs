@@ -22,9 +22,9 @@
 //!
 //! A span shows one, and joining several is the app's business. Whether two controls read as
 //! "W / Up", "W or Up" or as two table cells is a question about the screen they sit on, and a
-//! game that wants all of them has [`Prompts`] and a `join`. The load-bearing half is that a
-//! prompt is a hint rather than a manual: "Press W to thrust" is the sentence, and "Press W or Up
-//! Arrow to thrust" is a worse one even where both are true.
+//! game that wants all of them has [`Prompts`] and a `join`. What settles it is that a prompt is a
+//! hint rather than a manual: "Press W to thrust" is the sentence, and "Press W or Up Arrow to
+//! thrust" is a worse one even where both are true.
 
 use std::borrow::Cow;
 
@@ -148,7 +148,7 @@ fn connected_brand(world: &mut World) -> GamepadBrand {
 /// letter still points at the right physical button, so "A" is the better guess by a wide margin.
 ///
 /// A presentation choice, and deliberately this side of the crate: `Generic` genuinely means "no
-/// brand-specific name", which is a fact. What to *show* when there is none is a game's call (D53).
+/// brand-specific name", which is a fact. What to *show* when there is none is a game's call.
 /// [`refresh_icon_prompts`] does not do this — art that says Xbox on an unrecognized pad would be
 /// claiming something, where a word is only labelling one.
 fn labelling_brand(world: &mut World) -> GamepadBrand {
@@ -334,9 +334,8 @@ fn refresh_icon_prompts(world: &mut World) {
     }
 
     let device = active_family(world);
-    // Two brands, deliberately: art is resolved from what the pad actually is, since a picture
-    // saying Xbox on a pad that is not one claims more than a word does. The text it falls back to
-    // is only a word, so it names buttons on the same terms `refresh_prompts` does.
+    // Two brands, deliberately: art is resolved from what the pad actually is, the text it falls
+    // back to from what `refresh_prompts` would call the button — see `labelling_brand`.
     let brand = connected_brand(world);
     let labelled = labelling_brand(world);
     let manifest = &world.resource::<IconManifest>().0;
@@ -379,9 +378,7 @@ fn refresh_icon_prompts(world: &mut World) {
             }
             Resolved::Text(text) => {
                 entity.remove::<(InlineImage, InlineBox)>();
-                // An icon reads as a control on its own — a small, self-contained badge — but bare
-                // text sitting in a button caption does not, so the fallback gets the visual
-                // grouping an icon does not need.
+                // The brackets belong to the fallback, not to a prompt — see `IconPromptSpan`.
                 entity.insert(TextSpan::new(format!("[{text}]")));
             }
         }

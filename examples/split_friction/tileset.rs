@@ -5,8 +5,7 @@
 //! Kenney's own preview of the sheet in use. See `assets/split_friction/CREDITS.md` for the license.
 //!
 //! Only floor, wall, and the region-aspect props are named here — enough for a generated layout.
-//! Doors, characters, monsters and weapons get their own names when the chunks that use them need
-//! them.
+//! Doors, characters, monsters and weapons get their own names when something draws them.
 
 use bevy::prelude::*;
 

@@ -144,8 +144,8 @@ impl core::fmt::Display for MappingKey {
 /// own settings, or to whatever software is driving the pad.
 ///
 /// A screen reads this to decide whether a row is a button or a label. It is never a security
-/// boundary: a game that does not want a control changed simply does not offer it. It says nothing
-/// about whether the binding *works*.
+/// boundary: a game that does not want a control changed does not offer it. It says nothing about
+/// whether the binding *works*.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RebindPolicy {
     /// The player may change it, in this game's own screen.
@@ -154,9 +154,8 @@ pub enum RebindPolicy {
     Here,
     /// Shown so the player can see what the control does, and not changeable here.
     ///
-    /// What a binding gets by saying nothing. Where the player *does* change it — a preset, a
-    /// console's own settings, whatever software drives the pad — is the game's business to explain
-    /// and its screen's to offer.
+    /// What a binding gets by saying nothing. Where the player *does* change it is the game's
+    /// business to explain and its screen's to offer.
     Fixed,
 }
 
@@ -187,16 +186,15 @@ pub struct ActionMapping {
     pub accepts: ChannelShape,
     /// The controls bound to it now, one per slot, in the order they were declared.
     ///
-    /// Usually one. Two mappable bindings of the same action in the same family are the ordinary
-    /// way to ship a default primary *and* secondary, and they arrive here as one row with two
-    /// slots filled rather than as two rows.
+    /// Usually one. Two mappable bindings of the same action in the same family arrive here as one
+    /// row with two slots filled rather than as two rows.
     pub slots: Vec<Control>,
     /// How many slots this mapping has, or `None` if it grows without limit.
     ///
-    /// A fixed-width table draws one cell per slot, so this is its column count. Meaningful only
-    /// where [`rebind_policy`](Self::rebind_policy) is [`Here`](RebindPolicy::Here): a mapping the
-    /// player cannot change has exactly the slots its defaults fill, since nothing can ever add
-    /// another.
+    /// A fixed-width table draws one cell per slot, so this is its column count. A
+    /// [`Fixed`](RebindPolicy::Fixed) mapping has exactly the slots its defaults fill, since the
+    /// player can never add another — but a [preset](crate::preset) may still move that row, and is
+    /// refused if it offers more controls than there are slots.
     pub capacity: Option<usize>,
     /// Whether the player may change what is in those slots.
     ///
@@ -208,18 +206,16 @@ pub struct ActionMapping {
     /// Other actions riding this row's controls, declared with
     /// [`follow`](crate::binding::InputContextBuilder::follow).
     ///
-    /// Empty for almost every mapping. A follower contributes no slot of its own — its controls are
-    /// this row's by construction — so a screen draws it as a subordinate line under the row rather
-    /// than a row of its own, which is the whole reason `.follow` exists: two actions sharing one
-    /// control read as one thing to rebind, not two.
+    /// Empty for almost every mapping. Two actions sharing one control read as one thing to rebind,
+    /// so a screen draws these as subordinate lines under the row rather than as rows of their own.
     pub followers: Vec<Follower>,
 }
 
 /// One other action riding a mapping's row, contributing no controls of its own.
 ///
-/// What [`follow`](crate::binding::InputContextBuilder::follow) declares. The follower reads exactly the
-/// controls its principal's row lists, so nothing here repeats them — a screen names the row above
-/// again, usually with [`condition`](Self::condition) added, rather than drawing a row of its own.
+/// What [`follow`](crate::binding::InputContextBuilder::follow) declares. The follower reads
+/// exactly the controls its principal's row lists, so nothing here repeats them: its
+/// [`condition`](Self::condition) is usually the whole of what a screen has to add.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Follower {
     /// The action riding this row.
@@ -264,10 +260,6 @@ pub fn mappings(world: &World) -> Vec<ActionMapping> {
 
 /// A player-adjustable value on a binding, typed so a generic screen can render it without ever
 /// seeing the modifier it drives.
-///
-/// Two shapes cover both tunables this crate declares anywhere in-tree: a deadzone amount, and
-/// hold-vs-toggle. An on/off switch not tied to a toggle and a choice among named presets would
-/// need a third and fourth shape, and stay unbuilt until something in tree actually wants one.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TunableValue {
     /// A number bounded between `min` and `max`, rendered as a slider.
@@ -335,10 +327,6 @@ pub fn declared_mappings(world: &World) -> Vec<ActionMapping> {
 }
 
 /// The body the four public readers above share, once per output type.
-///
-/// Four names rather than one name and a flag, because two names read better at a call site than
-/// `mappings(world, OverrideStage::Declared)` does — but the four questions are two, and walking
-/// every declared context is the same walk regardless of which was asked.
 fn gather_mappings(world: &World, stage: OverrideStage) -> Vec<ActionMapping> {
     let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
         return Vec::new();
@@ -456,10 +444,9 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
 /// Empty for a game that declares none, which is the default and costs nothing.
 ///
 /// Bindings that derive the same key in the same family for the same action are merged into one
-/// mapping holding both controls, because that is what a player sees: one row for Jump with a
-/// primary and a secondary, not two rows both called Jump. Merging is keyed by family as well as
-/// by name, so the keyboard and gamepad rows stay separate; and by action, so two different actions
-/// landing on one name is still reported as a collision.
+/// mapping holding both controls. Merging is keyed by family as well as by name, so the keyboard
+/// and gamepad rows stay separate; and by action, so two different actions landing on one name is
+/// still reported as a collision.
 pub(crate) fn mappings_of(
     bindings: &[BindingSpec],
     context: &'static str,
@@ -534,9 +521,8 @@ pub(crate) fn mappings_of(
                     && mapping.family == control.family()
                     && mapping.action == leader.action
             }) {
-                // A row with two slots is two leader bindings, and Disasteroids' `Afterburner`
-                // follows both of Thrust's — one binding per key, same follower action either
-                // way. Without this it would be pushed once per slot it follows, and a screen
+                // A follower rides every one of its leader's bindings, and a row with two slots is
+                // two of them. Without this check it would be pushed once per slot, and a screen
                 // would draw the same sub-row twice.
                 if !mapping
                     .followers
@@ -557,11 +543,9 @@ pub(crate) fn mappings_of(
 
 /// The `Tunable` list for one binding list: one row per declared tunable.
 ///
-/// Called the same way `mappings_of` is — on a context's own bindings, and again on the rewritten
-/// bindings a variant plan holds once a tunable override has been applied — so a row built one way
-/// and a row rewritten another never disagree about what value is live. The current value is read
-/// straight off the modifier it targets rather than kept separately, for the same reason: a row and
-/// the binding it describes cannot then drift apart.
+/// Called on both binding lists the way `mappings_of` is, and for the same reason. The current
+/// value is read straight off the modifier it targets rather than kept separately, so a row and the
+/// binding it describes cannot drift apart.
 pub(crate) fn tunables_of(
     bindings: &[BindingSpec],
     context: &'static str,
@@ -628,9 +612,8 @@ pub(crate) fn always_reports_bool(input: &BindingInput, intent: ActionIntent) ->
 }
 
 /// Writes a tunable's new value into the modifier it targets — the write counterpart of
-/// [`current_tunable_value`], used when an override is applied. Silently does nothing on a shape
-/// mismatch, for the same reason that function falls back to the default: unreachable through the
-/// crate's own API, and cheap insurance if that ever stops being true.
+/// [`current_tunable_value`], used when an override is applied. A shape mismatch is a no-op, for
+/// the reason given on that function.
 pub(crate) fn apply_tunable_value(
     modifier: &mut BindingModifier,
     value: crate::mapping::TunableValue,
@@ -884,7 +867,6 @@ mod tests {
         });
     }
 
-    /// Shipping a translation catalogue must not be the price of a legible screen.
     #[test]
     fn a_key_reads_sensibly_without_a_catalogue() {
         let label = |key: MappingKey| key.fallback_label();
@@ -947,8 +929,7 @@ mod tests {
             ],
             "in the order they were declared, which is what makes the first one primary"
         );
-        // Nobody said "2". A mapping is never narrower than the defaults it already holds, so
-        // declaring two of them is enough on its own to make a two-slot row.
+        // Nobody said "2"; the defaults widened the row on their own.
         assert_eq!(mappings[0].capacity, Some(2));
     }
 
@@ -1258,9 +1239,8 @@ mod tests {
         assert_eq!(mappings[0].followers.len(), 1);
     }
 
-    /// Following a row the player cannot change is allowed, and is the case Disasteroids' pad
-    /// binding is: there is nothing to rewrite, and keeping the duplicate off the screen is the
-    /// whole of what it buys. Refusing it would fail the build of the game this exists for.
+    /// Following a row the player cannot change is allowed: there is nothing to rewrite, and
+    /// keeping the duplicate off the screen is the whole of what it buys.
     #[test]
     fn a_fixed_binding_can_be_followed() {
         #[derive(InputContext)]

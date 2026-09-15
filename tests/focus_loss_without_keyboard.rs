@@ -1,9 +1,9 @@
-//! Chunk 108's probe: `KeyboardFocusLost` must clear a held mouse button even when this crate's
-//! own `keyboard` feature is off. A real windowed game gets the message regardless — `bevy_window`
-//! asks for `bevy_input/keyboard` in its own `Cargo.toml`, so Cargo unifies the feature on across
-//! the whole build no matter what a game's manifest requests — but this crate's isolated device
+//! `KeyboardFocusLost` must clear a held mouse button even when this crate's own `keyboard`
+//! feature is off. A real windowed game gets the message regardless — `bevy_window` asks for
+//! `bevy_input/keyboard` in its own `Cargo.toml`, so Cargo unifies the feature on across the whole
+//! build no matter what a game's manifest requests — but this crate's isolated device
 //! matrix does not pull `bevy_window` in, so `--features mouse,gamepad` (no `keyboard`) is the one
-//! configuration that actually exercises the gap (R16.1).
+//! configuration that actually exercises the gap.
 
 #![cfg(feature = "mouse")]
 

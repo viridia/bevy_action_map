@@ -110,10 +110,9 @@ pub fn stored_preset(world: &World, pane: Entity) -> String {
 /// difference is that the device has no such single place — [`reconnect`](crate::reconnect) inserts
 /// [`KnownDevice`] for reasons of its own — while the preset does.
 ///
-/// Guarded on the value actually differing, and only the matching pane's resource is touched:
-/// `DerefMut` is what marks a resource changed and `bevy_settings` decides whether to write the
-/// file by asking exactly that, so a pane restored to the preset it was already on does not rewrite
-/// the file to say so.
+/// Guarded on the value actually differing, and only the matching pane's resource is touched, so a
+/// pane restored to the preset it was already on does not rewrite the file to say so — the change
+/// detection this rests on is described on `store`.
 pub fn store_preset(world: &mut World, pane: Entity, preset: &'static str) {
     let Some(&Protagonist(slot)) = world.get::<Protagonist>(pane) else {
         return;

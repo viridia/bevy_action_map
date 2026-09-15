@@ -48,9 +48,9 @@ pub struct DeadZone {
     /// still reads 1.0, which is what makes a deadzone feel like nothing was taken away. It is
     /// almost always what you want, and it is the default.
     ///
-    /// Turn it off when something later in the chain measures the same quantity. Stretching the
-    /// range means a threshold further along no longer corresponds to any particular physical
-    /// position, so at most one deadzone acting on a value may rescale.
+    /// Turn it off when something later in the chain measures the same quantity: stretching the
+    /// range moves every threshold downstream of it, so at most one deadzone acting on a value may
+    /// rescale.
     pub rescale: bool,
 }
 
@@ -118,8 +118,8 @@ pub trait Modifier: Send + Sync + 'static {
 }
 
 /// Built-in modifiers that can be chained onto a binding.
-// `Clone` so that a set of authored bindings can be copied and have its inputs rewritten, which is
-// how an override is applied without destroying the defaults it overrides.
+// `Clone` for the reason `BindingSpec` is: applying an override clones the authored bindings and
+// rewrites their inputs.
 #[derive(Clone)]
 pub enum BindingModifier {
     /// Suppresses values near centre, per [`DeadZone`].
@@ -165,8 +165,7 @@ pub enum BindingModifier {
     ///
     /// `active: false` is identity — the raw value passes through unchanged, which is an ordinary
     /// held control. `active: true` flips the latch on each press edge and reports the latch state
-    /// instead of the raw one, so a condition reading the result sees "on" continuously between two
-    /// presses rather than only while the control is physically down. What
+    /// instead of the raw one. What
     /// [`hold_or_toggle`](crate::binding::InputContextBuilder::hold_or_toggle) declares; `active`
     /// is the field a tunable adjusts.
     Toggle {
@@ -218,11 +217,9 @@ impl BindingModifier {
             Self::Rescale { .. } => true,
             Self::Custom(modifier) => modifier.rescales(),
             // Not `Compass`, which discards magnitude rather than stretching it, or
-            // `ClampMagnitude`, which only pulls in what already overshot. The check exists so
-            // that a later threshold still corresponds to a physical position, and after either of
-            // those there is no stretching for one to read whatever came before it — so the
-            // pairing this is built for, a deadzone deciding when the stick counts as deflected
-            // and a compass reading which way, is not the stacking the check is looking for.
+            // `ClampMagnitude`, which only pulls in what already overshot. A deadzone deciding when
+            // the stick counts as deflected and a compass reading which way is the pairing this is
+            // built for, not the stacking the check refuses.
             _ => false,
         }
     }
@@ -261,11 +258,10 @@ fn apply_dead_zone(value: ActionValue, dead_zone: DeadZone) -> ActionValue {
 fn dead_zone_remainder(magnitude: f32, dead_zone: DeadZone) -> f32 {
     let remainder = magnitude - dead_zone.lower;
     // A deadzone at or above full deflection leaves nothing to stretch the remainder onto, so it
-    // passes through unstretched rather than dividing by (near) zero — reachable at runtime even
-    // where `dead_zone` was declared well inside range, since `tunable_dead_zone` lets a player
-    // drag `lower` there from a slider. Not continuous with `lower` just under 1.0, where rescaling
-    // still stretches hard; smoothing that approach is a wider change than this one expression
-    // owns.
+    // passes through unstretched rather than dividing by (near) zero. Reachable at runtime even
+    // where `dead_zone` was declared well inside range: `tunable_dead_zone` lets a player drag
+    // `lower` there from a slider. The result is not continuous with `lower` just under 1.0, where
+    // rescaling still stretches hard.
     if dead_zone.rescale && dead_zone.lower < 1.0 {
         remainder / (1.0 - dead_zone.lower)
     } else {
@@ -298,7 +294,6 @@ where
 fn apply_compass(value: ActionValue, points: CompassPoints) -> ActionValue {
     match value {
         ActionValue::Axis2(value) => ActionValue::Axis2(compass_direction(value, points)),
-        // One dimension has two compass points, and which one a value is on is its sign.
         ActionValue::Axis1(value) => {
             ActionValue::Axis1(if value == 0.0 { 0.0 } else { value.signum() })
         }
@@ -332,8 +327,6 @@ const TOGGLE_LATCH: u8 = 1 << 0;
 
 /// Converts a momentary button into a sustained latch, active only while `active` says so.
 ///
-/// Inactive is identity, so declaring `hold_or_toggle` and never turning it on costs nothing beyond
-/// the one modifier call — the binding behaves exactly as if it had not been declared.
 /// `scratch.prev` is tracked whether or not the latch is live, so switching modes mid-press cannot
 /// manufacture a spurious edge the tick after the switch.
 ///
@@ -368,8 +361,7 @@ pub(crate) fn toggle_latch(scratch: &Scratch) -> bool {
 /// combined reading from last tick in `prev` the same way a private toggle carries its own.
 ///
 /// `active` mirrors [`apply_toggle`]'s own parameter: the bit only moves while the group's tunable
-/// says toggle mode is on, though `prev` is tracked regardless, for the same reason — a hold that
-/// outlasts a switch back to toggle mode must not read as a fresh press.
+/// says toggle mode is on, and `prev` is tracked regardless of it, for the same reason.
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 pub(crate) fn resolve_shared_toggle(actuated: bool, active: bool, scratch: &mut Scratch) {
     let was = scratch.prev.to_bool();
@@ -621,9 +613,6 @@ mod tests {
         );
     }
 
-    /// A player turning toggle mode on while the control is already held must not read as a fresh
-    /// press — `scratch.prev` is tracked whether or not the latch is live, precisely so this case
-    /// has nothing to trip on.
     #[test]
     fn switching_to_toggle_mode_mid_press_does_not_manufacture_an_edge() {
         let mut scratch = Scratch::default();
@@ -766,9 +755,6 @@ mod tests {
         assert!(BindingModifier::Rescale { min: 0.0, max: 1.0 }.rescales());
     }
 
-    /// A four-key `DirectionalButtons` reaches 1.414 on a diagonal — two keys held together
-    /// outrunning what a single key or a stick can produce. `clamp_magnitude` pulls that back to
-    /// the same reach as the rest of the circle, without slowing a cardinal direction.
     #[test]
     fn clamp_magnitude_reins_in_a_diagonal_but_leaves_a_cardinal_alone() {
         let diagonal = BindingModifier::ClampMagnitude.apply(

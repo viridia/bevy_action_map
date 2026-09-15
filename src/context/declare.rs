@@ -24,9 +24,8 @@ use super::state::InputContextState;
 // hold one plan and ten small state tables. The hook needs somewhere to read it from on insertion,
 // which is why it is also a resource.
 //
-// **This resource is the defaults, permanently.** Applying an override never writes to it — that is
-// what keeps R17.1's diff-against-defaults possible after the first apply, since a diff needs
-// something to diff against. The result of applying goes in `AppliedPlan<C>` instead.
+// Never rewritten: applying an override puts its result in `AppliedPlan<C>` instead, which is what
+// keeps R17.1's diff against the defaults possible after the first apply.
 #[derive(Resource)]
 pub(crate) struct InputContextPlan<C> {
     plan: Arc<Plan<C>>,
@@ -38,8 +37,9 @@ pub(crate) struct InputContextPlan<C> {
     // The tunables view of the same bindings, empty unless some were declared tunable.
     tunables: alloc::vec::Vec<crate::mapping::Tunable>,
     // Whether an instance is live the moment it is spawned. False for a context whose activation
-    // follows something else, so that it does not fire for one frame before the something else
-    // has had a chance to say otherwise.
+    // follows something else, so that it does not fire for one frame before the something else has
+    // had a chance to say otherwise — including an instance spawned once the answer is already yes,
+    // which the condition's next run brings up.
     starts_active: bool,
 }
 
@@ -107,12 +107,10 @@ fn detach_context_state<C: InputContext + Component>(
 
 /// Warns when a `#[derive(InputContext)]` component is spawned before `add_context` declared it.
 ///
-/// `attach_context_state` cannot catch this by itself: `add_context` is the only thing that
-/// installs it as `C`'s `on_add` hook, so a type nobody declared has no `on_add` hook at all, and
-/// neither does anything log the miss — the symptom is just a control that does nothing, on a
-/// context `dump` cannot see either, since [`DeclaredContexts`](crate::inspect::DeclaredContexts)
-/// is its only source. This runs from `Component::on_insert` instead, which the derive can set at
-/// compile time regardless of whether `add_context` ever runs, and is a no-op once it has.
+/// `attach_context_state` cannot catch this: `add_context` is what installs it as `C`'s `on_add`
+/// hook, so a type nobody declared has no such hook to run. This one comes from
+/// `Component::on_insert`, which the derive can set at compile time regardless of whether
+/// `add_context` ever runs, and is a no-op once it has.
 #[doc(hidden)]
 pub fn warn_if_undeclared<C: InputContext + Component>(
     world: DeferredWorld<'_>,
@@ -161,9 +159,8 @@ fn apply_active<C: InputContext + Component>(
     mut was_empty: bevy_ecs::system::Local<'_, bool>,
 ) {
     // Something said this context should be live and there is nothing to make live, which is the
-    // shape of a context declared but never spawned: every action in it is dead and the symptom is
-    // that a key does nothing. Only after two runs, because an entity spawned from `OnEnter` does
-    // not exist yet on the frame its state became current.
+    // shape of a context declared but never spawned. Only after two runs, because an entity spawned
+    // from `OnEnter` does not exist yet on the frame its state became current.
     let empty = contexts.is_empty();
     if live && empty && *was_empty {
         bevy_utils::once!(log::warn!(
@@ -284,9 +281,9 @@ impl<C: InputContext + Component> InputContextBuilder<C> {
     /// A state the app never initialized reads the same way, so a context following one stays
     /// quiet rather than bringing the app down.
     ///
-    /// This is `active_if(in_state(state))` placed where the state has just changed rather than
-    /// where the frame started, which is what lets a fixed-tick context stand down in time for the
-    /// same frame's simulation, and lets an `OnEnter` system find the context already in step.
+    /// The switch happens with the transition itself, so a fixed-tick context stands down in time
+    /// for the same frame's simulation and a system running in `OnEnter` finds the context already
+    /// in step.
     ///
     /// # Panics
     ///
@@ -342,11 +339,10 @@ pub trait ActionMapAppExt {
     /// `PreUpdate` and a `Fixed` context in `FixedPreUpdate`, both before the schedule you would
     /// normally read the actions from.
     ///
-    /// A context declared this way is live as soon as an entity carries it. Give it an
+    /// Live as soon as an entity carries it, unless you give it an
     /// [`active_if`](InputContextBuilder::active_if) or an
-    /// [`active_in_state`](InputContextBuilder::active_in_state) when it should follow something
-    /// else instead, or drive it yourself with [`activate`](InputContextState::activate) and
-    /// [`deactivate`](InputContextState::deactivate).
+    /// [`active_in_state`](InputContextBuilder::active_in_state), or drive it yourself with
+    /// [`activate`](InputContextState::activate) and [`deactivate`](InputContextState::deactivate).
     ///
     /// # Panics
     ///
@@ -849,8 +845,6 @@ fn declare_context<C: InputContext + Component>(
             apply_for_entity: apply_to_entity::<C>,
         });
 
-    // A context whose activation follows something else starts inactive and waits to be asked.
-    // That is also what catches an instance spawned once the answer is already yes.
     let activation = builder.activation.take();
     let starts_active = activation.is_none();
 
@@ -866,9 +860,8 @@ fn declare_context<C: InputContext + Component>(
         starts_active,
     });
 
-    // The hook can only be attached while no entity carries `C` yet, so declaring a context
-    // has to precede spawning into it. Bevy's own assertion here says nothing about
-    // `add_context`, which is why this one exists.
+    // Bevy's own assertion for a hook attached after something already carries the component says
+    // nothing about `add_context`, which is why this one exists.
     let world = app.world_mut();
     let mut existing = world.query::<&C>();
     assert!(
@@ -1039,8 +1032,7 @@ mod tests {
             context.bind::<Jump>(KeyCode::Space);
         });
 
-        // Not on the first run: an entity spawned by an `OnEnter` does not exist yet on the frame
-        // its state became current, and warning about that would be crying wolf.
+        // Not on the first run — see `apply_active`: warning that early would be crying wolf.
         app.update();
         assert_eq!(capture::seen(), before, "too early to be sure");
 
@@ -1065,10 +1057,6 @@ mod tests {
 
     /// Taking the component off takes the context off with it, which is the other half of "a
     /// declared context is live as soon as an entity carries it".
-    ///
-    /// Left behind, the state keeps evaluating — and because pairing usually comes off at the same
-    /// time, it does so against *every* device rather than the one it had. A game dropping a player
-    /// mid-session gets a character that still walks, driven by whoever else is holding a stick.
     #[cfg(feature = "keyboard")]
     #[test]
     fn removing_the_component_removes_the_context_state() {
@@ -1098,8 +1086,8 @@ mod tests {
         );
     }
 
-    /// The full handover, both ways. Pausing works by hand and unpausing does not, if the two
-    /// directions differ in a way the pause direction happens to tolerate.
+    /// The full handover, both ways: pausing, then unpausing again. Testing only the pause
+    /// direction passes even when the two are wired asymmetrically.
     #[cfg(all(feature = "state", feature = "keyboard"))]
     #[test]
     fn a_state_driven_context_hands_control_back_again() {

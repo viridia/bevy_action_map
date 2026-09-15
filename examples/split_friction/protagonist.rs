@@ -1,7 +1,7 @@
 //! The two protagonists: sprites, movement, and how each one is claimed.
 //!
 //! Both read the same [`OnFoot`] context, bound to a stick and to arrow keys alike; what makes them
-//! independently controlled is [`Paired`], not two different contexts (chunk 26's device routing).
+//! independently controlled is [`Paired`], not two different contexts.
 //! Neither carries [`OnFoot`] or [`Paired`] at spawn.
 //!
 //! What claims them is [`Inviting`]: one instance per available device, each [`Paired`] to its own.
@@ -43,7 +43,7 @@ pub struct OnFoot;
 #[context(path = "split_friction.inviting", tick = Render)]
 pub struct Inviting;
 
-/// The join gesture (chunk 66). [`Inviting`]'s only binding — A on a pad, Enter on the keyboard.
+/// The join gesture. [`Inviting`]'s only binding — A on a pad, Enter on the keyboard.
 #[derive(InputAction)]
 #[action(path = "split_friction.join", output = bool, intent = Button)]
 pub struct Join;
@@ -219,12 +219,11 @@ fn walk(
 /// Claims one device for one protagonist the moment [`Join`] fires, in spawn order — protagonist 0
 /// first, then 1.
 ///
-/// `Fired<Join>` says the action fired, not which device did — an ordinary action's value is
-/// device-agnostic by design, the same reason [`Move`] never says which stick moved it. What
-/// answers it is where the event landed: every [`Inviting`] instance is [`Paired`] to exactly one
-/// device, so the entity the observer was triggered on names the presser. Nothing here reads Bevy's
-/// `Gamepad` or `ButtonInput`, which is what makes it work under a backend supplying actions rather
-/// than raw device messages.
+/// `Fired<Join>` says the action fired, not which device did. What answers that is where the event
+/// landed: every [`Inviting`] instance is [`Paired`] to exactly one device, so the entity the
+/// observer was triggered on names the presser. Nothing here reads Bevy's `Gamepad` or
+/// `ButtonInput`, which is what makes it work under a backend supplying actions rather than raw
+/// device messages.
 ///
 /// [`ClaimedDevices`] rather than `join::is_claimed` against a `Query<&Paired>`: two protagonists'
 /// join presses landing in the same tick both fire before either `Paired` insert (a deferred

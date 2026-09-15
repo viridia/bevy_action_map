@@ -8,7 +8,7 @@
 //!
 //! There are separate tables for keyboard and gamepad, because the rebinding strategies are
 //! different: keyboard allows rebinding of individual keys, while gamepad allows a choice of
-//! presets. This mirrors common practice.
+//! presets.
 //!
 //! Selection movement is driven by
 //! [`AutoDirectionalNavigation`](bevy::ui::auto_directional_navigation::AutoDirectionalNavigation).
@@ -95,13 +95,9 @@ pub enum Settings {
 
 /// A choice of controls: the gamepad preset in effect, and the rows the player moved by hand.
 ///
-/// The two are kept apart rather than accumulated into one override set, because they mean
-/// different things once written down. A preset is game content that changes between builds, so
-/// what survives a restart is the *name* the player picked — store its resolved rows instead and a
-/// patch that edits the preset leaves the player on the definition that shipped the day they chose
-/// it. A hand-moved row is the player's own, and survives as itself.
-///
-/// [`working_copy`] is where the two become the single [`Overrides`] the game actually runs on.
+/// The two are kept apart rather than accumulated into one override set, because they are stored
+/// differently — see [`saved_controls`](crate::saved_controls). [`working_copy`] is where they
+/// become the single [`Overrides`] the game actually runs on.
 ///
 /// A name is a claim rather than a measurement, and that is the cost: the player is on Southpaw
 /// until they pick something else, however far they have since moved from it. A screen wanting to
@@ -133,11 +129,9 @@ pub(crate) struct AppliedControls(pub Controls);
 
 /// Every change the player has made on this visit to the screen, unconfirmed.
 ///
-/// Seeded from [`AppliedControls`] whenever the screen opens. Confirm is the only path from here
-/// into the running game, via [`apply_overrides_with_preset`]. Every capture and every preset press
-/// writes here and nowhere else — this is a model, and [`redraw_pending`] is the only thing that
-/// reads it back out to repaint a cell, so what a row shows is always what Confirm would commit
-/// without either writer having to know how to draw one.
+/// Seeded from [`AppliedControls`] whenever the screen opens, and Confirm is the only path from
+/// here into the running game, via [`apply_overrides_with_preset`]. What a row shows is always what
+/// Confirm would commit.
 #[derive(Resource, Default)]
 struct PendingOverrides(Controls);
 
@@ -383,9 +377,6 @@ fn screen(world: &World) -> impl Scene {
             .collect()
     };
 
-    // A stick has no boxed cell of its own to press, so a preset is that table's whole remapping
-    // story — the row of buttons below it is drawn distinct exactly where the current selection
-    // reads as matching what is bound.
     let presets = presets(world);
     let live_tunables = tunables(world);
     let pending = pending_copy(world);
@@ -461,7 +452,7 @@ fn screen(world: &World) -> impl Scene {
             // The one thing on this screen that has to know an action. A span rather than a
             // lookup formatted into the sentence: the question is what would fire it *now*, so
             // the answer skips a context that is switched off and a control something else has
-            // taken — and it changes while the screen is up, once this screen can rebind.
+            // taken — and it changes while the screen is up, as the player rebinds.
             Text::new(
                 "Boxed cells are the ones this game offers for rebinding — press one, then \
                  press what you want bound there; everything else is listed so you can see \
@@ -569,10 +560,8 @@ fn cancel_pressed(_: On<Activate>, mut next: ResMut<NextState<Settings>>) {
 /// Empties the working copy, which is what "everything the game declared" is: the default preset
 /// names no rows, and no captures lie over it.
 ///
-/// Writes the working copy and nothing else, the same discipline every other control on this screen
-/// keeps. That is what lets this need no confirmation of its own — Cancel still walks away from it,
-/// and nothing has reached the running game until Confirm. [`redraw_pending`] repaints both tables,
-/// the preset row and the two tunables, because it repaints everything.
+/// It needs no confirmation of its own: Cancel still walks away from it, and nothing has reached
+/// the running game until Confirm.
 fn reset_pressed(_: On<Activate>, mut pending: ResMut<PendingOverrides>) {
     pending.0 = Controls::default();
 }
@@ -602,9 +591,8 @@ fn preset_row(presets: &[Preset], selected: &str) -> impl Scene + use<> {
     }
 }
 
-/// One preset's own button. The one currently in effect is drawn distinct from the rest — the same
-/// border/background swap [`LISTENING`] uses for "a capture is happening here", with its own color,
-/// since "selected" and "listening" are not the same fact about a cell.
+/// One preset's own button. The one currently in effect takes [`SELECTED`] for its border and a
+/// wash of the same color behind it — the swap [`LISTENING`] makes for a cell that is listening.
 fn preset_button(preset: &Preset, selected: bool) -> impl Scene + use<> {
     let name = preset.name;
     let label = fallback_label(name);
@@ -712,9 +700,8 @@ fn dead_zone_tunable(world: &World, pending: &Overrides) -> TunableValue {
         )
 }
 
-/// Applies one step, clamped to the tunable's declared range. Writes into the working copy and
-/// nothing else — the same discipline every other row on this screen keeps, and the reason a
-/// deadzone the player is still deciding about does not move the ship underneath them.
+/// Applies one step, clamped to the tunable's declared range. Into the working copy, so a deadzone
+/// the player is still deciding about does not move the ship underneath them.
 fn apply_dead_zone_delta(adjusted: On<Adjusted>, mut commands: Commands) {
     let delta = adjusted.delta;
     commands.queue(move |world: &mut World| {
@@ -793,9 +780,8 @@ fn hold_or_toggle_label(active: bool) -> &'static str {
 #[derive(Component, Default, Clone, Copy)]
 struct HoldOrToggleValue;
 
-/// Flips the tunable in the working copy — never the running game, same discipline every other
-/// row on this screen keeps. Reads `tunables` fresh rather than trusting a captured value, so two
-/// presses in the same visit agree with each other.
+/// Flips the tunable in the working copy. Reads `tunables` fresh rather than trusting a captured
+/// value, so two presses in the same visit agree with each other.
 fn hold_or_toggle_pressed(_: On<Activate>, mut commands: Commands) {
     commands.queue(|world: &mut World| {
         let Some(tunable) = tunables(world)
@@ -820,9 +806,7 @@ fn hold_or_toggle_pressed(_: On<Activate>, mut commands: Commands) {
 #[derive(Component, Clone, Copy)]
 struct PresetButton(&'static str);
 
-/// Names the pressed preset in the working copy. Nothing else — no cell this observer could name is
-/// touched directly; [`redraw_pending`] notices the change and repaints everything that might have
-/// moved, including every preset button's own highlight.
+/// Names the pressed preset in the working copy, and does nothing else.
 ///
 /// Recording the name is the whole of it, because [`working_copy`] resolves the rows fresh every
 /// time it is asked. That is what makes picking a preset supersede the last rather than layer onto
@@ -860,9 +844,8 @@ fn preset_pressed(activate: On<Activate>, buttons: Query<&PresetButton>, mut com
 /// Every one of them rather than only the row a capture or a preset press actually named: a steal
 /// can move any row, and a preset can move several at once, so asking "which one" buys nothing a
 /// full pass does not already answer just as cheaply. What keeps that affordable is the run
-/// condition this is registered with — it does not run at all on a frame where
-/// [`PendingOverrides`] did not change — the same trade `prompt_ui::refresh_prompts` makes for the
-/// same reason.
+/// condition this is registered with: it does not run at all on a frame where
+/// [`PendingOverrides`] did not change.
 ///
 /// Exclusive, because it reads every tagged cell in the table alongside the mapping list, the
 /// preset list and the pending copy all at once.
@@ -961,9 +944,9 @@ fn table(title: &'static str, mut rows: Vec<ActionMapping>) -> impl Scene {
             ));
         }
         lines.push(line(cells(&mapping, columns), 0.0));
-        // Chunk 44 gave `Afterburner` a link to `Thrust` and nowhere to be drawn; this is where.
-        // Indented and dimmed rather than a row of its own, and not activatable — a follower is not
-        // separately rebindable, and a button that did nothing would say otherwise.
+        // A follower is drawn under the row it rides: indented and dimmed rather than a row of its
+        // own, and not activatable — a follower is not separately rebindable, and a button that did
+        // nothing would say otherwise.
         for follower in &mapping.followers {
             lines.push(line(
                 follower_cells(&mapping, follower, columns),
@@ -1086,8 +1069,8 @@ struct Cell {
     text: String,
     width: f32,
     color: Color,
-    /// Drawn around the cells the player will be able to press once rebinding lands, and around the
-    /// empty ones they will be able to fill. [`Color::NONE`] for the rest.
+    /// Drawn around the cells the player can press to rebind, and around the empty ones they can
+    /// fill. [`Color::NONE`] for the rest.
     border: Color,
     role: CellRole,
 }
@@ -1100,26 +1083,25 @@ struct Cell {
 /// about the family), so every role that names a row carries its `DeviceFamily` too.
 #[derive(Clone, Copy)]
 enum CellRole {
-    /// A heading, a row's name, or a follower's name — read, never pressed, and never moved by
+    /// A heading, a row's name, or a follower's name. Read, never pressed, and never moved by
     /// anything this screen does.
     Label,
     /// A control the player may press to capture a new one into this slot.
     Changeable(DeviceFamily, MappingKey, usize),
-    /// A control filled in but not player-capturable here — every gamepad row, since a preset
-    /// rather than this screen's own capture is that table's whole remapping story. Still named,
-    /// because a preset can still move it and [`redraw_pending`] has to find it again when one does.
+    /// A control filled in but not player-capturable here: every gamepad row, since a preset rather
+    /// than this screen's own capture is that table's whole remapping story. Still named, because a
+    /// preset can still move it and [`redraw_pending`] has to find it again when one does.
     Fixed(DeviceFamily, MappingKey, usize),
     /// A follower's line under one column of the row above it, carrying the condition its caption
-    /// is formatted with — a capture on that column has to reformat this cell too, not just the
+    /// is formatted with. A capture on that column has to reformat this cell too, not just the
     /// principal one.
     Follower(DeviceFamily, MappingKey, usize, ConditionDescriptor),
 }
 
 /// `indent` is nonzero for exactly a follower's line — the mark of a row that is a fact about the
 /// principal above it rather than a row of its own, since every cell in it is already
-/// [`SUBORDINATE`]. A parameter rather than a second function: two `impl Scene` functions are two
-/// different opaque types, and `table` below builds one `Vec` holding both ordinary and follower
-/// lines.
+/// [`SUBORDINATE`]. A parameter rather than a second function, since `table` below collects
+/// ordinary and follower lines into one `Vec`.
 fn line(cells: Vec<Cell>, indent: f32) -> impl Scene {
     let cells: Vec<_> = cells.into_iter().map(cell).collect();
     bsn! {
@@ -1270,11 +1252,8 @@ fn effective(mapping: &ActionMapping, pending: &Overrides) -> Vec<Control> {
     }
 }
 
-/// The policy chunk 31 picked for R19.3: a captured control is stolen from whatever else already
-/// holds it rather than being refused or left to duplicate.
-///
-/// Writes into [`PendingOverrides`] and nothing else — no cell is touched from here; see
-/// [`redraw_pending`], which notices the change and repaints whatever it finds moved.
+/// A captured control is stolen from whatever else already holds it, rather than being refused or
+/// left to duplicate.
 ///
 /// Every row a steal can find is guaranteed to share `family` with the row captured into: `control`
 /// is itself family-specific (a key can never sit in a gamepad row's slots), so nothing outside

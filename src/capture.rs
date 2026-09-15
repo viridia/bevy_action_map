@@ -383,8 +383,7 @@ pub struct ControlCaptured {
     /// Which slot of that mapping the control belongs in.
     ///
     /// Zero unless the session named another, which is what a "primary and secondary" table does.
-    /// Carried here because a mapping holds a list: without it, an override has nowhere to go but
-    /// front of the row, and the secondary column could never be filled.
+    /// See [`CaptureSession::for_slot`].
     pub slot: usize,
     /// The control the player chose.
     pub control: Control,
@@ -479,14 +478,12 @@ pub fn conflicts(
 /// (unaffected, not cleared), matching how [`crate::overrides::apply_overrides`] treats it.
 ///
 /// Resolving a conflict this finds is the caller's decision, made with [`Overrides::bind`] and
-/// [`Overrides::get`] directly rather than through another crate API. A caller can refuse the
-/// conflict by not writing the candidate row at all, allow the duplicate by writing it regardless,
-/// or read the conflicting row's current list the same way this function does —
-/// `pending.get(mapping.family, mapping.key)` falling back to `mapping.slots` — and `bind` it
-/// back with the shared control removed, or with the candidate's own previous control put in its
-/// place to trade the two. That same look at a row's own candidate list, before writing it, is
-/// how a caller notices it would hold one control twice: that case never reaches this function,
-/// because a mapping never conflicts with itself.
+/// [`Overrides::get`] directly rather than through another crate API: refuse the conflict by not
+/// writing the candidate row, allow the duplicate by writing it regardless, or rewrite the
+/// conflicting row without the shared control — putting the candidate's own previous control there
+/// instead trades the two. A row that would hold one control twice never reaches this function,
+/// since a mapping never conflicts with itself, so a caller checks its own candidate list for that
+/// before writing it.
 pub fn conflicts_pending(
     mappings: &[ActionMapping],
     pending: &Overrides,
@@ -645,7 +642,7 @@ pub fn run_captures(
             };
 
             // Asked before admissibility, and unconditionally: an excluded control is not capture's
-            // business at all, which is what lets it go on doing its job while a capture is live.
+            // business at all.
             if session.excluded.contains(&arrival.control) {
                 continue;
             }
@@ -692,9 +689,8 @@ pub fn run_captures(
     }
 }
 
-// No test here spawns an instance of the context being rebound, except where one is the point.
-// Capture reads the frame rather than a binding, so a settings screen works from the main menu
-// before a game starts — R19.1, D40.
+// No test here spawns an instance of the context being rebound, except where one is the point:
+// capture reads the frame rather than a binding (R19.1, D40).
 #[cfg(all(test, feature = "keyboard"))]
 mod tests {
     use super::*;
@@ -810,7 +806,7 @@ mod tests {
             .spawn(CaptureSession::for_mapping(&target).expect("a button mapping"))
             .id();
 
-        // The frame it arms in takes nothing, which is what stops it binding the key the player
+        // The arming frame takes no control, which is what stops it binding the key the player
         // opened the row with.
         press(&mut app, KeyCode::Enter);
         app.update();
@@ -848,11 +844,10 @@ mod tests {
         );
     }
 
-    /// An observer may do anything to the entity it is handed, despawning it included — a settings
-    /// row that closes on being answered is an ordinary thing to write. A guard rather than a
-    /// reproduction: the bug this was written for showed up under `DefaultPlugins`, because whether
-    /// an observer's deferred commands run before or after those already queued depends on the
-    /// executor. This states the contract.
+    /// An observer may do anything to the entity it is handed, despawning it included. A guard
+    /// rather than a reproduction: whether an observer's deferred commands run before or after
+    /// those already queued depends on the executor, so the original failure showed up only under
+    /// `DefaultPlugins`.
     #[test]
     fn an_observer_owns_the_entity_by_the_time_it_runs() {
         #[derive(Resource, Default)]
@@ -1015,8 +1010,6 @@ mod tests {
             .spawn(CaptureSession::accepting(ControlClass::AnyDelta));
         moving.update();
 
-        // A hand resting on the desk moves the mouse a pixel at a time without anybody choosing
-        // anything.
         moving.world_mut().write_message(MouseMotion {
             delta: bevy_math::Vec2::new(MOUSE_MOTION - 1.0, 0.0),
         });
@@ -1036,10 +1029,9 @@ mod tests {
         );
     }
 
-    /// A control can be refusable twice over, and the reason it gets is the one it is owed: a
-    /// player who pressed the settings key wants to hear that it is spoken for, not that its
-    /// channel is wrong. The order is checked on the predicate as well, because a saved file is
-    /// answered from the same rule and the two must not disagree.
+    /// A control refusable twice over gets the reason it is owed. The order is checked on the
+    /// predicate as well, because a saved file is answered from the same rule and the two must not
+    /// disagree.
     #[test]
     fn a_refusal_names_its_reason_and_leaves_the_session_listening() {
         assert_eq!(
@@ -1102,8 +1094,9 @@ mod tests {
     }
 
     /// A settings screen reached from a pause menu has the context it is rebinding live behind it,
-    /// and what the player presses there must not also play the game. Asserting the claim alone
-    /// never showed that: with no instance of the context spawned, nothing could have fired anyway.
+    /// and what the player presses there must not also play the game. The spawned instance is what
+    /// makes the test mean anything: with none, nothing could fire whether the control was taken or
+    /// not.
     #[test]
     fn a_capture_suppresses_the_live_context_it_is_rebinding() {
         use crate::event::Fired;
@@ -1143,11 +1136,8 @@ mod tests {
         );
     }
 
-    /// A mapping holds an ordered list, so a capture says which slot it fills — otherwise the
-    /// answer has nowhere to go but the front of the row and a secondary column could never be
-    /// filled. Capacity is a ceiling, not permission to skip: the next empty slot is reachable and
-    /// the one after it is not, because filling that would leave the slot between them empty for
-    /// good.
+    /// A capture says which slot it fills, and capacity is a ceiling rather than permission to
+    /// skip: the next empty slot is reachable and the one after it is not.
     #[test]
     fn a_row_is_addressed_by_slot() {
         let mut app = app();
@@ -1315,8 +1305,8 @@ mod tests {
         }
     }
 
-    /// `ClassFilter::Characters` cannot be decided from a bare control, only from the event: the
-    /// same key is a dead key on one press and a plain letter on the next.
+    /// The same key is a dead key on one press and a plain letter on the next, so the control alone
+    /// cannot answer this.
     #[test]
     fn the_character_class_is_decided_by_the_event() {
         let typed = |text: Option<&str>, state: ButtonState| {

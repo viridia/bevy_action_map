@@ -17,14 +17,9 @@
 //!
 //! # When there is more than one
 //!
-//! Conditions come in three kinds:
-//!
-//! - **Explicit** — if a binding has any, at least one must be satisfied.
-//! - **Implicit** — every one must be satisfied.
-//! - **Blocking** — if any is satisfied, the binding does not fire at all.
-//!
-//! So `.press()` and `.hold(0.5)` together mean "either a press or a long hold", while a blocking
-//! condition vetoes regardless of what the others said.
+//! A binding fires if at least one of its *explicit* conditions is satisfied and every *implicit*
+//! one is, unless a *blocking* one vetoes — see [`ConditionKind`]. So `.press()` and `.hold(0.5)`
+//! together mean "either a press or a long hold".
 
 use bevy_platform::sync::Arc;
 
@@ -76,8 +71,8 @@ pub trait Condition: Send + Sync + 'static {
 }
 
 /// The built-in conditions.
-// `Clone` for the reason `BindingModifier` is: applying an override copies the authored bindings
-// and rewrites their inputs, and the defaults have to survive that intact.
+// `Clone` for the reason `BindingSpec` is: applying an override clones the authored bindings and
+// rewrites their inputs.
 #[derive(Clone)]
 pub enum BindingCondition {
     /// Fires on the tick the control leaves rest.
@@ -162,8 +157,7 @@ impl ConditionDescriptor {
     /// game with no catalogue to ask instead.
     ///
     /// Returns the whole formula rather than a diff against the control, because a bare "Hold"
-    /// means nothing to a player who has not already read the control it qualifies. Word order is
-    /// English; a catalogue exists so a translator can choose its own.
+    /// means nothing to a player who has not already read the control it qualifies.
     pub fn fallback_format(self, control: &str) -> alloc::string::String {
         match self {
             Self::None => alloc::string::String::from(control),
@@ -623,8 +617,6 @@ mod tests {
         );
     }
 
-    // A binding with nothing but a non-vetoing blocking condition reads no value at all, so it
-    // must fall back to the same at-rest check the no-conditions case uses, not fire unasked.
     #[test]
     fn a_lone_blocking_condition_falls_back_to_the_control_at_rest() {
         struct NeverVetoes;
@@ -690,9 +682,8 @@ mod tests {
         );
     }
 
-    // A held direction has to keep saying something, because consumption follows this state: a
-    // menu that dropped to `Idle` between two crossings would hand the stick back to the game
-    // underneath it for those ticks.
+    // Consumption follows this state, so dropping to `Idle` between two crossings would hand the
+    // stick back to whatever is underneath for those ticks.
     #[test]
     fn a_held_direction_stays_ongoing_between_changes() {
         let held = run_values(&BindingCondition::Change, &[ActionValue::Axis1(1.0); 4]);
@@ -761,8 +752,6 @@ mod tests {
         assert_eq!(describe(&[]), ConditionDescriptor::None);
     }
 
-    // `HoldAndRelease` still asks the player to hold the control, even though what fires is the
-    // release — the caption is the same one `Hold` gets.
     #[test]
     fn hold_and_release_reads_as_a_hold() {
         assert_eq!(
@@ -771,8 +760,6 @@ mod tests {
         );
     }
 
-    // The whole formula rather than a qualifier on its own: a bare "Hold" means nothing to a
-    // player who has not already read the control it modifies.
     #[test]
     fn the_fallback_renderer_names_the_control_every_time() {
         assert_eq!(ConditionDescriptor::None.fallback_format("W"), "W");

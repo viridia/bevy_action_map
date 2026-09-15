@@ -8,8 +8,8 @@
 //!
 //! `F1` opens the debug panel — see [`pong::overlay`].
 //!
-//! [`pong`] is the seam a variant reaches through — see its own doc comment for how a
-//! concept-specific chunk imports this base and swaps in the one thing being demoed.
+//! [`pong`] is what a variant imports — see its own doc comment for how one builds on this base and
+//! swaps in the single thing it is demonstrating.
 
 #![allow(missing_docs)]
 

@@ -105,8 +105,7 @@
 //! [`Fired`](event::Fired), [`Started`](event::Started), [`Completed`](event::Completed), or
 //! [`Canceled`](event::Canceled), delivered to the entity holding the context. Polling suits
 //! `FixedUpdate` simulation code that wants an answer every tick regardless of whether anything
-//! changed; observing suits a one-shot reaction, such as a UI confirm or a sound effect, that
-//! would otherwise mean remembering last tick's value just to detect the edge.
+//! changed; observing suits a one-shot reaction, such as a UI confirm or a sound effect.
 //!
 //! Every action has an [`ActionPhase`](action::ActionPhase) each tick (`Idle`, `Started`,
 //! `Building`, `Fired`, `Firing`, `Completed`, `Canceled`), so a hold that has just begun and a
@@ -133,10 +132,10 @@
 //!
 //! Two players on one machine means two devices, and neither should see the other's input. A
 //! [`Paired`](player::Paired) component, sibling to the context, narrows a context instance to the
-//! devices it names; a context with no `Paired` reads every device, which is why nothing above
-//! needed this to stay single-player. [`apply_overrides_for`](overrides::apply_overrides_for)
-//! reaches one paired instance's own bindings rather than every one, so two players on identical
-//! pads can rebind independently without either becoming the new default a third inherits.
+//! devices it names; a context with no `Paired` reads every device.
+//! [`apply_overrides_for`](overrides::apply_overrides_for) reaches one paired instance's own
+//! bindings rather than every one, so two players on identical pads can rebind independently
+//! without either becoming the new default a third inherits.
 //!
 //! Getting a device into a `Paired` in the first place is a [join] gesture: declare join as an
 //! ordinary action on a listener context spawned once per available device, each `Paired` to its
@@ -195,7 +194,7 @@
 //! | `keyboard`    |   yes   | Keyboard keys as a binding input.                                |
 //! | `mouse`       |   yes   | Mouse buttons and motion as a binding input.                     |
 //! | `gamepad`     |   yes   | Gamepad buttons and axes as a binding input.                     |
-//! | `touch`       |         | Touch input as a binding input.                                  |
+//! | `touch`       |         | Planned: touch as a binding input. Gates the dependency only.    |
 //! | `bevy_reflect`|   yes   | Runtime reflection, needed to register custom modifiers and conditions. |
 //! | `serialize`   |         | `serde` support for saving and loading binding overrides.         |
 //! | `focus`       |         | Planned: `bevy_input_focus` integration. Gates the dependency only. |
@@ -235,11 +234,13 @@ pub mod preset;
 
 pub mod backend;
 
-/// System sets for the two stages of the input pipeline.
+/// System sets for the stages of the input pipeline.
 ///
 /// Order your own systems against these when you need to run at a specific point relative to
-/// input. [`Sample`](ActionMapSystems::Sample) collects device messages into the input frame;
-/// [`Evaluate`](ActionMapSystems::Evaluate) maps that frame onto action state.
+/// input. They run in this order: [`Sample`](ActionMapSystems::Sample) collects device messages
+/// into the input frame, [`Capture`](ActionMapSystems::Capture) offers it to a live rebinding
+/// session, [`Evaluate`](ActionMapSystems::Evaluate) maps it onto action state, and
+/// [`Dispatch`](ActionMapSystems::Dispatch) delivers what changed to observers.
 ///
 /// Sampling runs in `PreUpdate`, after Bevy's own input systems. Evaluation runs in `PreUpdate`
 /// for render-tick contexts and in `FixedPreUpdate` for fixed-tick ones, so a system reading
@@ -254,9 +255,7 @@ pub enum ActionMapSystems {
     Dispatch,
     /// Reads the frame on behalf of a live rebinding capture.
     ///
-    /// Between [`Sample`](ActionMapSystems::Sample) and
-    /// [`Evaluate`](ActionMapSystems::Evaluate), which is what lets a capture take a control before
-    /// any context acts on it.
+    /// Ahead of evaluation, so a capture takes a control before any context acts on it.
     Capture,
 }
 
@@ -318,8 +317,7 @@ impl bevy_app::Plugin for ActionMapPlugin {
             capture::run_captures.in_set(ActionMapSystems::Capture),
         );
 
-        // Once per render frame regardless of context type — see the system's own doc for why it
-        // is not folded into `evaluate_context`.
+        // Not inside `evaluate_context`; see the system's own doc.
         #[cfg(feature = "gamepad")]
         app.add_systems(
             bevy_app::PreUpdate,

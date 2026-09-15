@@ -3,16 +3,16 @@
 //! Player one is always the keyboard, paired the instant the game starts. Player two is always the
 //! first gamepad the OS reports — [`pair_gamepad`] claims it the moment one shows up, whether that
 //! is before the first frame or an hour into the rally, and never looks again. There is no join
-//! gesture (chunk 66's `ControlClass::AnyButton`) and no race to resolve: only one side is ever
-//! waiting, so there is only ever one slot to fill.
+//! gesture waiting on a `ControlClass::AnyButton` press, and no race to resolve: only one side is
+//! ever waiting, so there is only ever one slot to fill.
 //!
 //! Both paddles read the same [`Paddle`] context, bound to both device families at once. [`Paired`]
-//! (chunk 26's device routing) is what keeps player two's stick from moving player one's paddle,
-//! not two different contexts — the same arrangement Split Friction's `OnFoot` uses.
+//! is what keeps player two's stick from moving player one's paddle, not two different contexts —
+//! the same arrangement Split Friction's `OnFoot` uses.
 //!
 //! A pad unplugged mid-rally goes quiet rather than freezing the game — the crate cancels whatever
-//! it was holding on disconnect — but nothing here shows a reconnect prompt or restores the pairing
-//! if a different pad is plugged back in; that is chunk 103's, not this one's.
+//! it was holding on disconnect — but this example shows no reconnect prompt and does not restore
+//! the pairing if a different pad is plugged back in.
 
 use bevy::prelude::*;
 use bevy_action_map::binding::InputContextBuilder;

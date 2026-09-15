@@ -374,10 +374,6 @@ impl Control {
     /// The counterpart of [`BindingInput::channel_shape`] for a single control rather than an
     /// arrangement of them, and what decides whether a captured control fits the mapping it was
     /// captured for.
-    ///
-    /// A directional composite is still never one of these: four buttons produce a two-dimensional
-    /// reading together, and none of them is it alone. A stick is the exception, read whole rather
-    /// than decomposed, on the same terms as [`MouseMotion`](Self::MouseMotion).
     pub const fn shape(self) -> ChannelShape {
         match self {
             #[cfg(feature = "keyboard")]
@@ -550,11 +546,8 @@ impl BindingInput {
         }
     }
 
-    /// Calls `visit` with every control this input reads, and the part of the input it is.
-    ///
-    /// A composite's parts are named for the direction each one pushes rather than for their
-    /// position, which is what lets a rebinding screen address one of them — "the key that moves
-    /// you forward" — without the four being an ordered list somebody has to keep in step.
+    /// Calls `visit` with every control this input reads, and the [part](BindingPart) of the input
+    /// it is.
     pub fn for_each_part(&self, mut visit: impl FnMut(BindingPart, Control)) {
         match self {
             #[cfg(feature = "keyboard")]
@@ -604,8 +597,6 @@ impl BindingInput {
     /// that would not — the shape mismatch is caught here even if nothing caught it earlier.
     pub(crate) fn set_part(&mut self, part: BindingPart, control: Control) -> bool {
         match (&mut *self, part) {
-            // A whole binding is replaced outright, since the new input is entirely the new
-            // control.
             (Self::MouseMotion, BindingPart::Whole) => self.replace_whole(control),
             // A logical binding is overwritten by whatever control arrives, physical included, which
             // is what capture hands it: the player pressed a position, and on their own layout the
@@ -669,7 +660,6 @@ impl BindingInput {
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             Self::Directional2(_) => ChannelShape::Axis2,
             Self::MouseMotion => ChannelShape::Delta2,
-            // Including the triggers, which carry a fraction on this channel.
             #[cfg(feature = "gamepad")]
             Self::GamepadButton(_) => ChannelShape::Button,
             #[cfg(feature = "gamepad")]
@@ -919,10 +909,7 @@ mod tests {
         assert!(!threshold.pressed(threshold.release, true));
     }
 
-    /// A logical binding is an ordinary button as far as a rebind is concerned. Capture reports the
-    /// position the player pressed, so the row it lands in stops being logical — which costs the
-    /// player nothing, since on their own layout the two name the same key. Resetting to defaults
-    /// brings the logical binding back.
+    /// A logical binding is an ordinary button as far as a rebind is concerned.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_rebind_overwrites_a_logical_binding_with_the_position_captured() {

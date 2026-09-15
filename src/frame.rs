@@ -48,9 +48,8 @@ use bevy_input::keyboard::KeyboardFocusLost;
 use bevy_input::mouse::{MouseButtonInput, MouseMotion};
 
 /// A monotonically increasing timestamp tagged with the sampling frame that produced it.
-// Bevy's input events do not carry a stable order or a frame tag, so this wrapper gives us one
-// place to record both before later layers consume the queue. It goes away once Bevy ships event
-// timestamps.
+// A shim: Bevy's input events carry no stable order and no frame tag. It goes away once Bevy ships
+// event timestamps.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -165,11 +164,6 @@ pub struct TimedRawEvent {
 }
 
 /// The raw input that has happened and not yet been read.
-///
-/// Games usually want to make input decisions from a coherent record of what the devices did, not
-/// from a stream of callbacks arriving at arbitrary times. The frame keeps that record as an
-/// ordered, timestamped queue, which is easier to replay, easier to test, and a better handoff to
-/// the mapping layer.
 ///
 /// It is a queue rather than a per-frame snapshot: a fixed timestep runs a variable number of
 /// times per rendered frame, sometimes zero. A snapshot replaced each frame would lose a key that
@@ -331,11 +325,10 @@ pub fn sample_input(
     #[cfg(feature = "gamepad")]
     for event in gamepad_inputs.read() {
         let mut event = event.clone();
-        // Calibration is corrected here rather than in the evaluator: it is a fact about the
-        // hardware, not about who is reading it, so every context and every capture sees one
-        // answer and it costs one pass instead of one per context. It also lands on the right side
-        // of the injection seam — a backend that supplies values of its own writes into the frame
-        // directly, past this, which is R14.10 met by placement rather than by a check.
+        // Here rather than in the evaluator: calibration is a fact about the hardware, not about
+        // who is reading it, so every context and every capture sees one answer for one pass. It
+        // also sits ahead of the point a backend supplying its own values enters the frame at, so
+        // R14.10 holds by placement rather than by a check (docs/design.md §2).
         if let RawGamepadEvent::Axis(axis) = &mut event {
             if let Some(sampling) = sampling.as_mut() {
                 sampling.observe(axis.gamepad, axis.axis, axis.value);

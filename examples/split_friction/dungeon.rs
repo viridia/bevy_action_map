@@ -49,8 +49,7 @@ pub enum RegionAspect {
     Shrine,
 }
 
-/// A quarter-turn, clockwise. Only floor shadows use `R90` — light is modeled as coming from the
-/// northeast, so a wall to the north or east are the only two cases that cast one.
+/// A quarter-turn, clockwise. Only floor shadows use `R90` — see `tileset::FLOOR_SHADOW_EDGE`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Rotation {
     R0,
@@ -691,7 +690,6 @@ pub fn generate(seed: u64, width: usize, height: usize) -> Dungeon {
 
     add_loop_connections(&mut rng, &mut dungeon, &rooms, &mut passages);
 
-    // Make all `Solid` with a floor in front of them `SolidFront`.
     for y in 0..height - 1 {
         for x in 0..width {
             let idx = y * width + x;

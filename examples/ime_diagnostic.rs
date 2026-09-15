@@ -2,13 +2,12 @@
 //!
 //! Run it and read the console: `cargo run --example ime_diagnostic`.
 //!
-//! `ControlClass::CharacterProducing` (chunk 25) needs to tell "this key produced a character" from
-//! "this key did not" using nothing but one `KeyboardInput` event — no access to whatever IME state
-//! winit is tracking underneath. `KeyboardInput::text` looks like the whole answer, but IME
-//! composition arrives on a separate `bevy_window::Ime` channel this crate does not read, and
-//! whether a key event fired *during* composition still carries text is winit- and
-//! platform-specific. Reasoning about it from documentation is exactly the mistake chunk 8's
-//! gamepad deadzone findings warn against — this measures it instead.
+//! `ControlClass::CharacterProducing` has to tell "this key produced a character" from "this key
+//! did not" using one `KeyboardInput` event and no access to whatever IME state winit is tracking
+//! underneath. `KeyboardInput::text` looks like the whole answer, but IME composition arrives on a
+//! separate `bevy_window::Ime` channel this crate does not read, and whether a key event fired
+//! *during* composition still carries text is winit- and platform-specific. This measures it
+//! rather than reasoning about it from documentation.
 //!
 //! What to do: run this, then
 //!
@@ -20,8 +19,7 @@
 //! 3. If your keyboard layout has one, try a dead key (e.g. `´` on an international US layout) and
 //!    see what the following keypress reports.
 //!
-//! Paste the console output back — that is what turns the predicate in
-//! `src/capture.rs`'s `character_producing` from a guess into a finding.
+//! The console output is what `character_producing` in `src/capture.rs` has to be written against.
 
 #![allow(missing_docs)]
 

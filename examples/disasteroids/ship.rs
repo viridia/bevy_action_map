@@ -19,11 +19,9 @@ const MUZZLE_SPEED: f32 = 620.0;
 
 /// How long the gun takes to come back around, in seconds.
 ///
-/// A property of the weapon, so it lives here — but it is spent in
-/// [`actions`](crate::actions::plugin), as the interval of the `pulse` condition on `Fire`. That is
-/// the one seam in this example where a game number has to be known by the input layer, and it is
-/// the price of letting the bindings own the repeat instead of the ship keeping a timer to
-/// rediscover it.
+/// A property of the weapon, so it lives here, but it is spent in
+/// [`actions`](crate::actions::plugin) as the interval of `Fire`'s `pulse` condition — the one game
+/// number this example's input layer has to know.
 pub const RELOAD: f32 = 0.18;
 
 /// How long the smart bomb takes to charge, in seconds.
@@ -56,9 +54,9 @@ struct ShockRing;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(Startup, (ship.spawn(), bomb_meter.spawn()));
-    // Only `fly` polls now. What is left in a schedule is the thing that has to happen on every
-    // tick whether the player did anything or not; the two things that happen *because* the player
-    // did something are observers on the ship itself.
+    // `fly` is the only polled system: a schedule holds what has to happen on every tick whether
+    // the player did anything or not, and what happens *because* they did is an observer on the
+    // ship itself.
     app.add_systems(FixedUpdate, fly.in_set(Simulating));
     app.add_systems(
         Update,
@@ -80,7 +78,6 @@ pub fn plugin(app: &mut App) {
 fn ship() -> impl Scene {
     bsn! {
         Ship
-        // The context is a component, so the ship simply carries its own controls.
         Flying
         on(shoot)
         on(hyperspace)
@@ -136,9 +133,8 @@ fn fly(
 ///
 /// The rate of fire is not here. `Fire` is bound with a `pulse` condition, so holding the button
 /// fires the action again every [`RELOAD`] seconds and this runs once for each — no reload timer on
-/// the ship, and no polled system checking a timer against a button every tick. `Fired` carries the
-/// entity whose context it came from, which is the ship, so a second ship would shoot its own gun
-/// without this function learning anything new.
+/// the ship. `Fired` carries the entity whose context it came from, which is the ship, so a second
+/// ship would shoot its own gun without this function learning anything new.
 fn shoot(
     shot: On<Fired<Fire>>,
     mut commands: Commands,
@@ -173,9 +169,8 @@ fn bullet(from: Transform, velocity: Vec2) -> impl Scene {
 
 /// Somewhere else on the field, once per double-tap.
 ///
-/// The polled version of this had to ask `fired` rather than `value`, because a jump is an edge and
-/// a held key is not a stream of jumps. An observer is that distinction rather than a workaround for
-/// it: `Fired` is the edge, and the only way to run this twice is to double-tap twice.
+/// A jump is an edge, and a held key is not a stream of jumps. `Fired` is that edge: the only way
+/// to run this twice is to double-tap twice.
 fn hyperspace(
     jump: On<Fired<Hyperspace>>,
     mut ships: Query<(&mut Transform, &mut Velocity), With<Ship>>,

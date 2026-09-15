@@ -23,10 +23,9 @@
 //! crate we do not control. The table below is written once and pinned by a round-trip test; if an
 //! upstream name changes, the compiler says so and the stored string stays what it was.
 //!
-//! **The same string is the localization key.** A rebinding row has two halves, and the control
-//! half is as translatable as the other: an app looks up `key/KeyW` in its catalogue and renders
-//! whatever its translators wrote. [`fallback_label`](Control::fallback_label) is for when there is
-//! no catalogue, so that shipping translations is never the price of a legible screen.
+//! **The same string is the localization key.** An app looks up `key/KeyW` in its catalogue and
+//! renders whatever its translators wrote; [`fallback_label`](Control::fallback_label) is what a
+//! game with no catalogue shows instead.
 //!
 //! # What the fallback cannot do
 //!
@@ -54,10 +53,6 @@
 //! nothing rather than told what they will say. [`mapping::mappings`](crate::mapping::mappings) is
 //! the other list, and the one a controls screen wants: everything the game declared, whether or
 //! not it is live.
-//!
-//! [`Prompts`] is a trait because this crate is not always the authority. Where an external backend
-//! owns the bindings, it owns the answer too, and its controls are its own enumeration of things we
-//! have no name for — which is why a [`ControlOrigin`] is not a [`Control`].
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -83,8 +78,9 @@ use bevy_input::mouse::MouseButton;
 ///
 /// Gated with its callers: a build with no device features has no tables to write.
 ///
-/// Encoding is an exhaustive match, so a variant added or renamed upstream is a compile error
-/// rather than a control that silently stops having a name.
+/// Both directions match on named variants, so a variant renamed upstream is a compile error rather
+/// than a control that silently stops having a name. One *added* upstream is not caught: it falls
+/// through to `None`, and the table has to be extended by hand.
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 macro_rules! control_table {
     ($encode:ident, $decode:ident, $label:ident, $kind:ty, $prefix:literal, $all:ident, {
@@ -533,9 +529,9 @@ impl Control {
     /// [`GamepadBrand::Generic`](crate::device::GamepadBrand::Generic), answers
     /// exactly as [`fallback_label`](Self::fallback_label) does.
     ///
-    /// Current-generation controllers only (R11.6): DualSense, the Xbox Series pad, and the Switch
-    /// Pro Controller / Joy-Con. An older pad's own labels (Xbox 360's "Back"/"Start", PS4's
-    /// "Share") are not tracked, since brand alone cannot tell one console generation from another.
+    /// Current-generation controllers only: DualSense, the Xbox Series pad, and the Switch Pro
+    /// Controller / Joy-Con. An older pad's own labels (Xbox 360's "Back"/"Start", PS4's "Share")
+    /// are not tracked, since brand alone cannot tell one console generation from another.
     #[cfg(feature = "gamepad")]
     pub fn fallback_label_for_brand(
         self,
@@ -751,8 +747,8 @@ impl ControlOrigin {
 
     /// The control itself, for a caller that needs more than a name for it.
     ///
-    /// `None` for one that came from somewhere else, which is the case a caller reaching for this
-    /// has to have an answer for.
+    /// `None` for one that came from somewhere else, which is a case every caller of this has to
+    /// have an answer for.
     pub const fn control(&self) -> Option<Control> {
         match self {
             Self::Ours(control) => Some(*control),
@@ -856,10 +852,9 @@ pub trait Prompts {
 /// order is the order the bindings were written, which is what makes the first one the primary.
 ///
 /// **Nothing here ranks one device above another.** A player on a pad should be shown the pad
-/// control first, and this cannot know which device they are holding — that wants a per-player
-/// record of the most recently used one, which does not exist yet. So a caller that knows passes a
-/// [`PromptScope`], and a caller that does not is given every device's answer in a stable order rather
-/// than a guess presented as a ranking.
+/// control first, and this cannot know which device they are holding. So a caller that knows passes
+/// a [`PromptScope`], and a caller that does not is given every device's answer in a stable order
+/// rather than a guess presented as a ranking.
 pub struct BindingTable<'w>(&'w World);
 
 impl<'w> BindingTable<'w> {
@@ -883,8 +878,7 @@ impl Prompts for BindingTable<'_> {
             .map(|context| (context, (context.bindings)(self.0)))
             .filter(|(_, bound)| bound.active)
             .collect();
-        // Consumption flows forward in schedule order and priority orders within a schedule, so
-        // this is exactly the order in which contexts get to take a control from one another. The
+        // Consumption flows forward in schedule order, and priority orders within a schedule. The
         // sort is stable, which leaves declaration order as the last tiebreak.
         live.sort_by_key(|(context, _)| {
             (
@@ -964,8 +958,8 @@ impl Prompts for BindingTable<'_> {
 /// rather than about the moment, usually set once at startup and never touched again.
 ///
 /// **Absence means the game has not said**, which is not the same as saying there is no primary:
-/// a game that genuinely treats every device alike inserts this holding `None` and gets an answer
-/// ranked by nothing, deliberately. Nothing in this crate inserts it for you, because a default
+/// a game that genuinely treats every device alike inserts this holding `None` and gets a
+/// deliberately unranked answer. Nothing in this crate inserts it for you, because a default
 /// here would be a guess about which device your players hold, and being wrong about that is
 /// silent — every prompt in the game names the wrong control and nothing reports it.
 ///
@@ -987,10 +981,9 @@ pub struct PromptDevice(pub Option<DeviceFamily>);
 /// Either way round, and the crate is deliberately neutral between them. A run condition —
 /// `resource_changed::<PromptGeneration>` — coalesces a frame's worth of changes into one pass and
 /// rewrites at a point in the schedule you choose, which is what a text layer wants. An observer
-/// works too, because a resource is a component on an entity of its own: the touch below is an
-/// insert rather than a mutable deref precisely so that it fires hooks, so an observer of
-/// `Insert`/`Replace` on this type is a live signal for a consumer that would rather not own a
-/// system. It runs once per change rather than once per frame, which is the trade.
+/// works too, because a resource is a component on an entity of its own: an `Insert`/`Replace`
+/// observer on this type is a live signal for a consumer that would rather not own a system. It
+/// runs once per change rather than once per frame, which is the trade.
 ///
 /// # Writing it
 ///
@@ -1089,8 +1082,7 @@ mod tests {
         #[cfg(feature = "mouse")]
         round_trip(Control::MouseButton(MouseButton::Other(9)));
         // A letter, a character whose layout needs shift to reach it, one outside ASCII, and the
-        // separator the encoding itself uses — which needs no escape, since the name's remainder is
-        // taken whole.
+        // separator the encoding itself uses.
         #[cfg(feature = "keyboard")]
         for character in ['z', '+', 'é', '/'] {
             round_trip(Control::LogicalKey(character));
@@ -1145,8 +1137,7 @@ mod tests {
         // `mouse/motion` and `mouse/Left` share a prefix and must not be confusable for each other.
         assert_eq!(Control::from_name("mouse/Motion"), None);
         assert_eq!(Control::from_name("mouse/left"), None);
-        // A logical name holds exactly one character. More than one is a corrupt row, not a
-        // control, and reading it as one would leave a binding nothing could ever press.
+        // A logical name holds exactly one character; more than one is a corrupt row.
         #[cfg(feature = "keyboard")]
         {
             assert_eq!(Control::from_name("char/"), None);
@@ -1187,9 +1178,8 @@ mod tests {
             "`"
         );
 
-        // The label a logical binding shows is the only one on a keyboard that is not a guess: the
-        // player's key produces this character whatever their layout does with the position. `W`
-        // above is the US answer and wrong on AZERTY, which is R12.2's standing limitation.
+        // `W` above is the US answer and wrong on AZERTY, which is R12.2's standing limitation. A
+        // logical binding is the one keyboard label that is not a guess.
         let undo = Control::LogicalKey('z');
         assert_eq!(undo.name(), "char/z");
         assert_eq!(undo.fallback_label(), "Z", "shown as it is on the keycap");
@@ -1360,8 +1350,7 @@ mod tests {
         }
     }
 
-    /// The thumb buttons are shown the way a player's other games show them, and the stored name is
-    /// Bevy's word for the same button — the two halves being different strings is the point.
+    /// The thumb buttons, where the stored name and the shown text diverge most.
     #[cfg(feature = "mouse")]
     #[test]
     fn a_mouse_button_is_stored_by_name_and_shown_by_convention() {
@@ -1630,7 +1619,7 @@ mod prompt_tests {
     }
 
     /// A control a stronger context takes for something else does not fire this action, whatever
-    /// the binding says, so a prompt naming it is a lie the player can check.
+    /// the binding says.
     #[test]
     fn a_stronger_context_taking_a_control_takes_it_out_of_the_prompt() {
         let mut app = app();
@@ -1823,8 +1812,8 @@ mod prompt_tests {
         assert!(generation(&app) > active, "deactivation said nothing");
     }
 
-    // What keeps true the claim that the touch is written as an insert: a resource is a component
-    // on an entity of its own, so a consumer can observe the signal instead of polling for it.
+    // What keeps `bump`'s insert honest: an observer is half of how this resource is read, and a
+    // mutable deref would fire no hook for it.
     #[test]
     fn the_signal_can_be_observed_rather_than_polled() {
         use bevy_ecs::lifecycle::Insert;

@@ -52,8 +52,7 @@ pub fn plugin(app: &mut App) {
 /// The opening spread of rocks: a `SceneList` rather than a `Scene`, because these are six sibling
 /// entities and not one object with parts.
 ///
-/// A `Vec` of scenes is itself a `SceneList`, so the loop that used to spawn is now a loop that
-/// builds.
+/// A `Vec` of scenes is itself a `SceneList`, so the loop builds rather than spawns.
 fn starting_rocks() -> impl SceneList {
     (0..6)
         .map(|_| {
@@ -128,8 +127,8 @@ fn asteroid(size: Size, position: Vec2, velocity: Vec2) -> impl Scene {
         size
         Mesh2d(asset_value(RegularPolygon::new(size.radius(), 7)))
         MeshMaterial2d::<ColorMaterial>(asset_value(Color::srgb(0.45, 0.45, 0.5)))
-        // A patch, so the two fields that matter are set and `scale` keeps its default. This is why
-        // the builder chain (`from_translation(..).with_rotation(..)`) is no longer needed.
+        // A patch: the two fields that matter are set, `scale` keeps its default, and no
+        // `..default()` is needed to say so.
         Transform {
             translation: {position.extend(0.0)},
             rotation: {Quat::from_rotation_z(rand_unit() * TAU)},

@@ -36,12 +36,12 @@ fn toggle(_: On<Fired<ToggleOverlay>>, showing: ResMut<Showing>) {
     debug_overlay::toggle(showing);
 }
 
-/// Gives the panel an explicit camera rather than leaving it on whatever Bevy treats as the
-/// default UI camera — see `split_screen`'s own doc comment for the multi-`Camera2d` clearing bug
-/// that makes `hud_camera` (this game's default) the one camera nothing should ride on
-/// unannounced. The highest render order is the camera nothing draws over afterward, which is the
-/// same reasoning `join_ui` uses to pick a `PlayerCamera` instead — just without naming one, so
-/// this keeps working if the split ever grows a third pane.
+/// Gives the panel the explicit camera `debug_overlay::OverlayPanel` asks a multi-camera game for.
+/// See `split_screen`'s own doc comment for the multi-`Camera2d` clearing behaviour that makes
+/// `hud_camera` (this game's default) the one camera nothing should ride on unannounced. The
+/// highest render order is the camera nothing draws over afterward, which is the same reasoning
+/// `join_ui` uses to pick a `PlayerCamera` instead, without naming one, so this keeps working if
+/// the split ever grows a third pane.
 ///
 /// A plain `Update` system rather than ordered `Startup` wiring: the panel and the cameras are
 /// spawned by two different plugins, and racing their `Startup` systems to land in the right order

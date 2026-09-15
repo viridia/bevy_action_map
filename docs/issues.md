@@ -7,10 +7,10 @@ which session found it.
 whether it was confirmed by running something or only by reading. That last distinction is the
 important one, and it is stated per entry rather than assumed.
 
-**Line numbers are as of the scan, and several have since drifted** — `lib.rs:174` is now 201,
-`eval.rs:247` is now 257, and the two `cargo doc` sites in 1038 have moved and been fixed. Take a
-`file.rs:NNN` as "roughly here, find it by name"; the symbol named beside it is the part that is
-still good. Re-verify before acting on one.
+**Line numbers are as of the scan, and several have since drifted** — `eval.rs:247` is now 257, and
+the two `cargo doc` sites in 1038 have moved and been fixed. Take a `file.rs:NNN` as "roughly here,
+find it by name"; the symbol named beside it is the part that is still good. Re-verify before acting
+on one.
 
 **Numbering.** Each entry's number is a flat, permanent identity, assigned once from a single
 counter and independent of which tier it sits in — the tier is where it's filed today, not what it
@@ -20,7 +20,7 @@ chunk's own commit, and `docs/design.md` or `docs/decisions.md` where anything a
 are the record. A gap in the sequence below is a retired finding, not an omission. The next
 unassigned number is stated here; keep it up to date when numbering new items.
 
-**Next: 1055.**
+**Next: 1056.**
 
 **The calibration warning, stated up front because it is fair.** Ask a model to find sixty problems
 and it will find sixty. Some of what follows is real and some is a rule nobody would ever violate.
@@ -335,6 +335,10 @@ Unlike the device model's closedness (D65), this isn't about admitting an unknow
 gamepad's rumble motors and battery level are things `bevy_input`'s own `Gamepad` component already
 reports. Nothing here reads them.
 
+Chunk 117k removed the module doc's claim rather than leaving it promising a MUST with nothing
+behind it. Whatever lands this puts it back: `device.rs`'s summary line and its second paragraph
+both list what the module holds, and capabilities belong in both once they exist.
+
 Unrouted.
 
 ### 1048 Virtual devices have no first-class support
@@ -421,20 +425,6 @@ Unrouted.
 No behaviour at stake. All are small, and the reason to do them together is that a reader trusting
 any one of them is misled about a mechanism.
 
-### 1030 Public docs that promise a feature
-
-| Where                                   | Says                                                                                                                | Actually                                                                                                                                                                                                                                                                                               |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `lib.rs:174`                            | the `touch` feature is "Touch input as a binding source"                                                            | no `cfg(feature = "touch")` anywhere in `src/`; design §11 says _reserved_                                                                                                                                                                                                                             |
-| `device.rs` module doc                  | the module has persistent device identity and capability data                                                       | neither (R11.5, R11.3); the `DeviceHandle` doc eight lines below says the first is not built                                                                                                                                                                                                           |
-| `player.rs` module doc                  | the module "describes the named device requirements a game can assign players against"                              | it holds `Paired` and nothing else. That was R15.7, now withdrawn, so this promises something the crate will never grow rather than something it owes — the sentence goes rather than waiting on a fix. Chunk 48 renamed the one `Scheme`-like type to `DeviceFamily`, which answers a different question (which family a control belongs to, not what a player requires) |
-| `inspect.rs:76`                         | `ActionDump::state` is "Value, phase, elapsed time and progress"                                                    | `ActionState` is `{ value, phase }`. The two extra numbers exist since chunk 99, but on `ContextActions::elapsed` and `progress`, not on the struct this doc comment is describing — so the sentence names four fields for a type that has two |
-| `lib.rs:219`                            | `ActionMapSystems` is "System sets for the two stages of the input pipeline"                                        | four variants; the body names `Sample` and `Evaluate` and says nothing about `Capture` or `Dispatch`, both of which are public ordering targets                                                                                                                                                        |
-| `action.rs:497`                         | write `InputContext` by hand "if you need to configure the component differently; it is three associated constants" | the trait is not what makes the type a component — the derive emits `Component`, `Default`, `Clone` and `Copy` alongside it, and a hand-written impl gets none. `macros/src/lib.rs:131` says "four associated consts" for the same trait; four exist and three are required                            |
-| `mapping.rs`, `ActionMapping::capacity` | "Meaningful only where `rebind_policy` is `Here`"                                                                   | a preset moving a `Fixed` row is refused `TooManyControls { capacity: Some(1), given: 2 }`, verified — capacity is the second thing `refusal` consults on exactly the rows the sentence excuses it from                                                                                                |
-
-Unrouted.
-
 ### 1031 Examples and sketches that do not compile
 
 - `docs/design.md` §3's trait sketch says `// plus CATEGORY and CONSUME, with defaults`. The
@@ -477,11 +467,28 @@ Unrouted.
 - **§7 does not state R7.3's cost.** Two simultaneously-active layers hold separate action state, so
   a game reading `ContextActions<Base>` does not see the layer's answer and has to read both. R7.3
   is a MUST that is met and claimed nowhere.
-- **Three `§10.1` citations point at the wrong section**, in `context.rs`, `overrides.rs` (twice).
-  Two are about the serialized form, now §10.3; one is about the override store being keyed by
-  mapping alone, which is §10's preamble. §10.1 is "Applying," and none of the three is about
-  applying. **Small — worth a minute alongside the R14.10 mis-citation above, not worth a pass of
-  its own.**
+- **A `§10.1` citation points at the wrong section**, at `context/declare.rs:761`. It is about the
+  override store being keyed by mapping alone, which is §10's preamble; §10.1 is "Applying," and
+  this is not about applying. Two others, both in `overrides.rs` and both about the serialized form
+  (now §10.3), went with 117e. **Small — worth a minute alongside the R14.10 mis-citation above, not
+  worth a pass of its own.**
+
+Unrouted.
+
+### 1055 Split Friction teaches a disputed claim about somebody else's crate
+
+`split_screen.rs`'s module doc tells a reader that three `Camera2d`s sharing one window hit "what
+looks like a Bevy rendering bug", where only the last camera's `ClearColorConfig` is honored and it
+clears the entire window rather than its own `Viewport`
+([bevyengine/bevy#25608](https://github.com/bevyengine/bevy/issues/25608)). Whether it is a bug is
+arguable: it follows from how a wgpu render pass clears. So an example is teaching a contested claim
+about another crate in order to explain an arrangement it abandoned.
+
+Two ways out, and they exclude each other. Either the example learns to live with the clear
+behaviour, so a third camera works and the paragraph has no subject left; or the arrangement stands
+and the explanation comes out of the comment, since what a reader needs is that each pane's UI is
+`UiTargetCamera`'d at its own pane's camera, not why the alternative was dropped. The second is
+cheap and the first is the one that would make the example teach more.
 
 Unrouted.
 

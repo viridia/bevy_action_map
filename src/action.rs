@@ -32,14 +32,9 @@
 //! crates will use alongside their own. Add intermediate segments to group as you see fit. Contexts
 //! follow the same family and share the namespace of the actions they bind.
 //!
-//! Two consequences to plan for:
-//!
-//! - **The path is free to differ from the type name, and should stay put when the type moves.**
-//!   Renaming `Move` to `MoveOnFoot` or relocating it costs you nothing as long as the path is
-//!   unchanged.
-//! - **Changing a path is a save-data change, not a refactor.** Every binding a player has
-//!   customized is stored against the old string, so plan a migration the same way you would for
-//!   any other change to a save format.
+//! **Changing a path is a save-data change, not a refactor.** Every binding a player has customized
+//! is stored against the old string, so plan a migration the same way you would for any other
+//! change to a save format.
 //!
 //! # Grouping actions
 //!
@@ -218,13 +213,11 @@ impl ActionIntent {
     /// | `Directional2` | no       | no      | yes     | no       |
     /// | `Delta2`       | no       | no      | no      | yes      |
     ///
-    /// The two rows that refuse things are the ones worth understanding.
-    ///
     /// A single button carries no direction, so it cannot drive a `Directional2` action on its own.
     /// Bind a directional composite instead — four buttons, named for the directions they push —
     /// and the same composite accepts keyboard keys and a D-pad interchangeably.
     ///
-    /// A `Delta2` action accepts nothing but a delta, and a delta drives nothing else. A stick
+    /// A `Delta2` action accepts only a delta, and a delta serves no other intent. A stick
     /// reports how fast you want to turn and a mouse reports how far you have already turned;
     /// adding those together is a units error, and one that shows up as a look speed that changes
     /// with the frame rate. Driving one action from both devices is the normal thing to want, and
@@ -250,8 +243,6 @@ impl ActionIntent {
 }
 
 /// Runtime value returned by an action.
-///
-/// This is the shape you read from an action at runtime: button, 1D, 2D, or 3D.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -318,10 +309,8 @@ pub enum ActionPhase {
 /// condition and each stateful modifier, so two conditions on one binding cannot tread on each
 /// other.
 ///
-/// This is one fixed shape rather than a type per condition. A hold's duration and a
-/// multi-tap's window do not change from tick to tick, so they live in the compiled plan and
-/// never appear here. What is left is uniform and `Copy`, which lets a whole context's state be
-/// snapshotted by copying two slices.
+/// Configuration does not live here: a hold's duration and a multi-tap's window do not change from
+/// tick to tick, so they belong to the binding rather than to its working memory.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -499,8 +488,12 @@ pub trait ActionOutput: Copy + Send + Sync + 'static {
 ///
 /// The derive also makes the type a `Component`, because a context is something an entity carries
 /// — put it on the player, on one entity per local player, or on an entity of its own — and it can
-/// be spawned from a scene like any other component. Write the `InputContext` impl by hand if you
-/// need to configure the component differently; it is three associated constants.
+/// be spawned from a scene like any other component. `Default`, `Clone` and `Copy` come with it,
+/// all trivial on a unit struct.
+///
+/// To configure the component differently, write both impls by hand: `InputContext` is four
+/// associated constants, three of them required. A hand-written `Component` loses the warning that
+/// catches a context you never declared.
 ///
 /// ```rust
 /// use bevy_action_map::prelude::*;
@@ -597,12 +590,9 @@ pub trait InputAction: Send + Sync + 'static {
 
     /// What to group this action under in a rebinding screen.
     ///
-    /// A localization key rather than display text, on the same terms as the action's path: it is
-    /// a name that appears outside your code, so it should survive a refactor. Actions that share a
-    /// category are shown together — the four parts of a movement action, say, under "Movement".
-    ///
-    /// Actions in the same group should give the same key. It lives on the action rather than on
-    /// each binding, so there is one place to change it and no way for two bindings to disagree.
+    /// A localization key rather than display text, chosen on the same terms as the action's path.
+    /// Actions that give the same key are shown together; see
+    /// [the module docs](crate::action#grouping-actions).
     const CATEGORY: Option<&'static str> = None;
 
     /// Whether bindings of this action take their controls away from lower-priority contexts.
@@ -972,8 +962,8 @@ mod tests {
 
     #[test]
     fn an_output_shape_admits_only_the_intents_it_can_serve() {
-        // A 3D value is a direction or a displacement. It was previously claimed by every intent
-        // including `Button`, which would have let a jump action declare itself as a `Vec3`.
+        // A 3D value is a direction or a displacement, so the button intents must refuse it: a
+        // jump action declaring itself as a `Vec3` is the mistake this rules out.
         assert!(!ActionIntent::Button.supports_output::<Vec3>());
         assert!(!ActionIntent::Analog1.supports_output::<Vec3>());
         assert!(ActionIntent::Directional2.supports_output::<Vec3>());

@@ -178,6 +178,15 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 92b | A pane's chosen preset survives a restart                        |
 | 116 | A backend-neutral gamepad pool, and a join listener per device   |
 | 117a | The comments that were wrong, and the focus placeholder          |
+| 117c | The evaluator's duplication clusters, merged                      |
+| 117d | Shadow, require-reset, and the test docs that narrated bugs       |
+| 117e | The serialization docs, and the last public-item citations       |
+| 117f | The device and frame group, and `Brand`/`Identity` told apart     |
+| 117g | The binding group's listing, capacity, rescale and toggle clusters |
+| 117h | The presentation group's naming, follower and prompt clusters     |
+| 117i | Disasteroids' working-copy refrain, and the capture examples      |
+| 117j | The other examples and `tests/`, and the last chunk references    |
+| 117k | The public docs that contradicted the code                        |
 
 ---
 
@@ -608,46 +617,26 @@ A grooming pass that turned out to be more than one. The style violations were m
 found was prose describing a crate that no longer exists, and single conclusions written out three
 and four times across a field comment, a method doc, a test doc and `docs/design.md`.
 
-**Part a has landed:** the prose that was wrong rather than verbose, `src/focus.rs`'s deletion, the
-crate root's stale join recipe, and Disasteroids' overview. Candidate lists for every part below are
-in
-[notes/chunk-117-candidates.md](./notes/chunk-117-candidates.md), one section per file group. They
-cost enough to be worth not reproducing; delete the file when the last part lands.
+**Parts a, c, d, e, f, g, h, i, j and k have landed:** the prose that was wrong rather than verbose,
+`src/focus.rs`'s deletion, the crate root's stale join recipe, Disasteroids' overview, the
+evaluator's three duplication clusters, the context group, the persistence docs, the device and
+frame group, the binding group's listing, capacity, rescale and toggle clusters, the presentation
+group's naming, follower and prompt clusters, Disasteroids' own working-copy refrain, and the other
+examples' and `tests/`' citations. **No public-item citation is left anywhere in the tree, and no
+chunk reference at all**; the citations that remain are internal `//` comments in `src/`, which keep
+theirs. `docs/issues.md` 1030 is routed and retired — its capability clause is the one thing it
+promised that the crate still owes, and 1047 now carries the obligation to restore the sentence.
+What is left is 117l's `devfmt` fix. 117k also took the last two candidates the recon lists still
+held — Disasteroids' settings screen describing its own rebinding in the future tense, and a
+figurative "reach for" 117h had missed — so
+[notes/chunk-117-candidates.md](./notes/chunk-117-candidates.md) is spent; delete it when 117l
+lands.
 
 **How to run a part.** Invoke the `comment-grooming` skill, which carries the dial, the six
 categories and the reader rule. One part is one group and one commit: read that group's candidate
 list, verify each entry against the code before acting on it — a list entry is a candidate, not a
 finding — then `devfmt --diff` and `scripts/verify.sh`.
 
-- **117c — `eval.rs`, `plan.rs`.** Three clusters: the class-binding specificity rule, stated four
-  times; the shared-tunable machinery, three; and `apply_authority` reproducing `design.md` §5.8.
-  `Plan::is_indexed` is the model for the fix — state the conclusion, cross-reference the rest.
-- **117d — `context.rs`, `context/{declare,state,fixtures}.rs`.** Shadow-versus-active and
-  require-reset are each stated three or four times, and a cluster of test docs narrate the bug that
-  produced them rather than the invariant they now hold.
-- **117e — `overrides.rs`, `preset.rs`, `capture.rs`.** The serialization docs restate `design.md`
-  §10.3 paragraph for paragraph and carry the crate's only remaining public-item citations, on
-  `SavedOverrides` and `resolve_saved`.
-- **117f — `device.rs`, `frame.rs`, `lib.rs`, `player.rs`, `join.rs`, `backend.rs`, `event.rs`,
-  `inspect.rs`.** `device.rs`'s test comments re-explain the doc of the thing under test as a matter
-  of habit, and `Brand`/`Identity` are one doc with the nouns swapped.
-- **117g — `binding.rs`, `binding/{builder,control,modifier}.rs`, `condition.rs`.** One rationale
-  restated two to four times per rule: listing defaults, mapping capacity, the rescale rule,
-  composite part naming, the shared toggle's `prev`.
-- **117h — `action.rs`, `mapping.rs`, `present.rs`.** Public documentation is the axis, not internal
-  comment length — 970 doc lines against 118 internal. One public citation (`R11.6` on
-  `fallback_label_for_brand`) and roadmap status on `pub enum TunableValue`.
-- **117i — `examples/disasteroids/`, `examples/capture.rs`, `examples/ime_diagnostic.rs`.**
-  `capture.rs` re-teaches its own module doc three or four times, `settings.rs` repeats one
-  working-copy refrain six times, and four citations name a chunk or an R-number.
-- **117j — `examples/{split_friction,common,pong,pong_robot}/`, `tests/`.** Eighteen chunk and
-  R-number citations in user-facing teaching prose, the largest concentration in the tree, plus four
-  metaphor tells. `tileset.rs` and `split_screen.rs` use "seam" in its literal graphics sense and
-  are correct as they stand.
-- **117k — route and clear `docs/issues.md` 1030.** Six rows still stand after 117a took the
-  `player.rs` one: `touch`, `device.rs`'s module doc, `inspect.rs:76`, `lib.rs:219`,
-  `action.rs:497`, and `mapping.rs`'s capacity. The finding is marked *Unrouted*; this part is its
-  destination.
 - **117l — teach `devfmt` about YAML frontmatter.** It reads `---` and the `name:`/`description:`
   keys as prose and rewraps the block into one paragraph, which breaks any skill file it touches.
   The fix is in `reflow_file`'s `"md"` arm (`tools/devfmt/src/main.rs:269`): split a leading

@@ -35,13 +35,12 @@ pub(crate) struct BindingSpec {
     pub(crate) conditions: Vec<BindingCondition>,
     pub(crate) consume: bool,
     // `None` for a binding declared `private`, and for one declared `follows` — the first has no
-    // mapping and the second rides someone else's. Listing is the default: a player is entitled to
-    // see what their controls do, and it is *changing* one that has to be asked for.
+    // mapping and the second rides someone else's.
     pub(crate) mapping: Option<MappingDecl>,
     // Set by `follows`: the mapping this binding rides instead of declaring one.
     pub(crate) follows: Option<FollowsDecl>,
-    // What a player may tune on this binding, if anything. At most one — neither worked example
-    // this shipped with needs a second, and a `Vec` is the change to make if one ever does.
+    // What a player may tune on this binding, if anything. At most one; a `Vec` is the change to
+    // make if a binding ever needs two.
     pub(crate) tunable: Option<TunableDecl>,
     // Whether the controls this binding reads are withheld from capture across their family.
     pub(crate) reserved: bool,
@@ -52,9 +51,8 @@ pub(crate) struct BindingSpec {
 /// One action as [`InputContextBuilder::delegate`] declared it: named, and left to an authority
 /// outside this crate.
 ///
-/// Deliberately not a `BindingSpec`. There is no input, so nothing to modify, condition, consume or
-/// put on a rebinding screen — which is what makes attaching any of those to a delegated action
-/// unrepresentable rather than a mistake to diagnose.
+/// Deliberately not a `BindingSpec`: with no input to modify, condition, consume or list, attaching
+/// any of those to a delegated action is unrepresentable rather than a mistake to diagnose.
 #[derive(Clone)]
 pub(crate) struct DelegatedSpec {
     pub(crate) action: ActionId,
@@ -66,8 +64,7 @@ pub(crate) struct DelegatedSpec {
 /// One class binding as [`InputContextBuilder::bind_class`] declared it.
 ///
 /// Deliberately not a `BindingSpec`: a class binding has no input to modify, no chord, no mapping,
-/// and nothing to combine — the only things it carries are the class it watches, whether it
-/// consumes what it catches, and where to send it.
+/// and nothing to combine.
 pub(crate) struct ClassBindingSpec {
     pub(crate) action_path: &'static str,
     pub(crate) filter: crate::capture::ClassFilter,
@@ -77,18 +74,16 @@ pub(crate) struct ClassBindingSpec {
 
 /// What a binding contributes to the presentation list.
 ///
-/// Every binding has one of these unless it was declared `private`, because a controls screen that
-/// shows only the rebindable half is a controls screen with holes in it.
+/// Every binding has one of these unless it was declared `private`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct MappingDecl {
     /// Replaces the action's path in the derived key. `None` derives from the action.
     pub(crate) prefix: Option<&'static str>,
     /// The most controls a player may put in the mapping this binding contributes to.
     ///
-    /// Declared per binding but resolved per mapping: several bindings may feed one mapping, and
-    /// what the mapping ends up with is the widest thing any of them asked for, never narrower than
-    /// the defaults it already holds. Meaningless unless `rebind_policy` is `Here`, since nothing
-    /// can add a control to a mapping the player cannot change. `None` means unlimited.
+    /// Declared per binding but resolved per mapping, by `widest`. Meaningless unless
+    /// `rebind_policy` is `Here`, since nothing can add a control to a mapping the player cannot
+    /// change. `None` means unlimited.
     pub(crate) capacity: Option<usize>,
     /// Whether the player may change it, or is only being shown what it does.
     pub(crate) rebind_policy: crate::mapping::RebindPolicy,
@@ -124,8 +119,7 @@ pub(crate) struct FollowsDecl {
 }
 
 impl MappingDecl {
-    /// What a binding gets by saying nothing: listed, so the player can see what it does, and not
-    /// changeable, because changing it is the thing that has to be asked for.
+    /// What a binding gets by saying nothing: listed, and not changeable.
     const fn listed() -> Self {
         Self {
             prefix: None,
@@ -247,14 +241,7 @@ impl<'a, C> BindingBuilder<'a, C> {
     /// direction the player chose should ignore a value at rest.
     ///
     /// ```ignore
-    /// // Fires once each time the stick is pushed into a new direction.
-    /// context
-    ///     .bind::<Navigate>(Stick::Left)
-    ///     .dead_zone(DeadZone::radial(0.5))
-    ///     .compass(CompassPoints::Four)
-    ///     .on_change();
-    ///
-    /// // The same, with auto-repeat: the pulse keeps firing while the direction is held.
+    /// // One fire per direction entered, and auto-repeat while it is held.
     /// context
     ///     .bind::<Navigate>(Stick::Left)
     ///     .dead_zone(DeadZone::radial(0.5))
@@ -737,10 +724,10 @@ impl<C> InputContextBuilder<C> {
     /// ```
     ///
     /// Following a binding the player cannot change is allowed and useful — it keeps the duplicate
-    /// off the screen — and simply leaves nothing to rewrite. Calling this before `Leader` has
-    /// every device bound is not an error and not a mistake to catch: it is what lets a follower
-    /// ride only some of `Leader`'s devices, by naming `Leader`'s bindings so far rather than all
-    /// of them ever declared.
+    /// off the screen — and leaves nothing to rewrite. Calling this before `Leader` has every
+    /// device bound is not an error and not a mistake to catch: it is what lets a follower ride
+    /// only some of `Leader`'s devices, by naming `Leader`'s bindings so far rather than all of
+    /// them ever declared.
     ///
     /// # Panics
     ///
@@ -868,8 +855,8 @@ impl<C> InputContextBuilder<C> {
     ///
     /// A control already named by a plain binding in this context never reaches a class binding,
     /// however it is declared — see [`bind`](Self::bind)'s doc for how several bindings on one
-    /// action combine; a class binding does not compete in that the way a chord does, it simply
-    /// yields. For keys that produce text rather than a fixed shape, use
+    /// action combine; a class binding does not compete in that the way a chord does, it yields.
+    /// For keys that produce text rather than a fixed shape, use
     /// [`bind_characters`](Self::bind_characters) instead.
     pub fn bind_class<A: crate::event::ClassBinding>(
         &mut self,

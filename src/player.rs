@@ -20,9 +20,7 @@ use bevy_ecs::prelude::{Commands, EntityEvent, Event, Query, Res};
 /// means something outside any declared context type — a device-selection screen, say — can still
 /// ask "is this device claimed by anything" without knowing every context a game has declared.
 ///
-/// A context entity with no `Paired` reads every device, which is exactly today's single-player
-/// behavior: nothing has to opt in for a game that never mentions this component to keep working
-/// unchanged.
+/// A context entity with no `Paired` reads every device, so a single-player game needs no opt-in.
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Paired(DeviceHandleSet);
 
@@ -162,7 +160,7 @@ mod tests {
         }
 
         /// The owning pairing is told, and a pairing whose own device is unrelated is not — the
-        /// first half of R15.5, already true before this chunk, now with a signal attached to it.
+        /// first half of R15.5, with a signal attached to it.
         #[test]
         fn disconnect_signals_only_the_paired_entity() {
             let mut app = app();

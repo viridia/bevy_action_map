@@ -36,7 +36,9 @@ pub(crate) struct ButtonReading {
     pub(crate) pressed: bool,
 }
 
-/// The struct holds no references into the ECS, so tests and replays can drive one directly
+/// The live state of one context on one entity: what every action it binds is currently doing.
+///
+/// It holds no references into the ECS, so a test or a replay harness can drive one directly
 /// without a `World`.
 ///
 /// # Change detection
@@ -147,8 +149,8 @@ impl<C: InputContext> InputContextState<C> {
 
     /// Whether this context binds an action at all.
     ///
-    /// Reading an unbound action is not an error — it reads as though nobody is touching the
-    /// control — so this is here for code that would rather ask than infer it from a rest value.
+    /// Reading an unbound action is not an error, so this is here for code that would rather ask
+    /// than infer it from a rest value. See [`value`](Self::value).
     pub fn is_bound<A>(&self) -> bool
     where
         A: InputAction,
@@ -296,7 +298,7 @@ impl<C: InputContext> InputContextState<C> {
     /// ```
     ///
     /// Checked in the order the obstacles apply, so what comes back is the first thing in the way
-    /// rather than a list. Clearing it may reveal another.
+    /// rather than a list.
     pub fn why_not<A>(
         &self,
         consumed: &crate::eval::ConsumedControls,
@@ -441,9 +443,9 @@ impl<C: InputContext> InputContextState<C> {
     /// Takes a new set of compiled bindings, which is what applying an override does.
     ///
     /// Whatever was in flight is canceled and every action waits to be seen at rest once — the same
-    /// work `deactivate` and `activate` do, and for the same reasons. A hold on a control that is
-    /// no longer bound has to resolve rather than stay held for good, and a player still holding
-    /// the key they just rebound must not get a fresh press out of the swap.
+    /// work `deactivate` and `activate` do, and for the same reasons: a hold on a control that is
+    /// no longer bound has to resolve, and a player still holding the key they just rebound must
+    /// not get a fresh press out of the swap.
     ///
     /// The variant keeps the declared plan's slot allocation, so the action table and the
     /// require-reset flags stay aligned and only the scratch has to be rebuilt.
@@ -481,13 +483,10 @@ impl<C: InputContext> InputContextState<C> {
         self.cancel_in_flight();
     }
 
-    /// Suppresses this context for as long as a higher-priority exclusive context is active,
-    /// without touching what its own activation thinks — that stays `active`'s business, so the two
-    /// do not fight each other once the shadow lifts.
+    /// Suppresses this context for as long as a higher-priority exclusive context is active.
     ///
-    /// Cancels in-flight actions exactly as `deactivate` does, because a control held through a
-    /// modal opening must not stay "held forever" any more than one held through an ordinary
-    /// deactivation would.
+    /// Cancels in-flight actions as `deactivate` does: a control held through a modal opening must
+    /// not stay held forever any more than one held through an ordinary deactivation would.
     pub(crate) fn shadow(&mut self) {
         if self.shadowed {
             return;
@@ -506,8 +505,7 @@ impl<C: InputContext> InputContextState<C> {
         self.require_reset.set_range(.., true);
     }
 
-    /// Reports every action mid-hold or mid-fire as `Canceled` rather than left where it was — the
-    /// one piece `deactivate` and `shadow` share.
+    /// The cancellation `deactivate` and `shadow` share.
     ///
     /// `Started` is included along with `Fired`/`Firing`/`Building`: a hold canceled on the tick it
     /// began is still in flight, and leaving it at `Started` would strand it there until the
@@ -1484,10 +1482,10 @@ mod tests {
         );
     }
 
-    /// The bug `apply_active` had: comparing the condition's answer against `is_active()`, which
-    /// folds in shadowing, against a field `activate`/`deactivate` never move while shadowed. A
-    /// context whose condition keeps saying yes should stay quiet the whole time it is shadowed —
-    /// before the fix it was marked changed, and its prompt invalidated, every single frame.
+    /// A context whose condition keeps saying yes stays quiet the whole time it is shadowed.
+    ///
+    /// Comparing that answer against `is_active()`, which folds in shadowing, rather than against
+    /// `active` marks the instance changed and invalidates its prompt every frame the shadow lasts.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_shadowed_context_whose_condition_stays_satisfied_is_quiet() {
@@ -1546,10 +1544,9 @@ mod tests {
         );
     }
 
-    /// The other half of the same bug: while shadowed, `is_active()` already reads `false`, so a
-    /// condition going false too used to compare equal and skip the `deactivate` — stranding
-    /// `active` at `true` until the shadow itself lifted a frame later and finally noticed the
-    /// mismatch.
+    /// The other direction: while shadowed, `is_active()` already reads `false`, so comparing
+    /// against it makes a condition going false compare equal and skip the `deactivate`, stranding
+    /// `active` at `true` until the shadow lifts and finally notices the mismatch.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_condition_going_false_while_shadowed_deactivates_on_the_same_frame() {
@@ -1597,12 +1594,12 @@ mod tests {
         );
     }
 
-    /// The tick after the one it fired on, which is where consumption used to let go.
+    /// A claim lasts as long as the binding has something to say, not only the tick it fired on.
     ///
     /// A menu navigating by direction fires once per direction entered and says nothing on the
     /// ticks between, so a claim that lasted only as long as the fire would hand the key back to
-    /// the game underneath for every tick the player kept holding it. What the claim follows is the
-    /// binding having something to say, which includes a condition part way through.
+    /// the game underneath for every tick the player kept holding it. A condition part way through
+    /// counts as something to say.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_claim_outlasts_the_fire_that_made_it() {
@@ -1667,9 +1664,7 @@ mod tests {
         assert!(!seen.walked, "and the game behind still does not see it");
     }
 
-    /// Each obstacle the query can currently reach, provoked one at a time. The point of the type
-    /// is that these are five different situations that look identical from the call site, so the
-    /// test is worth as much as the feature.
+    /// Each obstacle the query can currently reach, provoked one at a time.
     #[cfg(feature = "keyboard")]
     #[test]
     fn the_diagnostic_names_which_thing_is_in_the_way() {
@@ -2247,10 +2242,7 @@ mod tests {
 
     /// A player may turn their own deadzone all the way off, and a worn stick still holds still.
     ///
-    /// This is the whole reason the two are separate stages. The preference stage adjusts what the
-    /// mechanic asked for, and it is free to ask for nothing, because it is not the thing keeping a
-    /// drifting stick quiet — calibration already removed the drift underneath it. There is no
-    /// clamp anywhere enforcing a floor; the floor is that stage 1 ran first.
+    /// No clamp anywhere enforces a floor; the floor is that stage 1 ran first.
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_deadzone_turned_all_the_way_down_still_rests_on_calibration() {
@@ -2316,9 +2308,9 @@ mod tests {
     /// An analog action cannot be wedged by an axis that never reads rest.
     ///
     /// Applying an override re-arms require-reset, which holds an action back until it is seen at
-    /// rest once. An axis is under no obligation to ever be: a stick drifting at 0.05, with a
-    /// player who has taken their own deadzone to zero, reads non-rest forever. Before this was
-    /// restricted to button intents the action never recovered — not on a real push, not ever.
+    /// rest once, and an axis is under no obligation to ever be: a stick drifting at 0.05, with a
+    /// player who has taken their own deadzone to zero, reads non-rest forever. Restricting the
+    /// latch to button intents is what keeps such an action from being held back for good.
     #[cfg(feature = "gamepad")]
     #[test]
     fn an_analog_action_survives_an_axis_that_never_rests() {
@@ -2596,8 +2588,8 @@ mod tests {
     }
 
     // The identity case (R15.3): two pads of the same model, where kind alone cannot tell them
-    // apart and only the device handle does. This is the test that fails without routing — every
-    // context reads the whole frame today, so an unpaired build sees both presses as its own.
+    // apart and only the device handle does. Every context reads the whole frame, so without
+    // routing each instance sees both presses as its own.
 
     #[cfg(feature = "gamepad")]
     #[test]
@@ -2648,9 +2640,9 @@ mod tests {
         );
     }
 
-    // Chunk 89: `why_not` used to have no `Paired` to check, so a control the player actually
-    // pressed on a device this instance is not paired to came back as `NoInput` — "nothing was
-    // pressed" — rather than naming the pairing as the reason it never arrived.
+    // Without a `Paired` to check, a control the player pressed on a device this instance is not
+    // paired to comes back from `why_not` as `NoInput` — "nobody touched it" — rather than naming
+    // the pairing as the reason it never arrived.
 
     #[cfg(all(feature = "gamepad", feature = "keyboard"))]
     #[test]

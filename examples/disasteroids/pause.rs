@@ -57,8 +57,6 @@ fn banner() -> impl Scene {
         DespawnOnExit::<Game>(Game::Paused)
         Text::new("PAUSED")
         TextFont { font_size: 48.0_f32 }
-        // A patch: only the three fields that differ are named, and the rest of `Node` keeps its
-        // defaults without a `..default()` to say so.
         Node {
             position_type: PositionType::Absolute,
             top: Val::Percent(42.0),

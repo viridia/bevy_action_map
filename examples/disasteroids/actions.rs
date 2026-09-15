@@ -103,10 +103,9 @@ pub struct Flying;
 
 /// The controls that work whatever the game is doing.
 ///
-/// Pause lives here rather than in [`Flying`] for the reason it always does: something has to hear
-/// the button that unpauses, and the context the player was flying under is exactly the one that is
-/// no longer listening. Anything else the player can always reach — a settings screen, a quit
-/// prompt — belongs here beside it.
+/// Pause lives here rather than in [`Flying`]: something has to hear the button that unpauses, and
+/// the context the player was flying under is exactly the one that is no longer listening. Anything
+/// else the player can always reach — a settings screen, a quit prompt — belongs here beside it.
 ///
 /// Render tick, because these answer at the frame rate rather than the simulation rate, and while
 /// the game is paused there is no simulation to answer at.
@@ -181,10 +180,8 @@ pub fn plugin(app: &mut App) {
 
         // A stick axis is already signed; two keys need a composite to become one. The deadzone is
         // what the mechanic wants, and the player may move it: a smaller one turns more readily, a
-        // larger one asks for a firmer push. The range reaches zero, which is only a sensible thing
-        // to offer once something is removing the hardware's own drift underneath — this game has
-        // no calibration step yet, so a player who takes it to zero gets their stick's drift and
-        // that is the honest answer rather than a floor pretending to be the mechanic's choice.
+        // larger one asks for a firmer push. The range reaches zero, and with no calibration step
+        // in this game a player who takes it there gets their stick's own drift.
         controls
             .bind::<Turn>(GamepadAxis::LeftStickX)
             .dead_zone(DeadZone::radial(0.15))
@@ -197,9 +194,7 @@ pub fn plugin(app: &mut App) {
         controls.bind::<Turn>(AxisButtons::left_right()).mappable();
 
         // `pulse` fires the action again every interval for as long as the button is down, so
-        // holding fire is a stream of separate `Fired`s rather than one long one — which is what
-        // lets `shoot` be an observer with no timer of its own. The interval is the ship's rate of
-        // fire, which is the one game number the input layer has to know.
+        // holding fire is a stream of separate `Fired`s rather than one long one.
         controls.bind::<Fire>(GamepadButton::South).pulse(RELOAD);
         // Two keyboard-and-mouse defaults, so Fire is one row with both slots filled. A mouse
         // button is the same kind of thing as a key here — one scheme, one channel — which is why
@@ -267,12 +262,12 @@ pub fn plugin(app: &mut App) {
     // controls it names. What is left to bind is only what the screen itself does with a control,
     // not what it needs to keep from the game underneath.
     app.add_context::<Menu>(|controls| {
-        // The pair chunk 29 exists for. A stick reports a position, and a position is off centre
-        // every tick it is held — so a binding on it fires every tick. Rounding to four points
-        // turns that position into one of four answers, and `on_change` narrows the firing to the
-        // ticks on which the answer moved. Four rather than eight because this drives a table,
-        // where a diagonal is a way of asking for one of its neighbours rather than a direction of
-        // its own.
+        // `compass` and `on_change` are a pair. A stick reports a position, and a position is off
+        // centre every tick it is held — so a binding on it fires every tick. Rounding to four
+        // points turns that position into one of four answers, and `on_change` narrows the firing
+        // to the ticks on which the answer moved. Four rather than eight because this drives a
+        // table, where a diagonal is a way of asking for one of its neighbours rather than a
+        // direction of its own.
         controls
             .bind::<Navigate>(Stick::Left)
             .dead_zone(DeadZone::radial(MENU_DEAD_ZONE))

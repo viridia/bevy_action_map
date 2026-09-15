@@ -17,11 +17,10 @@ use crate::action::{ActionId, ActionValue, InputAction};
 /// [`delegate`](crate::binding::InputContextBuilder::delegate)s. Whatever owns the outside
 /// authority — a platform input service, a network peer, a scripted agent — writes the value it
 /// resolved, and the action then behaves like any other: it fires, completes and cancels on the
-/// edges of what you write, and gameplay code reading it cannot tell the difference.
+/// edges of what you write.
 ///
 /// Values are levels, not events. What you write stands until you write something else, so a
-/// backend polled once a tick simply writes what it read. An action nobody has written reads at
-/// rest.
+/// backend polled once a tick writes what it read. An action nobody has written reads at rest.
 ///
 /// ```ignore
 /// // Poll the outside authority once a tick, before the input map evaluates.

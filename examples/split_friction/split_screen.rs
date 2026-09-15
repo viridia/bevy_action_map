@@ -15,18 +15,18 @@
 //! the two panes, a real UI node rather than relying on the gap between the two split viewports
 //! showing through as plain clear color, which read as garbage on at least one machine.
 //!
-//! Each pane's join prompt and device label (chunk 27) need to sit *on top of* that pane's own
-//! gameplay, not under it, which rules out drawing them through `hud_camera`: three `Camera2d`s
-//! sharing one window (the two split cameras plus `hud_camera` on top) hit what looks like a Bevy
-//! rendering bug — reproduced in isolation and reported upstream — where only the *last* camera's
-//! `ClearColorConfig` is honored, and it clears the *entire* window rather than being confined to
-//! its own `Viewport`, wiping out the other cameras' output. Instead, [`join_ui`] gives each pane's
-//! prompt/label their own root UI node, `UiTargetCamera`'d directly at that pane's own
-//! [`PlayerCamera`] — riding inside a render pass that already draws on top of that camera's own
-//! world content, no extra camera or draw-order questions involved. `UiTargetCamera`'d UI measures
-//! against the *whole window*, not that camera's own `Viewport` rect, so [`sync_viewports`] also
-//! keeps each root's own `Node` (`Val::Percent`, not `Val::Px` — resolution-independent, so no
-//! window scale-factor conversion needed) sized and positioned to match the pane it belongs to.
+//! Each pane's join prompt and device label need to sit *on top of* that pane's own gameplay, not
+//! under it, which rules out drawing them through `hud_camera`: three `Camera2d`s sharing one
+//! window (the two split cameras plus `hud_camera` on top) hit what looks like a Bevy rendering
+//! bug, where only the *last* camera's `ClearColorConfig` is honored, and it clears the *entire*
+//! window rather than being confined to its own `Viewport`, wiping out the other cameras' output.
+//! Instead, [`join_ui`] gives each pane's prompt/label their own root UI node, `UiTargetCamera`'d
+//! directly at that pane's own [`PlayerCamera`] — riding inside a render pass that already draws on
+//! top of that camera's own world content, no extra camera or draw-order questions involved.
+//! `UiTargetCamera`'d UI measures against the *whole window*, not that camera's own `Viewport`
+//! rect, so [`sync_viewports`] also keeps each root's own `Node` (`Val::Percent`, not `Val::Px` —
+//! resolution-independent, so no window scale-factor conversion needed) sized and positioned to
+//! match the pane it belongs to.
 
 use bevy::camera::{ScalingMode, Viewport};
 use bevy::input_focus::InputFocus;
@@ -108,10 +108,9 @@ pub fn plugin(app: &mut App) {
 
 /// Links each pane to its own protagonist and camera, once both exist.
 ///
-/// A plain `Update` system rather than ordered `Startup` wiring, the same reason
+/// A plain `Update` system rather than ordered `Startup` wiring, for the same reason
 /// `overlay::target_panel_camera` is: protagonists (`protagonist.rs`) and cameras (this module) are
-/// spawned by two different plugins, and racing their `Startup` systems to land in the right order
-/// is more moving parts than running this every frame until it finds both and stops.
+/// spawned by two different plugins.
 fn link_panes(
     mut commands: Commands,
     panes: Query<(Entity, &Pane), Without<PaneLinks>>,
@@ -219,8 +218,7 @@ fn layout() -> impl Scene {
 /// `UiTargetCamera(camera)` is inserted after spawning rather than written into `pane_ui`'s own
 /// `bsn!`: `bsn!`'s `FromTemplate` machinery requires `Default` of every component type a scene
 /// spawns, which `UiTargetCamera` — a foreign type wrapping an `Entity`, with no sensible default —
-/// doesn't have (the same constraint chunk 68 hit with `Paired`, met there by adding `Default`
-/// since it was this crate's own type; not an option here).
+/// doesn't have, and being foreign it cannot be given one here.
 fn join_ui(mut commands: Commands, cameras: Query<(Entity, &PlayerCamera)>) {
     for (camera, player) in &cameras {
         commands
@@ -415,11 +413,8 @@ fn device_name(device: DeviceHandle, brands: &Query<&Brand>) -> &'static str {
 /// Reads the two panes' and the divider's computed rects and writes each camera's viewport to
 /// reach exactly to the divider's own edge — not to the pane's, which the flex layout may round to
 /// a different pixel than the divider's edge lands on, leaving a sliver neither camera covers. Each
-/// pane's own [`PaneRoot`] (its join UI, `UiTargetCamera`'d at that pane's camera — see the module
-/// doc comment) is kept sized and positioned to match, as a percentage of the window rather than
-/// `Val::Px`: `UiTargetCamera`'d UI measures against the whole window regardless of which camera it
-/// targets, so a percentage of that same window is what lands a pane-relative rect correctly
-/// without converting through the window's own scale factor.
+/// pane's own [`PaneRoot`] is kept sized and positioned to match, as a percentage of the window
+/// rather than `Val::Px` — see the module doc comment.
 fn sync_viewports(
     panes: Query<(&Pane, &PaneLinks, &ComputedNode, &UiGlobalTransform)>,
     divider: Query<(&ComputedNode, &UiGlobalTransform), With<Divider>>,

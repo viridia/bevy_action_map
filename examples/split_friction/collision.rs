@@ -22,8 +22,8 @@ const HALF_TILE: f32 = crate::tileset::TILE_SIZE as f32 / 2.0;
 const SKIN: f32 = 0.5;
 
 /// How many times [`clamp_axis`] halves its search interval. Eight steps resolve to under a tenth
-/// of a pixel at protagonist speeds, well inside [`SKIN`] — no reason to reach for the exact
-/// contact distance when the back-off throws away more precision than one more halving would buy.
+/// of a pixel at protagonist speeds, well inside [`SKIN`] — no reason to chase the exact contact
+/// distance when the back-off throws away more precision than one more halving would buy.
 const ITERATIONS: u32 = 8;
 
 /// Clamps `delta` so moving `pos` by it never overlaps a solid dungeon cell or `other`'s own box.

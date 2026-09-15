@@ -52,8 +52,8 @@ fn main() {
     App::new()
         .add_plugins((
             // Disabled rather than kept, on the same terms as Disasteroids: the popup's own
-            // gamepad-focus bridge (`widget_focus::plugin`) answers for the keyboard half too, so
-            // there is no seam between two mechanisms both reaching for the same keys.
+            // gamepad-focus bridge (`widget_focus::plugin`) answers for the keyboard half too —
+            // see its module doc.
             DefaultPlugins
                 .set(ImagePlugin::default_nearest())
                 .build()

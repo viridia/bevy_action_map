@@ -73,7 +73,7 @@ pub struct ActionDump {
     pub action: ActionId,
     /// Its declared path.
     pub path: &'static str,
-    /// Value, phase, elapsed time and progress.
+    /// Its current value and phase.
     pub state: ActionState,
     /// What is in the way, or [`ActionObstacle::None`] when it is firing.
     pub obstacle: ActionObstacle,
@@ -97,9 +97,9 @@ pub(crate) struct DeclaredContext {
     pub(crate) priority: i32,
     pub(crate) read: fn(&mut World) -> Vec<InstanceDump>,
     // Mappings come from the context's compiled bindings rather than from anything an entity
-    // so unlike `read` this one needs no query and no exclusive access. `OverrideStage` picks
-    // between the rows in force and the rows the game declared — the latter being what a reset
-    // previews, and what an override is a diff against.
+    // carries, so unlike `read` this one needs no query and no exclusive access. `OverrideStage`
+    // picks between the rows in force and the rows the game declared — the latter being what a
+    // reset previews, and what an override is a diff against.
     pub(crate) mappings: fn(&World, OverrideStage) -> Vec<crate::mapping::ActionMapping>,
     // Tunables, on the same terms.
     pub(crate) tunables: fn(&World, OverrideStage) -> Vec<crate::mapping::Tunable>,

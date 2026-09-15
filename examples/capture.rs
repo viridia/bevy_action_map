@@ -27,7 +27,7 @@
 //! every player who never touched that row.
 //!
 //! No context is ever spawned here, and nothing evaluates: this is a settings screen with no game
-//! behind it, which is the case R19.5 is about.
+//! behind it.
 //!
 //! The window has nothing in it. It exists because that is where keyboard input comes from;
 //! everything the example has to say, it says on stdout.
@@ -87,14 +87,12 @@ fn main() {
         controls.bind::<Jump>(KeyCode::Space).mappable();
         controls.bind::<Jump>(KeyCode::KeyJ).mappable();
 
-        // The other half of the same idea: room for two, only one shipped. The walk below stops at
-        // the empty second slot, which is the cell a settings screen would draw blank.
+        // The other half of the same idea: room for two, only one shipped, and the empty second
+        // slot is the cell a settings screen draws blank.
         controls.bind::<Fire>(KeyCode::ControlLeft).mappable_upto(2);
 
-        // Jump held rather than tapped, which is a second action on a control the player is already
-        // being shown. It rides Jump's row instead of getting one of its own — and when Jump is
-        // rebound below, watch it move too. That is the whole reason `follow` exists: two actions
-        // declared as sharing a control have to go on sharing one.
+        // Jump held rather than tapped: a second action on a control the player is already being
+        // shown, riding Jump's row instead of getting one of its own.
         //
         // One call covers both of Jump's keyboard bindings, generated from them rather than
         // retyped. Called here, before Jump's pad binding below is declared, is what keeps
@@ -125,10 +123,6 @@ fn main() {
 }
 
 /// Which slots are left to walk, and what is listening for the current one.
-///
-/// A slot rather than a mapping: a mapping holds an ordered *list* of slots, and a "primary and
-/// secondary" table is that list drawn as columns. `Fire` below declares room for two and ships one,
-/// so the walk stops at its empty second slot like any other.
 #[derive(Resource)]
 struct Walk {
     remaining: Vec<(mapping::ActionMapping, usize)>,
@@ -210,8 +204,7 @@ fn next(world: &mut World) {
         bound(&mapping),
     );
 
-    // Escape is kept out of it so that it can go on meaning "not this one". A control capture
-    // ignores is a control that still works, which is the whole purpose of an exclusion list.
+    // Escape is excluded so that it can go on meaning "not this one" — see `skip` below.
     let listening = world
         .spawn(session.excluding([Control::PhysicalKey(KeyCode::Escape)]))
         .id();
@@ -222,8 +215,7 @@ fn next(world: &mut World) {
 
 /// The row `stale` has become, or `stale` itself if this build no longer declares it.
 ///
-/// Matched on family as well as name, because one name means one thing on the keyboard and another
-/// on the pad — `capture_demo.jump` is two rows, rebound independently.
+/// Matched on family as well as name, because one name is a separate row per family.
 fn current(world: &World, stale: &mapping::ActionMapping) -> mapping::ActionMapping {
     mapping::mappings(world)
         .into_iter()
@@ -334,8 +326,7 @@ fn rebind(world: &mut World, control: Control) {
                 .join(", "),
         );
     }
-    // The declaration is untouched, which is what lets the next patch ship a revised default to
-    // every player who never touched this row.
+    // The declaration itself is untouched: an override is a diff over it.
     let declared = mapping::declared_mappings(world)
         .into_iter()
         .find(|shipped| shipped.key == row.key && shipped.family == row.family);

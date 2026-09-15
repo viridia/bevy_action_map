@@ -12,13 +12,10 @@
 //! bindings without being told about any of them, and which can be moved around with the arrow keys
 //! or the stick and operated end to end from the pad.
 //!
-//! The three contexts are the arrangement worth copying. Flying is live only while the game is
-//! playing, so pausing stands it down and whatever the player was holding is canceled rather than
-//! left running. Pause itself is in a context with no condition at all, because the control that
-//! unpauses has to be heard by something that pausing did not switch off. And the settings screen
-//! is a third, at a higher priority and `exclusive`: while it is up the arrow keys move the
-//! selection instead of turning the ship, because an exclusive context stands down everything below
-//! it. No binding has to name what should stop answering, and none needs `.consume()`.
+//! The three contexts in [`actions`] are the arrangement worth copying: `Flying` is live only while
+//! the game is playing, `Shell` has no activation condition at all, and `Menu` is higher priority
+//! and `exclusive`, so while the settings screen is up the arrow keys move the selection instead of
+//! turning the ship. Each context's own doc says why it is shaped that way.
 
 #![allow(missing_docs)]
 
@@ -43,10 +40,9 @@ use common::widget_focus;
 fn main() {
     App::new()
         .add_plugins((
-            // `InputDispatchPlugin` is disabled rather than kept: it only ever answered for the
-            // keyboard half of a focused `Button`, the pad went through a hand-written observer
-            // beside it, and `widget_focus::plugin` now answers for both the same way. See
-            // `common::widget_focus`.
+            // `InputDispatchPlugin` is disabled because `widget_focus::plugin` answers a focused
+            // `Button` for both devices; leaving both in place puts two mechanisms on the same
+            // keys. See `common::widget_focus`.
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {

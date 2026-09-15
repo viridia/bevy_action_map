@@ -40,7 +40,7 @@
 //! );
 //! ```
 //!
-//! # Claiming a slot, and the race that is easy to miss
+//! # Claiming a slot
 //!
 //! Decide whether a device is already taken from state your own code updates **synchronously**, not
 //! from a `Query<&Paired>`. Two devices pressing join on the same tick both fire before either

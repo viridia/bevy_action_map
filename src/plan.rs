@@ -1,6 +1,4 @@
 //! Compiling bindings into the plan the evaluator runs against.
-//!
-//! A plan is the immutable compiled form of authored bindings.
 
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::marker::PhantomData;
@@ -332,7 +330,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
     // action on a key and on a pad button is two rows in two tables. And one action reaching a name
     // twice within one family is a primary and a secondary, which merge into a single row holding
     // both. What is left — two *different* actions answering to one name — is the case where a
-    // saved rebinding of one would land on the other, and is what R19.15 wants reported.
+    // saved rebinding of one would land on the other, and is what wants reporting.
     let mut keys = alloc::collections::BTreeMap::new();
     // A tunable's key is unique per family for the same reason a mapping's is: two different
     // actions sharing one name is a saved change to one landing on the other. Two bindings of the
@@ -552,29 +550,29 @@ pub(crate) struct CompiledBinding {
     // How specific this binding is: one for the control it names, plus one per control it requires
     // alongside. The clash between two bindings on one control is decided by this and nothing else.
     pub(crate) chord_len: u8,
-    // Where this binding keeps its working memory: the modifiers first, then the conditions. No
-    // two share a slot, even when they are the same kind.
+    // Where this binding keeps its working memory: the modifiers, then the conditions, then the
+    // press it derived. No two share a slot, even when they are the same kind.
     pub(crate) scratch_base: usize,
     // Set when this binding's tunable is shared with at least one other binding — `hold_or_toggle`
     // reaching a primary and a secondary key, most often — to the index of the plan's shared cell
-    // for the group. `None` is the ordinary case: the modifier still has the private slot
-    // `scratch_base` already gives it, and a binding with no sharing partner runs its own chain
-    // exactly as before. A binding with `Some` skips its own chain entirely instead of running it
-    // against a cell other bindings also write — see `resolve_shared_toggle`'s doc for why running
-    // it per binding is unsafe rather than merely redundant.
+    // for the group. `None` is the ordinary case: the modifier keeps the private slot
+    // `scratch_base` already gives it, and the binding runs its own chain. A binding with `Some`
+    // skips its own chain entirely instead of running it against a cell other bindings also write
+    // — see `resolve_shared_toggle`'s doc for why running it per binding is unsafe rather than
+    // merely redundant.
     pub(crate) tunable_shared: Option<usize>,
 }
 
 impl CompiledBinding {
     pub(crate) fn scratch_len(&self) -> usize {
-        // Modifiers, then conditions, then one more for the press this binding derived — which is
-        // hysteretic, so it has to remember what it decided last tick.
+        // The press gets a slot of its own because it is hysteretic: it has to remember what it
+        // decided last tick.
         self.modifiers.len() + self.conditions.len() + 1
     }
 }
 
-/// An authored class binding, resolved to nothing but itself — there is no slot, because there is
-/// nothing to hold between ticks.
+/// An authored class binding, carried through compilation unchanged — there is no slot, because
+/// there is nothing to hold between ticks.
 ///
 /// No `action_path` here, unlike `BindingSpec`/`CompiledBinding`: the one diagnostic that needs to
 /// name a class binding's action runs on the authored `ClassBindingSpec` list before compilation,
@@ -641,17 +639,14 @@ pub struct Plan<C> {
     // already claim the control an event arrived on.
     class_bindings: Vec<CompiledClassBinding>,
     // Every control any binding above reads, deduped. Not an arbitration index — a class binding
-    // never competes for a control on specificity, it simply yields whenever this set claims one.
+    // never competes for a control on specificity; it yields whenever this set claims one.
     indexed_controls: Vec<Control>,
     _marker: PhantomData<C>,
 }
 
 impl<C> Plan<C> {
     /// Compiles a plan from authored bindings.
-    // Compilation asks nothing about whether the bindings make sense: `diagnose` owns that, and
-    // `add_context` runs it first and refuses the context rather than compiling a plan that cannot
-    // work. Keeping the two apart is what lets a rebinding UI ask about bindings it has no
-    // intention of installing.
+    // Compilation takes the bindings as sound; `diagnose` is what decides whether they are.
     pub(crate) fn from_bindings(
         bindings: Vec<BindingSpec>,
         class_bindings: Vec<ClassBindingSpec>,
@@ -671,19 +666,16 @@ impl<C> Plan<C> {
     /// Compiles a variant of `template` — the same actions, driven by different controls.
     ///
     /// What an override applies as. The slot allocation is `template`'s rather than derived afresh,
-    /// and both consequences are wanted:
-    ///
-    /// - an action whose every binding the player unbound keeps its slot, so reading it gives a rest
-    ///   value rather than the "not bound in this context" warning, which is a typo diagnostic and
-    ///   not what happened here;
-    /// - slot indices stay put across the swap, so an instance's action states and require-reset
-    ///   flags stay aligned with no rebuilding.
+    /// so an action whose every binding the player unbound keeps its slot and reads at rest rather
+    /// than raising the "not bound in this context" warning, which is a typo diagnostic and not
+    /// what happened here; and slot indices stay put across the swap, so an instance's action
+    /// states and require-reset flags stay aligned with no rebuilding.
     ///
     /// A binding for an action the template does not have would still get a slot of its own, which
     /// cannot happen: a variant only rewrites the inputs of bindings the template already holds.
     ///
     /// Class bindings are not part of the diff — they are never rebindable, so they carry over from
-    /// `template` unchanged rather than being rebuilt from a list that would just be a copy of them.
+    /// `template` unchanged rather than being rebuilt from a list that would be a copy of them.
     pub(crate) fn variant_of(template: &Self, bindings: Vec<BindingSpec>) -> Self {
         let mut plan = Self::compile(bindings, Some(template));
         plan.class_bindings.clone_from(&template.class_bindings);
@@ -957,10 +949,9 @@ mod tests {
         );
     }
 
-    // `Custom`'s `rescales()` dispatches through the wrapped modifier's own trait impl rather
-    // than a match arm on `BindingModifier`, which is exactly the seam a stale blanket impl once
-    // broke silently for any built-in modifier routed through it. A hand-written one exercises the
-    // same seam and must still be counted.
+    // `Custom`'s `rescales()` dispatches through the wrapped modifier's own trait impl rather than
+    // a match arm on `BindingModifier`, so a hand-written modifier that rescales has to be counted
+    // like a built-in one. A stale blanket impl there fails silently.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_custom_modifier_still_counts_toward_chained_rescaling() {
@@ -1033,8 +1024,8 @@ mod tests {
         assert_eq!(builder.diagnostics(), &[]);
     }
 
-    // Two different actions sharing one tunable name in one family is the tunable half of
-    // `DuplicateMappingKey`: a saved change to one would land on the other.
+    // Two different actions sharing one tunable name in one family: the tunable half of
+    // `DuplicateMappingKey`.
     #[cfg(feature = "keyboard")]
     #[test]
     fn two_actions_cannot_share_a_tunable_key() {
@@ -1057,8 +1048,7 @@ mod tests {
     }
 
     // A deadzone declared at or beyond full deflection reads centered for every ordinary input, so
-    // it is reported even though it compiles and runs. `tunable_dead_zone` driving `lower` there
-    // at runtime is not this check's business — no build-time scan reaches a player's slider.
+    // it is reported even though it compiles and runs.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_dead_zone_at_full_deflection_is_reported() {
@@ -1124,8 +1114,7 @@ mod tests {
         );
     }
 
-    // The reason this is a list rather than an assertion: three mistakes should cost one run to
-    // find, not three runs to find one at a time.
+    // Three mistakes cost one run to find, not three.
     #[cfg(feature = "keyboard")]
     #[test]
     fn every_problem_is_reported_together() {
@@ -1203,8 +1192,7 @@ mod tests {
         );
     }
 
-    // Different filters overlapping is not a mistake — it's how an app says "claim these
-    // specifically, then everything else" — so nothing is reported.
+    // Different filters overlapping is deliberate, so it is not reported.
     #[cfg(feature = "keyboard")]
     #[test]
     fn two_different_filters_is_fine_even_though_they_overlap() {

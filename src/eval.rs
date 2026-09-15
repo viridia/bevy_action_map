@@ -1,6 +1,4 @@
 //! The evaluator: a plan and an input frame in, action state and a transition log out.
-//!
-//! The evaluator resolves bindings and emits a transition log for later dispatch.
 
 use alloc::vec::Vec;
 
@@ -32,9 +30,8 @@ use crate::frame::{InputFrame, RawEvent, TimedRawEvent};
 
 /// Which controls have already been claimed this frame, and by which schedule.
 ///
-/// Keyed by schedule rather than held flat, so that three cases come out right: what `PreUpdate`
-/// claimed stays claimed for every fixed tick in the frame, what one fixed tick claimed does not
-/// bind the next, and nothing survives into a frame where no fixed tick runs.
+/// What `PreUpdate` claimed stays claimed for every fixed tick in the frame; what one fixed tick
+/// claimed does not bind the next; and a frame where no fixed tick runs starts clear regardless.
 #[derive(bevy_ecs::resource::Resource, Default)]
 pub struct ConsumedControls {
     // Which context took it, not merely that something did: "consumed" is one of five reasons an
@@ -97,12 +94,11 @@ pub fn release_consumed_controls(mut consumed: bevy_ecs::prelude::ResMut<'_, Con
 /// The priority of the highest-priority active exclusive context seen so far this frame.
 ///
 /// Unlike `ConsumedControls`, this needs no per-schedule bookkeeping: a context's activity does not
-/// reset between fixed ticks the way a control's actuation does, so an exclusive context simply
-/// re-raises the ceiling to the same value every time it runs. One number, reset once at the top of
-/// the frame, is the whole mechanism — set by whichever exclusive context runs first in priority
-/// order (render-tick contexts run before fixed-tick ones, so the same forward-only direction
-/// applies here too), and read by everything lower that runs after it, in either domain, for the
-/// rest of the frame.
+/// reset between fixed ticks the way a control's actuation does, so an exclusive context re-raises
+/// the ceiling to the same value every time it runs. Reset once at the top of the frame, set by
+/// whichever exclusive context runs first in priority order, and read by everything lower that runs
+/// after it for the rest of the frame. Render-tick contexts run before fixed-tick ones, so exclusion
+/// flows forward through the frame the same way consumption does.
 #[derive(bevy_ecs::resource::Resource, Default)]
 pub(crate) struct ExclusionCeiling(Option<i32>);
 
@@ -124,8 +120,7 @@ impl ExclusionCeiling {
 }
 
 /// Starts a frame with no exclusion in effect — the same clear point as
-/// [`release_consumed_controls`], for the same reason: both describe "nothing has claimed anything
-/// yet".
+/// [`release_consumed_controls`], for the same reason.
 pub(crate) fn reset_exclusion_ceiling(
     mut ceiling: bevy_ecs::prelude::ResMut<'_, ExclusionCeiling>,
 ) {
@@ -141,9 +136,9 @@ pub fn release_consumed_in<S: bevy_ecs::schedule::ScheduleLabel>(
 
 /// One phase change, in the order it happened.
 ///
-/// The log records transitions rather than final state, which is the whole point: an action that
-/// fires and completes inside one tick has two of these, and a reader that only ever sees the
-/// current phase cannot express that.
+/// The log records transitions rather than final state: an action that fires and completes inside
+/// one tick has two of these, and a reader that only ever sees the current phase cannot express
+/// that.
 pub(crate) struct Transition {
     pub(crate) slot: usize,
     pub(crate) phase: ActionPhase,
@@ -166,8 +161,7 @@ pub fn dispatch_transitions<C: InputContext + Component>(
         // so, and saying it twice would move the change tick a system later than the fact.
         let state = state.bypass_change_detection();
 
-        // Taken rather than borrowed so the plan stays readable while dispatching, and handed back
-        // afterwards so the allocation survives to the next tick.
+        // Handed back afterwards so the allocation survives to the next tick.
         let mut log = core::mem::take(&mut state.transitions);
         for transition in log.drain(..) {
             let dispatch = state.plan.dispatch_for_slot(transition.slot);
@@ -287,9 +281,9 @@ enum Fold {
     /// across the whole window and read once, because half of a movement is not a position.
     Delta,
     /// A level pass triggered by a source disappearing — focus loss or a device disconnect — rather
-    /// than a player releasing a control. Reads exactly like `Level`; the only difference is that a
-    /// binding which was firing and reads at rest this pass reports `Canceled` rather than
-    /// `Completed`, since nothing was let go. A binding on an unaffected device is untouched.
+    /// than a player releasing a control. Reads like `Level`, except that a binding which was firing
+    /// and reads at rest this pass reports `Canceled` rather than `Completed`, since nothing was let
+    /// go. A binding on an unaffected device is untouched.
     Interrupted,
 }
 
@@ -339,17 +333,16 @@ impl<C: InputContext> InputContextState<C> {
         claims: &mut Vec<Control>,
         pairing: Option<&crate::player::Paired>,
     ) {
-        // Only what has arrived since this context last looked. Re-reading the whole queue is what
-        // made one mouse delta count three times across three fixed ticks. The cursor advances past
-        // the full unfiltered slice — including another device's events an unpaired viewer never
-        // touches below — so nothing here is ever offered twice.
+        // Only what has arrived since this context last looked: re-reading the whole queue counts
+        // one mouse delta once per fixed tick in the frame. The cursor advances past the full
+        // unfiltered slice — including another device's events an unpaired viewer never touches
+        // below — so every event is offered exactly once.
         let unread = frame.events_after(self.read_through);
         if let Some(last) = unread.last() {
             self.read_through = Some(last.timestamp);
         }
-        // Absent pairing reads every device, which is today's exact behavior (R15.3): a device's
-        // input must not reach a context paired to someone else, but a context nobody paired stays
-        // deaf to nothing.
+        // A device's input must not reach a context paired to someone else (R15.3); a context
+        // nobody paired hears every device, which is today's exact behaviour.
         let owns = |event: &TimedRawEvent| pairing.is_none_or(|p| p.contains(event.event.device()));
 
         // An inactive context still tracks its devices, shadowed or not. Skipping that would leave
@@ -365,9 +358,8 @@ impl<C: InputContext> InputContextState<C> {
         let mut mouse_delta = Vec2::ZERO;
         let mut level_changes = 0usize;
 
-        // Replayed one at a time rather than collapsed. Draining the whole window and then folding
-        // once is what made a press and release inside a single window vanish: the two cancel in
-        // the held state, and the fold sees nothing happen (R9.3).
+        // Replayed one at a time rather than collapsed: a press and a release inside one window
+        // cancel in the held state, and a single fold afterwards sees neither (R9.3).
         for event in unread.iter().filter(|e| owns(e)) {
             // `MouseMotion` is the one variant `RawEvent` keeps with every device feature off, so
             // there this is the only arm there is.
@@ -388,9 +380,8 @@ impl<C: InputContext> InputContextState<C> {
                 consumed,
                 claims,
             );
-            // After the fold, not before: docs/design.md §5.4's ordering. A class binding never
-            // competes on specificity, so it only ever gets a look at a control the fold's own
-            // bindings did not already index — checked once here rather than woven into the fold.
+            // After the fold, not before: docs/design.md §5.4's ordering. Checked once here rather
+            // than woven into the fold.
             self.class_dispatch(&event.event, consumed, claims);
             level_changes += 1;
         }
@@ -505,9 +496,9 @@ impl<C: InputContext> InputContextState<C> {
 
     /// Tests one raw event against the plan's class list.
     ///
-    /// Called once per level event, after the fold: a class binding never competes on specificity,
-    /// so it only ever sees a control no plain binding in this context already indexes, and only
-    /// while that control reads as actuated and nothing else has already consumed it this schedule.
+    /// Called once per level event, after the fold: only a control no plain binding in this context
+    /// indexes reaches here, and only while it reads as actuated and no one else has already
+    /// consumed it this schedule.
     fn class_dispatch(
         &mut self,
         event: &RawEvent,
@@ -547,7 +538,6 @@ impl<C: InputContext> InputContextState<C> {
         consumed: &ConsumedControls,
         claims: &mut Vec<Control>,
     ) {
-        // Field-level borrows: the fold reads the device state and the plan while writing actions.
         let Self {
             plan,
             actions,
@@ -597,7 +587,7 @@ impl<C: InputContext> InputContextState<C> {
 
         // Which chord has the strongest claim on each control. Computed before anything is read,
         // because a binding cannot know it is out-ranked without looking at the others — and it is
-        // a pure function of what is held, so it costs nothing stateful and can be redone per fold.
+        // a pure function of what is held, so it keeps no state and can be redone per fold.
         chord_claims.clear();
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         if plan.has_chords() {
@@ -670,7 +660,6 @@ impl<C: InputContext> InputContextState<C> {
             let mut combined = None;
             let mut best = ConditionState::Idle;
 
-            // Bindings are grouped by slot, so this inner walk is one action's contributions.
             while index < bindings.len() && bindings[index].slot == slot {
                 let binding = &bindings[index];
 
@@ -705,8 +694,7 @@ impl<C: InputContext> InputContextState<C> {
                     )),
                     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
                     BindingInput::Directional2(parts) => {
-                        // Four keys and a D-pad reach an action through this same arm, which is
-                        // the whole point of the composite.
+                        // Four keys and a D-pad reach an action through this same arm.
                         let x = axis_from_buttons(is_pressed(parts.left), is_pressed(parts.right));
                         let y = axis_from_buttons(is_pressed(parts.down), is_pressed(parts.up));
                         ActionValue::Axis2(Vec2::new(x, y))
@@ -747,8 +735,8 @@ impl<C: InputContext> InputContextState<C> {
                     }
                 };
 
-                // Three disjoint pieces of this binding's working memory, in the order they are
-                // used: reshape the value, decide whether it is a press, then judge it.
+                // This binding's working memory, split into the three disjoint pieces
+                // `CompiledBinding::scratch_base` allocates.
                 let owned = &mut scratch
                     [binding.scratch_base..binding.scratch_base + binding.scratch_len()];
                 let (modifier_scratch, rest) = owned.split_at_mut(binding.modifiers.len());
@@ -762,17 +750,14 @@ impl<C: InputContext> InputContextState<C> {
                 } else {
                     value
                 };
-                // A binding whose tunable is shared (`hold_or_toggle` reaching a primary and a
-                // secondary key, most often) does not run its own modifier chain when the group's
-                // toggle is on — the pre-pass above has already resolved this tick's latch once,
-                // from every sharing binding's raw actuation combined, and every member simply reads
-                // that back. Running each binding's chain independently here, against its own
-                // private scratch, is exactly what let one binding's evaluation order clobber
-                // another's edge detection before the pre-pass existed.
+                // With the group's toggle on, a binding whose tunable is shared reads back the
+                // latch the pre-pass above resolved rather than running its own modifier chain:
+                // running each chain independently against its own private scratch lets one
+                // binding's evaluation order clobber another's edge detection.
                 //
-                // While the group is in hold mode there is nothing to share: each binding is an
-                // ordinary momentary control again, so it falls through to the same modifier chain
-                // an unshared binding runs, whose own `Toggle { active: false }` is identity.
+                // In hold mode there is no latch to share: each binding is an ordinary momentary
+                // control again, so it falls through to the same modifier chain an unshared binding
+                // runs, whose own `Toggle { active: false }` is identity.
                 let value = match binding.tunable_shared {
                     Some(scratch_index) if crate::binding::toggle_active(&binding.modifiers) => {
                         ActionValue::Bool(crate::binding::toggle_latch(
@@ -848,16 +833,15 @@ impl<C: InputContext> InputContextState<C> {
 
     /// Writes the values an outside authority supplies, for the slots this context delegates to it.
     ///
-    /// The authority hands over the value the fold would otherwise have produced, and the same
-    /// state machine diffs it and synthesizes the edges — which is what keeps `fired()` and the
-    /// phases working for an action whose backend reports only a level and never an edge.
+    /// The authority hands over the value the fold would otherwise have produced, and `commit_slot`
+    /// synthesizes the edges from it — a backend that reports only a level never has to carry one.
     ///
-    /// Once a tick, unlike the fold: the authority is sampled, not replayed, so there is no queue
-    /// of its events to walk one at a time. `Fold::Level` for the same reason — an interruption is
-    /// this crate's device going away, and the authority's has not.
+    /// Once a tick, unlike the fold: the authority is sampled, not replayed. `Fold::Level` for the
+    /// same reason — an interruption is this crate's device going away, and the authority's has
+    /// not.
     pub(crate) fn apply_authority(&mut self, authority: Option<&AuthorityValues>, delta: f32) {
-        // Unlike a bound action there is no held state to keep up to date while inactive: what the
-        // authority reports is read afresh every tick, so an inactive context simply stops looking.
+        // Unlike `apply_frame`, this can stop dead while inactive: the authority is sampled afresh
+        // every tick, so there is no held state here to go stale.
         if !self.is_active() {
             return;
         }
@@ -928,7 +912,7 @@ fn commit_slot(
     // let the action behave normally (R7.5).
     //
     // Button intents only. What R7.5 guards is a *press* synthesized from a control the player was
-    // already holding, and an analog action has no press to synthesize — its value simply resumes.
+    // already holding, and an analog action has no press to synthesize, only a value that resumes.
     // Holding one back until it reads exactly rest can wedge it forever, because an axis is not
     // obliged to ever read rest: a drifting stick whose deadzone the player has taken to zero never
     // does, and the action never recovers.
@@ -970,7 +954,7 @@ fn at_rest(intent: ActionIntent) -> ActionValue {
 ///
 /// A delta is a displacement, so two of them add. Everything else is a position or a press, where
 /// adding would be a units error: the strongest contribution wins instead, and ties keep the
-/// earlier one so that declaration order decides.
+/// earlier one.
 fn combine(
     accumulated: ActionValue,
     contribution: ActionValue,
@@ -1046,8 +1030,8 @@ fn apply_modifiers(
 /// action already was. That is what makes giving up on a hold a `Canceled` rather than a
 /// `Completed` — the action never actually happened.
 ///
-/// `kind` is `Fold::Interrupted` for a pass forced by a source disappearing rather than an ordinary
-/// release; only there does a firing-then-idle transition become `Canceled` instead of `Completed`.
+/// `kind` decides which of `Completed` and `Canceled` a firing-then-idle transition is — see
+/// `Fold::Interrupted`.
 fn update_action_state(
     action_state: &mut crate::action::ActionState,
     value: ActionValue,
@@ -1327,11 +1311,8 @@ mod tests {
         assert_eq!(state.transitions[0].phase, ActionPhase::Completed);
     }
 
-    /// A player who taps faster than the tick rate still tapped, and collapsing the window to its
-    /// final state loses the whole event: press and release cancel in the held state, and a single
-    /// fold afterwards sees nothing happen at all.
-    ///
-    /// Polling cannot express this — one `ActionPhase` per read — which is why the log exists.
+    /// A player who taps faster than the tick rate still tapped. Polling cannot express that — one
+    /// `ActionPhase` per read — which is why the log exists.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_tap_inside_one_window_is_two_transitions() {
@@ -1966,9 +1947,8 @@ mod tests {
             None,
         );
         let threshold = ButtonThreshold::default();
-        // One frame for the whole test, its events accumulating over time — the same reason every
-        // other test here does, since `apply_frame` tracks how much of it has been read rather than
-        // each call bringing its own.
+        // One frame for the whole test, its events accumulating: `apply_frame` reads only what is
+        // new to it.
         let mut frame = InputFrame::default();
 
         apply(
@@ -2024,10 +2004,8 @@ mod tests {
     /// before a player ever turns toggle mode on, each key is an ordinary momentary control, exactly
     /// as if `hold_or_toggle` had never been declared.
     ///
-    /// The regression this guards: the shared latch used to resolve unconditionally, so a group of
-    /// two or more bindings — the documented primary-and-secondary case, and Disasteroids' `Thrust`
-    /// — read as permanently toggled with no way to turn it off, since nothing checked the tunable's
-    /// own value before reading the latch back.
+    /// A shared latch that resolves without first checking the tunable's own value reads as
+    /// permanently toggled instead, with no way to turn it off.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_shared_toggle_left_at_its_default_behaves_as_an_ordinary_hold() {
@@ -2229,9 +2207,8 @@ mod tests {
         assert!(state.value::<Jump>());
     }
 
-    /// A press derived from an axis was thresholded with no memory of what it decided last tick, so
-    /// a stick wobbling across the line chattered — the same defect the button channel had fixed,
-    /// in the neighbouring case.
+    /// A press derived from an axis is thresholded with the same hysteresis the button channel
+    /// uses, so a stick wobbling across the line does not chatter.
     #[cfg(feature = "gamepad")]
     #[test]
     fn a_press_derived_from_an_axis_does_not_chatter() {
@@ -2296,8 +2273,8 @@ mod tests {
         })
     }
 
-    /// The mechanism's whole point: an unindexed, class-matching key fires the class binding and,
-    /// once `consume` is set, is claimed the same way a plain consuming binding claims its control.
+    /// An unindexed, class-matching key fires the class binding and, once `consume` is set, is
+    /// claimed the same way a plain consuming binding claims its control.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_class_binding_fires_and_consumes_an_unclaimed_key() {
@@ -2448,8 +2425,8 @@ mod tests {
         );
     }
 
-    /// The chunk's whole reason for existing. On AZERTY the key that says `z` is the one QWERTY
-    /// calls `W`, so a logical binding has to follow the character across the board.
+    /// On AZERTY the key that says `z` is the one QWERTY calls `W`, so a logical binding has to
+    /// follow the character across the board.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_logical_binding_follows_the_character_not_the_position() {

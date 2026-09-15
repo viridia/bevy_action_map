@@ -3,10 +3,8 @@
 use bevy::prelude::*;
 use bevy_action_map::prelude::*;
 
-// `crate::common`, not `super::common`: `common` is declared once at whatever crate root is
-// consuming `pong` (its own `main.rs` here, a different example's `main.rs` if this module is
-// reused there), never nested inside `pong` itself — unlike `court`, `paddle`, `ball` and
-// `score`, which are always siblings of each other and so reach one another with `super::`.
+// `crate::common`, not `super::common` — see `pong`'s module doc: `common` is declared at the
+// consuming crate's root, never nested inside `pong` itself.
 use crate::common::debug_overlay::{self, Showing};
 
 /// Toggles the debug panel.
