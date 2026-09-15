@@ -49,6 +49,18 @@
 //! time the second press arrives. [`is_claimed`] answers the question it is named for and does not
 //! rescue you from this one, because the data it reads has not caught up yet.
 //!
+//! # A simpler recipe, while input comes from hardware
+//!
+//! One listener per device is the recipe that always answers. A game can instead bind join once
+//! with [`bind_class`](crate::binding::InputContextBuilder::bind_class) to a class such as
+//! [`ControlClass::AnyButton`](crate::capture::ControlClass::AnyButton) and read the device off
+//! [`ClassFired`](crate::event::ClassFired)'s raw event: one context, one binding, and no spawning
+//! per device. The race above applies to it unchanged.
+//!
+//! What it rests on is input arriving as hardware events. A backend that supplies action values
+//! directly, rather than reporting the controls it read, leaves no raw event to take a device from,
+//! so this recipe has no answer under one. Pair the listener instead if you may ever run that way.
+//!
 //! # The rest is yours
 //!
 //! Which slot a newly claimed device fills, how many slots there are, whether a listener survives

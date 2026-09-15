@@ -1,8 +1,8 @@
 //! Disasteroids — an asteroids-like game, playable on the keyboard or a gamepad.
 //!
-//! The point of the example is [`actions`], which holds the entire input layer: seven actions, two
-//! contexts, and the bindings that drive them from either device. Nothing else in the game mentions
-//! a key or a button.
+//! The point of the example is [`actions`], which holds the entire input layer: twelve actions,
+//! three contexts, and the bindings that drive them from either device. Nothing else in the game
+//! mentions a key or a button.
 //!
 //! Fly with `W`/arrow-up and `A`/`D` or the arrow keys, fire with space, jump with left shift, and
 //! pause with escape. On a pad, the right trigger is the throttle and it is analog — the ship burns
@@ -16,9 +16,9 @@
 //! playing, so pausing stands it down and whatever the player was holding is canceled rather than
 //! left running. Pause itself is in a context with no condition at all, because the control that
 //! unpauses has to be heard by something that pausing did not switch off. And the settings screen
-//! is a third, at a higher priority: while it is up the arrow keys move the selection instead of
-//! turning the ship, and nothing is switched off to make that happen — the screen simply consumes
-//! what it binds, and the game goes on flying behind it on everything else.
+//! is a third, at a higher priority and `exclusive`: while it is up the arrow keys move the
+//! selection instead of turning the ship, because an exclusive context stands down everything below
+//! it. No binding has to name what should stop answering, and none needs `.consume()`.
 
 #![allow(missing_docs)]
 

@@ -325,7 +325,7 @@ fn tunable_shapes_agree(a: crate::mapping::TunableValue, b: crate::mapping::Tuna
 pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
     let mut found = Vec::new();
     // Mapping keys have to be unique across the whole context, so they are gathered as we go
-    // than compared pairwise like the checks below.
+    // rather than compared pairwise like the checks below.
     //
     // Keyed by family as well as by name, and remembering *which action* claimed each, because
     // neither kind of repeat is a mistake on its own. Uniqueness is per family (R19.15), so one

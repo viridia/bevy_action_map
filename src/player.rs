@@ -1,7 +1,7 @@
 //! Players, device pairing, and control families.
 //!
 //! This module maps devices to the players that own them, so one player's input never reaches
-//! another, and describes the named device requirements a game can assign players against.
+//! another.
 
 use bevy_ecs::prelude::Component;
 use core::ops::Deref;

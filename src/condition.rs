@@ -623,8 +623,8 @@ mod tests {
         );
     }
 
-    // 1012: a binding with nothing but a non-vetoing blocking condition reads no value at all, so
-    // it must fall back to the same at-rest check the no-conditions case uses, not fire unasked.
+    // A binding with nothing but a non-vetoing blocking condition reads no value at all, so it
+    // must fall back to the same at-rest check the no-conditions case uses, not fire unasked.
     #[test]
     fn a_lone_blocking_condition_falls_back_to_the_control_at_rest() {
         struct NeverVetoes;

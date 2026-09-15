@@ -132,7 +132,8 @@ serialize = [
   "bevy_reflect",
 ]
 
-# bevy_input_focus integration: focus-activated contexts, dispatch effects (D4, R22.10).
+# bevy_input_focus integration (planned feature): focus-activated contexts, dispatch effects.
+# Gates the dependency only; nothing in `src/` reads it yet (R22.10).
 focus = ["dep:bevy_input_focus"]
 
 # bevy_state integration: a context's activation follows a game state (R7.1, R7.7).

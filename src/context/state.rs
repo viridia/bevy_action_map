@@ -2992,9 +2992,8 @@ mod tests {
     }
 
     // docs/decisions.md D8's two evaluation criteria, as facts about the layout rather than a
-    // wall-clock
-    // comparison: the numbers a timing run would produce follow from these, and these do not
-    // depend on the machine that ran them.
+    // wall-clock comparison: the numbers a timing run would produce follow from these, and these
+    // do not depend on the machine that ran them.
 
     #[test]
     fn activation_moves_no_entity_between_archetypes() {

@@ -794,8 +794,8 @@ impl<C> InputContextBuilder<C> {
     /// that would flatten it to on/off. A stick, an axis, mouse motion, or a composite are never
     /// eligible — there is no single press for any of them to toggle. Every eligible binding
     /// shares one latch: press any of them, release, press another, and the action reads one
-    /// consistent state
-    /// throughout — never one control turning it on while a different one turns it back off.
+    /// consistent state throughout — never one control turning it on while a different one turns
+    /// it back off.
     ///
     /// Held is the default; nothing changes until a player (or a preset) turns toggle mode on.
     /// Downstream conditions read whatever the modifier chain produced, so `.down()` on a toggled

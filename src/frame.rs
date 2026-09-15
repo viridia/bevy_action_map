@@ -5,8 +5,7 @@
 //! the frame. That makes input easier to replay, easier to test, and easier to feed into later
 //! mapping stages.
 //!
-//! Right now it samples keyboard input and mouse motion, but the queue is already shaped so higher
-//! layers can replay it later.
+//! It samples keyboard, mouse and gamepad input.
 //!
 //! ```rust
 //! use bevy::prelude::*;
@@ -177,42 +176,33 @@ pub struct TimedRawEvent {
 /// was pressed and released between two simulation ticks. Events instead stay queued until read,
 /// and each consumer asks for what has happened since it last looked, via
 /// [`events_after`](InputFrame::events_after).
-// Theory of operation. The queue is appended to once a frame, read independently by each consumer,
-// and retired wholesale. Three rules keep those from interfering.
+// The queue is appended to once a frame, read independently by each consumer, and retired
+// wholesale.
 //
-// Appending is monotonic. `record` stamps (frame, order) with order rising inside a sample and
-// frame rising across samples, so the vector is always sorted by timestamp. `events_after` relies
-// on that to binary-search for a consumer's cursor. Anything that inserted out of order, or sorted
-// by something else, would not fail loudly — it would hand consumers the wrong slice.
+// Appending is monotonic: `record` stamps (frame, order) with order rising inside a sample and
+// frame rising across samples, so the vector is always sorted by timestamp and `events_after` can
+// binary-search it. An insert out of that order would not fail loudly — it would hand consumers
+// the wrong slice.
 //
-// Reading is per consumer, not destructive. A consumer passes the last timestamp it saw and gets
-// what came after; reading does not remove anything, because several consumers read the same
-// events. A render-tick context and a fixed-tick context both act on the same press, and that is
-// correct: they are answering different questions about it.
+// Reading is per consumer and non-destructive, because several consumers read the same events: a
+// render-tick context and a fixed-tick context acting on one press are answering different
+// questions about it.
 //
-// Retiring is wholesale and happens after fixed evaluation. That instant is chosen because it is
-// the only one at which every consumer is known to have read: render-tick contexts evaluate in
-// PreUpdate, earlier in the same frame, and fixed-tick ones have just evaluated. Retiring at
-// sample time instead — which is what this did originally — discards events before a fixed tick
-// that has not run yet can see them, and is what made a 0-tick frame lose edges. The invariant is
-// load-bearing and not local to this file: it holds only while evaluation stays in PreUpdate and
-// FixedPreUpdate, so moving either schedule breaks it silently.
+// Retirement is wholesale, after fixed evaluation, and holds only while evaluation stays in
+// PreUpdate and FixedPreUpdate; moving either schedule breaks it silently.
 //
-// Cursors and retirement look redundant and are not. Retirement alone fails when the simulation
-// does not step: nothing is retired, next frame's sample appends to what is still queued, and a
-// render context reads events it already acted on. Cursors alone fail by unbounded growth. So
-// cursors give correctness and retirement gives a bound, and neither substitutes for the other.
+// Cursors and retirement are both needed. Without cursors, a frame that steps the simulation zero
+// times retires nothing and a render context re-reads what it already acted on; without
+// retirement, the queue grows unbounded.
 //
-// Window granularity is a property of the shim, not of the design. Timestamps carry a frame
-// number, so every event in a frame compares equal on the only axis a window could split, and the
-// first fixed tick to run necessarily takes all of them while later ticks in that frame take
-// nothing. Magnitude is conserved and each edge is seen once, which is what R9.4 and R9.5 ask for;
-// what is missing is attributing an event to the tick it truly fell in. Real timestamps
-// (bevy#9087) change that policy alone.
+// Window granularity is a property of the shim. Every event in a frame compares equal on the only
+// axis a window could split, so the first fixed tick takes all of them and later ticks take none.
+// Magnitude is conserved and each edge seen once (R9.4, R9.5), but an event is not attributed to
+// the tick it truly fell in. Real timestamps (bevy#9087) would change that.
 //
-// Reading from outside PreUpdate or FixedPreUpdate is a trap worth knowing about: by Update the
-// queue has been retired if the simulation stepped this frame and is intact if it did not, so a
-// reader there sees content that depends on the frame rate.
+// Reading outside PreUpdate or FixedPreUpdate is a trap: by Update the queue has been retired if
+// the simulation stepped this frame and is intact if it did not, so a reader there sees content
+// that depends on the frame rate.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, Default, PartialEq, Resource)]

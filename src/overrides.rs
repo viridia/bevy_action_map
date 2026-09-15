@@ -335,11 +335,11 @@ impl serde::Serialize for SavedRow {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             // Bare words a person reads as neither a control nor a mistake — every real control
-            // name carries a `/` (chunk 37), so the two can never collide with one (R17.7).
+            // name carries a `/`, so the two can never collide with one (R17.7).
             SavedRow::Cleared => serializer.serialize_str("cleared"),
             SavedRow::NotOurs => serializer.serialize_str("external"),
             // A scalar is the same thing as a one-element list, and most rows hold one — a player
-            // editing this by hand should not have to type brackets to say so (§10.1).
+            // editing this by hand should not have to type brackets to say so (§10.3).
             SavedRow::Controls(names) if names.len() == 1 => serializer.serialize_str(&names[0]),
             SavedRow::Controls(names) => names.serialize(serializer),
         }

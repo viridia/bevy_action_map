@@ -1054,8 +1054,6 @@ mod tests {
         assert_eq!(capture::seen(), before + 1);
     }
 
-    /// The list in that warning is the useful half of it — often a neighbouring action or the
-    /// same one in another context — and it reads as a plain sentence.
     use crate::{InputAction, InputContext};
     use bevy_app::{App, FixedUpdate, Update};
     use bevy_ecs::prelude::Resource;

@@ -138,14 +138,11 @@
 //! reaches one paired instance's own bindings rather than every one, so two players on identical
 //! pads can rebind independently without either becoming the new default a third inherits.
 //!
-//! Getting a device into a `Paired` in the first place is a [join] gesture: declare "press anything
-//! to join" as an ordinary action bound with
-//! [`bind_class`](binding::InputContextBuilder::bind_class) to
-//! [`ControlClass::AnyButton`](capture::ControlClass::AnyButton) (or to whichever class fits), and
-//! read which device fired it straight off [`ClassFired`](event::ClassFired)'s untouched raw event.
-//! [`join::is_claimed`] answers the one question a settings screen still needs — whether some other
-//! `Paired` already has that device — so a screen offering an open slot never hands it to a player
-//! someone else already claimed.
+//! Getting a device into a `Paired` in the first place is a [join] gesture: declare join as an
+//! ordinary action on a listener context spawned once per available device, each `Paired` to its
+//! own. The press then arrives on an entity that already names who pressed it, so the listener's
+//! own pairing is the answer rather than anything carried on the action. See [`join`] for the
+//! worked recipe, and for the race two players pressing on the same tick can hit.
 //!
 //! ## Presentation
 //!
@@ -201,7 +198,7 @@
 //! | `touch`       |         | Touch input as a binding input.                                  |
 //! | `bevy_reflect`|   yes   | Runtime reflection, needed to register custom modifiers and conditions. |
 //! | `serialize`   |         | `serde` support for saving and loading binding overrides.         |
-//! | `focus`       |         | Integration with `bevy_input_focus`: focus-driven contexts.       |
+//! | `focus`       |         | Planned: `bevy_input_focus` integration. Gates the dependency only. |
 //! | `state`       |   yes   | A context's activation can follow a `bevy_state` state.           |
 
 extern crate self as bevy_action_map;
@@ -237,10 +234,6 @@ pub mod present;
 pub mod preset;
 
 pub mod backend;
-
-#[cfg(feature = "focus")]
-#[cfg_attr(docsrs, doc(cfg(feature = "focus")))]
-pub mod focus;
 
 /// System sets for the two stages of the input pipeline.
 ///

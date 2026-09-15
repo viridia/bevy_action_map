@@ -177,6 +177,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 92  | Bindings that survive a restart, through `bevy_settings`         |
 | 92b | A pane's chosen preset survives a restart                        |
 | 116 | A backend-neutral gamepad pool, and a join listener per device   |
+| 117a | The comments that were wrong, and the focus placeholder          |
 
 ---
 
@@ -458,8 +459,9 @@ network removed, which was the expensive part.
 
 ## The library itself
 
-Three chunks no game asks for and no published crate can do without: an extension point nothing
-outside has exercised, the reflection the documents promise, and documentation that runs.
+Four chunks no game asks for and no published crate can do without: an extension point nothing
+outside has exercised, the reflection the documents promise, documentation that runs, and
+documentation that is true.
 
 ### 112. A backend suppresses a device family at L0
 
@@ -592,8 +594,70 @@ re-adds it.
   with what the crate grew into since.
 - **Comparison upkeep.** [docs/comparison.md](./docs/comparison.md) is read against BEI 0.26.0 and
   LWIM 0.21.0, which is a claim with a date on it. Both crates move.
+- **`cargo doc` is not in the Verification list, and fails outside `--all-features`.** The
+  no-devices build reports eighteen unresolved intra-doc links, every one to a feature-gated item
+  linked from ungated prose — `KeyCode`, `LogicalKey`, `SavedOverrides`, `active_in_state`, `Stick`,
+  `InputFramePlugin` among them. `--all-features` resolves all of them and so hides the lot. Extends
+  `docs/issues.md` 1038, which named only the all-features build.
 - **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
   look at the module pages the way a stranger would.
+
+### 117. The comment sweep
+
+A grooming pass that turned out to be more than one. The style violations were minor; what the scan
+found was prose describing a crate that no longer exists, and single conclusions written out three
+and four times across a field comment, a method doc, a test doc and `docs/design.md`.
+
+**Part a has landed:** the prose that was wrong rather than verbose, `src/focus.rs`'s deletion, the
+crate root's stale join recipe, and Disasteroids' overview. Candidate lists for every part below are
+in
+[notes/chunk-117-candidates.md](./notes/chunk-117-candidates.md), one section per file group. They
+cost enough to be worth not reproducing; delete the file when the last part lands.
+
+**How to run a part.** Invoke the `comment-grooming` skill, which carries the dial, the six
+categories and the reader rule. One part is one group and one commit: read that group's candidate
+list, verify each entry against the code before acting on it — a list entry is a candidate, not a
+finding — then `devfmt --diff` and `scripts/verify.sh`.
+
+- **117c — `eval.rs`, `plan.rs`.** Three clusters: the class-binding specificity rule, stated four
+  times; the shared-tunable machinery, three; and `apply_authority` reproducing `design.md` §5.8.
+  `Plan::is_indexed` is the model for the fix — state the conclusion, cross-reference the rest.
+- **117d — `context.rs`, `context/{declare,state,fixtures}.rs`.** Shadow-versus-active and
+  require-reset are each stated three or four times, and a cluster of test docs narrate the bug that
+  produced them rather than the invariant they now hold.
+- **117e — `overrides.rs`, `preset.rs`, `capture.rs`.** The serialization docs restate `design.md`
+  §10.3 paragraph for paragraph and carry the crate's only remaining public-item citations, on
+  `SavedOverrides` and `resolve_saved`.
+- **117f — `device.rs`, `frame.rs`, `lib.rs`, `player.rs`, `join.rs`, `backend.rs`, `event.rs`,
+  `inspect.rs`.** `device.rs`'s test comments re-explain the doc of the thing under test as a matter
+  of habit, and `Brand`/`Identity` are one doc with the nouns swapped.
+- **117g — `binding.rs`, `binding/{builder,control,modifier}.rs`, `condition.rs`.** One rationale
+  restated two to four times per rule: listing defaults, mapping capacity, the rescale rule,
+  composite part naming, the shared toggle's `prev`.
+- **117h — `action.rs`, `mapping.rs`, `present.rs`.** Public documentation is the axis, not internal
+  comment length — 970 doc lines against 118 internal. One public citation (`R11.6` on
+  `fallback_label_for_brand`) and roadmap status on `pub enum TunableValue`.
+- **117i — `examples/disasteroids/`, `examples/capture.rs`, `examples/ime_diagnostic.rs`.**
+  `capture.rs` re-teaches its own module doc three or four times, `settings.rs` repeats one
+  working-copy refrain six times, and four citations name a chunk or an R-number.
+- **117j — `examples/{split_friction,common,pong,pong_robot}/`, `tests/`.** Eighteen chunk and
+  R-number citations in user-facing teaching prose, the largest concentration in the tree, plus four
+  metaphor tells. `tileset.rs` and `split_screen.rs` use "seam" in its literal graphics sense and
+  are correct as they stand.
+- **117k — route and clear `docs/issues.md` 1030.** Six rows still stand after 117a took the
+  `player.rs` one: `touch`, `device.rs`'s module doc, `inspect.rs:76`, `lib.rs:219`,
+  `action.rs:497`, and `mapping.rs`'s capacity. The finding is marked *Unrouted*; this part is its
+  destination.
+- **117l — teach `devfmt` about YAML frontmatter.** It reads `---` and the `name:`/`description:`
+  keys as prose and rewraps the block into one paragraph, which breaks any skill file it touches.
+  The fix is in `reflow_file`'s `"md"` arm (`tools/devfmt/src/main.rs:269`): split a leading
+  frontmatter block off and pass the body with its real starting line, or `--diff` reflows the wrong
+  paragraphs.
+
+**Deliberate omissions.** No code changes beyond `src/focus.rs`, deleted in 117a. `docs/design.md`,
+`docs/decisions.md` and `Requirements.md` are not touched: where a comment duplicates one of them,
+the comment yields and the document stays. Chunk 28 owns the README and the crate-level `//!`
+rewrite — 117 fixes what is *wrong* in `lib.rs`, not what is thin.
 
 ---
 
