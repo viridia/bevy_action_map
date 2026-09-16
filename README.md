@@ -320,9 +320,9 @@ need `--features serialize` as well, marked below.
 
 ## Installing
 
-Not on crates.io yet. Depend on the git repository directly, and pin `Cargo.lock` the way this repo
-does — the Bevy dependencies are git dependencies with no `rev`, so an unpinned `cargo update` can
-pull a Bevy commit this crate hasn't been built against:
+Not on crates.io yet, so depend on the git repository directly. It targets Bevy `0.20.0-rc.1`, and
+your own Bevy dependency has to name that pre-release exactly: a plain `0.20` will not match it
+until 0.20.0 is out.
 
 ```toml
 [dependencies]

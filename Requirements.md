@@ -1566,8 +1566,8 @@ to produce APIs in which the simplest case stops being simple.
   Bevy's own convention for plugin setup, and an error returned from a builder chain tends to be
   dropped. The obligation that applies to both is the actionable message.
 - **R24.5 (SHOULD)** Follow current Bevy event conventions: buffered `Message` + `MessageReader` for
-  streams, `Event`/observers for per-entity notification. (Bevy 0.20-dev has completed this split;
-  the crate must not be written against the old `EventReader` model.)
+  streams, `Event`/observers for per-entity notification. (Bevy 0.20 has completed this split; the
+  crate must not be written against the old `EventReader` model.)
 - **R24.6 (MUST)** The common case must be short — binding WASD to a movement action should be a few
   lines. Comprehensiveness (this document) must not produce a system that requires 40 lines for the
   trivial case; an ergonomic façade over the general model is a requirement, not a nicety.

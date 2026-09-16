@@ -1,6 +1,7 @@
 # Working on `bevy_action_map`
 
-A Bevy input-mapping crate. Bevy 0.20-dev pinned by commit, `no_std` + alloc, `forbid(unsafe_code)`.
+A Bevy input-mapping crate. Bevy 0.20.0-rc.1 from crates.io, `no_std` + alloc,
+`forbid(unsafe_code)`.
 
 ## Starting a session
 

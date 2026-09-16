@@ -34,15 +34,15 @@ workspace = true
 # `bevy` via dev-dependencies instead.
 [dependencies]
 bevy_action_map_macros = { path = "macros", version = "0.1.0" }
-bevy_app = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
-bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
-bevy_input = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
-bevy_math = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
-bevy_time = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
-bevy_platform = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
-bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", default-features = false, optional = true }
-bevy_input_focus = { git = "https://github.com/bevyengine/bevy.git", default-features = false, optional = true }
-bevy_state = { git = "https://github.com/bevyengine/bevy.git", default-features = false, optional = true }
+bevy_app = { version = "0.20.0-rc.1", default-features = false }
+bevy_ecs = { version = "0.20.0-rc.1", default-features = false }
+bevy_input = { version = "0.20.0-rc.1", default-features = false }
+bevy_math = { version = "0.20.0-rc.1", default-features = false }
+bevy_time = { version = "0.20.0-rc.1", default-features = false }
+bevy_platform = { version = "0.20.0-rc.1", default-features = false }
+bevy_reflect = { version = "0.20.0-rc.1", default-features = false, optional = true }
+bevy_input_focus = { version = "0.20.0-rc.1", default-features = false, optional = true }
+bevy_state = { version = "0.20.0-rc.1", default-features = false, optional = true }
 serde = { version = "1", default-features = false, features = [
   "alloc",
   "derive",
@@ -52,7 +52,7 @@ serde = { version = "1", default-features = false, features = [
 log = { version = "0.4", default-features = false }
 # For `once!`, which is the `no_std` half of `bevy_log::warn_once!`. Already in the graph beneath
 # `bevy_ecs`, so it costs a line here and nothing to build.
-bevy_utils = { git = "https://github.com/bevyengine/bevy.git", default-features = false }
+bevy_utils = { version = "0.20.0-rc.1", default-features = false }
 # For `DeviceHandleSet` (§15): a handful of devices per occupant, heap-spilling rather than
 # hard-capping. Already in the graph beneath `bevy_ecs`.
 smallvec = { version = "1", default-features = false }
@@ -62,7 +62,7 @@ fixedbitset = "0.5"
 # `bevy_settings` is not in the umbrella's default profiles. Split Friction is the only example
 # that stores anything, and where a game puts its bytes is the app's decision (D53), so this is a
 # dev-dependency feature rather than anything the crate itself knows about.
-bevy = { git = "https://github.com/bevyengine/bevy.git", features = [
+bevy = { version = "0.20.0-rc.1", features = [
   "dynamic_linking",
   "bevy_settings",
 ] }
