@@ -188,6 +188,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 117j | The other examples and `tests/`, and the last chunk references    |
 | 117k | The public docs that contradicted the code                        |
 | 117l | `devfmt` holds YAML frontmatter verbatim                          |
+| 117m | A rewrap stops changing what the text is                          |
 
 ---
 
@@ -671,34 +672,27 @@ re-adds it.
 - **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
   look at the module pages the way a stranger would.
 
-### 117m. A rewrap stops changing what the text is
+### 117o. A preview that shows the change, not the filename
 
-`devfmt` rewraps a paragraph by joining its words and re-emitting them under one prefix. Three
-things that are not words are destroyed on the way through, and all three are live at `HEAD` —
-`--diff` is the only reason they stay rare, since a paragraph nobody edited is never reached.
+`--check` prints a list of filenames, which answers "is anything unformatted" and nothing else.
+`--preview` prints what would change and writes nothing, exiting non-zero the same way. It lands
+before 117n because it is the instrument for judging 117n: the flip's effect on the tree can be read
+before the flip is turned on.
 
-- **Indentation survives a rewrap.** A paragraph's own indent — the whitespace between the base
-  prefix and the text — is read off the first line and then dropped. An indented continuation
-  paragraph comes back at column 0 and escapes the bullet it belonged to; a nested list item is
-  promoted to top level, flattening a two-level list into one. Both reproduce in a `.md` file and
-  in a Rust doc comment, the doc-comment path handing its post-marker content to the same reflow.
-  `Paragraph` carries the indent it was built with, and the first-line and continuation prefixes
-  are built from it.
-- **A line with no letter or digit is atomic.** `// ---------` is a divider, and a rewrap pulls the
-  next sentence's first word up onto the end of it. The rule costs three lines and has no false
-  positive on prose; it also covers the `---` thematic break in markdown, which nothing guarded.
-- **A backtick span is one unbreakable unit.** Greedy fill splits on whitespace, so `` `12. ` ``
-  breaks across two lines — and the fragment left at the head of the second is then a list marker
-  to the next run over that file. A span too long to fit overflows its line, the trade already made
-  for a long URL.
-- **Not doing: repacking**, which is 117n. This chunk changes what a rewrap does, not when one
-  fires, so no prose in tree moves.
-- **Not doing: string literals.** A `.rs` line whose trimmed text starts with `//` inside a string
-  literal is read as a comment. The module header disclaims this as not occurring in idiomatic
-  Rust; it occurs in `devfmt`'s own test fixtures and nowhere else in tree, and telling the two
-  apart means lexing Rust. Deferred with a gate, and the header stops claiming otherwise.
-- **Verified by:** a unit test per corruption, and no prose outside `tools/devfmt/` changing — a
-  diff elsewhere means a rewrap that was already firing has changed its answer.
+- **A unified diff with paragraph-sized hunks.** A reflow rewrites every line of a paragraph, so a
+  minimal line diff is noise; each hunk covers a whole paragraph instead, with zero context lines
+  the way `diff -U0` emits them. Nothing requires a patch to be minimal, only correct.
+- **No diff algorithm, and no dependency.** Blank lines pass through untouched and a paragraph never
+  emits one, so old and new resynchronize at every blank line: split both on blanks, compare segment
+  by segment, and each differing pair is one hunk. `devfmt` keeps its empty dependency list.
+- **`--check` is unchanged.** It still lists filenames and exits non-zero, the contract `cargo fmt
+  --check` has and the view 117p wants for slicing by directory. Two questions, two flags: which
+  files, and what exactly.
+- **Not doing: a second output shape.** No `--preview=patch`, no JSON, until something wants to pipe
+  it somewhere.
+- **Verified by:** the emitted patch applying cleanly with `git apply` and reproducing byte-for-byte
+  what a real run writes. A preview that disagrees with the run it previews is worse than none, so
+  that equivalence is the test rather than a sample of the output.
 
 ### 117n. Repacking is what `devfmt` does, and a bare run is refused
 
@@ -718,16 +712,35 @@ against 6 pure rewraps in the last 60 commits.
 - **A `docs/decisions.md` entry.** What `devfmt` is for — renormalizing prose rather than fixing
   violations — is cheap to reverse in code and expensive once a tree-wide diff has landed on it,
   and it has already been re-argued once from a blank page.
-- **Six split code spans in tree go with it.** `Requirements.md`, `Roadmap.md`, `docs/design.md`,
-  `docs/issues.md`, `src/binding/control.rs` and `examples/split_friction/main.rs` each carry one
-  backtick span broken across two lines, left behind by the bug 117m fixes. A repack rejoins them,
-  so they need no pass of their own — but they are the reason this chunk's diff touches prose that
-  reads as already correct.
+- **Not doing: the sweep itself**, which is 117p. Nothing in tree is rewritten here, so this chunk
+  is the behaviour change on its own and its diff is the tool and its tests.
 - **Not doing: the usage log.** Its deferred row gates on hand reflows still happening after this
   lands, and the row's wording is corrected here to stop asserting that they already do.
-- **Verified by:** `--sweep` over the tree, with `main.rs`'s own divider intact afterwards — the
-  canary for 117m's three fixes. `tools/devfmt/src/main.rs` is read by hand rather than trusted,
-  since its test fixtures are where the string-literal limitation bites.
+- **Verified by:** unit tests that a paragraph inside `--diff`'s reach is repacked whether or not it
+  already fits and one outside it is not; then 117o's `--preview` over the whole tree, read as the
+  blast radius without writing any of it.
+
+### 117p. The migration, a directory at a time
+
+316 loose breaks across 53 files, measured before writing this: prose wrapped before repacking
+existed and never repacked since. A repack is idempotent, so this is a one-time normalization and
+not a standing mode — afterwards `--diff` keeps the tree packed and a later sweep does nothing.
+
+- **One commit per directory**, largest first: `src` 144, `docs` 55, `examples` 51, the root
+  documents 37, `tools` 23, `macros` 4, `tests` 2. Each is one `--sweep <dir>`, read through
+  `--preview` before it is written, so the review is bounded by the directory rather than the tree.
+- **Six split code spans go with it.** `Requirements.md`, `Roadmap.md`, `docs/design.md`,
+  `docs/issues.md`, `src/binding/control.rs` and `examples/split_friction/main.rs` each carry one
+  backtick span broken across two lines, left behind by the bug 117m fixed. A repack rejoins them,
+  so they need no pass of their own; they are why a hunk here can touch prose that reads as correct.
+- **`tools/devfmt/src/main.rs` is swept by hand, or not at all.** Its test fixtures are string
+  literals full of `///`, which the classifier reads as comments. The deferred row owns the general
+  case; this chunk owns not walking into it.
+- **Not doing: `archive/`.** Nothing in flight reasons from it, and it is larger than everything
+  else here together.
+- **Verified by:** `--check --sweep` clean on each directory afterwards, and no line over 100
+  columns that is not a table row or a string literal. The diff is reviewed as "every hunk is a
+  reflow", which is the only way a diff this size is reviewable at all.
 
 ---
 
