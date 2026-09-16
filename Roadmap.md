@@ -677,13 +677,19 @@ re-adds it.
 
 ### 117p. The migration, a directory at a time
 
-316 loose breaks across 53 files, measured before writing this: prose wrapped before repacking
-existed and never repacked since. A repack is idempotent, so this is a one-time normalization and
-not a standing mode — afterwards `--diff` keeps the tree packed and a later sweep does nothing.
+Prose wrapped before repacking existed and never repacked since. A repack is idempotent, so this is
+a one-time normalization and not a standing mode — afterwards `--diff` keeps the tree packed and a
+later sweep does nothing.
 
-- **One commit per directory**, largest first: `src` 144, `docs` 55, `examples` 51, the root
-  documents 37, `tools` 23, `macros` 4, `tests` 2. Each is one `--sweep <dir>`, read through
-  `--preview` before it is written, so the review is bounded by the directory rather than the tree.
+- **One commit per directory**, each a single `--sweep <dir>` read through `--preview` first, so the
+  review is bounded by the directory rather than by the tree. Measured without writing any of it, in
+  hunks and lines replaced: `src` 185/486, `docs` 73/241, `examples` 59/153, the root documents
+  48/158, `macros` 3/9, `tests` 2/6. `macros` and `tests` are five hunks between them and can ride
+  with anything; `src` is the one that wants its own sitting, and splits by module if it needs to.
+- **Sampled before starting**, one file of each kind. `src/context/state.rs` came to 19 hunks of
+  comment reflow; `docs/decisions.md` to 30 hunks and 102 lines each way, a pure reflow with no net
+  growth. Nothing structural moved: table rows, nested bullets and link definitions come through at
+  identical counts, and the dedent scan finds what it already found and nothing new.
 - **Six split code spans go with it.** `Requirements.md`, `Roadmap.md`, `docs/design.md`,
   `docs/issues.md`, `src/binding/control.rs` and `examples/split_friction/main.rs` each carry one
   backtick span broken across two lines, left behind by the bug 117m fixed. A repack rejoins them,
@@ -693,9 +699,15 @@ not a standing mode — afterwards `--diff` keeps the tree packed and a later sw
   case; this chunk owns not walking into it.
 - **Not doing: `archive/`.** Nothing in flight reasons from it, and it is larger than everything
   else here together.
-- **Verified by:** `--check --sweep` clean on each directory afterwards, and no line over 100
-  columns that is not a table row or a string literal. The diff is reviewed as "every hunk is a
-  reflow", which is the only way a diff this size is reviewable at all.
+- **Verified by:** `--check --sweep` clean on the directory afterwards, and no line over 100 columns
+  that is not a table row, a link definition or a string literal — a count that improves rather than
+  holding, since the sweep fixes 23 over-width markdown lines on its way past and leaves 21 that are
+  all exempt. The diff is read as "every hunk is a reflow", which is the only way a diff this size
+  is reviewable at all.
+- **Undecided, and cheaper to settle before the first commit than after:** whether to lead with
+  `tests` and `macros` as a throwaway-sized first commit, to see the shape in a real review before
+  the large ones; and whether `Roadmap.md` reflowing itself inside the root-documents commit is
+  acceptable, since it is 12 of those hunks and this section is among them.
 
 ---
 
