@@ -24,7 +24,7 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 | `docs/design.md` | how the crate works, in 11 numbered sections | you need the shape of a thing before changing it |
 | `docs/decisions.md` | why it is that way, `D1`–`D74` | a decision looks arbitrary, or you are about to reverse one |
 | `Roadmap.md` | what is left, what is broken, the chunk sequence | **start here for any chunk** |
-| `Requirements.md` | 224 numbered requirements, `R<section>.<n>`, in sections `§0`–`§24` | you need to know what must be true, or a chunk cites an R-number |
+| `Requirements.md` | 224 numbered requirements, `R<section>.<n>`, in sections 0–24 | you need to know what must be true, or a chunk cites an R-number |
 | `docs/comparison.md` | how this crate differs from BEI and LWIM | someone asks why this exists |
 | `docs/one-way-doors.md` | what stops being revisable if an input crate goes upstream | upstreaming comes up |
 | `docs/issues.md` | the implementation scan's findings, `1.1`–`6`, by severity | a finding needs routing, or you are about to re-find one |
@@ -38,8 +38,10 @@ from them.
 There is **one `D`-numbering** in the project, defined in `docs/decisions.md`. `Requirements.md`
 tags requirements with it; it used to carry a rival `D1`–`D9` of its own, and does not any more.
 
-A bare `§N` is a section of `Requirements.md`. A section of any other document is cited with the
-filename, as `design.md §3.3`.
+Two documents have numbered sections: `Requirements.md`, numbered 0–24, and `docs/design.md`,
+numbered 1–11 with subsections such as `5.3`. A bare `§` is one or the other, and which one is
+usually clear from whether it carries a subsection, since `Requirements.md` has none. Qualify with
+the filename — `design.md §5.3` — wherever it is not.
 
 A requirement is defined once, as a list item reading `- **R<section>.<n> (MUST)**`, and is cited
 bare everywhere else. So to reach a definition, search for `**` followed by the number: the `**`
