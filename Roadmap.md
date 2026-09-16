@@ -671,6 +671,59 @@ re-adds it.
 - **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
   look at the module pages the way a stranger would.
 
+### 117m. A rewrap stops changing what the text is
+
+`devfmt` rewraps a paragraph by joining its words and re-emitting them under one prefix. Three
+things that are not words are destroyed on the way through, and all three are live at `HEAD` —
+`--diff` is the only reason they stay rare, since a paragraph nobody edited is never reached.
+
+- **Indentation survives a rewrap.** A paragraph's own indent — the whitespace between the base
+  prefix and the text — is read off the first line and then dropped. An indented continuation
+  paragraph comes back at column 0 and escapes the bullet it belonged to; a nested list item is
+  promoted to top level, flattening a two-level list into one. Both reproduce in a `.md` file and
+  in a Rust doc comment, the doc-comment path handing its post-marker content to the same reflow.
+  `Paragraph` carries the indent it was built with, and the first-line and continuation prefixes
+  are built from it.
+- **A line with no letter or digit is atomic.** `// ---------` is a divider, and a rewrap pulls the
+  next sentence's first word up onto the end of it. The rule costs three lines and has no false
+  positive on prose; it also covers the `---` thematic break in markdown, which nothing guarded.
+- **A backtick span is one unbreakable unit.** Greedy fill splits on whitespace, so `` `12. ` ``
+  breaks across two lines — and the fragment left at the head of the second is then a list marker
+  to the next run over that file. A span too long to fit overflows its line, the trade already made
+  for a long URL.
+- **Not doing: repacking**, which is 117n. This chunk changes what a rewrap does, not when one
+  fires, so no prose in tree moves.
+- **Not doing: string literals.** A `.rs` line whose trimmed text starts with `//` inside a string
+  literal is read as a comment. The module header disclaims this as not occurring in idiomatic
+  Rust; it occurs in `devfmt`'s own test fixtures and nowhere else in tree, and telling the two
+  apart means lexing Rust. Deferred with a gate, and the header stops claiming otherwise.
+- **Verified by:** a unit test per corruption, and no prose outside `tools/devfmt/` changing — a
+  diff elsewhere means a rewrap that was already firing has changed its answer.
+
+### 117n. Repacking is what `devfmt` does, and a bare run is refused
+
+A paragraph in reach is refilled whether or not its lines already fit. Editing prose shortens a line
+as often as it lengthens one, and a shortened line leaves a paragraph ragged without ever crossing
+the width, which is the half of the problem a width check cannot see. 350 loose breaks stand in tree
+against 6 pure rewraps in the last 60 commits.
+
+- **`fits` stops gating the rewrap.** `flush_paragraph` keeps its scope test and loses its width
+  test, so `--diff` rather than the width is what bounds the blast radius.
+- **A bare `devfmt <path>` is refused.** Once repacking is unconditional the no-flag form is a
+  whole-tree rewrite, one flag away from the routine invocation `CLAUDE.md` documents. `--diff` or
+  `--sweep` has to be named, and passing both is an error.
+- **The prose that says otherwise moves with it.** The module header's last assumption,
+  `tools/devfmt/README.md`'s "only paragraphs that actually violate the width are touched", and
+  `CLAUDE.md`'s devfmt paragraph each state the behaviour this chunk reverses.
+- **A `docs/decisions.md` entry.** What `devfmt` is for — renormalizing prose rather than fixing
+  violations — is cheap to reverse in code and expensive once a tree-wide diff has landed on it,
+  and it has already been re-argued once from a blank page.
+- **Not doing: the usage log.** Its deferred row gates on hand reflows still happening after this
+  lands, and the row's wording is corrected here to stop asserting that they already do.
+- **Verified by:** `--sweep` over the tree, with `main.rs`'s own divider intact afterwards — the
+  canary for 117m's three fixes. `tools/devfmt/src/main.rs` is read by hand rather than trusted,
+  since its test fixtures are where the string-literal limitation bites.
+
 ---
 
 ## Deliberately deferred
@@ -704,7 +757,8 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **R16.3's suspend/resume** (mobile, console) | a platform target that needs it. Nothing in this crate's supported platforms emits a suspend signal or has a device re-enumeration step to hook |
 | **Split Friction's monsters, spawners and missiles** | a mechanic that would exercise input this crate has not already proven. Kept as a row rather than deleted because the sprites, the dungeon's region aspects and a `Fire`-shaped action all exist, so changing our mind is cheap |
 | **Guardian migration** | porting it from Bevy 0.16.1 with `bevy_enhanced_input` 0.12 to 0.20-dev — four versions, and a port plus a rewrite. Doing both at once would confuse "action_map is wrong" with "0.20 moved this" |
-| **A devfmt usage log, to catch the misses nobody notices** | **hand reflows still happening now that repacking is canonical.** Measured before deferring: 350 loose breaks in tree against 6 pure rewraps in 60 commits, so the aftermath of a devfmt run lives in working-tree churn and not in history — `git log` cannot be mined for it, and devfmt is the only thing positioned to see it. The shape, if it revives: devfmt appends to a gitignored log from the process already being run, costing no approval and no tokens; per paragraph it records a hash of the word sequence and a hash of the physical lines, so a later run finding the same words under different line breaks has caught a miss and can attribute it to its own earlier decision. Worth building only with a mechanical trigger to read it — one line of output when the count crosses a threshold — since a log nobody opens is cost with no signal |
+| **A devfmt usage log, to catch the misses nobody notices** | **hand reflows still happening once 117n makes repacking canonical.** Measured before deferring: 350 loose breaks in tree against 6 pure rewraps in 60 commits, so the aftermath of a devfmt run lives in working-tree churn and not in history — `git log` cannot be mined for it, and devfmt is the only thing positioned to see it. The shape, if it revives: devfmt appends to a gitignored log from the process already being run, costing no approval and no tokens; per paragraph it records a hash of the word sequence and a hash of the physical lines, so a later run finding the same words under different line breaks has caught a miss and can attribute it to its own earlier decision. Worth building only with a mechanical trigger to read it — one line of output when the count crosses a threshold — since a log nobody opens is cost with no signal |
+| **`devfmt` reading a comment marker inside a string literal** | a second file in tree acquiring one. A `.rs` line whose trimmed text starts with `//` inside a string literal is reflowed as though it were a comment — the module header's "does not occur in idiomatic Rust" assumption, which `devfmt`'s own test fixtures are the sole counter-example to, and they are also the one file a devfmt chunk edits. So the cost today is a hand check on a file already under review, not a corruption nobody sees. Telling the two apart needs a Rust lexer carrying string state, raw strings and `\`-continued literals, which is a different tool from the line classifier this is built on; a second file acquiring one is what changes that arithmetic |
 | **A physical binding's label matching the current layout** (R12.2, R12.7) | winit exposing a physical-to-logical query and a layout-change signal, requested as [winit#4606][] and tracked by the broader [winit#2678][], open since February 2023 and unimplemented. A workaround was scoped and set aside: `run_captures` already sees the logical key at capture time, but keeping it means a new field on `ControlCaptured`, a session table `present.rs` consults ahead of the static fallback, and an honest answer on whether it survives a save — which drags in the still-deferred binding-definition serialization (R17.6, R22.16) for a fix that only covers controls a player has personally rebound. A landed query supersedes it outright, for every physical binding rather than only captured ones, so the workaround is not worth building ahead of it |
 
 ---
