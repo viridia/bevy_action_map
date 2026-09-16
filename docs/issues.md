@@ -231,7 +231,7 @@ and `CLAUDE.md`. The section's own preamble calls these "cheap to accommodate no
 retrofit," which is the argument for looking at it before more is built on top.
 
 R20.2 and R20.5 are built (chunk 64) and R20.1 holds by construction. R20.4 is withdrawn, and R20.7,
-the narrower requirement that replaced it, is 1045. **R20.6** (MAY, sticky modifiers / one-handed
+the narrower requirement that replaced it, is 1045. R20.6 (MAY, sticky modifiers / one-handed
 support) is **reviewed and left alone**: no in-tree pressure and no case behind it — not worth a
 chunk unless one shows up.
 
@@ -333,7 +333,7 @@ R22.4 (MUST) wants documented ordering and integration with `bevy_input::InputSy
   its generic `Pointer<E>`, which is a reversal note rather than an ordering. Nothing in `src/`,
   `examples/` or `Roadmap.md` mentions it at all, and no ordering constraint anywhere relates the
   two — which is the third R22.4 asks for.
-- **R22.11** (MUST) — focus changes must resolve before the same frame's actions are evaluated.
+- R22.11 (MUST) — focus changes must resolve before the same frame's actions are evaluated.
   `active_if` schedules `condition.pipe(apply_active::<C>)` in `PreUpdate` `.before(Evaluate)` with
   no constraint against whatever writes `InputFocus`, and `examples/common/widget_focus.rs`'s
   `focus_is` adds none. Disasteroids is not bitten because it disables `InputDispatchPlugin` and
@@ -345,12 +345,12 @@ Unrouted.
 
 ### 1027 Two documentation requirements with no document
 
-- **R16.4** (SHOULD) — the web caveats: pointer lock and gamepad access needing a user gesture,
-  gamepad events being polled, key codes and `vendor_id` being less reliable. What the crate says
-  about the web is three comments in `device.rs` noting that `vendor_id` is often absent there,
-  which is one clause of one caveat, written where it happened to matter rather than anywhere a
-  reader would look for the list. Nothing mentions pointer lock or the user gesture.
-- **R16.5** (SHOULD) — name the OS-reserved combinations that are unavailable. Nothing.
+- R16.4 (SHOULD) — the web caveats: pointer lock and gamepad access needing a user gesture, gamepad
+  events being polled, key codes and `vendor_id` being less reliable. What the crate says about the
+  web is three comments in `device.rs` noting that `vendor_id` is often absent there, which is one
+  clause of one caveat, written where it happened to matter rather than anywhere a reader would look
+  for the list. Nothing mentions pointer lock or the user gesture.
+- R16.5 (SHOULD) — name the OS-reserved combinations that are unavailable. Nothing.
 
 Unrouted.
 
@@ -372,7 +372,7 @@ the `no_std` build — and that document does not carry it. Unrouted.
   what is left is a parenthetical inside the physical-binding-label row saying the serialization is
   "still deferred" while gating something else. Both are MAYs, so the stakes are small and the
   omission is not.
-- **R7.5's opt-out is exercised by a test and nothing else.** `activate_including_held` now has a
+- **The R7.5 opt-out is exercised by a test and nothing else.** `activate_including_held` now has a
   caller — a unit test in `src/eval.rs` — where at the time of the scan it had none. What is still
   missing is any example or production caller: the MUST's "unless explicitly opted in" clause is
   proven correct in isolation but has never been asked for by a game in tree.

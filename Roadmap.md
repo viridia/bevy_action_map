@@ -600,7 +600,7 @@ second implementer and the real one cannot live here.
   the backend-owned paddle changes. It is no longer Disasteroids' pad for the same reason it was
   never going to be — that is where presets get taught, and a pad the backend owns has no presets of
   ours to show.
-- **R0.6, the half that is not about Steam.** A backend suppresses its devices at L0 so their raw
+- **The half of R0.6 that is not about Steam.** A backend suppresses its devices at L0 so their raw
   events never reach the frame. Without it the demo reads the pad twice.
 - **Review surface, and it is the point of the chunk.** One decision is still falsifiable here: an
   input observed twice. A decision this chunk cannot break is a decision that was not made.
@@ -612,8 +612,8 @@ second implementer and the real one cannot live here.
 - **A backend-owned action accepting a `.hold()`** was the third falsifiable decision, and chunk
   111 made it unrepresentable rather than diagnosable, so the hold on the serve is now the local
   paddle's or nothing.
-- **R0.5's queryable half is still owed.** A delegated action's value is indistinguishable from a
-  bound one at the call site, which is the requirement's point, but nothing yet names *which*
+- **The queryable half of R0.5 is still owed.** A delegated action's value is indistinguishable from
+  a bound one at the call site, which is the requirement's point, but nothing yet names *which*
   authority produced it: chunk 111 left `AuthorityValues` unnamed rather than adding a field with no
   reader. A chunk with two real backends in one build is where a name earns itself.
 - **A delegated action has no row on a controls screen**, because it has no binding to derive one
@@ -713,7 +713,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Sub-frame event timing** (D4's remainder) | [bevy#9087][] upstream. Gamepad stays frame-quantized regardless until gilrs polling is rewritten, so mixed fidelity across sources is permanent for now rather than an artifact |
 | **Schedule enforcement for tick domains** (D9's remainder) | Bevy giving a `SystemParam` a way to know its own schedule. A plugin-time validation pass and a debug assertion stand in |
 | **Mouse wheel as a binding source** (R13.3) | nothing in tree wants it. The wheel is a delta on its own channel, needs `Line`/`Pixel` normalization, and shares nothing with a button but the device |
-| **R16.3's suspend/resume** (mobile, console) | a platform target that needs it. Nothing in this crate's supported platforms emits a suspend signal or has a device re-enumeration step to hook |
+| **Suspend/resume** (R16.3; mobile, console) | a platform target that needs it. Nothing in this crate's supported platforms emits a suspend signal or has a device re-enumeration step to hook |
 | **Split Friction's monsters, spawners and missiles** | a mechanic that would exercise input this crate has not already proven. Kept as a row rather than deleted because the sprites, the dungeon's region aspects and a `Fire`-shaped action all exist, so changing our mind is cheap |
 | **Guardian migration** | porting it from Bevy 0.16.1 with `bevy_enhanced_input` 0.12 to 0.20 — four versions, and a port plus a rewrite. Doing both at once would confuse "action_map is wrong" with "0.20 moved this" |
 | **A devfmt usage log, to catch the misses nobody notices** | **hand reflows still happening now that repacking is canonical.** Measured before deferring: 350 loose breaks in tree against 6 pure rewraps in 60 commits, so the aftermath of a devfmt run lives in working-tree churn and not in history — `git log` cannot be mined for it, and devfmt is the only thing positioned to see it. The shape, if it revives: devfmt appends to a gitignored log from the process already being run, costing no approval and no tokens; per paragraph it records a hash of the word sequence and a hash of the physical lines, so a later run finding the same words under different line breaks has caught a miss and can attribute it to its own earlier decision. Worth building only with a mechanical trigger to read it — one line of output when the count crosses a threshold — since a log nobody opens is cost with no signal |
