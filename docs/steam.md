@@ -319,12 +319,11 @@ through the base API, and `steamworks` 0.13 exposes nothing else (`S10`).
 API surface. The value of measuring it is that the alternative was live: had Steam left both sets
 reporting, this crate's any-number-of-contexts model would have mapped onto Steam directly.
 
-**What it costs.** A Steam authority backend can drive **one** of this crate's contexts at a time.
-A game running a gameplay context and a modal overlay context simultaneously — which this crate
-does routinely, and which chunk 42's Pong variant was designed around — cannot have both fed by
-Steam. `ActivateActionSetLayer` exists in the Steamworks SDK and is the intended answer, but the
-Rust binding does not expose it, so reaching it needs a patch upstream or a direct FFI call past
-the safe wrapper.
+**What it costs.** A Steam authority backend can drive **one** of this crate's contexts at a time. A
+game running a gameplay context and a modal overlay context simultaneously — which this crate does
+routinely — cannot have both fed by Steam. `ActivateActionSetLayer` exists in the Steamworks SDK and
+is the intended answer, but the Rust binding does not expose it, so reaching it needs a patch
+upstream or a direct FFI call past the safe wrapper.
 
 ### S20 — One control can drive several actions in one set, and Steam does not arbitrate
 

@@ -396,7 +396,9 @@ default is right: a refactor is free, and breaking a player's settings takes a d
 
 The record/replay half of this is proven; chunk 83 exercises it directly. The network half is
 **designed and not proven** — there is no testbed in tree that sends a frame over a wire, and
-Roadmap.md's deferred table says so, gated on chunk 42's authority-backend trait landing first.
+Roadmap.md's deferred table says so, gated on a networked target. The injection point it would use
+is built: chunk 111 landed `delegate` and `AuthorityValues`, and `examples/pong_robot` drives a
+paddle through them.
 
 Mocking at the action level (BEI, LWIM) and record/replaying at the frame level (this crate, for
 local determinism) are not the same test. The first tests your game logic; the second also tests

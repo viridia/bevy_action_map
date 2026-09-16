@@ -518,7 +518,7 @@ network removed, which was the expensive part.
   the type rather than something built for this chunk's sake.
 - **What stays deferred:** injection and reconciliation — feeding a remote player's resolved action
   through the authority-backend seam (D69), and disagreeing with the authority about what happened.
-  Those want a network and chunk 42's trait; rewinding does not.
+  Those want a network; rewinding does not, and the injection point itself is already chunk 111's.
 - **Split if it grows.** Making the state snapshot-able with a differential test is separable from
   the example that rewinds, and ground rule 1 says that split happens before the code, not during.
 - **Depends on chunk 95.** The visible rewind reuses its Pong base rather than a third vehicle — the
@@ -570,56 +570,40 @@ per-device policy D22 assumed, so what is left is a family switch.
   actually owns and leaves that one open.
 - **Not doing: R0.4's per-action split**, which lives at L2 and is chunk 111's, already landed.
 
-### 42. The authority backend, faked
+### 42. A backend-owned row, and the rebind it delegates
 
-The backend seam made real against something that is not Steam, because the seam is only proven by a
-second implementer and the real one cannot live here.
+What is left of the authority work once chunk 111 landed injection and chunk 112 takes suppression:
+the half a controls screen asks for on demand rather than the half the evaluator reads every tick.
+Nothing here is faked — `examples/pong_robot` is already an authority resolving a real action.
 
-- **Depends on chunk 111**, which landed the injection itself: `delegate::<A>()` and
-  `AuthorityValues` (D71). What is left here is the half a settings screen asks for on demand rather
-  than the half the evaluator reads every tick — origins, glyphs, whether an action is bound at all,
-  and delegating a rebind (R18.8, R18.9, R19.8). That is where a trait in `src/backend.rs` earns its
-  place, and where a source backend would be described if it needed anything beyond
-  `InputFrame::record`, which it does not.
-- **The mock lives entirely in `examples/`.** The traits are public API and carry a maintenance
-  promise; the fake is a test fixture and gets deleted when a real backend exists.
-- **It must fake the API, not the concept.** Level-only reads with no timestamps, an "is this bound"
-  flag distinct from a zero value, origins as a type deliberately not `Control`, a glyph as a
-  filesystem path, and a binding panel that is ugly on purpose. A mock nicer than Steam proves
-  nothing.
-- **The binding panel is also `docs/issues.md` 1022's demo.** R19.8 wants a backend-owned row to say
-  "not rebindable here, delegate to that backend's own UI" rather than reading as an ordinary fixed
-  one — this chunk's ugly-on-purpose panel is exactly where that distinction has to show up, so it
-  is one more thing the panel renders rather than a separate chunk.
-- **Depends on chunk 95.** The vehicle is its Pong base: one paddle's pad handed to the mock
-  backend, the other reading normally, so R0.4's per-context split is the game rather than a
-  contrived aside. A pause overlay over an in-progress rally supplies the second modal context the
-  review surface below needs live on the same pad, and a hold-to-charge serve gives the
-  backend-owned action an in-genre reason to carry a `.hold()`. The acceptance criterion is a
-  non-diff: the court, the score, and the pause menu run unchanged, and only which context drives
-  the backend-owned paddle changes. It is no longer Disasteroids' pad for the same reason it was
-  never going to be — that is where presets get taught, and a pad the backend owns has no presets of
-  ours to show.
-- **The half of R0.6 that is not about Steam.** A backend suppresses its devices at L0 so their raw
-  events never reach the frame. Without it the demo reads the pad twice.
-- **Review surface, and it is the point of the chunk.** One decision is still falsifiable here: an
-  input observed twice. A decision this chunk cannot break is a decision that was not made.
-- **Two modal contexts on one pad is measured, and the vehicle survives.** Steam runs one action
-  set per controller and the last activation wins (`docs/steam.md` S19), so a set per context is
-  out — but one control can drive several actions in one set and Steam arbitrates none of them
-  (S20). The pause overlay over an in-progress rally works from a single set holding every
-  delegated action, with this crate doing its own gating. `ActivateActionSetLayer` is not needed.
-- **A backend-owned action accepting a `.hold()`** was the third falsifiable decision, and chunk
-  111 made it unrepresentable rather than diagnosable, so the hold on the serve is now the local
-  paddle's or nothing.
-- **The queryable half of R0.5 is still owed.** A delegated action's value is indistinguishable from
-  a bound one at the call site, which is the requirement's point, but nothing yet names *which*
-  authority produced it: chunk 111 left `AuthorityValues` unnamed rather than adding a field with no
-  reader. A chunk with two real backends in one build is where a name earns itself.
-- **A delegated action has no row on a controls screen**, because it has no binding to derive one
-  from, and `RebindPolicy` has no third state to say why. R17's "not ours" (`Requirements.md`
-  §17.1042) and R19.8's delegate-instead outcome are both this chunk's, and the panel is what needs
-  them.
+- **`RebindPolicy` needs a third state** — `docs/issues.md` 1022. `Here | Fixed` cannot tell a
+  backend-owned row from an ordinary fixed one, so a screen reading `mappings()` has to consult its
+  own working copy to say "not rebindable here, delegate to that backend's own UI".
+- **Rebinding reports delegation as an outcome, not a failure** (R19.8), and R19.3's conflict
+  detection does not run on those actions, because we do not own the rules they would be checked
+  against.
+- **Partial delegation is the case; total delegation is not.** `pong_robot` already has the shape:
+  `Move` delegated in the robot's context and bound in the human's, so the action keeps its row and
+  only what the row can offer changes. Steam is that shape one device family over — the keyboard
+  rebound here, the pad delegated — so the screen renders both states side by side rather than
+  hiding the action. The previous version of this chunk delegated a whole pad, which is the case no
+  real game has.
+- **The vehicle is Disasteroids, with one action delegated.** It owns the rebinding screen by a
+  division already stated in tree: `examples/pong_robot/main.rs` says Pong has no settings screen
+  because Disasteroids owns that, and building a second one there would reverse it. Delegating one
+  action leaves the presets and the saved controls intact and adds exactly the row this chunk is
+  about.
+- **Not doing: origins** (R18.8), already closed — `ControlOrigin` carries a control that is not one
+  of ours, with the same stored name and fallback label everything else renders from.
+- **Not doing: glyphs** (R18.9), which has its own deferred row and its own asset questions.
+- **Not doing: suppression at L0** (R0.6), which is chunk 112's whole subject.
+- **Not doing: a backend trait.** Earlier drafts wanted one in `src/backend.rs`, from when injection
+  was assumed to need it; chunk 111 landed injection through a component instead. Delegating a
+  rebind is a call the game makes to a backend it chose — the crate's part is saying the row is not
+  ours to capture on. A trait earns its place when a rebinding widget has to delegate without
+  knowing its backend, which is the presentation-crate row.
+- **Not doing: naming which authority produced a value** (R0.5's queryable half). One authority in a
+  build cannot motivate a name; the deferred table carries it.
 
 ### 109. Derive `Reflect`, and turn on auto-registration instead of hand-writing it
 
@@ -709,6 +693,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **A game-wide "more forgiving timings" control** (R20.4's withdrawal) | a game with enough timings that setting them one at a time is the complaint. One player-facing control across a whole game needs the crate to know which way forgiveness runs per threshold — down for `Hold` and `HoldAndRelease`'s floors, up for `Tap` and `MultiTap`'s ceilings and `Pulse`'s interval — which is the one part of this a game cannot get right without hand-checking five signs, and the reason the row exists rather than the idea being dropped with the requirement. Chunk 115's per-timing tunables come first regardless: they are what a game would expose the control *through*, and they may turn out to be all anyone wants |
 | **Auto-switching which device a player is paired to** (R15.8) | a game where picking up the other device happens often enough that re-joining is a real cost. Split Friction joins once and a player who wants the keyboard instead can take it the same way they took the pad. Deferred rather than withdrawn alongside R15.7, because unlike R15.7 this is not something an app can write for itself: telling a deliberate grab from a drifting stick means reading the raw samples under a deadzone floor before any action fires, which an app watching `Fired` never sees. R18.6 stays withdrawn on it — if this lands, a prompt reads the player's paired device rather than tracking one of its own |
 | **Opaque platform-user identity** (R15.9) | a real platform SDK. Floated for Split Friction, but there is nothing to show without one, and not worth a faked stub the way chunk 42 fakes a backend |
+| **Naming which authority produced a value** (R0.5's queryable half) | a build with two authorities in it. That a delegated action is indistinguishable from a bound one at the call site is the requirement's point; what has no reader is *which* authority supplied it. Chunk 111 left `AuthorityValues` unnamed rather than adding a field nothing consults, and one authority cannot motivate a name — `pong_robot`'s robot has nothing to be told apart from |
 | **An authority backend's actions in rollback** (D22's remainder) | a snapshot to fit them into. `AuthorityValues` is a plain component and clones with the entity, but what a rewind has to reproduce is what the authority *said* on the tick being re-simulated, which is not in the frame. The available answer is recording the backend's output into the frame at sample time, at the cost of a larger frame |
 | **Sub-frame event timing** (D4's remainder) | [bevy#9087][] upstream. Gamepad stays frame-quantized regardless until gilrs polling is rewritten, so mixed fidelity across sources is permanent for now rather than an artifact |
 | **Schedule enforcement for tick domains** (D9's remainder) | Bevy giving a `SystemParam` a way to know its own schedule. A plugin-time validation pass and a debug assertion stand in |

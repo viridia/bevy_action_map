@@ -679,4 +679,4 @@ lets two players share one keyboard.
 
 **Excluded rather than missed**, both already recorded: `apply_overrides_for` discards the rewritten
 rows, which is the per-entity presentation deferred row; and `Override::NotOurs` leaves the crate's
-binding live rather than silencing it, which is R0.6 and chunk 42's review surface.
+binding live rather than silencing it, which is R0.6 and chunk 112's.
