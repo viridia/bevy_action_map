@@ -85,6 +85,9 @@ run_doc_step() {
     unset DYLD_FALLBACK_LIBRARY_PATH
 }
 
+# First because it costs milliseconds, and because a reference that stopped resolving is the one
+# kind of breakage nothing else here would ever notice.
+run_step "scripts/xref.py" python3 scripts/xref.py --quiet
 run_step "cargo fmt --check" cargo fmt --check
 run_step "cargo check --all-features --tests --examples" \
     cargo check --all-features --tests --examples

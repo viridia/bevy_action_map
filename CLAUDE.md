@@ -174,6 +174,7 @@ otherwise have decided, or where the author wrote the code and the model reviewe
 prefer it to running each command by hand.
 
 ```sh
+python3 scripts/xref.py                                 # the documents' cross-references
 cargo fmt --check
 cargo test --all-features --lib --tests
 cargo clippy --all-features --all-targets
