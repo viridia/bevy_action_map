@@ -256,11 +256,12 @@ impl CaptureSession {
     /// drawn as columns — so which slot the player activated is what a capture has to carry, or the
     /// answer has nowhere to go but the front of the row.
     ///
-    /// Returns `None` for a slot the mapping does not have: past its
-    /// [`capacity`](crate::mapping::ActionMapping::capacity), or more than one past the controls
-    /// it holds now. The second is what stops a capture leaving a hole in a list whose *order* is
-    /// what primary and secondary mean. It also returns `None` for one the player may not change
-    /// at all — see [`RebindPolicy`](crate::mapping::RebindPolicy).
+    /// Returns `None` for a slot more than one past the controls the mapping holds now, which is
+    /// what stops a capture leaving a hole in a list whose *order* is what primary and secondary
+    /// mean. A row grows one slot at a time, so a screen offering a spare cell beside a filled one
+    /// always gets a session; offering two spare cells at once does not. It also returns `None` for
+    /// a mapping the player may not change at all — see
+    /// [`RebindPolicy`](crate::mapping::RebindPolicy).
     pub fn for_slot(mapping: &ActionMapping, slot: usize) -> Option<Self> {
         // A mapping the player cannot change has nothing to capture *for*. It is on the screen so
         // they can read it, and a screen that asked anyway would be offering a rebind it could not
@@ -268,7 +269,7 @@ impl CaptureSession {
         if !mapping.rebind_policy.is_rebindable() {
             return None;
         }
-        if mapping.capacity.is_some_and(|limit| slot >= limit) || slot > mapping.slots.len() {
+        if slot > mapping.slots.len() {
             return None;
         }
         Some(Self {
@@ -756,9 +757,9 @@ mod tests {
             controls
                 .bind::<Move>(crate::binding::DirectionalButtons::wasd())
                 .mappable();
-            // One default in a row with room for three: enough to address a filled slot, the next
-            // empty one, and one that would leave a hole behind it.
-            controls.bind::<Jump>(KeyCode::Space).mappable_upto(3);
+            // One default: enough to address a filled slot, the next empty one, and one that would
+            // leave a hole behind it.
+            controls.bind::<Jump>(KeyCode::Space).mappable();
             // Two defaults, so a row has a secondary for conflict detection to find.
             controls.bind::<Crouch>(KeyCode::KeyC).mappable();
             controls.bind::<Crouch>(KeyCode::KeyV).mappable();
@@ -1136,14 +1137,13 @@ mod tests {
         );
     }
 
-    /// A capture says which slot it fills, and capacity is a ceiling rather than permission to
-    /// skip: the next empty slot is reachable and the one after it is not.
+    /// A capture says which slot it fills, and a row grows one slot at a time: the next empty slot
+    /// is reachable and the one after it is not.
     #[test]
     fn a_row_is_addressed_by_slot() {
         let mut app = app();
         let jump = mapping(&app, "capture_tests.jump");
-        assert_eq!(jump.slots.len(), 1, "one default…");
-        assert_eq!(jump.capacity, Some(3), "…in a row with room for three");
+        assert_eq!(jump.slots.len(), 1, "one default");
 
         // What a single-column table gets without asking.
         assert_eq!(
@@ -1155,15 +1155,15 @@ mod tests {
         assert!(CaptureSession::for_slot(&jump, 1).is_some(), "the next one");
         assert!(
             CaptureSession::for_slot(&jump, 2).is_none(),
-            "within capacity, but it would leave slot 1 empty behind it"
+            "it would leave slot 1 empty behind it"
         );
-        assert!(CaptureSession::for_slot(&jump, 3).is_none(), "past the end");
 
-        // A plain `mappable` said nothing about wanting a second, so only the one is addressable.
-        let up = mapping(&app, "capture_tests.move.up");
-        assert_eq!(up.capacity, Some(1));
-        assert!(CaptureSession::for_slot(&up, 0).is_some());
-        assert!(CaptureSession::for_slot(&up, 1).is_none());
+        // The rule is the row's own length rather than a number anything declared, so a row that
+        // ships two defaults offers a third cell and no more.
+        let crouch = mapping(&app, "capture_tests.crouch");
+        assert_eq!(crouch.slots.len(), 2);
+        assert!(CaptureSession::for_slot(&crouch, 2).is_some());
+        assert!(CaptureSession::for_slot(&crouch, 3).is_none());
 
         // And the slot the session was made for is what reaches the observer.
         app.world_mut()

@@ -168,7 +168,7 @@ pub fn plugin(app: &mut App) {
         //
         // Two of them, both plainly `mappable`: they derive one mapping name, so this is *one*
         // row holding a primary and a secondary rather than two rows the player has to be told are
-        // the same thing. Its capacity grows to two because it holds two, with nobody saying so.
+        // the same thing.
         controls.bind::<Thrust>(KeyCode::KeyW).mappable();
         controls.bind::<Thrust>(KeyCode::ArrowUp).mappable();
         // Declared once for the action, after every binding above: it reaches both keys and shares
@@ -234,12 +234,12 @@ pub fn plugin(app: &mut App) {
         controls
             .bind::<Hyperspace>(GamepadButton::East)
             .multi_tap(2, 0.3);
-        // Room for two, one shipped: the second slot is one a settings screen draws blank and the
-        // player fills, rather than one the game had to have a default for.
+        // One shipped, and the settings screen draws a second cell beside it for the player to fill
+        // — a slot the game never needed a default for.
         controls
             .bind::<Hyperspace>(KeyCode::ShiftLeft)
             .multi_tap(2, 0.3)
-            .mappable_upto(2);
+            .mappable();
     });
 
     // No condition, so this one is live from the moment its entity exists and stays that way. Pause

@@ -678,7 +678,7 @@ evaluation order, which is the order the plan stores them.
 | Conditions | `press`, `release`, `down`, `hold`, `hold_once`, `hold_and_release`, `tap`, `multi_tap`, `pulse`, `on_change`, `when(custom)` |
 | Modifiers | `scale`, `negate`, `swizzle`, `clamp`, `clamp_magnitude`, `rescale`, `curve`, `per_second`, `compass`, `dead_zone`, `tunable_dead_zone`, `custom` |
 | Consumption | `consume`, `without_consuming` |
-| Presentation | `mappable`, `mappable_as`, `mappable_upto`, `mappable_any`, `private`, `reserved` |
+| Presentation | `mappable`, `mappable_as`, `private`, `reserved` |
 
 `Modifier` and `Condition` are traits, and `BindingModifier` / `BindingCondition` are enums with a
 `Custom` variant holding an `Arc`, so built-ins dispatch statically and stay exhaustively matchable
@@ -758,7 +758,6 @@ pub struct ActionMapping {
     pub family: DeviceFamily,        // KeyboardMouse | Gamepad
     pub accepts: ChannelShape,
     pub slots: Vec<Control>,         // ordered; slot 0 is the primary
-    pub capacity: Option<usize>,     // Some(n) | None — how many columns to draw, or unlimited
     pub rebind_policy: RebindPolicy, // Here | Fixed
     pub context: &'static str,
     pub followers: Vec<Follower>,
@@ -779,11 +778,18 @@ otherwise:
 `gameplay.move.up`; the family is inferred from the controls, and a binding whose parts span both
 families is refused. `mappable_as` replaces the derived key where one is needed.
 
-**Capacity is inferred and raised, never lowered.** A plain `mappable` asks for one slot; several
-bindings feeding one mapping take the widest anything asked for; and no mapping ends up narrower
-than the defaults it already holds. Declaring two mappable bindings of one action in one family is
-how a game ships a default primary *and* secondary — they merge into one row with two slots, not two
-rows. `mappable_upto(n)` ships one control and leaves the rest for the player.
+**A row has no declared width.** `slots` is however many controls the row holds, and how many cells
+to draw beside them is the screen's own decision — a table with a spare column draws one more than
+the row holds and a capture fills it. Declaring two mappable bindings of one action in one family is
+how a game ships a default primary *and* secondary: they merge into one row with two slots, not two
+rows.
+
+**`MaxSlots` is the one length the crate has an opinion about**, and only on the apply path: a game
+that reads override sets it did not write inserts the resource, and a row naming more controls than
+that comes back as `TooManyControls` rather than being applied. Without the resource there is no
+limit, which is what a game whose save files are its own already assumes. Capture is unaffected —
+`for_slot` grows a row one slot at a time, so nothing a player does in a screen can walk past a
+limit the game shipped under.
 
 Uniqueness is per family, and two mappable bindings collide only when they name different actions.
 
@@ -886,9 +892,8 @@ game declares, and rebinding one overwrites it with the position captured; reset
 brings it back.
 
 A session skips whatever is already queued on its first run, so the press that opened it is not what
-it binds. A slot past the mapping's capacity, or more than one past what it currently holds, is
-refused — which keeps a capture from leaving a hole in a list whose order is what primary and
-secondary mean.
+it binds. A slot more than one past what the mapping currently holds is refused, which keeps a
+capture from leaving a hole in a list whose order is what primary and secondary mean.
 
 **Three refusals, and one silent guard.**
 
@@ -1085,7 +1090,7 @@ src/
   event.rs           Fired/Started/Completed/Canceled, class bindings
   player.rs          the Paired component
   join.rs        L3  is_claimed
-  mapping.rs         mappings, slots, capacity, tunables, and their derivation from bindings
+  mapping.rs         mappings, slots, tunables, and their derivation from bindings
   overrides.rs       the diff structure, applying it, serialization
   preset.rs          a named Overrides and its builder
   capture.rs         capture sessions, reserved controls, conflict detection

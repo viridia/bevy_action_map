@@ -210,6 +210,33 @@ impl Overrides {
     }
 }
 
+/// The most controls one mapping may hold, for a game that reads override sets it did not write.
+///
+/// A mapping is an ordered list with no length of its own: how many controls a row *ought* to hold
+/// is a question its settings screen answers, by deciding how many cells to draw. This is the other
+/// question — how much a file is allowed to say. An override set from a cloud save, a shared
+/// profile or a hand-edited settings file can name ten thousand controls for one row, and a game
+/// that reads such a file wants a point past which it stops.
+///
+/// **Insert it to have one; without it there is no limit.** A game whose save files are its own
+/// already trusts them, and leaving this out keeps that:
+///
+/// ```ignore
+/// app.insert_resource(MaxSlots(8));
+/// ```
+///
+/// Only [`apply_overrides`] and its variants consult it, so a row past the limit comes back as
+/// [`OverrideProblemKind::TooManyControls`] and the rest of the set still applies. Rebinding in
+/// your own screen is unaffected: a capture adds one control at a time, so a player cannot walk a
+/// row past a limit the game shipped under.
+///
+/// **What your game declares is never limited.** A row holds however many controls its bindings
+/// give it, whatever this says — the limit is about what an override set may *do* to a row, not how
+/// long one is allowed to be. So a fixed row listing a dozen controls is yours to ship, and a
+/// preset moving a row is held to the limit like anything else applied.
+#[derive(bevy_ecs::resource::Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MaxSlots(pub usize);
+
 /// A row an override set named that could not be used, and why.
 ///
 /// A player whose binding quietly vanished is owed better than silence, so a row this build cannot
@@ -256,10 +283,10 @@ pub enum OverrideProblemKind {
         /// The reserved control.
         control: Control,
     },
-    /// More controls than the mapping has slots for.
+    /// More controls in one row than [`MaxSlots`] allows.
     TooManyControls {
-        /// How many the mapping holds.
-        capacity: Option<usize>,
+        /// The ceiling the game set.
+        limit: usize,
         /// How many the row named.
         given: usize,
     },
@@ -845,6 +872,17 @@ fn apply_with(
     problems
 }
 
+/// What the world forbids, as against what any one context declared.
+///
+/// Both halves are read off resources and neither belongs to the bindings being rewritten, which is
+/// why they travel together rather than as two more arguments.
+pub(crate) struct Limits<'a> {
+    /// Controls withheld from capture everywhere, from `ReservedControls`.
+    pub(crate) reserved: &'a [Control],
+    /// The most controls one row may hold, from [`MaxSlots`]. `None` where the game set none.
+    pub(crate) max_slots: Option<usize>,
+}
+
 /// The pure half: authored bindings and an override set in, rewritten bindings and rows out.
 ///
 /// Separate from the ECS work so that it can be reasoned about and tested without a `World`.
@@ -854,7 +892,7 @@ pub(crate) fn rewrite(
     tunables: &[Tunable],
     overrides: &Overrides,
     preset: Option<&Overrides>,
-    reserved: &[Control],
+    limits: &Limits<'_>,
     context: &'static str,
 ) -> (
     Vec<BindingSpec>,
@@ -901,7 +939,7 @@ pub(crate) fn rewrite(
         if let Some(kind) = refusal(
             row,
             wanted,
-            reserved,
+            limits,
             &contributors,
             declared,
             preset_authorized,
@@ -922,9 +960,9 @@ pub(crate) fn rewrite(
                     variant[part.binding].input.set_part(part.part, control);
                     rewrite_followers(declared, &leaders, &mut variant, part.binding);
                 }
-                // A slot the game shipped nothing for — the empty secondary of a `mappable_upto(2)`
-                // row. The last binding feeding the row is cloned onto the new control, so the
-                // secondary behaves like the primary rather than like a bare input with no
+                // A slot the game shipped nothing for — the empty secondary a screen drew beside
+                // the primary. The last binding feeding the row is cloned onto the new control, so
+                // the secondary behaves like the primary rather than like a bare input with no
                 // modifiers or conditions on it.
                 None => {
                     let Some(last) = contributors.last() else {
@@ -991,7 +1029,7 @@ pub(crate) fn rewrite(
 fn refusal(
     row: &ActionMapping,
     wanted: &[Control],
-    reserved: &[Control],
+    limits: &Limits<'_>,
     contributors: &[&MappedPart],
     declared: &[BindingSpec],
     preset_authorized: bool,
@@ -999,13 +1037,13 @@ fn refusal(
     if !row.rebind_policy.is_rebindable() && !preset_authorized {
         return Some(OverrideProblemKind::NotRebindable);
     }
-    // Capacity first: "this row has one slot" is both simpler and truer than anything below it
-    // about why a second control has nowhere to go.
-    if let Some(limit) = row.capacity
+    // The ceiling first: "this game reads at most eight" is both simpler and truer than anything
+    // below it about why a file naming ten thousand is not worth inspecting control by control.
+    if let Some(limit) = limits.max_slots
         && wanted.len() > limit
     {
         return Some(OverrideProblemKind::TooManyControls {
-            capacity: row.capacity,
+            limit,
             given: wanted.len(),
         });
     }
@@ -1026,7 +1064,7 @@ fn refusal(
             control,
             Some(row.family),
             accepts,
-            reserved.contains(&control),
+            limits.reserved.contains(&control),
         ) {
             Ok(()) => {}
             Err(RefusedReason::Family) => {
@@ -1100,12 +1138,9 @@ fn clone_onto(
 /// The presentation rows for a variant, keyed to the declared ones.
 ///
 /// Derived from the rewritten bindings rather than patched, so the rows and the plan cannot
-/// disagree about what is bound — with two exceptions the derivation cannot express on its own. A
-/// row the player emptied has no bindings left and so derives nothing at all; it has to stay on the
-/// screen, holding nothing, or there is nowhere to bind it back. And capacity is raised, never
-/// lowered (R19.9): a row rebound down to one control still derives from one binding, so its
-/// capacity is widened back against what was declared rather than taken from the derived row as-is,
-/// or the second slot a rebind just vacated could never be filled again.
+/// disagree about what is bound — with one exception the derivation cannot express on its own: a
+/// row the player emptied has no bindings left and so derives nothing at all, and it has to stay on
+/// the screen holding nothing, or there is nowhere to bind it back.
 fn current_rows(
     variant: &[BindingSpec],
     declared: &[ActionMapping],
@@ -1122,10 +1157,7 @@ fn current_rows(
                         && current.family == row.family
                         && current.action == row.action
                 })
-                .map(|current| ActionMapping {
-                    capacity: crate::mapping::widest(current.capacity, row.capacity),
-                    ..current.clone()
-                })
+                .cloned()
                 .unwrap_or_else(|| ActionMapping {
                     slots: Vec::new(),
                     followers: row.followers.clone(),
@@ -1175,14 +1207,14 @@ mod tests {
     #[context(path = "override_tests.playing", tick = Render)]
     struct Playing;
 
-    /// `Move` on WASD (four rows), `Jump` on Space with room for a secondary and a `Lunge` riding
-    /// it, `Look` on the mouse (listed, unchangeable), and a reserved settings key.
+    /// `Move` on WASD (four rows), `Jump` on Space with a `Lunge` riding it, `Look` on the mouse
+    /// (listed, unchangeable), and a reserved settings key.
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
         app.add_context::<Playing>(|controls| {
             controls.bind::<Move>(DirectionalButtons::wasd()).mappable();
-            controls.bind::<Jump>(KeyCode::Space).mappable_upto(2);
+            controls.bind::<Jump>(KeyCode::Space).mappable();
             controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));
             controls.bind::<Look>(crate::binding::MouseMove);
             controls.bind::<OpenSettings>(KeyCode::F1).reserved();
@@ -1619,10 +1651,10 @@ mod tests {
         assert!(kinds.contains(&OverrideProblemKind::Reserved {
             control: Control::PhysicalKey(KeyCode::F1)
         }));
-        assert!(kinds.contains(&OverrideProblemKind::TooManyControls {
-            capacity: Some(1),
-            given: 2
-        }));
+        assert!(
+            kinds.contains(&OverrideProblemKind::CompositeCannotGrow),
+            "{kinds:?}"
+        );
 
         // Refused whole, never half: every one of those rows still holds what it shipped with.
         assert_eq!(
@@ -1820,9 +1852,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
         app.add_context::<Wide>(|controls| {
-            controls
-                .bind::<Move>(DirectionalButtons::wasd())
-                .mappable_upto(2);
+            controls.bind::<Move>(DirectionalButtons::wasd()).mappable();
         });
 
         let up = row(&app, "override_tests.move.up");
@@ -1912,70 +1942,41 @@ mod tests {
         );
     }
 
-    /// Capacity is raised by the author and never lowered by a player (R19.9): rebinding a two-slot
-    /// row down to one control must leave the vacated slot fillable.
+    /// A row is as long as the file says unless the game set a ceiling, and the ceiling is the only
+    /// thing that refuses one for its length.
     #[test]
-    fn rebinding_a_row_down_does_not_shrink_its_capacity() {
-        #[derive(InputContext)]
-        #[context(path = "override_tests.two_slots", tick = Render)]
-        struct TwoSlots;
+    fn a_row_is_refused_for_its_length_only_against_a_ceiling() {
+        let long = [
+            Control::PhysicalKey(KeyCode::Space),
+            Control::PhysicalKey(KeyCode::KeyK),
+            Control::PhysicalKey(KeyCode::KeyL),
+        ];
 
-        let mut app = App::new();
-        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
-        app.add_context::<TwoSlots>(|controls| {
-            controls.bind::<Jump>(KeyCode::Space).mappable();
-            controls.bind::<Jump>(KeyCode::KeyJ).mappable();
-        });
-
-        let jump = row(&app, "override_tests.jump");
-        assert_eq!(
-            jump.capacity,
-            Some(2),
-            "two mappable bindings merge into one two-slot row"
-        );
-
-        let overrides = bind(
-            &app,
-            "override_tests.jump",
-            &[Control::PhysicalKey(KeyCode::Space)],
-        );
-        let problems = apply_overrides(app.world_mut(), &overrides);
+        let mut unbounded = app();
+        let overrides = bind(&unbounded, "override_tests.jump", &long);
+        let problems = apply_overrides(unbounded.world_mut(), &overrides);
         assert!(problems.is_empty(), "{problems:?}");
-
-        let jump = row(&app, "override_tests.jump");
-        assert_eq!(jump.slots, [Control::PhysicalKey(KeyCode::Space)]);
         assert_eq!(
-            jump.capacity,
-            Some(2),
-            "the vacated secondary must stay fillable"
+            slots(&unbounded, "override_tests.jump"),
+            long,
+            "a game that set no ceiling reads whatever its own file says"
         );
-    }
 
-    /// The other shape of the same rule, right by accident: a cleared row finds no derived row to
-    /// widen against and falls back to the declared one whole, capacity included. A test of its own
-    /// so the accident cannot quietly stop being true.
-    #[test]
-    fn clearing_a_row_does_not_shrink_its_capacity() {
-        #[derive(InputContext)]
-        #[context(path = "override_tests.cleared_slots", tick = Render)]
-        struct ClearedSlots;
-
-        let mut app = App::new();
-        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
-        app.add_context::<ClearedSlots>(|controls| {
-            controls.bind::<Jump>(KeyCode::Space).mappable();
-            controls.bind::<Jump>(KeyCode::KeyJ).mappable();
-        });
-
-        let jump = row(&app, "override_tests.jump");
-        let mut overrides = Overrides::new();
-        overrides.set(jump.family, jump.key, Override::Cleared);
-        let problems = apply_overrides(app.world_mut(), &overrides);
-        assert!(problems.is_empty(), "{problems:?}");
-
-        let jump = row(&app, "override_tests.jump");
-        assert!(jump.slots.is_empty());
-        assert_eq!(jump.capacity, Some(2));
+        let mut bounded = app();
+        bounded.insert_resource(MaxSlots(2));
+        let problems = apply_overrides(bounded.world_mut(), &overrides);
+        assert_eq!(
+            problems
+                .iter()
+                .map(|problem| problem.kind.clone())
+                .collect::<Vec<_>>(),
+            [OverrideProblemKind::TooManyControls { limit: 2, given: 3 }]
+        );
+        assert_eq!(
+            slots(&bounded, "override_tests.jump"),
+            [Control::PhysicalKey(KeyCode::Space)],
+            "refused whole, so the row still holds what the game shipped"
+        );
     }
 
     /// A key match alone must not move an override across families: `hold_or_toggle` reaching both
@@ -2055,15 +2056,14 @@ mod tests {
         #[context(path = "persist_tests.playing", tick = Render)]
         struct Playing;
 
-        /// `Move` on WASD (four keyboard rows, none of them overridden below), `Jump` on Space with
-        /// room for a secondary and on the pad's South button, and a settings key an external
-        /// backend will claim.
+        /// `Move` on WASD (four keyboard rows, none of them overridden below), `Jump` on Space and
+        /// on the pad's South button, and a settings key an external backend will claim.
         fn declared() -> Vec<ActionMapping> {
             let mut app = App::new();
             app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
             app.add_context::<Playing>(|controls| {
                 controls.bind::<Move>(DirectionalButtons::wasd()).mappable();
-                controls.bind::<Jump>(KeyCode::Space).mappable_upto(2);
+                controls.bind::<Jump>(KeyCode::Space).mappable();
                 controls.bind::<Jump>(GamepadButton::South).mappable();
                 controls.bind::<OpenSettings>(KeyCode::F1).mappable();
             });
@@ -2106,11 +2106,11 @@ mod tests {
             \n\
             [tunables]\n";
 
-        /// What [`save_overrides`] writes is a document a person would be willing to write by
-        /// hand, and reading it back through `bevy_reflect` — the way a `Reflect`-based settings
-        /// layer actually would — produces the identical value: a scalar for the row that holds
-        /// one control, a list for the row that holds two, and the two three-state words neither
-        /// of which could ever be mistaken for a control name.
+        /// What [`save_overrides`] writes is a document a person would be willing to write by hand,
+        /// and reading it back through `bevy_reflect` — the way a `Reflect`-based settings layer
+        /// actually would — produces the identical value: a scalar for the row that holds one
+        /// control, a list for the row that holds two, and the two three-state words neither of
+        /// which could ever be mistaken for a control name.
         #[test]
         fn a_saved_override_set_round_trips_through_reflect() {
             let declared = declared();

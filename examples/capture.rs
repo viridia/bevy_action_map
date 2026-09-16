@@ -7,9 +7,10 @@
 //! the row the next question prints.
 //!
 //! A *slot* rather than a mapping, because a mapping holds an ordered list of them: `Jump` ships
-//! two keyboard defaults and `Fire` ships one with room for a second, so the walk visits Jump twice
-//! and stops at Fire's empty second slot. That is the "primary and secondary" table every shipped
-//! game has, before anything draws it.
+//! two keyboard defaults and `Fire` ships one, so the walk visits Jump twice and then offers the
+//! empty slot beside Fire's. That is the "primary and secondary" table every shipped game has,
+//! before anything draws it — and how many cells to draw is the screen's own decision, not
+//! something the game declares alongside the binding.
 //!
 //! Worth trying, because each is a case the crate has an opinion about:
 //!
@@ -82,14 +83,14 @@ fn main() {
         controls.bind::<Move>(DirectionalButtons::wasd()).mappable();
 
         // Two mappable bindings of one action in one family are a default primary *and* secondary.
-        // They derive the same mapping name on purpose: that is one row holding two controls,
-        // not two rows both called Jump, and its capacity grows to fit them without being asked.
+        // They derive the same mapping name on purpose: that is one row holding two controls, not
+        // two rows both called Jump.
         controls.bind::<Jump>(KeyCode::Space).mappable();
         controls.bind::<Jump>(KeyCode::KeyJ).mappable();
 
-        // The other half of the same idea: room for two, only one shipped, and the empty second
-        // slot is the cell a settings screen draws blank.
-        controls.bind::<Fire>(KeyCode::ControlLeft).mappable_upto(2);
+        // One shipped control, and a row that can still take a second: the empty slot beside it is
+        // the cell a settings screen chooses to draw blank.
+        controls.bind::<Fire>(KeyCode::ControlLeft).mappable();
 
         // Jump held rather than tapped: a second action on a control the player is already being
         // shown, riding Jump's row instead of getting one of its own.
@@ -157,14 +158,16 @@ fn begin(world: &mut World) {
     next(world);
 }
 
-/// Every slot of a row a capture could fill: the ones holding something, plus the next empty one
-/// if the row has room for it.
+/// Every slot this walk offers for a row: the ones holding something, plus the next empty one where
+/// the row can take it.
 ///
-/// The same rule `CaptureSession::for_slot` enforces — it refuses anything else — so a screen that
-/// asks this first never offers a slot that would be turned down.
+/// One empty slot and no more, which is the rule `CaptureSession::for_slot` enforces — a list whose
+/// *order* is what primary and secondary mean cannot have a hole in it. The exception is a row that
+/// is one direction of a composite: a second "forward" key is one part of a second set of four, so
+/// those rows grow only when the whole composite does and the walk stops at what they hold.
 fn slots(mapping: &mapping::ActionMapping) -> std::ops::Range<usize> {
     let filled = mapping.slots.len();
-    0..if mapping.capacity.is_none_or(|limit| filled < limit) {
+    0..if mapping.key.part() == BindingPart::Whole {
         filled + 1
     } else {
         filled
@@ -200,7 +203,7 @@ fn next(world: &mut World) {
         "\n{} [{:?}] {} — the row holds {}. Press a control, or Escape to skip.",
         mapping.key.fallback_label(),
         mapping.family,
-        column(slot, &mapping),
+        column(slot),
         bound(&mapping),
     );
 
@@ -240,12 +243,11 @@ fn bound(mapping: &mapping::ActionMapping) -> String {
 }
 
 /// Which column of the row this slot is, in the words a table would put at the top of it.
-fn column(slot: usize, mapping: &mapping::ActionMapping) -> String {
-    match (slot, mapping.capacity) {
-        (_, Some(1)) => "the only slot".into(),
-        (0, _) => "primary".into(),
-        (1, _) => "secondary".into(),
-        (n, _) => format!("slot {}", n + 1),
+fn column(slot: usize) -> String {
+    match slot {
+        0 => "primary".into(),
+        1 => "secondary".into(),
+        n => format!("slot {}", n + 1),
     }
 }
 

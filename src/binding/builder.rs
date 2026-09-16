@@ -7,7 +7,7 @@ use core::marker::PhantomData;
 use crate::action::{ActionId, ActionIntent, InputAction};
 use crate::condition::{BindingCondition, Condition};
 use crate::event::{Dispatch, dispatch_for};
-use crate::mapping::{always_reports_bool, mappings_of, tunables_of, widest};
+use crate::mapping::{always_reports_bool, mappings_of, tunables_of};
 
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 use super::control::ButtonControl;
@@ -79,12 +79,6 @@ pub(crate) struct ClassBindingSpec {
 pub(crate) struct MappingDecl {
     /// Replaces the action's path in the derived key. `None` derives from the action.
     pub(crate) prefix: Option<&'static str>,
-    /// The most controls a player may put in the mapping this binding contributes to.
-    ///
-    /// Declared per binding but resolved per mapping, by `widest`. Meaningless unless
-    /// `rebind_policy` is `Here`, since nothing can add a control to a mapping the player cannot
-    /// change. `None` means unlimited.
-    pub(crate) capacity: Option<usize>,
     /// Whether the player may change it, or is only being shown what it does.
     pub(crate) rebind_policy: crate::mapping::RebindPolicy,
 }
@@ -123,7 +117,6 @@ impl MappingDecl {
     const fn listed() -> Self {
         Self {
             prefix: None,
-            capacity: Some(1),
             rebind_policy: crate::mapping::RebindPolicy::Fixed,
         }
     }
@@ -321,16 +314,16 @@ impl<'a, C> BindingBuilder<'a, C> {
     ///
     /// **Declaring two of these for one action in one family is how you ship a default primary and
     /// secondary.** They derive the same key, so they are one row holding two controls rather than
-    /// two rows; the mapping's capacity grows to fit them without being asked. Use
-    /// [`mappable_upto`](Self::mappable_upto) to leave a slot for a control the player adds that
-    /// the game does not ship a default for.
+    /// two rows. A mapping holds as many controls as it is given; how many cells to draw beside
+    /// them — a spare one for a control the player adds, or none — is the settings screen's
+    /// decision rather than something declared here.
     ///
     /// ```ignore
     /// controls.bind::<Jump>(KeyCode::Space).mappable();
     /// controls.bind::<Jump>(KeyCode::KeyJ).mappable();   // the same row, second slot
     /// ```
     pub fn mappable(self) -> Self {
-        self.declare_mapping(None, Some(1))
+        self.declare_mapping(None)
     }
 
     /// Keeps this binding out of the presentation list entirely.
@@ -371,41 +364,10 @@ impl<'a, C> BindingBuilder<'a, C> {
     /// its three neighbours. Use it when two would otherwise derive the same key, which happens
     /// when one action is bound in two contexts.
     pub fn mappable_as(self, key: &'static str) -> Self {
-        self.declare_mapping(Some(key), Some(1))
+        self.declare_mapping(Some(key))
     }
 
-    /// Lets the player rebind this, and put up to `count` controls in the mapping.
-    ///
-    /// What a "primary and secondary" screen declares when the game ships only one default and
-    /// leaves the other slot empty. A mapping never ends up narrower than the defaults it holds, so
-    /// this raises a ceiling rather than setting one.
-    ///
-    /// ```ignore
-    /// controls.bind::<Fire>(KeyCode::ControlLeft).mappable_upto(2);
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// If `count` is zero. A mapping with no room is a binding the player cannot change, which is
-    /// what leaving `mappable` off already says.
-    pub fn mappable_upto(self, count: usize) -> Self {
-        assert!(
-            count > 0,
-            "a mapping needs room for at least one control; leave `mappable` off instead"
-        );
-        self.declare_mapping(None, Some(count))
-    }
-
-    /// Lets the player rebind this, with no limit on how many controls the mapping holds.
-    ///
-    /// For a program whose command set is large and open enough that its shortcuts cannot be laid
-    /// out in a table written in advance — an editor or a tool, where the screen grows an "add
-    /// shortcut" button. A game almost always wants a fixed number of slots instead.
-    pub fn mappable_any(self) -> Self {
-        self.declare_mapping(None, None)
-    }
-
-    fn declare_mapping(self, prefix: Option<&'static str>, capacity: Option<usize>) -> Self {
+    fn declare_mapping(self, prefix: Option<&'static str>) -> Self {
         let existing = self.builder.bindings[self.index].mapping;
         assert!(
             self.builder.bindings[self.index].follows.is_none(),
@@ -418,13 +380,9 @@ impl<'a, C> BindingBuilder<'a, C> {
              the other says they may change it"
         );
         self.builder.bindings[self.index].mapping = Some(MappingDecl {
-            // A later call names the mapping; `mappable_as(..).mappable_upto(2)` must not silently
-            // drop the name, and neither order should surprise.
+            // A later call names the mapping; `mappable_as(..).mappable()` must not silently drop
+            // the name, and neither order should surprise.
             prefix: prefix.or(existing.and_then(|decl| decl.prefix)),
-            capacity: match existing {
-                Some(decl) => widest(decl.capacity, capacity),
-                None => capacity,
-            },
             // Every one of this method's callers is a `mappable*`, so reaching here is the author
             // asking for the upgrade from the listed-but-fixed default.
             rebind_policy: crate::mapping::RebindPolicy::Here,

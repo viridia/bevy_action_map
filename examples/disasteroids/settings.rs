@@ -65,6 +65,15 @@ const SELECTED: Color = Color::srgb(0.25, 0.55, 0.35);
 /// The width of the column holding what a row is called, and of each control column after it.
 const NAME_WIDTH: f32 = 210.0;
 const CONTROL_WIDTH: f32 = 155.0;
+
+/// How many control cells each table draws per row.
+///
+/// The crate has no opinion: a mapping is a list of controls and how many to offer is this screen's
+/// decision. Two on the keyboard, so every changeable row has a spare cell for a second key. One on
+/// the pad, whose rows are all fixed here — the console's own remapper owns that — so a second cell
+/// would be a promise this screen cannot keep.
+const KEYBOARD_COLUMNS: usize = 2;
+const GAMEPAD_COLUMNS: usize = 1;
 /// How far a follower's line sits under the row it rides.
 const FOLLOWER_INDENT: f32 = 20.0;
 
@@ -415,11 +424,11 @@ fn screen(world: &World) -> impl Scene {
             --
             Node { column_gap: Val::Px(48.0), align_items: AlignItems::Start }
             Children [
-                @{table("Keyboard & Mouse", rows(DeviceFamily::KeyboardMouse))}
+                @{table("Keyboard & Mouse", rows(DeviceFamily::KeyboardMouse), KEYBOARD_COLUMNS)}
                 --
                 Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0) }
                 Children [
-                    @{table("Gamepad", rows(DeviceFamily::Gamepad))}
+                    @{table("Gamepad", rows(DeviceFamily::Gamepad), GAMEPAD_COLUMNS)}
                     --
                     @{preset_row(&presets, selected)}
                     --
@@ -912,14 +921,9 @@ fn redraw_pending(world: &mut World) {
     }
 }
 
-/// One device's worth of rows, under a heading and grouped by category.
-///
-/// The column count is the data's rather than the screen's: a row says how many controls it can
-/// hold, and the widest row in the table decides how many cells every row draws. That is what makes
-/// the keyboard table three columns wide — name, primary, secondary — and the pad table two, with
-/// nothing here saying so.
-fn table(title: &'static str, mut rows: Vec<ActionMapping>) -> impl Scene {
-    let columns = rows.iter().map(slots_in).max().unwrap_or(1);
+/// One device's worth of rows, under a heading and grouped by category, `columns` control cells
+/// wide.
+fn table(title: &'static str, mut rows: Vec<ActionMapping>, columns: usize) -> impl Scene {
     // Stable, so rows keep the order the game declared them in within each category.
     rows.sort_by_key(|mapping| (mapping.category.is_none(), mapping.category));
 
@@ -968,11 +972,6 @@ fn table(title: &'static str, mut rows: Vec<ActionMapping>) -> impl Scene {
     }
 }
 
-/// How many controls a row can hold, which for a row nobody may change is however many it holds.
-fn slots_in(mapping: &ActionMapping) -> usize {
-    mapping.capacity.unwrap_or(mapping.slots.len())
-}
-
 /// One row: what it is called, then a cell per column.
 fn cells(mapping: &ActionMapping, columns: usize) -> Vec<Cell> {
     let changeable = mapping.rebind_policy.is_rebindable();
@@ -986,9 +985,11 @@ fn cells(mapping: &ActionMapping, columns: usize) -> Vec<Cell> {
     }];
 
     for column in 0..columns {
-        // A slot this row does not have is blank and unboxed; one it has and has not filled is an
-        // empty box, which is what a spare secondary looks like before the player uses it.
-        let exists = column < slots_in(mapping);
+        // Every cell of a changeable row is one the player can put a control in, filled or not — an
+        // empty box is what a spare secondary looks like before it is used. A fixed row shows what
+        // it holds and stops: no capture will ever reach the cell after it, so a box there would be
+        // a promise this screen cannot keep.
+        let filled = column < mapping.slots.len();
         cells.push(Cell {
             text: mapping
                 .slots
@@ -997,21 +998,21 @@ fn cells(mapping: &ActionMapping, columns: usize) -> Vec<Cell> {
                 .unwrap_or_default(),
             width: CONTROL_WIDTH,
             color,
-            border: if changeable && exists {
+            border: if changeable {
                 CHANGEABLE.with_alpha(0.35)
             } else {
                 Color::NONE
             },
             // Exactly the cells the box is drawn around, which is what the box was always
-            // promising: the selection can reach what the player may change, and skips the rest.
-            // A slot that exists but is not changeable still gets an identity — `Fixed` rather
-            // than `Label` — because a preset may still move it even though a capture never will.
-            role: if !exists {
-                CellRole::Label
-            } else if changeable {
+            // promising: the selection can reach what the player may change, and skips the rest. A
+            // filled cell that is not changeable still gets an identity — `Fixed` rather than
+            // `Label` — because a preset may still move it even though a capture never will.
+            role: if changeable {
                 CellRole::Changeable(mapping.family, mapping.key, column)
-            } else {
+            } else if filled {
                 CellRole::Fixed(mapping.family, mapping.key, column)
+            } else {
+                CellRole::Label
             },
         });
     }

@@ -177,6 +177,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 117n | Repacking is what `devfmt` does, and a bare run is refused        |
 | 117q | The preview stops showing unchanged code                          |
 | 119  | Bevy 0.20.0-rc.1, from crates.io rather than git                  |
+| 118a | Capacity is the app's business, and a resource-set ceiling replaces it |
 
 ---
 
@@ -330,34 +331,6 @@ to the player as a named tunable, the way `tunable_dead_zone` already offers a d
 
 What the player is shown, once the crate knows what is bound.
 
-### 118a. Capacity is the app's business, and one ceiling replaces it
-
-`ActionMapping::capacity` goes, with `mappable_upto`, `mappable_any` and `mapping::widest`. A
-mapping is an ordered list; how long it ought to be is the settings screen's decision — how many
-columns to draw, whether a row may grow, what a blank cell offers.
-
-- **Measured before deciding.** `mappable_any` — the growable-list case D29 was written for — is
-  reached once in tree, by a unit test asserting `capacity == None`. No example uses it.
-  `mappable_upto` is used twice, both `upto(2)`, both meaning "ship one default, draw a blank second
-  cell"; and Disasteroids takes `max` across the table (`settings.rs:922`), so the per-row widths
-  capacity exists to express are read by no screen in tree.
-- **One ceiling, everywhere, rather than only on load.** A `MAX_SLOTS` constant enforced at three
-  points: the derivation in `mappings_of` as a plan-build diagnostic, `refusal` on the apply path,
-  and `for_slot`. `TooManyControls` is repurposed rather than deleted — `capacity: Option<usize>`
-  becomes a plain `limit: usize` — so a damaged save naming ten thousand controls for one row is
-  still refused once capacity has stopped doing it by accident.
-- **Chunk 81 is reversed.** A rebound row keeping its declared capacity was the whole of that chunk,
-  and `current_rows`' widening exception goes with the field it widened.
-- **D29 is half-reversed, and R19.9's capacity paragraph withdrawn.** The ordered list survives;
-  "capacity is inferred from the defaults and raisable by the author" does not, and the withdrawal
-  keeps enough to stop a per-mapping width being re-proposed.
-- **`for_slot` keeps its `Option`**, and its doc says density rather than capacity: the save format
-  is a dense list until 118b, so a skipped slot still has nowhere to go.
-- **Not doing: holes**, which are 118b. Nor `RebindPolicy`, which answers a different question and
-  already carries the "may this cell be captured into" half a screen needs.
-- **Verified by:** Disasteroids' settings screen unchanged on screen, with `slots_in` replaced by a
-  screen-owned constant and its `exists` test folded into the `changeable` one.
-
 ### 118b. A slot may be empty
 
 `Vec<Option<Control>>` through `ActionMapping::slots` and `Override::Controls`, so a player emptying
@@ -384,6 +357,22 @@ the primary leaves a gap rather than promoting the secondary into it.
   chunk owns the design question it was unrouted for: dropping per part rather than per binding, or
   refusing the clear outright.
 - **D48's three slot cases become four**, and D29 gains the empty slot.
+- **`for_slot` drops its density check, and slots assign like a JavaScript array.** Refusing a slot
+  more than one past what the row holds is what stops a hole today; once a hole is representable
+  that rule produces an arbitrary answer, refusing the secondary of an emptied two-cell row because
+  `1 > 0` while allowing the primary. Capturing into slot 4 of an empty row fills the four before it
+  with empties, so the only rule `for_slot` has left is the rebindable gate, and how far a row may
+  be addressed is the screen's column count. The app-side row edit goes with it: the
+  `controls.push(control)` in `examples/capture.rs` cannot make a gap and has to resize instead.
+- **`MaxSlots` becomes reachable from the capture path**, which it is not in 118a. One capture into
+  a high slot now makes a long row with no file involved, so the claim that a capture cannot exceed
+  the ceiling — written in `MaxSlots`'s own doc and in TD9.1 — is revised, and the ceiling gains a
+  guard on that path. `session.slot >= limit` is the whole test, needing no lookup of the row, so an
+  `On<Add<CaptureSession>>` observer with a `warn_once` is the cheap shape.
+- **Bulk `"cleared"` in a file is new here.** Trailing empties are stripped, but interior ones are
+  not, so a sparse assignment writes the word once per skipped slot. That is the first time it
+  appears more than singly, and the format is unchanged — worth stating rather than discovering in a
+  settings file.
 - **Not doing: a per-slot reset.** `reset` is per row, and whether "restore just this cell" means
   the declared control or an empty one is a question no screen in tree asks.
 - **Verified by:** clearing Disasteroids' primary and keeping the secondary, saved and reloaded with

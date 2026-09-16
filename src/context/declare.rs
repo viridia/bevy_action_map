@@ -531,6 +531,9 @@ fn apply_to_context<C: InputContext + Component>(
         .get_resource::<crate::capture::ReservedControls>()
         .map(|reserved| reserved.iter().map(|entry| entry.control).collect())
         .unwrap_or_default();
+    let max_slots = world
+        .get_resource::<crate::overrides::MaxSlots>()
+        .map(|max| max.0);
 
     let (variant, mappings, tunables, problems) = crate::overrides::rewrite(
         &bindings,
@@ -538,7 +541,10 @@ fn apply_to_context<C: InputContext + Component>(
         &tunables,
         overrides,
         preset,
-        &reserved,
+        &crate::overrides::Limits {
+            reserved: &reserved,
+            max_slots,
+        },
         C::PATH,
     );
     let plan = Arc::new(Plan::variant_of(&template, variant));
@@ -584,6 +590,9 @@ fn apply_to_entity<C: InputContext + Component>(
         .get_resource::<crate::capture::ReservedControls>()
         .map(|reserved| reserved.iter().map(|entry| entry.control).collect())
         .unwrap_or_default();
+    let max_slots = world
+        .get_resource::<crate::overrides::MaxSlots>()
+        .map(|max| max.0);
 
     let (variant, _mappings, _tunables, problems) = crate::overrides::rewrite(
         &bindings,
@@ -591,7 +600,10 @@ fn apply_to_entity<C: InputContext + Component>(
         &tunables,
         overrides,
         preset,
-        &reserved,
+        &crate::overrides::Limits {
+            reserved: &reserved,
+            max_slots,
+        },
         C::PATH,
     );
     let plan = Arc::new(Plan::variant_of(&template, variant));

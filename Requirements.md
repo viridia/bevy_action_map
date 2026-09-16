@@ -1221,17 +1221,21 @@ and response curves ([IGA file][steam-iga]).
   (R19.1), and the control scheme it belongs to. Its category comes from the action it belongs to
   (R1.6).
 
-  A mapping holds an **ordered list of slots** _(D29)_, each holding one control, with a
-  **capacity** saying how many slots it has — "primary and secondary" is a common arrangement, a
-  keyboard row with two cells. The first slot is primary by convention, so order is part of the
-  data rather than an artefact of iteration.. A screen draws one cell per slot; "cell" is the
-  drawing and never the data.
+  A mapping holds an **ordered list of slots** _(D29)_, each holding one control. The first slot is
+  primary by convention, so order is part of the data rather than an artefact of iteration. A screen
+  draws one cell per slot; "cell" is the drawing and never the data.
 
-  Capacity is **inferred from the declared defaults and raisable by the author**, never inferred
-  downward: a mapping holding two defaults has room for two without anyone saying so, and an author
-  who ships one default and wants a spare slot says so once. An unbounded capacity exists for the
-  other kind of program — a tool whose command set is too large and open to lay out in a table — and
-  is not what a game reaches for.
+  ~~A mapping carries a **capacity** saying how many slots it has — "primary and secondary" is a
+  common arrangement, a keyboard row with two cells — inferred from the declared defaults and
+  raisable by the author, never inferred downward.~~ _Withdrawn: a per-mapping width is a
+  presentation idea, and the screens in tree that wanted a number had it already from the list
+  itself or from a constant of their own, so the field expressed a decision no caller could be found
+  making. How wide a row may grow is the screen's business — how many columns to draw, whether a
+  cell offers a blank neighbour. What remains of the idea is a single ceiling across all rows, a
+  resource the app sets rather than a property per mapping: a hostile or corrupt save is the one
+  case where a boundary is the crate's business, and it is one global answer rather than a width per
+  row. Re-proposing a per-mapping capacity would need a screen that reads it, rather than one that
+  could already have its number from the list._
 - **R19.10 (MUST)** _(D28)_ A binding is **listed by default and rebindable only when declared**.
   Three states, and every binding is in exactly one:
 

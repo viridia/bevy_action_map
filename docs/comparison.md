@@ -307,8 +307,8 @@ and loadable as an asset. Same story: a workable basis, rendering left to you.
 - A **presentation model distinct from the binding model**. Dead zones and response curves are
   developer concerns; a player rebinding "Thrust" should not see them. Marking a binding
   `.mappable()` puts it in a separate, smaller model — a named *mapping* with an ordered list of
-  slots ("Primary", "Secondary") and a declared capacity, which is what a primary/secondary table
-  is. Everything is *listed* for the player to read; only what was declared is rebindable.
+  slots ("Primary", "Secondary"), which is what a primary/secondary table is. Everything is *listed*
+  for the player to read; only what was declared is rebindable.
 - **Interactive capture** with reserved and excluded controls, and **conflict detection** that can
   be run against an uncommitted working copy — so a screen with unconfirmed choices can tell whether
   two of them clash before either is applied, and a clash can steal the control from whatever held

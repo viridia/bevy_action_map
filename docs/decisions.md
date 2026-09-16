@@ -50,7 +50,7 @@ here, so there is one `D`-numbering in the project.
 | **D25** | What must not move upstream                                                   | —               |
 | **D27** | The presentation model is separate from the binding model                     | TD9       |
 | **D28** | Listing is the default; rebinding is opt-in                                   | TD9.1     |
-| **D29** | A mapping is an ordered list of slots, and capacity is inferred               | TD9.1     |
+| **D29** | A mapping is an ordered list of slots                                         | TD9.1     |
 | **D30** | `follow` declares a shared control once, against the leader's bindings so far | TD8.2     |
 | **D31** | Every player-facing string is a key; the mapping owns the name                | TD9.1     |
 | **D32** | A tunable is typed, so a settings screen is generic                           | TD9.1     |
@@ -726,13 +726,18 @@ name themselves, so the key derives as `gameplay.move.up` and a catalogue is whe
 translator will look. The family is inferred from the controls, because declaring it would be a
 third chance to disagree with what is actually bound.
 
-### D29 — A mapping is an ordered list of slots, and capacity is inferred
+### D29 — A mapping is an ordered list of slots
 
 **Decided.** A *mapping* is the named thing a player rebinds; a *slot* is one position in it holding
-one control; a screen draws one cell per slot. Capacity is `Some(n)` or `None`, widened by whatever
-the defaults ask for and never narrowed below them.
+one control; a screen draws one cell per slot. How many cells a screen draws is the screen's
+business, not the mapping's.
 
-**Rules out.** One control per mapping, and a fixed two.
+**Rules out.** One control per mapping, and a fixed two. Also a per-mapping capacity: how long a row
+*may* grow was once a property of the mapping, and it stopped being one when the width it expressed
+turned out to be read by no shipped screen — every caller that wanted a column count already had
+that count from the list itself, or from a constant of its own. A global ceiling on a row's length
+remains, as a resource the app sets, because a corrupt or hostile save is the one case where a
+boundary is the crate's business rather than the screen's.
 
 **Reversal.** One control per mapping cannot express the two-cell row every shipped game's keyboard
 table has. The workaround it forced was a second row under an alias name — `thrust` and

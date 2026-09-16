@@ -6,9 +6,9 @@
 //! that drive it.
 //!
 //! A mapping holds an ordered list of **slots**, each holding one control, because a rebinding row
-//! usually has more than one — "Primary" and "Secondary" is the arrangement almost every game ships.
-//! Declaring one action mappable twice in one family is how you ship both defaults, and the mapping
-//! grows to fit them.
+//! usually has more than one — "Primary" and "Secondary" is the arrangement almost every game
+//! ships. Declaring one action mappable twice in one family is how you ship both defaults: they
+//! arrive as one row holding two controls rather than as two rows.
 //!
 //! A mapping is not a binding. For anything composite the binding has no single control to show: a
 //! movement binding is four keys, so each *part* of it becomes a mapping of its own, which is how
@@ -37,7 +37,6 @@
 //!     controls.bind::<Move>(DirectionalButtons::wasd()).mappable();  // four mappings…
 //!     controls.bind::<Jump>(KeyCode::Space).mappable();              // one mapping…
 //!     controls.bind::<Jump>(KeyCode::KeyJ).mappable();               // …with a second slot
-//!     controls.bind::<Fire>(KeyCode::ControlLeft).mappable_upto(2);  // one control, two slots
 //!     controls.bind::<Look>(MouseMove);                              // listed; not changeable
 //!     controls.bind::<Crouch>(KeyCode::KeyC).private();              // not listed at all
 //!     controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));   // rides the Jump row
@@ -188,14 +187,10 @@ pub struct ActionMapping {
     ///
     /// Usually one. Two mappable bindings of the same action in the same family arrive here as one
     /// row with two slots filled rather than as two rows.
-    pub slots: Vec<Control>,
-    /// How many slots this mapping has, or `None` if it grows without limit.
     ///
-    /// A fixed-width table draws one cell per slot, so this is its column count. A
-    /// [`Fixed`](RebindPolicy::Fixed) mapping has exactly the slots its defaults fill, since the
-    /// player can never add another — but a [preset](crate::preset) may still move that row, and is
-    /// refused if it offers more controls than there are slots.
-    pub capacity: Option<usize>,
+    /// How many cells to draw is the screen's decision, not this list's: a table offering a spare
+    /// column draws one more cell than the row holds, and a capture fills it.
+    pub slots: Vec<Control>,
     /// Whether the player may change what is in those slots.
     ///
     /// A screen draws a row of buttons for [`Here`](RebindPolicy::Here) and a row of labels for
@@ -352,19 +347,6 @@ fn gather_tunables(world: &World, stage: OverrideStage) -> Vec<Tunable> {
         .collect()
 }
 
-/// The more permissive of two capacities. `None` means unlimited.
-///
-/// Several bindings can feed one mapping, and each carries whatever its own combinator asked for.
-/// The mapping takes the widest: a narrower declaration on one binding says nothing about the
-/// mapping itself, only about a binding that happens to share the row.
-pub(crate) const fn widest(a: Option<usize>, b: Option<usize>) -> Option<usize> {
-    match (a, b) {
-        (None, _) | (_, None) => None,
-        (Some(a), Some(b)) if a >= b => Some(a),
-        (_, b) => b,
-    }
-}
-
 /// The binding whose mapping `bindings[index]` rides, if there is one.
 ///
 /// A follower reads the same controls as the binding it follows, which is what makes matching on
@@ -465,10 +447,9 @@ pub(crate) fn mappings_of(
                 && mapping.action == binding.action
         }) {
             mapping.slots.push(entry.control);
-            mapping.capacity = widest(mapping.capacity, declaration.capacity);
-            // Bindings that disagree about this are a plan-build error, so the first one
-            // wins here only so that the value is deterministic while the context is
-            // being refused.
+            // Bindings that disagree about whether the player may change the row are a plan-build
+            // error, so the first one's `rebind_policy` wins here only so that the value is
+            // deterministic while the context is being refused.
             continue;
         }
 
@@ -477,25 +458,18 @@ pub(crate) fn mappings_of(
             action: binding.action,
             action_path: binding.path,
             category: binding.category,
-            // A part of a composite holds a button, whatever the composite as a whole
-            // reports; a whole binding holds whatever its own input does.
+            // A part of a composite holds a button, whatever the composite as a whole reports; a
+            // whole binding holds whatever its own input does.
             accepts: match entry.part {
                 BindingPart::Whole => binding.input.channel_shape(),
                 _ => ChannelShape::Button,
             },
             family: entry.family,
             slots: alloc::vec![entry.control],
-            capacity: declaration.capacity,
             rebind_policy: declaration.rebind_policy,
             context,
             followers: Vec::new(),
         });
-    }
-
-    // A mapping is never narrower than the defaults it already holds, so declaring two
-    // bindings is enough on its own to make a two-slot row — nobody has to also say "2".
-    for mapping in &mut mappings {
-        mapping.capacity = widest(mapping.capacity, Some(mapping.slots.len()));
     }
 
     // A second pass rather than folded into the first: a follower's row is found by the
@@ -719,7 +693,6 @@ mod tests {
         // shows. One apiece here: nothing declared a second mappable binding.
         assert_eq!(mappings[0].slots, [Control::PhysicalKey(KeyCode::KeyW)]);
         assert_eq!(mappings[4].slots, [Control::PhysicalKey(KeyCode::Space)]);
-        assert_eq!(mappings[4].capacity, Some(1), "one default, one slot");
 
         // The category comes from the action, so the four movement rows file together.
         assert_eq!(mappings[0].category, Some("mapping_tests.movement"));
@@ -929,8 +902,6 @@ mod tests {
             ],
             "in the order they were declared, which is what makes the first one primary"
         );
-        // Nobody said "2"; the defaults widened the row on their own.
-        assert_eq!(mappings[0].capacity, Some(2));
     }
 
     /// The collision that survives the merge above: *different* actions answering to one name, where
@@ -951,69 +922,6 @@ mod tests {
             controls
                 .bind::<ToggleOverlay>(KeyCode::Enter)
                 .mappable_as("mapping_tests.go");
-        });
-    }
-
-    /// Capacity is a ceiling the author raises, not a count of what is bound: a game ships one
-    /// default and leaves the second slot for the player.
-    #[test]
-    fn a_slot_can_be_given_more_room_than_its_defaults_need() {
-        #[derive(InputContext)]
-        #[context(path = "mapping_tests.roomy", tick = Fixed)]
-        struct Roomy;
-
-        let mut app = App::new();
-        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
-        app.add_context::<Roomy>(|controls| {
-            controls.bind::<Jump>(KeyCode::Space).mappable_upto(2);
-            controls.bind::<ToggleOverlay>(KeyCode::F1).mappable_any();
-        });
-
-        let mappings = mappings(app.world());
-        assert_eq!(mappings[0].slots, [Control::PhysicalKey(KeyCode::Space)]);
-        assert_eq!(mappings[0].capacity, Some(2), "one default, two slots");
-        assert_eq!(mappings[1].capacity, None);
-
-        // What an "add" button asks before offering itself.
-        assert!(mappings[0].capacity.is_none_or(|limit| 1 < limit));
-        assert!(mappings[0].capacity.is_some_and(|limit| 2 >= limit));
-        assert!(mappings[1].capacity.is_none_or(|limit| 2 < limit));
-    }
-
-    /// The widest declaration wins, and the defaults widen it further — because a narrower word
-    /// elsewhere is a statement about *that* binding, not a demand that the row be narrow.
-    #[test]
-    fn capacity_is_the_widest_anything_asked_for() {
-        #[derive(InputContext)]
-        #[context(path = "mapping_tests.widening", tick = Fixed)]
-        struct Widening;
-
-        let mut app = App::new();
-        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
-        app.add_context::<Widening>(|controls| {
-            // A plain `mappable` says `UpTo(1)`, and does not narrow the row it lands in.
-            controls.bind::<Jump>(KeyCode::Space).mappable_upto(3);
-            controls.bind::<Jump>(KeyCode::Enter).mappable();
-        });
-
-        let mappings = mappings(app.world());
-        assert_eq!(mappings.len(), 1);
-        assert_eq!(mappings[0].capacity, Some(3));
-    }
-
-    /// A mapping with no room is a binding that is not mappable, which is what leaving `mappable`
-    /// already says.
-    #[test]
-    #[should_panic(expected = "room for at least one control")]
-    fn a_slot_cannot_be_declared_empty() {
-        #[derive(InputContext)]
-        #[context(path = "mapping_tests.empty", tick = Fixed)]
-        struct Empty;
-
-        let mut app = App::new();
-        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
-        app.add_context::<Empty>(|controls| {
-            controls.bind::<Jump>(KeyCode::Space).mappable_upto(0);
         });
     }
 
@@ -1043,32 +951,30 @@ mod tests {
         assert_eq!(mappings[1].family, DeviceFamily::Gamepad, "…two families");
     }
 
-    /// A name and a capacity are separate things to say, so saying both must work in either order
-    /// — neither call may quietly discard what the other declared.
+    /// A second `mappable*` on one binding must not quietly discard the name the first one gave it,
+    /// in either order.
     #[test]
-    fn naming_a_slot_and_widening_it_are_independent() {
+    fn naming_a_slot_survives_a_second_mappable() {
         #[derive(InputContext)]
-        #[context(path = "mapping_tests.named_and_wide", tick = Fixed)]
-        struct NamedAndWide;
+        #[context(path = "mapping_tests.named_twice", tick = Fixed)]
+        struct NamedTwice;
 
         let mut app = App::new();
         app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
-        app.add_context::<NamedAndWide>(|controls| {
+        app.add_context::<NamedTwice>(|controls| {
             controls
                 .bind::<Jump>(KeyCode::Space)
                 .mappable_as("mapping_tests.leap")
-                .mappable_upto(2);
+                .mappable();
             controls
                 .bind::<ToggleOverlay>(KeyCode::F1)
-                .mappable_upto(3)
+                .mappable()
                 .mappable_as("mapping_tests.peek");
         });
 
         let mappings = mappings(app.world());
         assert_eq!(mappings[0].key.to_string(), "mapping_tests.leap");
-        assert_eq!(mappings[0].capacity, Some(2));
         assert_eq!(mappings[1].key.to_string(), "mapping_tests.peek");
-        assert_eq!(mappings[1].capacity, Some(3));
     }
 
     /// And the same collision across two contexts, which no single plan can see.
@@ -1148,11 +1054,10 @@ mod tests {
         let mappings = mappings(app.world());
         assert_eq!(mappings.len(), 1);
         assert_eq!(mappings[0].key.to_string(), "mapping_tests.jump");
-        assert_eq!(mappings[0].slots, [Control::PhysicalKey(KeyCode::Space)]);
         assert_eq!(
-            mappings[0].capacity,
-            Some(1),
-            "a follower contributes no slots, so it cannot widen the row it rides"
+            mappings[0].slots,
+            [Control::PhysicalKey(KeyCode::Space)],
+            "a follower contributes no control of its own to the row it rides"
         );
 
         // Not a row, but not invisible either: the row it rides knows it is there.
