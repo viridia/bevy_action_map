@@ -718,6 +718,11 @@ against 6 pure rewraps in the last 60 commits.
 - **A `docs/decisions.md` entry.** What `devfmt` is for — renormalizing prose rather than fixing
   violations — is cheap to reverse in code and expensive once a tree-wide diff has landed on it,
   and it has already been re-argued once from a blank page.
+- **Six split code spans in tree go with it.** `Requirements.md`, `Roadmap.md`, `docs/design.md`,
+  `docs/issues.md`, `src/binding/control.rs` and `examples/split_friction/main.rs` each carry one
+  backtick span broken across two lines, left behind by the bug 117m fixes. A repack rejoins them,
+  so they need no pass of their own — but they are the reason this chunk's diff touches prose that
+  reads as already correct.
 - **Not doing: the usage log.** Its deferred row gates on hand reflows still happening after this
   lands, and the row's wording is corrected here to stop asserting that they already do.
 - **Verified by:** `--sweep` over the tree, with `main.rs`'s own divider intact afterwards — the

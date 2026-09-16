@@ -3,8 +3,9 @@
 //! `cargo fmt`'s own `wrap_comments` needs nightly and does not understand markdown, so a rename
 //! that lengthens or shortens an identifier leaves every paragraph that mentions it wrapped wrong,
 //! and fixing that by hand is one small edit per paragraph. This tool does the same reflow
-//! `rustfmt` does for code, but for prose: it re-wraps paragraphs and leaves everything with its
-//! own layout rules — fenced code blocks, table rows, headings, and link definitions — untouched.
+//! `rustfmt` does for code, but for prose: it re-wraps paragraphs and leaves untouched everything
+//! with its own layout rules — fenced code blocks, table rows, headings, divider lines and link
+//! definitions.
 //!
 //! Usage: `devfmt [--check] [--width N] [--diff[=REF]] <path>...`
 //!
@@ -24,9 +25,13 @@
 //!
 //! # What it assumes
 //!
-//! - A line is classified by what its trimmed text starts with, not by parsing Rust or
-//!   markdown, so a full-line string literal that happens to start with `//` would be
-//!   misread as a comment. This does not occur in idiomatic Rust.
+//! - A line is classified by what its trimmed text starts with, not by parsing Rust or markdown, so
+//!   a line inside a string literal that starts with `//` is read as a comment and reflowed with
+//!   everything around it. A formatter's own test fixtures are where that actually bites; telling
+//!   the two apart needs a Rust lexer rather than a line classifier.
+//! - A line with no letter or digit in it is a divider rather than prose, and is held verbatim.
+//!   A line of punctuation meant as prose would be held too.
+//! - A backtick span is never broken across lines, so a span longer than the width overflows it.
 //! - A plain `//` comment is prose, the same as `///`/`//!`. This tool does not distinguish
 //!   commented-out code from an explanatory comment — do not point it at a tree that leaves
 //!   commented-out code lying around.
@@ -457,8 +462,13 @@ struct ParaLine {
     line_no: usize,
 }
 
+/// `indent` is the whitespace between `base_indent` and the text, taken from the paragraph's first
+/// line and reused on every line it emits. Dropping it is what used to pull an indented
+/// continuation paragraph out to column 0, escaping the list item it belonged to, and flatten a
+/// nested bullet into a top-level one.
 struct Paragraph {
     kind: ParaKind,
+    indent: String,
     lines: Vec<ParaLine>,
 }
 
@@ -476,6 +486,7 @@ fn reflow_paragraphs(
     for (line_no, line) in (start_line..).zip(text.lines()) {
         let content = line.strip_prefix(base_indent).unwrap_or(line);
         let trimmed = content.trim_start();
+        let indent = &content[..content.len() - trimmed.len()];
 
         if in_fence {
             flush_paragraph(para.take(), width, base_indent, touched, &mut out);
@@ -487,8 +498,11 @@ fn reflow_paragraphs(
         }
 
         let opens_fence = trimmed.starts_with("```");
+        // A line with no letter or digit is a divider or a thematic break rather than prose, and a
+        // rewrap would pull the following sentence's first word up onto the end of it.
         let atomic = opens_fence
             || trimmed.is_empty()
+            || !trimmed.chars().any(char::is_alphanumeric)
             || trimmed.starts_with('|')
             || trimmed.starts_with('#')
             || is_link_definition(trimmed);
@@ -507,6 +521,7 @@ fn reflow_paragraphs(
             };
             para = Some(Paragraph {
                 kind: ParaKind::List { marker },
+                indent: indent.to_string(),
                 lines: vec![line],
             });
         } else {
@@ -520,6 +535,7 @@ fn reflow_paragraphs(
                 None => {
                     para = Some(Paragraph {
                         kind: ParaKind::Plain,
+                        indent: indent.to_string(),
                         lines: vec![line],
                     })
                 }
@@ -563,18 +579,25 @@ fn flush_paragraph(
         return;
     }
 
+    let indent = &para.indent;
     let (first_prefix, cont_prefix) = match &para.kind {
-        ParaKind::Plain => (base_indent.to_string(), base_indent.to_string()),
+        ParaKind::Plain => (
+            format!("{base_indent}{indent}"),
+            format!("{base_indent}{indent}"),
+        ),
         ParaKind::List { marker } => (
-            format!("{base_indent}{marker}"),
-            format!("{base_indent}{}", " ".repeat(marker.chars().count())),
+            format!("{base_indent}{indent}{marker}"),
+            format!(
+                "{base_indent}{indent}{}",
+                " ".repeat(marker.chars().count())
+            ),
         ),
     };
 
     let rewrap_parts: Vec<&str> = para.lines.iter().map(|l| l.rewrap.as_str()).collect();
     let joined = rewrap_parts.join(" ");
-    let words: Vec<&str> = joined.split_whitespace().collect();
-    if words.is_empty() {
+    let units = wrap_units(&joined);
+    if units.is_empty() {
         return;
     }
 
@@ -584,17 +607,17 @@ fn flush_paragraph(
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut avail = first_avail;
-    for word in words {
-        let word_len = word.chars().count();
+    for unit in &units {
+        let unit_len = unit.chars().count();
         if current.is_empty() {
-            current.push_str(word);
-        } else if current.chars().count() + 1 + word_len <= avail {
+            current.push_str(unit);
+        } else if current.chars().count() + 1 + unit_len <= avail {
             current.push(' ');
-            current.push_str(word);
+            current.push_str(unit);
         } else {
             lines.push(std::mem::take(&mut current));
             avail = cont_avail;
-            current.push_str(word);
+            current.push_str(unit);
         }
     }
     lines.push(current);
@@ -605,6 +628,37 @@ fn flush_paragraph(
         out.push_str(line);
         out.push('\n');
     }
+}
+
+/// The units a greedy fill may not break: whitespace-separated words, except that words inside a
+/// backtick span are held together as one. A span containing a space otherwise splits across lines,
+/// and the fragment left at the head of the second line can itself read as a list marker on a later
+/// run over the same file.
+///
+/// A unit longer than the width overflows its line, the same trade a long URL already gets. An odd
+/// number of backticks in the paragraph means they cannot be paired, so the span rule is dropped
+/// rather than guessed at — one stray backtick would otherwise glue the rest of the paragraph into
+/// a single unit.
+fn wrap_units(text: &str) -> Vec<String> {
+    if text.chars().filter(|&c| c == '`').count() % 2 == 1 {
+        return text.split_whitespace().map(str::to_string).collect();
+    }
+
+    let mut units: Vec<String> = Vec::new();
+    let mut open = false;
+    for word in text.split_whitespace() {
+        match units.last_mut() {
+            Some(unit) if open => {
+                unit.push(' ');
+                unit.push_str(word);
+            }
+            _ => units.push(word.to_string()),
+        }
+        if word.chars().filter(|&c| c == '`').count() % 2 == 1 {
+            open = !open;
+        }
+    }
+    units
 }
 
 /// Whether `trimmed` opens a markdown list item, and if so, the exact marker text (`"- "`,
@@ -767,6 +821,79 @@ mod tests {
     fn different_indentation_never_merges_across_scopes() {
         let input = "    /// inner one\nfn f() {\n        /// deeper one\n    }\n";
         assert_eq!(rust(input, 100), input);
+    }
+
+    #[test]
+    fn an_indented_paragraph_keeps_its_indent() {
+        // A continuation paragraph under a list item. Dedenting it to column 0 takes it out of the
+        // item it belongs to, which is a different document.
+        let input = "  aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk\n";
+        let out = reflow_paragraphs(input, 30, "", 1, None);
+        for line in out.lines() {
+            assert!(line.starts_with("  "), "lost its indent: {line:?}");
+            assert!(line.chars().count() <= 30, "line too long: {line:?}");
+        }
+    }
+
+    #[test]
+    fn a_nested_list_item_keeps_its_nesting() {
+        // Promoting this to column 0 flattens a two-level list into one.
+        let input = "  - aaaa bbbb cccc dddd eeee ffff gggg hhhh\n";
+        let out = reflow_paragraphs(input, 30, "", 1, None);
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(lines.len() > 1, "nothing rewrapped, so nothing was tested");
+        assert!(lines[0].starts_with("  - "), "promoted: {:?}", lines[0]);
+        for line in &lines[1..] {
+            assert!(line.starts_with("    "), "continuation not hung: {line:?}");
+        }
+    }
+
+    #[test]
+    fn a_nested_list_item_in_a_doc_comment_keeps_its_nesting() {
+        let input = "///   - aaaa bbbb cccc dddd eeee ffff gggg hhhh\n";
+        let out = rust(input, 30);
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(lines.len() > 1, "nothing rewrapped, so nothing was tested");
+        assert!(lines[0].starts_with("///   - "), "promoted: {:?}", lines[0]);
+        for line in &lines[1..] {
+            assert!(
+                line.starts_with("///     "),
+                "continuation not hung: {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_divider_is_not_absorbed_into_the_paragraph_below_it() {
+        let input = "// -------------------\n// aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii\n";
+        let out = rust(input, 30);
+        assert!(
+            out.starts_with("// -------------------\n"),
+            "the divider grew a word: {out:?}"
+        );
+    }
+
+    #[test]
+    fn a_backtick_span_containing_a_space_is_never_split() {
+        // Splitting `12. ` leaves a fragment that a later run over the same file reads as a list
+        // marker, so the damage compounds.
+        let input =
+            "/// so `- ` and `12. ` each hang their continuation lines under their own width\n";
+        let out = rust(input, 40);
+        assert!(
+            out.lines().any(|l| l.contains("`12. `")),
+            "the span was split: {out:?}"
+        );
+    }
+
+    #[test]
+    fn an_unpaired_backtick_falls_back_to_plain_words() {
+        // One stray backtick would otherwise glue the rest of the paragraph into a single unit.
+        let input = "/// a stray ` tick aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk\n";
+        let out = rust(input, 30);
+        for line in out.lines() {
+            assert!(line.chars().count() <= 30, "line too long: {line:?}");
+        }
     }
 
     #[test]
