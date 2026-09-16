@@ -1,13 +1,21 @@
-# Findings: the implementation scan
+# Findings awaiting routing
 
-What the six-session scan of `src/` turned up, reordered by how much it matters rather than by
-which session found it.
+The register of things known to be wrong, missing, or out of proportion, and not yet given a chunk.
+A finding lands here whatever turned it up — the six-session scan of `src/` that started the
+document, a session that tripped over something, or a defect noticed while writing an example — and
+leaves when a chunk takes it. Ordered by how much it matters rather than by what found it.
+
+**What this document admits.** A finding is a claim that something is wrong and a statement of what
+someone would observe; it is not a plan. The moment a finding acquires a chunk, the chunk is where
+it lives and the entry is retired. Nothing here describes what the crate does, which is
+`docs/design.md`'s job, and nothing here is a limitation accepted on purpose, which is a decision
+and lives in `docs/decisions.md` where it says what reversing it would cost.
 
 **How to read an entry.** Each says where the problem is, what someone would actually observe, and
 whether it was confirmed by running something or only by reading. That last distinction is the
 important one, and it is stated per entry rather than assumed.
 
-**Line numbers are as of the scan, and several have since drifted** — `eval.rs:247` is now 257, and
+**Line numbers are as of the entry, and several have since drifted** — `eval.rs:247` is now 257, and
 the two `cargo doc` sites in 1038 have moved and been fixed. Take a `file.rs:NNN` as "roughly here,
 find it by name"; the symbol named beside it is the part that is still good. Re-verify before acting
 on one.
@@ -20,14 +28,15 @@ chunk's own commit, and `docs/design.md` or `docs/decisions.md` where anything a
 are the record. A gap in the sequence below is a retired finding, not an omission. The next
 unassigned number is stated here; keep it up to date when numbering new items.
 
-**Next: 1056.**
+**Next: 1058.**
 
-**The calibration warning, stated up front because it is fair.** Ask a model to find sixty problems
-and it will find sixty. Some of what follows is real and some is a rule nobody would ever violate.
-The tiers below are the honest attempt to separate them. Where a finding rests on reasoning rather
-than on a probe, or where the reachable case is hypothetical, the entry says so in as many words.
-Where an entry judges a small cost not worth acting on, that verdict is stated inline rather than
-collected into a tier of its own.
+**The calibration warning, stated up front because it is fair.** Most of these entries came from
+asking a model to scan `src/`, and a model asked to find sixty problems will find sixty. Some of
+what follows is real and some is a rule nobody would ever violate. The tiers below are the honest
+attempt to separate them. Where a finding rests on reasoning rather than on a probe, or where the
+reachable case is hypothetical, the entry says so in as many words. Where an entry judges a small
+cost not worth acting on, that verdict is stated inline rather than collected into a tier of its
+own.
 
 **What the tiers mean.**
 
@@ -35,20 +44,37 @@ collected into a tier of its own.
 | ----------------------- | ------------------------------------------------------------------------------------------------ |
 | **1. Live**             | An ordinary build, an ordinary API call, and the answer is wrong                                 |
 | **2. Latent**           | The code is wrong and the path is not taken in tree — a feature exists that nothing has used yet |
-| **3. Absent**           | Not wrong, missing, with a requirement saying it must exist                                      |
+| **3. Absent**           | Not wrong, missing, where a requirement or an example's own job says it should exist            |
 | **4. Prose**            | A comment or document contradicts the code. No behaviour at stake                                |
 | **5. Cost and surface** | Public items nothing asks for, and machinery out of proportion                                   |
 
-This document does not _decide_ routing, and it does not describe what the crate does — routing is
-ground rule 5's business and yours, and `docs/design.md` is the description. It does record routing
-once it happens: an entry that has been given a chunk says so on its `Fix` line, so what is left
+This document does not _decide_ routing, which is ground rule 5's business and the author's. It
+records routing once it happens: an entry given a chunk says so on its `Fix` line, so what is still
 unrouted can be read off the entries that stay silent.
 
 ---
 
 ## 1. Live — an ordinary build gets a wrong answer
 
-Every entry this scan filed here has landed (chunks 81, 84, 85, 86, 88, 89, 90, 91) and is retired.
+Every entry the `src/` scan filed here has landed (chunks 81, 84, 85, 86, 88, 89, 90, 91) and is
+retired. What follows was found another way.
+
+### 1056 `InputDispatchPlugin`, left enabled, bypasses consumption
+
+R8.2a · `bevy_ui_widgets` · carried from `Roadmap.md`, **not re-probed** — that Disasteroids
+disables the plugin outright is the strongest evidence here, and it is circumstantial
+
+`bevy_ui_widgets::Button` activates on `Space` from a `FocusedInput<KeyboardInput>` that asks the
+mapper nothing, so a focused button answers a control a context has already claimed.
+
+What is wrong is the *default*, not the capability. A context per widget kind answers it, and
+Disasteroids ships that way by disabling the plugin outright — so nothing in tree is bitten. What
+bites is that `DefaultPlugins` brings the collision and nothing tells a game to opt out, which means
+every game meets it once, by surprise, and has to work out what happened.
+
+_Fix:_ the generic form is the **consumption-aware `FocusedInput` dispatch** deferred row, gated on
+a game wanting `bevy_ui_widgets`' own widgets working unmodified. What has no home is the smaller
+half — saying so somewhere a game reads before it hits this.
 
 ---
 
@@ -115,9 +141,23 @@ is missing from the crate.
 
 ---
 
-## 3. Absent — a requirement says it should exist and nothing does
+## 3. Absent — something should exist and nothing does
 
 Ordered by what a real game would miss first.
+
+### 1057 A refused capture is silent on Disasteroids' screen
+
+`examples/disasteroids/settings.rs` · carried from `Roadmap.md`, **not re-probed** — read from the
+screen's own code, which never renders `CaptureRefused::reason`
+
+Wrong shape, wrong device family, or reserved: the capture session keeps listening and says nothing
+about why the press did not take. A player cannot tell a refusal from a key the game did not hear.
+
+The crate side is built — capture already reports why it refused — so this is the screen declining
+to render a reason it is handed. No requirement asks for it; R19 says what a rebinding UI may
+legally offer, not what it must say when it says no. It is here because ground rule 3 makes the
+examples the acceptance test, and an example that swallows a diagnostic is not demonstrating the
+thing the diagnostic was built for.
 
 ### 1015 Nothing can bind to where the pointer is
 
@@ -475,8 +515,9 @@ while it lasted. Unrouted.
 
 ### 1035 R23.2 is unenforced, and reading is the only thing enforcing it
 
-`Roadmap.md` says two violations have reached the per-tick path and both were caught by reading. The
-scan found two more, and both are still there:
+No allocation and no synchronization on the per-tick path is a rule with no tooling behind it. Four
+violations have reached that path and every one was caught by reading. Two were fixed; two are still
+there:
 
 - `evaluate_context` builds `let mut claims = Vec::new()` per instance per tick (`eval.rs`, in the
   loop that calls `apply_frame`) and allocates the moment anything is claimed. `chord_claims` sits

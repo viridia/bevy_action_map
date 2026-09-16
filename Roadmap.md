@@ -19,33 +19,15 @@ is an item that will be dropped.
 
 ## Where this stands
 
-[docs/design.md](./docs/design.md) is what the crate does today. What follows is only the delta:
-what is wrong, what was never built, and what is left to do.
+[docs/design.md](./docs/design.md) is what the crate does today, and
+[docs/issues.md](./docs/issues.md) is what is known to be wrong and not yet routed. What follows is
+the rest of the delta: what was never built, and what is left to do.
 
 The target the remaining sequence aims at is **Disasteroids** — an asteroids-like game playable on
 keyboard or gamepad, with a rebinding screen built on `bevy_ui_widgets` and operable from the
 controller. It is not a phase of its own; it arrives early, badly, and grows a capability per chunk,
 because ground rule 3 wants something runnable at every step and a real game is a better acceptance
 test than a synthetic one.
-
-### Known wrong
-
-Defects, as distinct from limitations that were accepted deliberately — those are decisions and live
-in `docs/decisions.md`, where each says what reversing it would cost.
-
-- **`InputDispatchPlugin`, left enabled, bypasses consumption.** `bevy_ui_widgets::Button` activates
-  on `Space` from a `FocusedInput<KeyboardInput>` that asks the mapper nothing, so a focused button
-  answers a control a context has claimed (R8.2a). What is wrong is the *default*, not the
-  capability: a context per widget kind answers it, and Disasteroids ships that way, disabling the
-  plugin outright. What is wrong is that `DefaultPlugins` brings the collision and nothing tells a
-  game to opt out. The generic form is in the deferred table.
-- **A refused capture is silent on Disasteroids' screen.** Wrong shape, wrong device family, or
-  reserved, and the session simply keeps listening with nothing said about why the press did not
-  take.
-- **`R23.2` is unenforced.** No allocation and no synchronization on the per-tick path is a rule
-  with no tooling behind it. Four violations have reached that path, every one caught by reading —
-  and one of them was later recorded as gone on a reading that missed a rename
-  ([docs/issues.md](./docs/issues.md) 1035). Two are still live.
 
 ### Never built
 

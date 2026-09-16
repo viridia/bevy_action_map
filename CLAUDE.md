@@ -9,7 +9,8 @@ One chunk per session, ending at the commit. To orient, in this order — it is 
 whole bootstrap:
 
 1. `git log --oneline -5` — what landed, and therefore where in the sequence we are.
-2. `Roadmap.md`'s "Where this stands" — what is wrong and what was never built.
+2. `docs/issues.md` for what is known to be wrong, and `Roadmap.md`'s "Where this stands" for what
+   was never built.
 3. The current chunk's `###` section in `Roadmap.md`.
 
 Everything below is on demand.
@@ -27,7 +28,7 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 | `Requirements.md` | 224 numbered requirements, `R<section>.<n>`, in sections `R0`–`R24` | you need to know what must be true, or a chunk cites an R-number |
 | `docs/comparison.md` | how this crate differs from BEI and LWIM | someone asks why this exists |
 | `docs/one-way-doors.md` | what stops being revisable if an input crate goes upstream | upstreaming comes up |
-| `docs/issues.md` | the implementation scan's findings, `1.1`–`6`, by severity | a finding needs routing, or you are about to re-find one |
+| `docs/issues.md` | findings awaiting routing, in five tiers by severity | a finding needs routing, or you are about to re-find one |
 | `docs/steam.md` | what a running Steam client actually does, `S1`–`S12` | a decision rests on how an external backend behaves |
 
 `archive/` holds the retired `Design.md`, `Log.md` and `Log-archive.md`. **Nothing in flight reasons
@@ -88,6 +89,7 @@ Each document admits one kind of thing, and the test is what distinguishes them.
 | `docs/decisions.md` | decisions expensive to reverse | Name what breaks if it is reversed. If you cannot, it is a code comment. |
 | `Requirements.md` | normative statements | Can it be violated? If nothing could violate it, it is design. |
 | `Roadmap.md` | work not done, and gaps | Does it name something that will change? If it describes the present, it is design. |
+| `docs/issues.md` | findings not yet routed | Is something wrong, and has no chunk taken it? A finding with a chunk belongs to the chunk. |
 | `CLAUDE.md` | process | Is it about the work rather than about the crate? |
 
 **What has been built is described in exactly one place, `docs/design.md`.** Four documents used to
