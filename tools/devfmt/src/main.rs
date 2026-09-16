@@ -7,7 +7,7 @@
 //! with its own layout rules — fenced code blocks, table rows, headings, divider lines and link
 //! definitions.
 //!
-//! Usage: `devfmt [--check] [--preview] [--width N] [--diff[=REF]] <path>...`
+//! Usage: `devfmt [--check] [--preview] [--width N] (--diff[=REF] | --sweep) <path>...`
 //!
 //! A `<path>` may be a file or a directory (directories are walked recursively for `.rs` and
 //! `.md` files, skipping `target/`, `.git/`, and other dot-directories). Given neither reporting
@@ -18,13 +18,17 @@
 //! what to run over next. `--preview` prints a unified diff of the change itself, its hunks sized
 //! to the paragraph that moved rather than to the minimal line change.
 //!
-//! `--diff` (default ref `HEAD`) is the routine way to run this: it restricts every check to
-//! paragraphs that overlap a line `git diff` says changed against that ref, the same trick
-//! `git-clang-format` uses to stay out of code nobody touched. `<path>` narrows which changed
-//! files are considered; with `--diff` and no paths, every changed file in the repository is.
-//! Run from the repository root — paths from `git diff` are repo-root-relative. Without `--diff`,
-//! every paragraph in every collected file is checked, which is the right mode for a deliberate
-//! cleanup sweep rather than routine use after an edit.
+//! One of two scope flags is required; a run naming neither is refused rather than guessed at.
+//!
+//! `--diff` (default ref `HEAD`) is the routine one: it restricts every check to paragraphs that
+//! overlap a line `git diff` says changed against that ref, the same trick `git-clang-format` uses
+//! to stay out of code nobody touched. `<path>` narrows which changed files are considered; with
+//! `--diff` and no paths, every changed file in the repository is. Run from the repository root —
+//! paths from `git diff` are repo-root-relative.
+//!
+//! `--sweep` takes every paragraph in the paths it is given. Since a paragraph is refilled whether
+//! or not its lines already fit, that rewrites far more than a diff does, which is why it has to be
+//! asked for by name.
 //!
 //! # What it assumes
 //!
@@ -41,10 +45,10 @@
 //! - Block comments (`/* */`) are left alone entirely.
 //! - A markdown file opening with a `---` line has YAML frontmatter, held verbatim up to the
 //!   closing `---`. A `---` anywhere else is an ordinary line.
-//! - A paragraph whose lines already fit the width is reproduced exactly as written, never
-//!   repacked to a tighter fit — matching hand-editing practice: only an actual violation gets
-//!   touched, and fixing it only ever pushes trailing words forward onto later lines, never pulls
-//!   words backward to reclaim slack a prior edit left behind.
+//! - A paragraph in scope is refilled whether or not its lines already fit. Editing prose shortens
+//!   a line as often as it lengthens one, and a shortened line leaves a paragraph ragged without
+//!   ever crossing the width, so a width test sees only half the problem. The cost is that a line
+//!   broken short on purpose does not survive a run that reaches it.
 
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -57,6 +61,7 @@ const DEFAULT_WIDTH: usize = 100;
 fn main() -> ExitCode {
     let mut check = false;
     let mut preview = false;
+    let mut sweep = false;
     let mut width = DEFAULT_WIDTH;
     let mut diff_ref: Option<String> = None;
     let mut paths: Vec<PathBuf> = Vec::new();
@@ -66,6 +71,7 @@ fn main() -> ExitCode {
         match arg.as_str() {
             "--check" => check = true,
             "--preview" => preview = true,
+            "--sweep" => sweep = true,
             "--diff" => diff_ref = Some("HEAD".to_string()),
             "--width" => {
                 let value = args.next().unwrap_or_else(|| {
@@ -86,6 +92,23 @@ fn main() -> ExitCode {
             }
             other => paths.push(PathBuf::from(other)),
         }
+    }
+
+    // Repacking reaches every paragraph it is given, so the old no-flag form became a whole-file
+    // rewrite rather than a tidy-up. Which paragraphs are in reach is now always said out loud.
+    match (diff_ref.is_some(), sweep) {
+        (false, false) => {
+            eprintln!(
+                "devfmt: name the scope — --diff for the paragraphs you changed, --sweep for every \
+                 paragraph in the paths given"
+            );
+            return ExitCode::from(2);
+        }
+        (true, true) => {
+            eprintln!("devfmt: --diff and --sweep are alternatives; pass one");
+            return ExitCode::from(2);
+        }
+        _ => {}
     }
 
     let (files, touched_by_file) = match &diff_ref {
@@ -179,7 +202,7 @@ fn main() -> ExitCode {
 }
 
 fn print_usage() {
-    eprintln!("usage: devfmt [--check] [--preview] [--width N] [--diff[=REF]] <path>...");
+    eprintln!("usage: devfmt [--check] [--preview] [--width N] (--diff[=REF] | --sweep) <path>...");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -581,18 +604,15 @@ fn flush_paragraph(
 ) {
     let Some(para) = para else { return };
 
-    let fits = para
-        .lines
-        .iter()
-        .all(|l| base_indent.chars().count() + l.raw.chars().count() <= width);
     let in_scope = touched.is_none_or(|set| para.lines.iter().any(|l| set.contains(&l.line_no)));
 
     // A paragraph outside the diff's reach is never touched, even if it happens to violate the
-    // width — that debt was there before this edit and is not this run's to fix. A paragraph
-    // whose lines already fit is reproduced exactly as written rather than repacked to the
-    // tightest fit: this tool's job is fixing violations, not renormalizing prose a human already
-    // wrapped somewhere short of the limit on purpose.
-    if fits || !in_scope {
+    // width — that debt was there before this edit and is not this run's to fix. Inside the reach
+    // it is refilled whether or not its lines already fit, because an edit shortens a line as often
+    // as it lengthens one and a shortened line leaves the paragraph ragged without ever crossing
+    // the width. That half of the problem a width test cannot see, so scope rather than width is
+    // what bounds the blast radius.
+    if !in_scope {
         for line in &para.lines {
             emit_verbatim(base_indent, &line.raw, out);
         }
@@ -914,13 +934,38 @@ mod tests {
     }
 
     #[test]
-    fn a_paragraph_wrapped_short_of_the_limit_is_left_exactly_as_written() {
-        // Every line here fits comfortably under 100 — a human broke it early for readability,
-        // and a tighter greedy repacking exists but must not be applied: this regressed once,
-        // when the tool repacked every already-compliant paragraph in the tree on a routine run.
-        let input = "/// The window lost input focus, reported by Bevy's `KeyboardFocusLost` — alt-tab, a lock\n\
-                      /// screen, a suspend. Every physically-held keyboard and mouse control is released.\n";
-        assert_eq!(rust(input, 100), input);
+    fn a_paragraph_wrapped_short_of_the_limit_is_repacked() {
+        // Nothing here violates the width. The paragraph is ragged, which is what an edit that
+        // shortens a line leaves behind and precisely what a width test cannot see. What keeps
+        // this off prose nobody edited is the diff scope, not the width — the two tests below.
+        let input = "/// aaaa bbbb\n/// cccc dddd\n";
+        assert_eq!(rust(input, 100), "/// aaaa bbbb cccc dddd\n");
+    }
+
+    #[test]
+    fn a_ragged_paragraph_outside_the_diff_is_left_alone() {
+        // With the width no longer gating a rewrap, scope is the only thing between a routine run
+        // and every paragraph in the file, so this is the guard rail that matters.
+        let input = "/// aaaa bbbb\n/// cccc dddd\n";
+        let untouched: HashSet<usize> = HashSet::new();
+        assert_eq!(rust_scoped(input, 100, &untouched), input);
+    }
+
+    #[test]
+    fn a_ragged_paragraph_inside_the_diff_is_repacked() {
+        let input = "/// aaaa bbbb\n/// cccc dddd\n";
+        let touched: HashSet<usize> = [1].into_iter().collect();
+        assert_eq!(
+            rust_scoped(input, 100, &touched),
+            "/// aaaa bbbb cccc dddd\n"
+        );
+    }
+
+    #[test]
+    fn repacking_a_packed_paragraph_changes_nothing() {
+        // A sweep over an already-packed tree has to be a no-op, or a migration could never finish.
+        let packed = rust("/// aaaa bbbb\n/// cccc dddd\n", 100);
+        assert_eq!(rust(&packed, 100), packed);
     }
 
     #[test]
@@ -959,11 +1004,12 @@ mod tests {
     }
 
     #[test]
-    fn an_already_compliant_multiline_list_item_is_left_alone() {
-        // Both lines already fit — a human chose this break, so it survives even though a
-        // tighter packing exists.
+    fn a_multiline_list_item_that_fits_on_one_line_is_joined() {
         let input = "/// - one two three four five six seven\n///   eight nine ten\n";
-        assert_eq!(rust(input, 100), input);
+        assert_eq!(
+            rust(input, 100),
+            "/// - one two three four five six seven eight nine ten\n"
+        );
     }
 
     #[test]
