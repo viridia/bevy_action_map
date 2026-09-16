@@ -191,6 +191,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 117m | A rewrap stops changing what the text is                          |
 | 117o | A preview that shows the change, not the filename                 |
 | 117n | Repacking is what `devfmt` does, and a bare run is refused        |
+| 117q | The preview stops showing unchanged code                          |
 
 ---
 

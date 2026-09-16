@@ -770,14 +770,7 @@ fn paragraph_hunks(old: &str, new: &str) -> Vec<Hunk> {
     loop {
         let oe = next_blank(&old_lines, i);
         let ne = next_blank(&new_lines, j);
-        if let Some((at, old_len, new_len)) = narrow(&old_lines[i..oe], &new_lines[j..ne]) {
-            regions.push(Region {
-                old_from: i + at,
-                old_to: i + at + old_len,
-                new_from: j + at,
-                new_to: j + at + new_len,
-            });
-        }
+        narrow_into(&old_lines[i..oe], &new_lines[j..ne], i, j, &mut regions);
         if oe >= old_lines.len() && ne >= new_lines.len() {
             break;
         }
@@ -809,19 +802,75 @@ fn next_blank(lines: &[&str], from: usize) -> usize {
         .unwrap_or(lines.len())
 }
 
-/// The part of one blank-delimited segment that actually differs: its offset within the segment,
-/// then how many lines the old and new sides each contribute. `None` when the segment is unchanged.
-/// The offset is the same on both sides, since everything before it matched.
-fn narrow(old: &[&str], new: &[&str]) -> Option<(usize, usize, usize)> {
-    if old == new {
-        return None;
-    }
+/// Appends the parts of one aligned span that actually differ. Lines that already match at either
+/// end are dropped; then the longest run of lines the two sides still share splits what is left,
+/// and each side of it is narrowed again.
+///
+/// Trimming the ends alone is not enough. A blank-delimited segment of a `.rs` file routinely holds
+/// a doc comment, the code it documents and a second comment, and a change at each end would drag
+/// the untouched code between them into the hunk — thirty lines shown as removed and re-added.
+/// `old_at`/`new_at` are where this span begins in its own text.
+fn narrow_into(old: &[&str], new: &[&str], old_at: usize, new_at: usize, out: &mut Vec<Region>) {
     let shorter = old.len().min(new.len());
     let head = (0..shorter).take_while(|&k| old[k] == new[k]).count();
+    if head == old.len() && head == new.len() {
+        return;
+    }
     let tail = (0..shorter - head)
         .take_while(|&k| old[old.len() - 1 - k] == new[new.len() - 1 - k])
         .count();
-    Some((head, old.len() - tail - head, new.len() - tail - head))
+    let (old_lo, old_hi) = (head, old.len() - tail);
+    let (new_lo, new_hi) = (head, new.len() - tail);
+
+    // Trimming has already established that the two sides disagree at both ends of what is left, so
+    // any shared run lies strictly inside it and both halves are smaller than what we started with.
+    if let Some((oi, ni, len)) = longest_shared_run(&old[old_lo..old_hi], &new[new_lo..new_hi]) {
+        let (old_mid, new_mid) = (old_lo + oi, new_lo + ni);
+        narrow_into(
+            &old[old_lo..old_mid],
+            &new[new_lo..new_mid],
+            old_at + old_lo,
+            new_at + new_lo,
+            out,
+        );
+        narrow_into(
+            &old[old_mid + len..old_hi],
+            &new[new_mid + len..new_hi],
+            old_at + old_mid + len,
+            new_at + new_mid + len,
+            out,
+        );
+        return;
+    }
+
+    out.push(Region {
+        old_from: old_at + old_lo,
+        old_to: old_at + old_hi,
+        new_from: new_at + new_lo,
+        new_to: new_at + new_hi,
+    });
+}
+
+/// The longest run of consecutive identical lines `old` and `new` share, as an offset into each and
+/// its length. `None` when they have no line in common. Taking the longest first is what keeps an
+/// incidental one-line match — a bare `///`, a lone brace — from being preferred to the real one.
+fn longest_shared_run(old: &[&str], new: &[&str]) -> Option<(usize, usize, usize)> {
+    let mut best: Option<(usize, usize, usize)> = None;
+    for a in 0..old.len() {
+        for b in 0..new.len() {
+            if old[a] != new[b] {
+                continue;
+            }
+            let mut len = 1;
+            while a + len < old.len() && b + len < new.len() && old[a + len] == new[b + len] {
+                len += 1;
+            }
+            if best.is_none_or(|(_, _, longest)| len > longest) {
+                best = Some((a, b, len));
+            }
+        }
+    }
+    best
 }
 
 /// Builds the printable hunk covering `group`, which is one region or several that had to merge.
@@ -1294,6 +1343,27 @@ mod tests {
         assert_eq!(hunks.len(), 1);
         assert_eq!(hunks[0].body, [" aaaa bbbb cccc", "-dddd"]);
         assert_eq!((hunks[0].old_count, hunks[0].new_count), (2, 1));
+    }
+
+    #[test]
+    fn unchanged_lines_between_two_changes_stay_out_of_the_diff() {
+        // A doc comment, the code under it and a second comment share one blank-delimited segment.
+        // A change at each end must not carry the untouched code between them into a hunk.
+        let old = "aaaa bbbb\ncccc\nfn f() {}\nlet x = 1;\nlet y = 2;\ndddd eeee\nffff\n";
+        let new = "aaaa bbbb cccc\nfn f() {}\nlet x = 1;\nlet y = 2;\ndddd eeee ffff\n";
+        let hunks = paragraph_hunks(old, new);
+        assert_eq!(
+            hunks.len(),
+            2,
+            "the untouched middle did not split the hunk"
+        );
+        assert!(
+            !hunks
+                .iter()
+                .flat_map(|h| &h.body)
+                .any(|line| line == "-let x = 1;"),
+            "untouched code was reported as a change"
+        );
     }
 
     #[test]
