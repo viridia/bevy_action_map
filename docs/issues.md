@@ -69,9 +69,10 @@ settings screen with an "unbind" button is the obvious way in.
 `CompositeCannotGrow` refuses the mirror case in the same pass, so the refusal list already knows
 the shape and covers only the growing half.
 
-_Fix:_ a chunk rather than an edit. Dropping per part instead of per binding and refusing the clear
-outright are both defensible, and which is right is a design question about what clearing one arrow
-of a movement composite means. Unrouted.
+_Fix:_ **chunk 118b**, which grows `rewrite` a fourth case for the same reason and owns the design
+question this was unrouted for: dropping per part instead of per binding, or refusing the clear
+outright. Both are defensible, and which is right is a question about what clearing one arrow of a
+movement composite means.
 
 ### 1046 A class binding on an analog source has no dead zone
 
@@ -111,30 +112,6 @@ ordinary `.bind::<Join>(Stick::Left)`, since class bindings skip the modifier ch
 wanting both gestures observes `Fired<Join>` for the wiggle beside whatever it already does for the
 button. Worth doing once Split Friction wants the polish; not routed to a chunk, since nothing here
 is missing from the crate.
-
-### 1049 The documented join recipe races two players for one slot
-
-`join.rs`'s module doc · **verified by reading**, and by the workaround Split Friction already
-carries
-
-The sketch in `join.rs` teaches: check `is_claimed`, return if the device is taken, otherwise "pick
-a slot and insert `Paired::to(device)` on it". Two devices pressing join on the same tick both pass
-`is_claimed` — correctly, they are different devices — and then both pick the same slot, because
-the first one's `Paired` insert is a deferred command that has not applied when the second observer
-runs. A game following the documented path hands both players protagonist 0.
-
-`is_claimed` is not wrong; it answers the question it is named for. What is missing is that the
-sketch's second half needs state the query cannot see yet, and nothing says so.
-
-Split Friction hit this and worked around it: `protagonist.rs`'s `ClaimedDevices` is a resource
-updated synchronously inside the observer, and its doc comment explains the race in full. So the
-crate's flagship multiplayer example does not use the crate's documented join recipe, for a reason
-the crate's documentation does not mention — in a crate whose stated purpose includes device
-routing for local multiplayer.
-
-_Fix:_ **chunk 116**, which rewrites `join.rs`'s recipe wholesale and takes this paragraph with it.
-A claim helper that sees queued claims would let the sketch stay as short as it reads, and is the
-better fix if the rewritten recipe still reads long.
 
 ---
 
@@ -177,33 +154,36 @@ winit — [winit#4606][] and [winit#2678][] — and are the deferred table's row
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678
 
-### 1019 `Reflect` reaches two modules, and nothing anywhere registers a type
+### 1019 The types a scene would author carry no `Reflect`, and auto-registration is switched off
 
-R24.3 (MUST) · `action.rs`, `frame.rs`, `Cargo.toml:38,94-101` · reasoned from the pinned Bevy
-commit's own `Cargo.toml` feature graph, **not probed**
+R24.3 (MUST) · `action.rs`, `frame.rs`, `Cargo.toml`'s `bevy_reflect` dependency and feature ·
+reasoned from `bevy_reflect 0.20.0-rc.1`'s own `Cargo.toml` feature graph, **not probed**
 
-`#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]` appears in `action.rs` and `frame.rs` and
-nowhere else, and **nothing in the crate or the examples calls `register_type`**. That reads like a
-gap only manual calls can close, but since [bevyengine/bevy#15030][], landed well before the pinned
-commit, a non-generic `#[derive(Reflect)]` type is registered automatically at app startup — no
-`register_type` needed — unless it opts out with `#[reflect(no_auto_register)]`. A generic type is
-the one case that still needs a manual call, per type parameter, because there is no single
-`TypeId` to register on its behalf.
+Deriving `Reflect` reads like a gap only manual `register_type` calls can close, but since
+[bevyengine/bevy#15030][] a non-generic `#[derive(Reflect)]` type is registered automatically at app
+startup — no call needed — unless it opts out with `#[reflect(no_auto_register)]`. A generic type is
+the one case that still needs a manual call, per type parameter, because there is no single `TypeId`
+to register on its behalf.
 
-That mechanism is inert here, though, which is why the finding still holds. It lives behind
-`bevy_reflect`'s own `auto_register_inventory` (or, on platforms `inventory` doesn't support,
-`auto_register_static`) feature, bundled into `bevy_reflect`'s `default` set upstream — but this
-crate's `bevy_reflect` dependency is declared `default-features = false` (`Cargo.toml:38`), and its
-own forwarded `bevy_reflect` feature (`Cargo.toml:94-101`) never re-adds either. So today, deriving
-`Reflect` on `Prompt` or `ActionMapping` would still leave it out of the registry — not because the
-crate has to hand-register everything, but because it never turned on the feature that would do it
-for free.
+That mechanism is inert here, which is the finding. It lives behind `bevy_reflect`'s own
+`auto_register_inventory` (or, on platforms `inventory` doesn't support, `auto_register_static`)
+feature, bundled into `bevy_reflect`'s `default` set upstream — but this crate's `bevy_reflect`
+dependency is declared `default-features = false` and its own forwarded `bevy_reflect` feature never
+re-adds either. So today, deriving `Reflect` on `Prompt` or `ActionMapping` would still leave it out
+of the registry — not because the crate has to hand-register everything, but because it never turned
+on the feature that would do it for free.
 
 `Control`, `DeviceFamily`, `ActionMapping`, `RebindPolicy`, `Prompt`, `ControlOrigin`,
 `DeviceHandle`, `ActionObstacle` and `Paired` still carry no `Reflect` at all, which
 auto-registration doesn't touch — deriving it is a separate step from registering what's derived.
 `Paired` is a component a scene would author, and the five resources `ActionMapPlugin` initializes
-are unregistered.
+are unregistered. `Identity` belongs on that list too: chunk 72 gave it to a device's entity and
+left it, like `Paired` beside it, underived.
+
+Two of the scan's supporting observations have since expired, and neither was what the finding
+rested on. `overrides.rs` and `device.rs` both derive `Reflect` now, so `action.rs` and `frame.rs`
+are no longer the only sites; and `register_type` has callers — `lib.rs`, `device.rs`, and three in
+`examples/` — where the scan found none.
 
 Chunk 17c owns R5.6 and R17.5 — `Modifier` and `Condition` — and `docs/decisions.md:430`
 deliberately keeps those two bound-free. Neither is R24.3.
@@ -227,30 +207,6 @@ R15.9 (SHOULD, split from 1020) — opaque platform-user identity attached to a 
 show without a real platform SDK behind it, unlike the rest of this group.
 
 _Fix:_ **deferred**, with the gate stated in Roadmap's deferred table.
-
-### 1050 The one answer to "which device fired this" is unused by the example that needs it
-
-`protagonist.rs`'s `pair_on_join` · **verified**: its own doc says "Not backend-safe"
-
-An ordinary action's value is device-agnostic by design, so `Fired<Join>` cannot say which device
-pressed. The crate's answer is a class binding: `ClassFired` carries the untouched raw event, and
-`event.device()` names the device — which is what `join.rs` documents and what chunk 66 originally
-shipped.
-
-Split Friction no longer uses it. `Join` is bound to two concrete controls, and `pair_on_join` reads
-`ButtonInput<KeyCode>` and `Query<&Gamepad>` directly to find the presser — queries that do not
-exist under a Steam authority, which its own comment says in as many words. So the example
-demonstrates a device-routing crate failing to answer, on its own flagship screen, the question its
-device routing exists for, and it does so by reaching around the crate to Bevy.
-
-**Why** `Join` moved off the class binding is recorded, in chunk 110's commit message rather than in
-any document: a class binding has no Steam expression, and the join caption needed a concrete
-control to name instead of a hardcoded "press any button". Neither reason expires, so going back to
-the class binding is not the fix — 1046 adds a third against it.
-
-_Fix:_ **chunk 116**, which answers the question by pairing the context that hears the press rather
-than by carrying an origin on the action. The deferred row ("a backend-safe way to ask which device
-drove an ordinary action's current activation") is withdrawn there rather than met.
 
 ### 1052 Naming a device to the player has no requirement and no support
 
@@ -371,7 +327,7 @@ citation anywhere. The netcode deferred row is where this plausibly already belo
 
 R22.4 (MUST) wants documented ordering and integration with `bevy_input::InputSystems`,
 `bevy_input_focus` and `bevy_picking`. The `InputSystems` third is met and documented
-(`frame.rs:374`, design §1). The other two:
+(`frame.rs:363`, design §1). The other two:
 
 - **`bevy_picking` is named once, about something else.** `docs/decisions.md` mentions it flattening
   its generic `Pointer<E>`, which is a reversal note rather than an ordering. Nothing in `src/`,
@@ -390,15 +346,17 @@ Unrouted.
 ### 1027 Two documentation requirements with no document
 
 - **R16.4** (SHOULD) — the web caveats: pointer lock and gamepad access needing a user gesture,
-  gamepad events being polled, key codes and `vendor_id` being less reliable. There is no occurrence
-  of "wasm", "web" or "pointer lock" in `README.md`, `docs/` or `src/`.
+  gamepad events being polled, key codes and `vendor_id` being less reliable. What the crate says
+  about the web is three comments in `device.rs` noting that `vendor_id` is often absent there,
+  which is one clause of one caveat, written where it happened to matter rather than anywhere a
+  reader would look for the list. Nothing mentions pointer lock or the user gesture.
 - **R16.5** (SHOULD) — name the OS-reserved combinations that are unavailable. Nothing.
 
 Unrouted.
 
 ### 1028 `tracing` is contradicted by a dependency choice recorded only in `Cargo.toml`
 
-R22.3 (SHOULD) wants spans and events at the sampling and firing boundaries. What exists is four
+R22.3 (SHOULD) wants spans and events at the sampling and firing boundaries. What exists is six
 `log::warn!` sites, all app-build or misconfiguration.
 
 The crate depends on `log` rather than `bevy_log`, and the comment in `Cargo.toml` gives the reason:
@@ -408,9 +366,12 @@ the `no_std` build — and that document does not carry it. Unrouted.
 
 ### 1029 Two routing gaps rather than findings
 
-- `Roadmap.md`'s chunk 17c calls serializing whole binding definitions (R17.6, R22.16) "deferred"
-  inside a bullet. There is no row and no gate, which is what ground rule 5 forbids in as many
-  words. Both are MAYs, so the stakes are small and the omission is not.
+- **Serializing whole binding definitions (R17.6, R22.16) has no destination at all.** The scan
+  found it called "deferred" inside a bullet of chunk 17c — no row, no gate, which is what ground
+  rule 5 forbids in as many words. 17c has since landed, so that bullet went with its section, and
+  what is left is a parenthetical inside the physical-binding-label row saying the serialization is
+  "still deferred" while gating something else. Both are MAYs, so the stakes are small and the
+  omission is not.
 - **R7.5's opt-out is exercised by a test and nothing else.** `activate_including_held` now has a
   caller — a unit test in `src/eval.rs` — where at the time of the scan it had none. What is still
   missing is any example or production caller: the MUST's "unless explicitly opted in" clause is
@@ -434,11 +395,11 @@ Unrouted.
 
 ### 1032 Internal comments whose stated reason is false
 
-- `binding.rs:205`, `BindingSpec` justifies its copies with "the plan keys state by `ActionId`,
-  which does not reach back to the type." `ActionId::info` reaches back to exactly the three fields
-  the comment is justifying. The copies are still right — `info` takes the registry lock and linear
-  scans — but the stated reason is the one a reader would use to decide whether the duplication may
-  go.
+- `binding/builder.rs:24`, `BindingSpec` justifies its copies with "the plan keys state by
+  `ActionId`, which does not reach back to the type." `ActionId::info` reaches back to exactly the
+  three fields the comment is justifying. The copies are still right — `info` takes the registry
+  lock and linear scans — but the stated reason is the one a reader would use to decide whether the
+  duplication may go.
 - `frame.rs:340` credits calibration's placement with meeting R14.10. R14.10 governs an authority
   backend, which per D51 enters at the button state machine and never touches the frame. The
   placement is right and the `R`-number is wrong; it is the crate's only claim on R14.10. **Small —
@@ -513,23 +474,23 @@ hundred and twenty context binding lists.
 per-tick path, so R23.2 does not apply — but see 1003 (fixed) which made "how often" every frame
 while it lasted. Unrouted.
 
-### 1035 R23.2 is unenforced, and the register's count of violations is stale
+### 1035 R23.2 is unenforced, and reading is the only thing enforcing it
 
 `Roadmap.md` says two violations have reached the per-tick path and both were caught by reading. The
-scan found two more. One is gone: the `binding.source.controls()` call that allocated a
-`Vec<Control>` per consuming binding per tick no longer exists — `controls` has no caller in
-`eval.rs` at all now, and nothing recorded which chunk removed it. The other is still present:
+scan found two more, and both are still there:
 
 - `evaluate_context` builds `let mut claims = Vec::new()` per instance per tick (`eval.rs`, in the
   loop that calls `apply_frame`) and allocates the moment anything is claimed. `chord_claims` sits
   on `InputContextState` and cites R23.2 in its comment for exactly this reason, and
   `dispatch_transitions` takes and hands back its log to keep the allocation — so both idioms are
   established in the same file and `claims` follows neither.
+- `controls()` allocates a fresh `Vec<Control>` and is called per consuming binding per tick, in the
+  same loop, to fill that vector.
 
-The finding is not the line. It is that violations keep being found by reading and then quietly
-stop being true, which is what the register calls "a rule with no tooling behind it." This entry has
-now gone stale in exactly the way it complains about: it has been rewritten once for a count that
-moved, and it will need it again. Unrouted.
+This entry once recorded the second as gone, on a grep for `binding.source.controls()` that missed
+it: the field was renamed to `input`, not removed. Which is the finding. Violations keep being found
+by reading, and then a reading finds them absent with equal confidence — "a rule with no tooling
+behind it," as the register puts it, does not only fail to prevent them. Unrouted.
 
 ### 1036 Public items with no caller and no document
 
@@ -542,8 +503,8 @@ is already crate-private:
   `dispatch_class_fires` — `pub` with `ActionMapPlugin` and `declare_context` as their only
   registrars, beside `reset_exclusion_ceiling` and `evaluate_context`, which are `pub(crate)` and do
   the same job in the same file.
-- `frame.rs`: `warn_on_unread_gamepad_settings`, `retire_read_events` — same shape, only
-  `InputFramePlugin` names them.
+- `device.rs`: `warn_on_unread_gamepad_settings`, and `frame.rs`: `retire_read_events` — same shape,
+  only `InputFramePlugin` names them.
 - `capture.rs`: `ReservedControls::claimant` and `iter` — every caller is inside the crate.
   `claimant` is the one with a plausible unwritten caller, since a screen refusing a reserved
   control wants to say what reserved it.
@@ -589,12 +550,14 @@ Unrouted.
 
 `Roadmap.md` · `Cargo.toml`
 
-Every Bevy dependency is a git dependency, resolved in `Cargo.lock` to a `0.20.0-dev` commit.
-crates.io rejects git dependencies, so the crate cannot be published until Bevy 0.20 ships — an
-external date, not a chunk.
+Chunk 119 moved every Bevy dependency to crates.io at `0.20.0-rc.1`, which removes the mechanical
+barrier this finding was filed against: crates.io rejected the git dependencies outright, and it
+accepts an rc. What stops a publish now is a judgement — that nothing ships while the dependency is
+a release candidate — and 0.20.0 has no stable release yet.
 
-Nothing in `Roadmap.md` says so. There is no release chunk, no deferred row gated on the 0.20
-release, and no checklist of what must be true before the first publish, which by ground rule 5 is
+That makes the finding sharper rather than smaller. The thing that was guaranteeing nobody published
+by accident is gone, and `Roadmap.md` still has no release chunk, no deferred row gated on the 0.20
+release, and no checklist of what must be true before the first publish — which by ground rule 5 is
 an item that will be dropped. The work that is release-shaped is scattered through chunks whose
 descriptions do not mention it: 110's sum type and 42's backend trait are both "cheap now, breaking
 later" and neither says that is a publishing deadline rather than a preference.
@@ -660,7 +623,9 @@ now warning-free.
 The finding survives the fix, because it was never really about the two warnings. That command is
 the only one in the project that reads doc comments at all, and it is not in `CLAUDE.md`'s
 Verification list — so nothing would have caught either warning, and nothing will catch the next.
-Unrouted.
+
+_Fix:_ **chunk 28**, which adds the command and extends this to the no-devices build, where eighteen
+intra-doc links `--all-features` resolves go unresolved.
 
 ---
 

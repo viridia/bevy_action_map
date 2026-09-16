@@ -43,7 +43,9 @@ in `docs/decisions.md`, where each says what reversing it would cost.
   reserved, and the session simply keeps listening with nothing said about why the press did not
   take.
 - **`R23.2` is unenforced.** No allocation and no synchronization on the per-tick path is a rule
-  with no tooling behind it. Two violations have reached that path and both were caught by reading.
+  with no tooling behind it. Four violations have reached that path, every one caught by reading —
+  and one of them was later recorded as gone on a reading that missed a rename
+  ([docs/issues.md](./docs/issues.md) 1035). Two are still live.
 
 ### Never built
 
@@ -624,11 +626,11 @@ second implementer and the real one cannot live here.
 R24.3 (`docs/issues.md` 1019): `Control`, `DeviceFamily`, `ActionMapping`, `RebindPolicy`, `Prompt`,
 `ControlOrigin`, `DeviceHandle`, `ActionObstacle` and `Paired` carry no `Reflect`, and nothing calls
 `register_type` for the two types that do (`action.rs`, `frame.rs`). The second half looked like it
-needed a call per type, written once and kept in sync forever after — but
-[bevyengine/bevy#15030][] means it doesn't: a non-generic `#[derive(Reflect)]` type registers itself
-at startup once `bevy_reflect`'s `auto_register_inventory` feature is on, which it isn't here — this
-crate's `bevy_reflect` dependency is `default-features = false` and its own forwarded feature never
-re-adds it.
+needed a call per type, written once and kept in sync forever after — but [bevyengine/bevy#15030][]
+means it doesn't: a non-generic `#[derive(Reflect)]` type registers itself at startup once
+`bevy_reflect`'s `auto_register_inventory` feature is on, which it isn't here — this crate's
+`bevy_reflect` dependency is `default-features = false` (`Cargo.toml:43`) and its own forwarded
+feature (`Cargo.toml:116-123`) never re-adds it.
 
 - **Derive `Reflect`** on the nine types named in 1019, same as `action.rs` and `frame.rs` already
   do it. Add `Identity` to that list: chunk 72 gave it to a device's entity and left it, like
@@ -637,10 +639,10 @@ re-adds it.
   because a stored identity's domain has to resolve back to a concrete type at load. It stays
   either way — it registers type data, not just the type — but it is no longer true that nothing
   calls `register_type`.
-- **Add `bevy_reflect/auto_register_inventory`** to this crate's own `bevy_reflect` feature
-  (`Cargo.toml:94-101`), so every type above — and every one derived after this chunk — registers
-  itself, rather than adding a `register_type` call this chunk would immediately have to write nine
-  of and the next new type would silently skip.
+- **Add `bevy_reflect/auto_register_inventory`** to this crate's own `bevy_reflect` feature, so
+  every type above — and every one derived after this chunk — registers itself, rather than adding a
+  `register_type` call this chunk would immediately have to write nine of and the next new type
+  would silently skip.
 - **Check the `no_std` interaction before assuming it holds.** `inventory` lists Linux, macOS, iOS,
   FreeBSD, Android, Windows and WebAssembly as supported, which says nothing about a `no_std` +
   `libm` build. Run the `libm` shape through `scripts/verify.sh --full`'s combination sweep with
@@ -676,40 +678,6 @@ re-adds it.
 - **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
   look at the module pages the way a stranger would.
 
-### 117p. The migration, a directory at a time
-
-Prose wrapped before repacking existed and never repacked since. A repack is idempotent, so this is
-a one-time normalization and not a standing mode — afterwards `--diff` keeps the tree packed and a
-later sweep does nothing.
-
-- **One commit per directory**, each a single `--sweep <dir>` read through `--preview` first, so the
-  review is bounded by the directory rather than by the tree. Measured without writing any of it, in
-  hunks and lines replaced: `src` 185/486, `docs` 73/241, `examples` 59/153, the root documents
-  48/158, `macros` 3/9, `tests` 2/6. `macros` and `tests` are five hunks between them and can ride
-  with anything; `src` is the one that wants its own sitting, and splits by module if it needs to.
-- **Sampled before starting**, one file of each kind. `src/context/state.rs` came to 19 hunks of
-  comment reflow; `docs/decisions.md` to 30 hunks and 102 lines each way, a pure reflow with no net
-  growth. Nothing structural moved: table rows, nested bullets and link definitions come through at
-  identical counts, and the dedent scan finds what it already found and nothing new.
-- **Six split code spans go with it.** `Requirements.md`, `Roadmap.md`, `docs/design.md`,
-  `docs/issues.md`, `src/binding/control.rs` and `examples/split_friction/main.rs` each carry one
-  backtick span broken across two lines, left behind by the bug 117m fixed. A repack rejoins them,
-  so they need no pass of their own; they are why a hunk here can touch prose that reads as correct.
-- **`tools/devfmt/src/main.rs` is swept by hand, or not at all.** Its test fixtures are string
-  literals full of `///`, which the classifier reads as comments. The deferred row owns the general
-  case; this chunk owns not walking into it.
-- **Not doing: `archive/`.** Nothing in flight reasons from it, and it is larger than everything
-  else here together.
-- **Verified by:** `--check --sweep` clean on the directory afterwards, and no line over 100 columns
-  that is not a table row, a link definition or a string literal — a count that improves rather than
-  holding, since the sweep fixes 23 over-width markdown lines on its way past and leaves 21 that are
-  all exempt. The diff is read as "every hunk is a reflow", which is the only way a diff this size
-  is reviewable at all.
-- **Undecided, and cheaper to settle before the first commit than after:** whether to lead with
-  `tests` and `macros` as a throwaway-sized first commit, to see the shape in a real review before
-  the large ones; and whether `Roadmap.md` reflowing itself inside the root-documents commit is
-  acceptable, since it is 12 of those hunks and this section is among them.
-
 ---
 
 ## Deliberately deferred
@@ -722,8 +690,6 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **A real Steam backend, validated out of tree** | less than it looked. `docs/steam.md` S4 now says a borrowed app id does carry its own manifest from inside the client's bundle, and S13 answered R1.7 that way, so what is left needing an app id is only what S6 blocks: a configuration Steam actually applies. Whether that needs an app id at all, or only a windowed app Steam launches, is itself unmeasured. The shape is settled: a probe rather than a game, in its own repository, pinning `bevy_action_map` by git rev so it breaks only on a deliberate bump — and it is an audit rather than a gate, since it needs a client and a pad and cannot run in CI. `steam_probe/` is its gitignored seed and moves out when the repository exists. Nothing in this crate is blocked on it: per-family suppression is chunk 112, and the presentation half can be built against API signatures already verified to exist |
 | **Named override profiles per user** (R17.4's first clause) | a game wanting more than one set of bindings under one player. The per-scheme half of R17.4 is already met — `Overrides` is keyed by family, so a keyboard remap cannot reach the gamepad layout — and chunk 92 stores one set per game, in one settings group. A second is another group, or a group holding several; which of those is right depends on whether profiles are switched at runtime, and nothing in tree switches one |
 | **Resolving a stored device identity to the connected devices that match it** | a caller asking in that direction. Written for chunk 72 and withdrawn for want of one; chunks 72d and 92 did not need it either. Devices arrive as connection events one at a time, the ones already plugged in at launch included, so every caller has one device in hand and asks the inverse question. Two identical pads never present themselves as a set to choose from |
-| **Persisting calibration**, keyed to identity (R11.7, R14.11) | nothing any more — chunk 72 built the identity, and chunk 72b owns re-keying calibration onto it. Measured calibration lasts as long as the process until then |
-| **A backend-safe way to ask which device drove an ordinary action's current activation** | a real need, not just Split Friction's. `Fired`'s value is device-agnostic by design — the same reason `Move` never says which stick moved it — so `protagonist.rs`'s `pair_on_join` (chunk 66, restated when `Join` moved off a class binding) reads Bevy's `Gamepad` component and `ButtonInput<KeyCode>` directly to find out who pressed it. That query does not exist under a Steam authority (D22, suppression), so the example breaks under the one backend this crate means to support. Whatever answers this generalizes past one example: some notion of "which device is this activation's origin" carried alongside an ordinary action's value, not only a class binding's raw event |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it. Measured (`docs/steam.md` S17): `get_glyph_for_action_origin` resolves to an absolute filesystem path inside the client's own app bundle — `Contents/MacOS/controller_base/images/api/dark/shared_lstick_md.png` on macOS, not the `tenfoot/resource/...` path this row previously guessed — and the `dark` component says the glyphs are themed, so a light variant has to be selected rather than assumed. A Bevy `AssetPath` can carry it natively via `from_path_buf` — no string-escaping the drive letter or backslashes. The path is not to be opened as given: a custom `AssetSource` reader must canonicalize it and reject anything outside a known root before reading, rather than trust an external SDK's return value as a bare filesystem path. One scheme, one hard-coded root is the right size while only this one root is confirmed; a second scheme is warranted only if a second root with its own lifecycle surfaces (e.g. something ephemeral, which cannot share a stable root's caching and hot-reload assumptions) — not one scheme per SDK call that happens to return a path |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import |
 | **Netcode injection and reconciliation** | a networked target. The injection point is built: chunk 111 landed `delegate` and `AuthorityValues`, so a peer's resolved action already has somewhere to go (D71). Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. Injection targets L2 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs a remote player's resolved action to inject and a later correction to reconcile against it |
@@ -744,6 +710,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Split Friction's monsters, spawners and missiles** | a mechanic that would exercise input this crate has not already proven. Kept as a row rather than deleted because the sprites, the dungeon's region aspects and a `Fire`-shaped action all exist, so changing our mind is cheap |
 | **Guardian migration** | porting it from Bevy 0.16.1 with `bevy_enhanced_input` 0.12 to 0.20 — four versions, and a port plus a rewrite. Doing both at once would confuse "action_map is wrong" with "0.20 moved this" |
 | **A devfmt usage log, to catch the misses nobody notices** | **hand reflows still happening now that repacking is canonical.** Measured before deferring: 350 loose breaks in tree against 6 pure rewraps in 60 commits, so the aftermath of a devfmt run lives in working-tree churn and not in history — `git log` cannot be mined for it, and devfmt is the only thing positioned to see it. The shape, if it revives: devfmt appends to a gitignored log from the process already being run, costing no approval and no tokens; per paragraph it records a hash of the word sequence and a hash of the physical lines, so a later run finding the same words under different line breaks has caught a miss and can attribute it to its own earlier decision. Worth building only with a mechanical trigger to read it — one line of output when the count crosses a threshold — since a log nobody opens is cost with no signal |
+| **Repacking the prose `devfmt` never reached** | **the residue stopping its own shrink.** Prose wrapped before repacking existed and never repacked since; `--diff` repacks whatever a commit touches, so what is left is the paragraphs in files nothing is working on, and a sweep buys less each month. Measured today, files needing a reflow: `src` 21/25, `docs` 6/6, `examples` 22/38, `macros` 1/1, `tests` 2/12. A `--sweep <dir>` is warranted when that stops falling, or ahead of reading a directory end to end. What rides with it: six backtick spans broken across two lines (`Requirements.md`, `Roadmap.md`, `docs/design.md`, `docs/issues.md`, `src/binding/control.rs`, `examples/split_friction/main.rs`), left by the bug 117m fixed. `tools/devfmt/src/main.rs` is swept by hand or not at all — its fixtures are string literals full of `///`, which is the row below. `archive/` is excluded: nothing in flight reasons from it |
 | **`devfmt` reading a comment marker inside a string literal** | a second file in tree acquiring one. A `.rs` line whose trimmed text starts with `//` inside a string literal is reflowed as though it were a comment — the module header's "does not occur in idiomatic Rust" assumption, which `devfmt`'s own test fixtures are the sole counter-example to, and they are also the one file a devfmt chunk edits. So the cost today is a hand check on a file already under review, not a corruption nobody sees. Telling the two apart needs a Rust lexer carrying string state, raw strings and `\`-continued literals, which is a different tool from the line classifier this is built on; a second file acquiring one is what changes that arithmetic |
 | **A physical binding's label matching the current layout** (R12.2, R12.7) | winit exposing a physical-to-logical query and a layout-change signal, requested as [winit#4606][] and tracked by the broader [winit#2678][], open since February 2023 and unimplemented. A workaround was scoped and set aside: `run_captures` already sees the logical key at capture time, but keeping it means a new field on `ControlCaptured`, a session table `present.rs` consults ahead of the static fallback, and an honest answer on whether it survives a save — which drags in the still-deferred binding-definition serialization (R17.6, R22.16) for a fix that only covers controls a player has personally rebound. A landed query supersedes it outright, for every physical binding rather than only captured ones, so the workaround is not worth building ahead of it |
 

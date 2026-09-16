@@ -75,7 +75,7 @@ here, so there is one `D`-numbering in the project.
 | **D58** | An unrecognized version refuses the set; no migration exists yet              | design §10.3    |
 | **D59** | Persistence goes through a separate, reflectable type                         | design §10.3    |
 | **D51** | An authority backend writes a value, not a state                              | —               |
-| **D52** | Pairing is a runtime handle; the join gesture reuses class bindings           | design §7.4     |
+| **D52** | Pairing is a runtime handle, filtered at the frame                            | design §7.4     |
 | **D53** | The crate detects and reports; the app decides                                | —               |
 | **D54** | There is no pass-through action                                               | design §5.5     |
 | **D55** | State-driven activation runs inside `StateTransition`                         | design §7.2     |
@@ -1320,7 +1320,7 @@ bound at all, and delegating a rebind to the backend's own UI (R18.8, R19.8). Th
 demand by a settings screen rather than once a tick by the evaluator, and chunk 42 is where they
 land.
 
-### D52 — Pairing is a runtime handle; the join gesture reuses class bindings
+### D52 — Pairing is a runtime handle, filtered at the frame
 
 **Decided.** `DeviceHandle` models keyboard and mouse as one value, a gamepad as the backend's own
 entity — nothing a save file should ever compare across a restart. Filtering happens once, at the
@@ -1334,12 +1334,20 @@ keeps consumption and the exclusion ceiling computed once per context *type* and
 pairing, and a context with no pairing reads every device, so nothing that predates the component
 changed behaviour.
 
-**The join gesture needed no new evaluation path.** The design this replaces proposed evaluating a
-designated context against every unassigned device — a second per-device evaluation cycle running
-parallel to the main one. What ships instead is an ordinary action bound with `bind_class` on a
-context with no pairing of its own, so it reads every device exactly as any other unpaired context
-does. The one piece of new code checks that a device no pairing already names is the one that
-counts, which is what stops two waiting slots racing for it.
+**The join gesture needed no new evaluation path**, and chunk 116 narrowed which existing one it
+takes. The design both replace proposed evaluating a designated context against every unassigned
+device — a second per-device evaluation cycle running parallel to the main one. What shipped first
+was an ordinary action bound with `bind_class` on a context with no pairing of its own, reading
+every device as any unpaired context does and taking the presser off the raw event. What ships now
+is that same ordinary action on a context spawned once per available device, each `Paired` to its
+own, so the entity a press arrives on already names who pressed it.
+
+**Why the narrowing.** A class binding answers only while input is hardware events. A backend that
+supplies action values directly reports no control it read, so there is no raw event to take a
+device from and the recipe has no answer at all — which is the one backend this crate means to
+support. The paired listener asks the pairing instead of the event, so it holds under either. The
+class-binding recipe survives in `join.rs` as the shorter option for a game that will never run that
+way, rather than as the one the crate teaches first.
 
 **Still open.** Owner-scoping consumption and the exclusion ceiling. Nothing in tree needs
 it: no game pairs two different-priority contexts to different devices where one's consumption would
