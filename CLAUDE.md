@@ -138,8 +138,9 @@ cargo run --manifest-path tools/devfmt/Cargo.toml --quiet -- --diff
 ```
 
 `--diff` (default `HEAD`) only touches paragraphs overlapping a line the working tree actually
-changed, so pre-existing debt elsewhere in the file is left alone — add `--check` first to preview
-what it would change. Drop `--diff` and pass paths instead only for a deliberate whole-tree sweep.
+changed, so pre-existing debt elsewhere in the file is left alone — add `--preview` first to read
+exactly what it would rewrite, or `--check` for just the list of files. Drop `--diff` and pass paths
+instead only for a deliberate whole-tree sweep.
 
 ## Commit messages
 

@@ -4,14 +4,17 @@ Reflows prose in Rust comments (`///`, `//!`, `//`) and markdown files to a fixe
 `rustfmt` for the parts `rustfmt` won't touch.
 
 ```sh
-devfmt [--check] [--width N] <path>...
+devfmt [--check] [--preview] [--width N] [--diff[=REF]] <path>...
 ```
 
 - `<path>` may be a file or a directory (directories are walked recursively for `.rs` and `.md`
   files, skipping `target/`, `.git/`, and other dot-directories).
-- Without `--check`, matching files are rewritten in place. With `--check`, nothing is written;
-  changed files are listed on stdout and the process exits non-zero — the same contract
-  `cargo fmt --check` has.
+- Given neither reporting flag, matching files are rewritten in place. `--check` writes nothing and
+  lists the files that would change. `--preview` writes nothing and prints a unified diff of the
+  change itself, its hunks sized to the paragraph that moved. Both exit non-zero when something
+  would have changed — the same contract `cargo fmt --check` has.
+- `--diff` (default ref `HEAD`) restricts the work to paragraphs overlapping a line `git diff`
+  reports as changed, leaving pre-existing debt elsewhere in the file alone.
 - `--width` defaults to 100.
 
 Only paragraphs that actually violate the width are touched. A paragraph a human already wrapped

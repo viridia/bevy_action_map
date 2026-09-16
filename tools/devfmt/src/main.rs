@@ -7,13 +7,16 @@
 //! with its own layout rules — fenced code blocks, table rows, headings, divider lines and link
 //! definitions.
 //!
-//! Usage: `devfmt [--check] [--width N] [--diff[=REF]] <path>...`
+//! Usage: `devfmt [--check] [--preview] [--width N] [--diff[=REF]] <path>...`
 //!
 //! A `<path>` may be a file or a directory (directories are walked recursively for `.rs` and
-//! `.md` files, skipping `target/`, `.git/`, and other dot-directories). Without `--check`,
-//! matching files are rewritten in place, silently, unless something changed. With `--check`,
-//! nothing is written; changed files are listed and the process exits non-zero, the same
-//! contract `cargo fmt --check` has.
+//! `.md` files, skipping `target/`, `.git/`, and other dot-directories). Given neither reporting
+//! flag, matching files are rewritten in place, silently, unless something changed.
+//!
+//! Two flags report instead of writing, both exiting non-zero when something would have changed —
+//! the contract `cargo fmt --check` has. `--check` lists the files, which is the view for deciding
+//! what to run over next. `--preview` prints a unified diff of the change itself, its hunks sized
+//! to the paragraph that moved rather than to the minimal line change.
 //!
 //! `--diff` (default ref `HEAD`) is the routine way to run this: it restricts every check to
 //! paragraphs that overlap a line `git diff` says changed against that ref, the same trick
@@ -53,6 +56,7 @@ const DEFAULT_WIDTH: usize = 100;
 
 fn main() -> ExitCode {
     let mut check = false;
+    let mut preview = false;
     let mut width = DEFAULT_WIDTH;
     let mut diff_ref: Option<String> = None;
     let mut paths: Vec<PathBuf> = Vec::new();
@@ -61,6 +65,7 @@ fn main() -> ExitCode {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--check" => check = true,
+            "--preview" => preview = true,
             "--diff" => diff_ref = Some("HEAD".to_string()),
             "--width" => {
                 let value = args.next().unwrap_or_else(|| {
@@ -123,8 +128,19 @@ fn main() -> ExitCode {
         let touched = touched_by_file.as_ref().and_then(|m| m.get(file));
         match reflow_file(file, width, touched) {
             Ok(Some(new_contents)) => {
-                if check {
+                if check || preview {
                     changed_files.push(file.clone());
+                    // Re-read rather than have `reflow_file` hand back both sides: one extra read
+                    // of a file already in the page cache, against a signature every caller pays.
+                    if preview {
+                        match fs::read_to_string(file) {
+                            Ok(old) => print_preview(file, &paragraph_hunks(&old, &new_contents)),
+                            Err(e) => {
+                                eprintln!("devfmt: {}: {e}", file.display());
+                                error = true;
+                            }
+                        }
+                    }
                 } else if let Err(e) = fs::write(file, new_contents) {
                     eprintln!("devfmt: {}: {e}", file.display());
                     error = true;
@@ -148,18 +164,22 @@ fn main() -> ExitCode {
                 changed_files.len(),
                 files.len()
             );
-            return ExitCode::from(1);
         }
     }
 
     if error {
         return ExitCode::from(1);
     }
+    // Both reporting modes have `cargo fmt --check`'s contract: nothing written, non-zero when
+    // something would have been.
+    if (check || preview) && !changed_files.is_empty() {
+        return ExitCode::from(1);
+    }
     ExitCode::SUCCESS
 }
 
 fn print_usage() {
-    eprintln!("usage: devfmt [--check] [--width N] [--diff[=REF]] <path>...");
+    eprintln!("usage: devfmt [--check] [--preview] [--width N] [--diff[=REF]] <path>...");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -691,6 +711,165 @@ fn is_link_definition(trimmed: &str) -> bool {
     rest[close + 1..].starts_with(':')
 }
 
+// ---------------------------------------------------------------------------------------------
+// Preview: a unified diff of what a run would write. The hunks are the size of the region the
+// reflow rewrote rather than the minimal line change — a reflowed paragraph has every one of its
+// lines changed, so a minimal diff of it is noise to read.
+//
+// No diff algorithm is involved. Every path here emits a blank line verbatim and no paragraph ever
+// produces one, so the blank lines of the old text and the new correspond one to one, and the text
+// between a pair of them can be compared directly. Dropping the lines that already match at each
+// end of such a segment is what narrows a hunk to the part that moved.
+// ---------------------------------------------------------------------------------------------
+
+/// One hunk, ready to print: where it starts in each text (1-based, counting its context) and how
+/// many lines it covers there, with `body` already carrying the `' '`/`'-'`/`'+'` prefixes.
+struct Hunk {
+    old_start: usize,
+    new_start: usize,
+    old_count: usize,
+    new_count: usize,
+    body: Vec<String>,
+}
+
+/// One changed region, as 0-based half-open line ranges into the old and new texts.
+struct Region {
+    old_from: usize,
+    old_to: usize,
+    new_from: usize,
+    new_to: usize,
+}
+
+/// Where `new` differs from `old`, aligned on the blank lines they share. Empty when they match.
+fn paragraph_hunks(old: &str, new: &str) -> Vec<Hunk> {
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+
+    let mut regions = Vec::new();
+    let (mut i, mut j) = (0usize, 0usize);
+    loop {
+        let oe = next_blank(&old_lines, i);
+        let ne = next_blank(&new_lines, j);
+        if let Some((at, old_len, new_len)) = narrow(&old_lines[i..oe], &new_lines[j..ne]) {
+            regions.push(Region {
+                old_from: i + at,
+                old_to: i + at + old_len,
+                new_from: j + at,
+                new_to: j + at + new_len,
+            });
+        }
+        if oe >= old_lines.len() && ne >= new_lines.len() {
+            break;
+        }
+        i = oe + 1;
+        j = ne + 1;
+    }
+
+    // A hunk carries one line of context on each side, since `git apply` refuses a patch whose
+    // hunks have none unless told it was generated at `-U0`. Two regions with a single line between
+    // them — the usual spacing of two paragraphs that both moved — would each claim that line, and
+    // overlapping hunks are refused just as firmly, so they become one hunk holding it as interior
+    // context instead.
+    let mut hunks = Vec::new();
+    let mut start = 0;
+    while start < regions.len() {
+        let mut end = start;
+        while end + 1 < regions.len() && regions[end + 1].old_from <= regions[end].old_to + 1 {
+            end += 1;
+        }
+        hunks.push(materialize(&regions[start..=end], &old_lines, &new_lines));
+        start = end + 1;
+    }
+    hunks
+}
+
+fn next_blank(lines: &[&str], from: usize) -> usize {
+    (from..lines.len())
+        .find(|&k| lines[k].trim().is_empty())
+        .unwrap_or(lines.len())
+}
+
+/// The part of one blank-delimited segment that actually differs: its offset within the segment,
+/// then how many lines the old and new sides each contribute. `None` when the segment is unchanged.
+/// The offset is the same on both sides, since everything before it matched.
+fn narrow(old: &[&str], new: &[&str]) -> Option<(usize, usize, usize)> {
+    if old == new {
+        return None;
+    }
+    let shorter = old.len().min(new.len());
+    let head = (0..shorter).take_while(|&k| old[k] == new[k]).count();
+    let tail = (0..shorter - head)
+        .take_while(|&k| old[old.len() - 1 - k] == new[new.len() - 1 - k])
+        .count();
+    Some((head, old.len() - tail - head, new.len() - tail - head))
+}
+
+/// Builds the printable hunk covering `group`, which is one region or several that had to merge.
+/// The context lines come from the old text; every one of them is a line both texts agree on, so
+/// which side they are read from does not matter.
+fn materialize(group: &[Region], old_lines: &[&str], new_lines: &[&str]) -> Hunk {
+    let first = &group[0];
+    let last = &group[group.len() - 1];
+    let lead = usize::from(first.old_from > 0 && first.new_from > 0);
+    let trail = usize::from(last.old_to < old_lines.len() && last.new_to < new_lines.len());
+
+    let mut body = Vec::new();
+    if lead == 1 {
+        body.push(format!(" {}", old_lines[first.old_from - 1]));
+    }
+    for (n, region) in group.iter().enumerate() {
+        for line in &old_lines[region.old_from..region.old_to] {
+            body.push(format!("-{line}"));
+        }
+        for line in &new_lines[region.new_from..region.new_to] {
+            body.push(format!("+{line}"));
+        }
+        if let Some(next) = group.get(n + 1) {
+            for line in &old_lines[region.old_to..next.old_from] {
+                body.push(format!(" {line}"));
+            }
+        }
+    }
+    if trail == 1 {
+        body.push(format!(" {}", old_lines[last.old_to]));
+    }
+
+    Hunk {
+        old_start: first.old_from + 1 - lead,
+        new_start: first.new_from + 1 - lead,
+        old_count: last.old_to + trail - (first.old_from - lead),
+        new_count: last.new_to + trail - (first.new_from - lead),
+        body,
+    }
+}
+
+/// A unified-diff line span. A side with no lines at all is written as the line it follows with a
+/// count of zero; a hunk carrying context never reaches that, but one at the very start of a file
+/// can.
+fn diff_span(start: usize, count: usize) -> (usize, usize) {
+    if count == 0 {
+        (start.saturating_sub(1), 0)
+    } else {
+        (start, count)
+    }
+}
+
+fn print_preview(path: &Path, hunks: &[Hunk]) {
+    if hunks.is_empty() {
+        return;
+    }
+    println!("--- a/{}", path.display());
+    println!("+++ b/{}", path.display());
+    for hunk in hunks {
+        let (old_start, old_count) = diff_span(hunk.old_start, hunk.old_count);
+        let (new_start, new_count) = diff_span(hunk.new_start, hunk.new_count);
+        println!("@@ -{old_start},{old_count} +{new_start},{new_count} @@");
+        for line in &hunk.body {
+            println!("{line}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1039,5 +1218,68 @@ mod tests {
     fn ignores_non_hunk_lines() {
         let diff = "diff --git a/f b/f\nindex 111..222 100644\n--- a/f\n+++ b/f\n";
         assert!(parse_diff_touched_lines(diff).is_empty());
+    }
+
+    #[test]
+    fn an_unchanged_text_has_no_hunks() {
+        let text = "keep me\n\naaaa bbbb\n";
+        assert!(paragraph_hunks(text, text).is_empty());
+    }
+
+    #[test]
+    fn a_hunk_addresses_the_lines_that_moved() {
+        let old = "keep me\n\naaaa bbbb\ncccc\n\nkeep me too\n";
+        let new = "keep me\n\naaaa bbbb cccc\n\nkeep me too\n";
+        let hunks = paragraph_hunks(old, new);
+        assert_eq!(hunks.len(), 1);
+        assert_eq!((hunks[0].old_start, hunks[0].old_count), (2, 4));
+        assert_eq!((hunks[0].new_start, hunks[0].new_count), (2, 3));
+        assert_eq!(
+            hunks[0].body,
+            [" ", "-aaaa bbbb", "-cccc", "+aaaa bbbb cccc", " "]
+        );
+    }
+
+    #[test]
+    fn a_hunk_that_only_removes_lines_keeps_its_context() {
+        let old = "aaaa bbbb cccc\ndddd\n";
+        let new = "aaaa bbbb cccc\n";
+        let hunks = paragraph_hunks(old, new);
+        assert_eq!(hunks.len(), 1);
+        assert_eq!(hunks[0].body, [" aaaa bbbb cccc", "-dddd"]);
+        assert_eq!((hunks[0].old_count, hunks[0].new_count), (2, 1));
+    }
+
+    #[test]
+    fn two_changes_one_blank_line_apart_become_one_hunk() {
+        // Separately, each would claim that blank line as its own context, and `git apply` refuses
+        // overlapping hunks as firmly as context-free ones. Merged, the blank is interior context.
+        let old = "aaaa bbbb\ncccc\n\ndddd eeee\nffff\n";
+        let new = "aaaa bbbb cccc\n\ndddd eeee ffff\n";
+        let hunks = paragraph_hunks(old, new);
+        assert_eq!(hunks.len(), 1, "the two regions did not merge");
+        assert_eq!((hunks[0].old_count, hunks[0].new_count), (5, 3));
+        assert_eq!(hunks[0].body.iter().filter(|l| *l == " ").count(), 1);
+    }
+
+    #[test]
+    fn applying_the_hunks_reproduces_what_a_run_would_write() {
+        // The property the preview lives or dies on: what it shows is what a real run writes. A
+        // preview that disagrees with its own run is worse than having none.
+        let old = "keep\n\naaaa bbbb\ncccc\n\ndddd eeee\nffff\n\ntail\n";
+        let new = "keep\n\naaaa bbbb cccc\n\ndddd eeee ffff\n\ntail\n";
+        let mut rebuilt: Vec<String> = old.lines().map(str::to_string).collect();
+        // Back to front, so a hunk's line numbers still address `rebuilt` when it is applied.
+        for hunk in paragraph_hunks(old, new).iter().rev() {
+            let kept: Vec<String> = hunk
+                .body
+                .iter()
+                .filter(|line| !line.starts_with('-'))
+                .map(|line| line[1..].to_string())
+                .collect();
+            let at = hunk.old_start - 1;
+            rebuilt.splice(at..at + hunk.old_count, kept);
+        }
+        assert_eq!(rebuilt.join("\n") + "\n", new);
     }
 }
