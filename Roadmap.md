@@ -247,13 +247,13 @@ so the requirement has a destination in `Requirements.md` and, until this chunk,
 
 - **Self-contained**, and independent of 94c — a different corner of the same requirements
   section, not a shared mechanism.
-- **Closed over the four keyboard modifiers, not generic.** A new `with_modifier(ChordModifier,
-  Side)` carries this, where `ChordModifier` is `Ctrl | Shift | Alt | Super` and `Side` is
-  `Left | Right | Either` — not `with_either(impl Into<ButtonControl>, impl Into<ButtonControl>)`
-  over two arbitrary controls. R12.3 sits under §12, "Keyboard specifics", and never asked for an
-  either-shaped bumper or any other pairing; a permissive signature would only add combinations
-  nobody asked for and nothing downstream can describe. `with` is unchanged for every other chord
-  entry.
+- **Closed over the four keyboard modifiers, not generic.** A new
+  `with_modifier(ChordModifier, Side)` carries this, where `ChordModifier` is
+  `Ctrl | Shift | Alt | Super` and `Side` is `Left | Right | Either` — not
+  `with_either(impl Into<ButtonControl>, impl Into<ButtonControl>)` over two arbitrary controls.
+  R12.3 sits under R12, "Keyboard specifics", and never asked for an either-shaped bumper or any
+  other pairing; a permissive signature would only add combinations nobody asked for and nothing
+  downstream can describe. `with` is unchanged for every other chord entry.
 - **`Side::Either` is `Fixed`, and stays that way.** It is declared at bind time, not observed:
   capture resolves one keypress to one concrete control, and no keypress means "either side" for it
   to answer with. A rebind touching this row could only replace it with a concrete `Left` or
@@ -385,7 +385,7 @@ the primary leaves a gap rather than promoting the secondary into it.
   of `Control` an arm meaning "not a control" — the frame, prompts, `fallback_label`, `admissible`,
   conflict comparison — and `conflicts` acquires a bug the first time two empty slots compare equal.
   A `BTreeMap<usize, Control>` answers a sparse-at-index-9000 question nobody asked and gives up the
-  scalar shorthand §10.3 keeps on purpose.
+  scalar shorthand TD10.3 keeps on purpose.
 - **The wire word already exists.** Every real control name carries a `/`, which is what lets
   `"cleared"` and `"external"` be bare words that cannot collide with one (R17.7). An empty slot
   inside a list is `"cleared"` — one word meaning the same thing at both levels, no JSON `null`, and
@@ -499,10 +499,10 @@ section was persistence — the same move, to a file between runs — and chunks
 ### 83. Rewind, without the network
 
 `InputContextState`'s own comment says a rollback snapshot is the two tables plus the dirty bits,
-and `docs/design.md` §6 says the same. Nothing has ever taken one. A ring buffer of snapshots and
-the `InputFrame`s that followed each, with a key that rewinds N ticks and re-simulates forward, is
-rollback's three requirements — snapshot, restore, deterministic re-simulation — with the
-network removed, which was the expensive part.
+and TD6 says the same. Nothing has ever taken one. A ring buffer of snapshots and the `InputFrame`s
+that followed each, with a key that rewinds N ticks and re-simulates forward, is rollback's three
+requirements — snapshot, restore, deterministic re-simulation — with the network removed, which was
+the expensive part.
 
 - **The recorded transition log and the re-simulated one must match**, which is the assertion doing
   the real work. The visible rewind is what makes it a chunk rather than a test.

@@ -367,11 +367,10 @@ associated const, and a reverse lookup behind a trait — and are worth the line
 
 ---
 
-For this crate's own reasoning behind each position: [Requirements.md](../Requirements.md) (§0 for
-the layer seams, §9 for timing, §14 for dead zones, §15 for pairing, §18–19 for presentation),
-[design.md](./design.md) (§1, §5, §6, §8.4), [decisions.md](./decisions.md) (D1, D20, D51), and
-[Roadmap.md](../Roadmap.md)'s deferred
-table for what it has not built. A user-facing comparison of the three crates is in
-[comparison.md](./comparison.md).
+For this crate's own reasoning behind each position: [Requirements.md](../Requirements.md) (R0 for
+the layer seams, R9 for timing, R14 for dead zones, R15 for pairing, R18–19 for presentation),
+[design.md](./design.md) (TD1, TD5, TD6, TD8.4), [decisions.md](./decisions.md) (D1, D20, D51), and
+[Roadmap.md](../Roadmap.md)'s deferred table for what it has not built. A user-facing comparison of
+the three crates is in [comparison.md](./comparison.md).
 
 [bei]: https://github.com/simgine/bevy_enhanced_input

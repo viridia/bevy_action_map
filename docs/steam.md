@@ -197,10 +197,9 @@ every name resolved to a distinct handle:
 | `ToggleOverlay` | 1 |
 | `pong.toggle_overlay` | 2 |
 
-So this crate's own path format — dot separator, at least two segments (`design.md` §3.3) — is
-spellable as a Steam action name, and R1.7 needs no path-to-name mapping on the dot's account.
-Valve's own convention is snake_case with underscores, but that is a convention rather than a
-constraint.
+So this crate's own path format — dot separator, at least two segments (TD3.3) — is spellable as a
+Steam action name, and R1.7 needs no path-to-name mapping on the dot's account. Valve's own
+convention is snake_case with underscores, but that is a convention rather than a constraint.
 
 **Precision about what this shows.** Steam accepted and interned the name, which is exactly what
 R1.7 asserts. It is not evidence that a binding to that action works end to end — `S5` is the

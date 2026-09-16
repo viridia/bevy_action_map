@@ -21,10 +21,10 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 
 | File | Holds | Reach for it when |
 | --- | --- | --- |
-| `docs/design.md` | how the crate works, in 11 numbered sections | you need the shape of a thing before changing it |
+| `docs/design.md` | how the crate works, in sections `TD1`–`TD11` | you need the shape of a thing before changing it |
 | `docs/decisions.md` | why it is that way, `D1`–`D74` | a decision looks arbitrary, or you are about to reverse one |
 | `Roadmap.md` | what is left, what is broken, the chunk sequence | **start here for any chunk** |
-| `Requirements.md` | 224 numbered requirements, `R<section>.<n>`, in sections 0–24 | you need to know what must be true, or a chunk cites an R-number |
+| `Requirements.md` | 224 numbered requirements, `R<section>.<n>`, in sections `R0`–`R24` | you need to know what must be true, or a chunk cites an R-number |
 | `docs/comparison.md` | how this crate differs from BEI and LWIM | someone asks why this exists |
 | `docs/one-way-doors.md` | what stops being revisable if an input crate goes upstream | upstreaming comes up |
 | `docs/issues.md` | the implementation scan's findings, `1.1`–`6`, by severity | a finding needs routing, or you are about to re-find one |
@@ -38,10 +38,12 @@ from them.
 There is **one `D`-numbering** in the project, defined in `docs/decisions.md`. `Requirements.md`
 tags requirements with it; it used to carry a rival `D1`–`D9` of its own, and does not any more.
 
-Two documents have numbered sections: `Requirements.md`, numbered 0–24, and `docs/design.md`,
-numbered 1–11 with subsections such as `5.3`. A bare `§` is one or the other, and which one is
-usually clear from whether it carries a subsection, since `Requirements.md` has none. Qualify with
-the filename — `design.md §5.3` — wherever it is not.
+Two documents have numbered sections, and each has its own prefix so a reference never needs to know
+which document it is standing in. `Requirements.md`'s sections are `R0`–`R24`, told from the
+requirements inside them by the dot: `R19` is the section, `R19.14` a requirement in it.
+`docs/design.md`'s are `TD1`–`TD11`, with subsections such as `TD5.3`. The section sign these
+replaced is retired, and `scripts/xref.py` fails on one: any that survives is a reference nothing
+migrated.
 
 A requirement is defined once, as a list item reading `- **R<section>.<n> (MUST)**`, and is cited
 bare everywhere else. So to reach a definition, search for `**` followed by the number: the `**`
@@ -107,9 +109,9 @@ is genuinely needed, and they keep their `R`-number and `docs/` references.
 documentation, written for a game developer who wants to use the crate, so **pedagogy is the ruling
 principle**: explain the concept, show the usage, say why it matters. Length is whatever teaching
 that costs and not a word more — being public licenses clarity, not loquacity. Don't explain how it
-is implemented, and never cite a requirement number, a `§`, an `OQ`, a decision or a chunk: users do
-not care, and on docs.rs the documents being cited do not exist. The reasoning usually survives the
-edit — drop the parenthesis, keep the sentence.
+is implemented, and never cite a requirement number, a section, an `OQ`, a decision or a chunk:
+users do not care, and on docs.rs the documents being cited do not exist. The reasoning usually
+survives the edit — drop the parenthesis, keep the sentence.
 
 **Analysis belongs in the review conversation.** The reasoning that produced a design — why an
 alternative was rejected, what the trade-off was — goes in the chunk's discussion, and where it

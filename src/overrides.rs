@@ -334,7 +334,7 @@ impl serde::Serialize for SavedRow {
             SavedRow::Cleared => serializer.serialize_str("cleared"),
             SavedRow::NotOurs => serializer.serialize_str("external"),
             // A scalar is the same thing as a one-element list, and most rows hold one — a player
-            // editing this by hand should not have to type brackets to say so (§10.3).
+            // editing this by hand should not have to type brackets to say so (TD10.3).
             SavedRow::Controls(names) if names.len() == 1 => serializer.serialize_str(&names[0]),
             SavedRow::Controls(names) => names.serialize(serializer),
         }

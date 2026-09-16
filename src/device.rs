@@ -169,7 +169,7 @@ pub trait DeviceIdentity:
 /// Taken from the trait bounds rather than from
 /// `reflect_clone`/`reflect_partial_eq`/`reflect_hash`: the derive special-cases those three, so a
 /// backend that omits `#[reflect(Hash)]` cannot be detected at registration and would instead panic
-/// the first time its device was plugged in. See docs/design.md §7.7.
+/// the first time its device was plugged in. See TD7.7.
 #[cfg(feature = "bevy_reflect")]
 #[derive(Clone, Copy)]
 struct DeviceIdOps {

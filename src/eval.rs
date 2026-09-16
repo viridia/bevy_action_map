@@ -224,7 +224,7 @@ pub(crate) fn evaluate_context<
 ) {
     let delta = time.delta_secs();
     // Read once, before this context's own instances can raise it further — evaluation order is
-    // priority order (docs/design.md §5.1, §5.3), so whatever a higher-priority exclusive context
+    // priority order (TD5.1, TD5.3), so whatever a higher-priority exclusive context
     // already did this frame is visible here, and nothing this context does can affect its own
     // shadowing.
     let shadowed = ceiling.shadows(C::PRIORITY);
@@ -380,7 +380,7 @@ impl<C: InputContext> InputContextState<C> {
                 consumed,
                 claims,
             );
-            // After the fold, not before: docs/design.md §5.4's ordering. Checked once here rather
+            // After the fold, not before: TD5.4's ordering. Checked once here rather
             // than woven into the fold.
             self.class_dispatch(&event.event, consumed, claims);
             level_changes += 1;

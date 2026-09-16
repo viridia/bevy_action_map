@@ -54,8 +54,7 @@ pub struct InputContextState<C> {
     pub(crate) actions: Vec<ActionState>,
     // Parallel to `actions`: which ones changed state since evaluation last cleared this. Per
     // action rather than per context because the component's own change tick cannot distinguish
-    // them (R23.4), and because a rollback snapshot is the two tables plus these bits
-    // (docs/design.md §6).
+    // them (R23.4), and because a rollback snapshot is the two tables plus these bits (TD6).
     pub(crate) dirty: FixedBitSet,
     pub(crate) active: bool,
     // Set and cleared only by `shadow`/`unshadow` (R7.8), never by `activate`/`deactivate`:

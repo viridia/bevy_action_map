@@ -82,7 +82,7 @@ against a false-fire**
 
 Found reaching for `ControlClass::AnyStick` to fix a real papercut: a player picking up a gamepad
 and wiggling the stick — the natural first move — has no way to join a game whose join gesture is a
-button. `AnyStick` looks like the fix, but a class binding's fold skips the modifier chain (§8, no
+button. `AnyStick` looks like the fix, but a class binding's fold skips the modifier chain (TD8, no
 dead zone stage), and `actuated` (`eval.rs`) treats any nonzero axis reading as a match — so a stick
 whose rest position sits off true zero, which no calibration step catches before a device is paired,
 would fire on its own drift. The failure is silent: a device joins that nobody touched, and nothing
@@ -210,7 +210,7 @@ _Fix:_ **deferred**, with the gate stated in Roadmap's deferred table.
 
 ### 1052 Naming a device to the player has no requirement and no support
 
-`split_screen.rs`'s `device_name` · `Requirements.md` §11, §18
+`split_screen.rs`'s `device_name` · R11, R18
 
 R18.3 forbids hard-coding English for a control's display string and the crate supplies
 `fallback_label` so a game does not have to. A *device* has no equivalent: nothing returns a
@@ -219,16 +219,16 @@ anything about naming the result. So Split Friction's pane label hard-codes four
 `GamepadBrand`, which is exactly the shape R18.3 exists to prevent one step to the left.
 
 The gap is in `Requirements.md` first: no requirement covers it, so the crate is not failing one.
-Whether a device name is §18's business (a display string, like a control's) or §11's (a fact about
+Whether a device name is R18's business (a display string, like a control's) or R11's (a fact about
 the device, like its brand) is the question to settle before anything is built.
 
 Unrouted.
 
 ### 1021 Accessibility has no citation anywhere in the project
 
-`Requirements.md` §20, all six requirements, uncited in `src/`, `examples/`, `docs/`, `Roadmap.md`
-and `CLAUDE.md`. The section's own preamble calls these "cheap to accommodate now and expensive to
-retrofit," which is the argument for looking at it before more is built on top.
+R20, all six requirements, uncited in `src/`, `examples/`, `docs/`, `Roadmap.md` and `CLAUDE.md`.
+The section's own preamble calls these "cheap to accommodate now and expensive to retrofit," which
+is the argument for looking at it before more is built on top.
 
 R20.2 and R20.5 are built (chunk 64) and R20.1 holds by construction. R20.4 is withdrawn, and R20.7,
 the narrower requirement that replaced it, is 1045. R20.6 (MAY, sticky modifiers / one-handed
@@ -281,11 +281,10 @@ there. Unrouted.
 
 R11.3 (MUST) · `device.rs`
 
-The module's own doc claims "capability data" (`device.rs:5`); nothing answers a capability
-question anywhere in the crate — no rumble, motion/gyro, touchpad, battery or LED query, and no way
-to ask what controls a device has beyond matching on `DeviceHandle`'s own closed kind. §18's
-prompts and any "can this player play at all" check — R11.3's own two named callers — have nothing
-to call.
+The module's own doc claims "capability data" (`device.rs:5`); nothing answers a capability question
+anywhere in the crate — no rumble, motion/gyro, touchpad, battery or LED query, and no way to ask
+what controls a device has beyond matching on `DeviceHandle`'s own closed kind. R18's prompts and
+any "can this player play at all" check — R11.3's own two named callers — have nothing to call.
 
 Unlike the device model's closedness (D65), this isn't about admitting an unknown device kind — a
 gamepad's rumble motors and battery level are things `bevy_input`'s own `Gamepad` component already
@@ -318,16 +317,16 @@ Unrouted.
 
 R23.6 · `InputContextState::new` and `apply_frame` are both `pub(crate)`
 
-`docs/design.md` §6 says "a test or replay harness can drive one directly." From outside, the only
-way to get an instance is to spawn an entity and the only way to advance one is `App::update`. The
-struct's freedom from ECS references is real and unreachable, and R23.6's standalone half has no
-citation anywhere. The netcode deferred row is where this plausibly already belongs. Unrouted.
+TD6 says "a test or replay harness can drive one directly." From outside, the only way to get an
+instance is to spawn an entity and the only way to advance one is `App::update`. The struct's
+freedom from ECS references is real and unreachable, and R23.6's standalone half has no citation
+anywhere. The netcode deferred row is where this plausibly already belongs. Unrouted.
 
 ### 1026 Focus and picking ordering is neither documented nor enforced
 
 R22.4 (MUST) wants documented ordering and integration with `bevy_input::InputSystems`,
 `bevy_input_focus` and `bevy_picking`. The `InputSystems` third is met and documented
-(`frame.rs:363`, design §1). The other two:
+(`frame.rs:363`, TD1). The other two:
 
 - **`bevy_picking` is named once, about something else.** `docs/decisions.md` mentions it flattening
   its generic `Pointer<E>`, which is a reversal note rather than an ordering. Nothing in `src/`,
@@ -388,8 +387,8 @@ any one of them is misled about a mechanism.
 
 ### 1031 Examples and sketches that do not compile
 
-- `docs/design.md` §3's trait sketch says `// plus CATEGORY and CONSUME, with defaults`. The
-  constant is `CONSUMES`. Copying the sketch into a hand-written impl does not compile.
+- TD3's trait sketch says `// plus CATEGORY and CONSUME, with defaults`. The constant is `CONSUMES`.
+  Copying the sketch into a hand-written impl does not compile.
 
 Unrouted.
 
@@ -413,26 +412,26 @@ Unrouted.
 
 ### 1033 Design sentences that are a clause short
 
-- **§4 says "only the scratch is rebuilt."** `Plan::compile` rebuilds `indexed_controls` and
+- **TD4 says "only the scratch is rebuilt."** `Plan::compile` rebuilds `indexed_controls` and
   `has_chords` as well, and `plan.rs`'s own comment says the first is required rather than
   incidental: an override rewrites which controls a binding reads, so one has to move between
   indexed and not. The code is right and the sentence is short.
-- **§5.3 says the exclusion ceiling "is set by the `PreUpdate` pass and read — never rewritten — by
+- **TD5.3 says the exclusion ceiling "is set by the `PreUpdate` pass and read — never rewritten — by
   every `FixedPreUpdate` run."** `evaluate_context` raises it for any `C::EXCLUSIVE` with an active
   instance in whichever schedule it runs, which is what makes a `Fixed` exclusive context work at
   all. The consequence the sentence hides, verified: a fixed exclusive context shadows lower-
   priority _fixed_ contexts and never a render one, in that frame or the next, because the reset
-  runs at the top of `PreUpdate`. §5.2 states this for consumption and nothing states it for
+  runs at the top of `PreUpdate`. TD5.2 states this for consumption and nothing states it for
   exclusion.
-- **§6's "a test or replay harness can drive one directly"** — see 1025.
-- **§7 does not state R7.3's cost.** Two simultaneously-active layers hold separate action state, so
-  a game reading `ContextActions<Base>` does not see the layer's answer and has to read both. R7.3
-  is a MUST that is met and claimed nowhere.
-- **A `§10.1` citation points at the wrong section**, at `context/declare.rs:761`. It is about the
-  override store being keyed by mapping alone, which is §10's preamble; §10.1 is "Applying," and
+- **TD6's "a test or replay harness can drive one directly"** — see 1025.
+- **TD7 does not state R7.3's cost.** Two simultaneously-active layers hold separate action state,
+  so a game reading `ContextActions<Base>` does not see the layer's answer and has to read both.
+  R7.3 is a MUST that is met and claimed nowhere.
+- **A `TD10.1` citation points at the wrong section**, at `context/declare.rs:761`. It is about the
+  override store being keyed by mapping alone, which is TD10's preamble; TD10.1 is "Applying," and
   this is not about applying. Two others, both in `overrides.rs` and both about the serialized form
-  (now §10.3), went with 117e. **Small — worth a minute alongside the R14.10 mis-citation above, not
-  worth a pass of its own.**
+  (now TD10.3), went with 117e. **Small — worth a minute alongside the R14.10 mis-citation above,
+  not worth a pass of its own.**
 
 Unrouted.
 
@@ -518,7 +517,7 @@ is already crate-private:
 - `device.rs`: `GamepadCalibration::clear_device`, `is_empty`.
 - `mapping.rs`: `MappingKey::part` — plausible for a screen grouping a composite's four rows, and
   nothing does.
-- `overrides.rs`: `Overrides::is_empty` — called only by its own test; design §10 enumerates twelve
+- `overrides.rs`: `Overrides::is_empty` — called only by its own test; TD10 enumerates twelve
   `Overrides` methods and this is not one.
 - `action.rs`: `ActionValue::from_output` — **now has a caller**, `backend.rs`'s
   `AuthorityValues::set`, added by chunk 111 after the scan. It still duplicates the four `From`
@@ -530,19 +529,18 @@ is already crate-private:
   public and a `Default` impl.
 - `plan.rs`: `Plan` is `pub` with **nothing public on it** — no field, no method, no constructor,
   and it appears in no public signature, every wrapper holding one being `pub(crate)`. It is on
-  docs.rs as a struct a reader can name and do nothing with. Design §4 names `Plan<C>` in prose,
-  which is architecture rather than a request for it to be public.
+  docs.rs as a struct a reader can name and do nothing with. TD4 names `Plan<C>` in prose, which is
+  architecture rather than a request for it to be public.
 
 **Reviewed and left alone**: `GamepadCalibration::clear_device`/`is_empty`, `MappingKey::part`,
 `Overrides::is_empty` and `ActionState::new` are ordinary API completeness on small types. "No
 caller in tree" is not a defect for a library; it is only worth acting on for items that are _also_
 misleading, and none of these is.
 
-Worth stating for calibration: `docs/design.md` §7.3, §8.2, §9.1 and §10 _enumerate_ their public
-surface rather than describing it, so the sweep over those was a diff and came back nearly empty —
-eleven conditions, ten modifiers, six presentation methods, eleven `ActionMapping` fields, eight
-problem kinds, all matching one for one. The list above is concentrated where no document
-enumerates.
+Worth stating for calibration: TD7.3, TD8.2, TD9.1 and TD10 _enumerate_ their public surface rather
+than describing it, so the sweep over those was a diff and came back nearly empty — eleven
+conditions, ten modifiers, six presentation methods, eleven `ActionMapping` fields, eight problem
+kinds, all matching one for one. The list above is concentrated where no document enumerates.
 
 Unrouted.
 
@@ -636,8 +634,7 @@ Recorded so nobody re-derives it. Every one of these was read against the code a
 **Values and shapes.** R2.2's conversion table matches `to_bool`/`to_axis1`/`to_axis2`/`to_axis3`
 cell for cell, including the two rows the requirement expects an argument about. R2.10's two
 hardware cases hold in `ActionIntent::accepts`. R1.1's declared path is required by the derive with
-no default. Design §4's fourteen `DiagnosticKind` variants and both `Severity` variants match
-exactly.
+no default. TD4's fourteen `DiagnosticKind` variants and both `Severity` variants match exactly.
 
 **The frame.** R9.1–R9.5 and R9.7, including the two worth doubting: deltas are summed rather than
 replaced (`eval.rs:347`, asserted at `eval.rs:1131`), and events are replayed singly rather than

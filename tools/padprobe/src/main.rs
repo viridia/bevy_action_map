@@ -2,7 +2,7 @@
 //!
 //! gilrs is the crate Bevy's gamepad support *is*, so this answers "will this pad work with
 //! bevy_action_map?" without building a Bevy app. It also measures the numbers the deadzone design
-//! (Requirements §14, D6) needs from real hardware.
+//! (R14, D6) needs from real hardware.
 //!
 //! Usage: `padprobe [seconds] [--bevy | --unfiltered]`
 //!

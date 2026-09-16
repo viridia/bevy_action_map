@@ -74,7 +74,7 @@ acted on. The queue is capped at 4096 events, dropping oldest-first and counting
 `InputFrame::dropped()`.
 
 **Calibration.** Gamepad axis values are corrected as they are recorded, not where they are read
-(§8.4). A backend writing values into the frame directly enters past that point.
+(TD8.4). A backend writing values into the frame directly enters past that point.
 
 ---
 
@@ -130,7 +130,7 @@ shapes can serve which intent, and a binding whose channel cannot serve its acti
 refused when the context is declared. The derive checks output against intent in a compile-time
 assertion.
 
-A directional **composite** — several controls arranged as one binding (§8.1) — reports `Axis2` as
+A directional **composite** — several controls arranged as one binding (TD8.1) — reports `Axis2` as
 four buttons read together; a gamepad stick's is the one exception, a single `Control::GamepadStick`
 reporting a position the same way `MouseMotion` reports a displacement.
 
@@ -174,9 +174,9 @@ Bindings are authored as data and compiled once per context into a `Plan<C>`.
 | Compilation produces | Serves |
 | --- | --- |
 | action → slot assignment, and the reverse as a direct index | O(1) state access without hashing |
-| scratch slot assignment per condition and stateful modifier | §6 |
+| scratch slot assignment per condition and stateful modifier | TD6 |
 | each binding's chord length, and whether the plan has any | the clash pre-pass, skipped when there are no chords |
-| the set of controls any binding indexes | class-binding fallback, §5.4 |
+| the set of controls any binding indexes | class-binding fallback, TD5.4 |
 | resolved dispatch per slot | turning a transition into a typed event |
 | diagnostics | reported before the context is installed |
 
@@ -509,7 +509,7 @@ synchronously.
 owner.
 
 **Which device is "the" one for a prompt is the app's call**, on the same terms as `PromptDevice`
-(§9.2): a player with two gamepads paired is an edge case nothing in this crate ranks, and a game
+(TD9.2): a player with two gamepads paired is an edge case nothing in this crate ranks, and a game
 that cares reaches for `Paired`'s own devices and its own notion of which is current.
 
 ### 7.5 Connection signals
@@ -703,7 +703,7 @@ Two further builder entry points:
 - `hold_or_toggle::<A>(key)` declares a latch turning a momentary press into a sustained one, once
   per action rather than per binding, so every eligible control shares one runtime latch.
 
-`bind_class::<A>()` declares the class binding of §5.4, and `diagnostics()` returns what the plan
+`bind_class::<A>()` declares the class binding of TD5.4, and `diagnostics()` returns what the plan
 build found.
 
 ### 8.3 Dead zones and thresholds
@@ -833,10 +833,10 @@ is a `ControlOrigin` rather than a `Control` for the same reason, and both varia
 and `fallback_label()`. `BindingTable` is the implementation that answers from this crate's own
 plans.
 
-**`Control::fallback_label_for_brand(GamepadBrand)`** (§7.6) answers the way `fallback_label` does,
+**`Control::fallback_label_for_brand(GamepadBrand)`** (TD7.6) answers the way `fallback_label` does,
 except a gamepad's face buttons, bumpers, triggers, Select/Start and Mode read in that brand's own
-words — "Cross" rather than "South Button" on a PlayStation pad. Sticks and the D-pad read the
-same either way, and `GamepadBrand::Generic` falls through to the positional answer.
+words — "Cross" rather than "South Button" on a PlayStation pad. Sticks and the D-pad read the same
+either way, and `GamepadBrand::Generic` falls through to the positional answer.
 
 **A prompt is not a row of the settings screen.** `mappings` is what the game declared and is
 static; a prompt is what would fire now, so it is empty for a context nobody is carrying or that is

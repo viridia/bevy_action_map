@@ -21,69 +21,69 @@ here, so there is one `D`-numbering in the project.
 
 | #       | Decision                                                                      | Mechanism       |
 | ------- | ----------------------------------------------------------------------------- | --------------- |
-| **D1**  | Four layers, and L2 reads only L1                                             | design §1       |
-| **D2**  | L1 is an event queue, not a level snapshot                                    | design §2       |
-| **D3**  | Each context reads by cursor; retirement is separate and later                | design §2       |
-| **D4**  | Timestamps order events; they do not time them                                | design §2       |
-| **D5**  | An action is a type                                                           | design §3       |
-| **D6**  | Serialized identity is a declared path, not the Rust type path                | design §3.3     |
-| **D7**  | ActionIntent is separate from output shape and from channel shape                   | design §3.1     |
-| **D8**  | Action state is two dense tables; actions are not entities                    | design §6       |
-| **D9**  | A context declares one tick domain and is evaluated once                      | design §1, §3   |
-| **D10** | Bindings compile once into an immutable, shared plan                          | design §4       |
-| **D11** | Arbitration splits: priority is system ordering, chord length is a pre-pass   | design §5.1     |
-| **D12** | Consumption is recorded per schedule and flows forward                        | design §5.2     |
-| **D13** | Exclusivity is a ceiling, not a third context state                           | design §5.3     |
-| **D14** | A class binding is a second list, not an expanded set of controls             | design §5.4     |
-| **D15** | ActionIntent decides how several bindings fold into one action                      | design §5.5     |
-| **D16** | Nothing user-defined runs inside the evaluator                                | design §5.6     |
-| **D17** | Transitions are generic entity events on the context entity                   | design §5.6     |
-| **D18** | Require-reset holds back buttons only                                         | design §7.2     |
-| **D26** | Failures surface at the earliest tier that can catch them                     | design §4, §7.3 |
-| **D19** | Modifiers and conditions are enums with a `Custom` variant                    | design §8.2     |
+| **D1**  | Four layers, and L2 reads only L1                                             | TD1       |
+| **D2**  | L1 is an event queue, not a level snapshot                                    | TD2       |
+| **D3**  | Each context reads by cursor; retirement is separate and later                | TD2       |
+| **D4**  | Timestamps order events; they do not time them                                | TD2       |
+| **D5**  | An action is a type                                                           | TD3       |
+| **D6**  | Serialized identity is a declared path, not the Rust type path                | TD3.3     |
+| **D7**  | ActionIntent is separate from output shape and from channel shape                   | TD3.1     |
+| **D8**  | Action state is two dense tables; actions are not entities                    | TD6       |
+| **D9**  | A context declares one tick domain and is evaluated once                      | TD1, TD3   |
+| **D10** | Bindings compile once into an immutable, shared plan                          | TD4       |
+| **D11** | Arbitration splits: priority is system ordering, chord length is a pre-pass   | TD5.1     |
+| **D12** | Consumption is recorded per schedule and flows forward                        | TD5.2     |
+| **D13** | Exclusivity is a ceiling, not a third context state                           | TD5.3     |
+| **D14** | A class binding is a second list, not an expanded set of controls             | TD5.4     |
+| **D15** | ActionIntent decides how several bindings fold into one action                      | TD5.5     |
+| **D16** | Nothing user-defined runs inside the evaluator                                | TD5.6     |
+| **D17** | Transitions are generic entity events on the context entity                   | TD5.6     |
+| **D18** | Require-reset holds back buttons only                                         | TD7.2     |
+| **D26** | Failures surface at the earliest tier that can catch them                     | TD4, TD7.3 |
+| **D19** | Modifiers and conditions are enums with a `Custom` variant                    | TD8.2     |
 | **D65** | The device model is closed; a third-party kind needs one in hand             | —               |
-| **D20** | We own the whole dead-zone chain, in three stages, with one rescaling         | design §8.4     |
-| **D21** | Calibration is measured by an explicit step, never detected                   | design §8.4     |
+| **D20** | We own the whole dead-zone chain, in three stages, with one rescaling         | TD8.4     |
+| **D21** | Calibration is measured by an explicit step, never detected                   | TD8.4     |
 | **D22** | Backends enter at two seams, not one                                          | —               |
 | **D23** | Focus integrates by activation, and interception is static                    | —               |
-| **D24** | One crate, feature-gated by source                                            | design §11      |
+| **D24** | One crate, feature-gated by source                                            | TD11      |
 | **D25** | What must not move upstream                                                   | —               |
-| **D27** | The presentation model is separate from the binding model                     | design §9       |
-| **D28** | Listing is the default; rebinding is opt-in                                   | design §9.1     |
-| **D29** | A mapping is an ordered list of slots, and capacity is inferred               | design §9.1     |
-| **D30** | `follow` declares a shared control once, against the leader's bindings so far | design §8.2     |
-| **D31** | Every player-facing string is a key; the mapping owns the name                | design §9.1     |
-| **D32** | A tunable is typed, so a settings screen is generic                           | design §9.1     |
-| **D33** | A preset is a starting point, not a layer                                     | design §10.2    |
-| **D34** | The reverse lookup is a trait, and the answer is not a `Control`              | design §9.2     |
-| **D35** | A prompt is not a row of the settings screen                                  | design §9.2     |
-| **D36** | The device is a scope the caller supplies; ranking devices is refused         | design §9.2     |
-| **D37** | A prompt reads consumption from the declarations, not the frame               | design §9.2     |
-| **D38** | Staleness is a counter, and the crate says what it cannot see                 | design §9.2     |
-| **D39** | The control name table is ours, and one name is both identity and key         | design §9.2     |
-| **D40** | Capture reads the frame directly, not through a binding                       | design §9.3     |
-| **D41** | A capture session is a component on whatever entity the caller picks          | design §9.3     |
-| **D42** | Reserved before shape, and excluded is a silent guard                         | design §9.3     |
-| **D43** | Conflicts are detected, never resolved                                        | design §9.3     |
-| **D44** | Two general combinators, not a navigation path                                | design §8.3     |
-| **D45** | An override is a diff keyed by mapping and family, holding controls only      | design §10      |
-| **D46** | Three row states, not two                                                     | design §10      |
-| **D47** | Applying is the only path in, and overrides do not compose                    | design §10.1    |
-| **D48** | Applying rewrites the authored bindings; a variant keeps the declared slots   | design §10.1    |
-| **D49** | The control encoding is a format we own                                       | design §10.3    |
-| **D50** | Loading is pure, and reports rather than drops                                | design §10.3    |
-| **D58** | An unrecognized version refuses the set; no migration exists yet              | design §10.3    |
-| **D59** | Persistence goes through a separate, reflectable type                         | design §10.3    |
+| **D27** | The presentation model is separate from the binding model                     | TD9       |
+| **D28** | Listing is the default; rebinding is opt-in                                   | TD9.1     |
+| **D29** | A mapping is an ordered list of slots, and capacity is inferred               | TD9.1     |
+| **D30** | `follow` declares a shared control once, against the leader's bindings so far | TD8.2     |
+| **D31** | Every player-facing string is a key; the mapping owns the name                | TD9.1     |
+| **D32** | A tunable is typed, so a settings screen is generic                           | TD9.1     |
+| **D33** | A preset is a starting point, not a layer                                     | TD10.2    |
+| **D34** | The reverse lookup is a trait, and the answer is not a `Control`              | TD9.2     |
+| **D35** | A prompt is not a row of the settings screen                                  | TD9.2     |
+| **D36** | The device is a scope the caller supplies; ranking devices is refused         | TD9.2     |
+| **D37** | A prompt reads consumption from the declarations, not the frame               | TD9.2     |
+| **D38** | Staleness is a counter, and the crate says what it cannot see                 | TD9.2     |
+| **D39** | The control name table is ours, and one name is both identity and key         | TD9.2     |
+| **D40** | Capture reads the frame directly, not through a binding                       | TD9.3     |
+| **D41** | A capture session is a component on whatever entity the caller picks          | TD9.3     |
+| **D42** | Reserved before shape, and excluded is a silent guard                         | TD9.3     |
+| **D43** | Conflicts are detected, never resolved                                        | TD9.3     |
+| **D44** | Two general combinators, not a navigation path                                | TD8.3     |
+| **D45** | An override is a diff keyed by mapping and family, holding controls only      | TD10      |
+| **D46** | Three row states, not two                                                     | TD10      |
+| **D47** | Applying is the only path in, and overrides do not compose                    | TD10.1    |
+| **D48** | Applying rewrites the authored bindings; a variant keeps the declared slots   | TD10.1    |
+| **D49** | The control encoding is a format we own                                       | TD10.3    |
+| **D50** | Loading is pure, and reports rather than drops                                | TD10.3    |
+| **D58** | An unrecognized version refuses the set; no migration exists yet              | TD10.3    |
+| **D59** | Persistence goes through a separate, reflectable type                         | TD10.3    |
 | **D51** | An authority backend writes a value, not a state                              | —               |
-| **D52** | Pairing is a runtime handle, filtered at the frame                            | design §7.4     |
+| **D52** | Pairing is a runtime handle, filtered at the frame                            | TD7.4     |
 | **D53** | The crate detects and reports; the app decides                                | —               |
-| **D54** | There is no pass-through action                                               | design §5.5     |
-| **D55** | State-driven activation runs inside `StateTransition`                         | design §7.2     |
-| **D56** | Activation answers per context type, and is declared on the builder           | design §7.2     |
-| **D57** | Where two pads report one axis, the one that moved last speaks                | design §7.4     |
-| **D60** | The character-producing door is a method, not a fourth `ControlClass`         | design §5.4     |
-| **D61** | A gamepad stick is a `Control`, named whole                                   | design §8.1     |
-| **D66** | Control classes are a closed set                                             | design §5.4     |
+| **D54** | There is no pass-through action                                               | TD5.5     |
+| **D55** | State-driven activation runs inside `StateTransition`                         | TD7.2     |
+| **D56** | Activation answers per context type, and is declared on the builder           | TD7.2     |
+| **D57** | Where two pads report one axis, the one that moved last speaks                | TD7.4     |
+| **D60** | The character-producing door is a method, not a fourth `ControlClass`         | TD5.4     |
+| **D61** | A gamepad stick is a `Control`, named whole                                   | TD8.1     |
+| **D66** | Control classes are a closed set                                             | TD5.4     |
 
 ---
 
@@ -185,7 +185,7 @@ relocating it would orphan every binding a player has saved against it. The regi
 path for the same reason, which is why it is not the reflect type registry.
 
 **Accepted cost.** A second name to keep straight, and no compiler check that it is unique. The
-naming convention in design §3.3 is what stands in for one.
+naming convention in TD3.3 is what stands in for one.
 
 ### D7 — ActionIntent is separate from output shape and from channel shape
 
@@ -481,7 +481,7 @@ open to a device kind this crate did not write.
 **Rules out.** A `Custom(Arc<dyn Device>)` extension the way D19 opened `Modifier` and `Condition`.
 The difference is that D19's `Custom` had one fixed interface to satisfy — a value and a scratch
 slot, evaluated once a tick — while "a device" has no equivalent fixed point across the candidates
-§11's own Problem statement names: MIDI, a HOTAS, a racing wheel, gyro, eye tracking. Building the
+R11's own Problem statement names: MIDI, a HOTAS, a racing wheel, gyro, eye tracking. Building the
 trait now means guessing which of their shapes it should fit.
 
 **Reversal.** A concrete third-party device, not a hypothetical one. Once one exists to design
@@ -1275,7 +1275,7 @@ local, and the receiving peer never re-derives anything from it.
 
 **Note.** The record/replay argument for L1 — a replay re-derives through bindings and conditions,
 an action-level mock cannot — is real, but it argues for testing rigor, not for a network wire
-format. `Requirements.md` §10 conflated the two before this decision separated them.
+format. R10 conflated the two before this decision separated them.
 
 ### D70 — `mouse`'s feature entry also asks for `bevy_input/keyboard`
 

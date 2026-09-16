@@ -635,7 +635,7 @@ pub struct Plan<C> {
         allow(dead_code)
     )]
     has_chords: bool,
-    // docs/design.md §5.4's second structure: consulted only when `indexed_controls` doesn't
+    // TD5.4's second structure: consulted only when `indexed_controls` doesn't
     // already claim the control an event arrived on.
     class_bindings: Vec<CompiledClassBinding>,
     // Every control any binding above reads, deduped. Not an arbitration index — a class binding

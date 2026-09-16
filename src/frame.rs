@@ -328,7 +328,7 @@ pub fn sample_input(
         // Here rather than in the evaluator: calibration is a fact about the hardware, not about
         // who is reading it, so every context and every capture sees one answer for one pass. It
         // also sits ahead of the point a backend supplying its own values enters the frame at, so
-        // R14.10 holds by placement rather than by a check (docs/design.md §2).
+        // R14.10 holds by placement rather than by a check (TD2).
         if let RawGamepadEvent::Axis(axis) = &mut event {
             if let Some(sampling) = sampling.as_mut() {
                 sampling.observe(axis.gamepad, axis.axis, axis.value);

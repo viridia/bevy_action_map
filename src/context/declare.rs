@@ -758,8 +758,8 @@ fn report_mapping_collisions<C: InputContext + Component>(
             // is the point. Two mappable bindings of one action inside one context are a primary
             // and a secondary and merge into one row. The same two in two different contexts are
             // two rows, in two contexts that may be active at different times — and the overrides
-            // store is keyed by mapping alone (§10.1), so a rebind of one still lands on the other.
-            // Same action, and still a collision.
+            // store is keyed by mapping alone (TD10.1), so a rebind of one still lands on the
+            // other. Same action, and still a collision.
             //
             // Rebindable rows only, for the reason the within-a-context check gives: the hazard is
             // a *saved* rebind landing on the wrong row, and a fixed row is never saved. Since

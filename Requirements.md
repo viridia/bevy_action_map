@@ -37,7 +37,7 @@ budget for setup, staff for QA, and translators. Configuration is not what they 
 
 **The long tail** — solo developers, jam entries, two-person teams — is the larger constituency by
 count and is short of exactly what the studio has. No localization budget. One controller on the
-desk, and per §14 possibly a controller that lies about itself. No QA pass. No time to read
+desk, and per R14 possibly a controller that lies about itself. No QA pass. No time to read
 twenty-four sections of requirements before moving a character. What they cannot tolerate is a
 floor: setup that must be completed before anything works at all.
 
@@ -50,18 +50,18 @@ to reach all three without leaving the crate.
 Three consequences, each of which this document already obeys in places and should obey everywhere:
 
 - **Additive, never prerequisite.** Mappings (R19.10), tunables and presets (R19.13), localization
-  keys (R19.14), pairing (§15), and persistence (§17) are declarations a game opts into. None may
+  keys (R19.14), pairing (R15), and persistence (R17) are declarations a game opts into. None may
   become a step you must perform before an action fires.
-- **Defaults must be right without being tested.** The long tail cannot verify what it does not
-  own — a second gamepad, a Steam Deck, an AZERTY keyboard, a right-to-left locale. So a default
-  that is merely _reasonable_ is not good enough; it has to be the one that survives hardware and
-  locales the author never sees. This is also why the diagnostic tiers of §4.R4.8 matter more here
-  than they would in a crate aimed only at studios: a mistake caught at build time is one the solo
-  developer does not need a QA department to find.
+- **Defaults must be right without being tested.** The long tail cannot verify what it does not own
+  — a second gamepad, a Steam Deck, an AZERTY keyboard, a right-to-left locale. So a default that is
+  merely _reasonable_ is not good enough; it has to be the one that survives hardware and locales
+  the author never sees. This is also why the diagnostic tiers of R4.8 matter more here than they
+  would in a crate aimed only at studios: a mistake caught at build time is one the solo developer
+  does not need a QA department to find.
 - **Accessibility must not be what falls off the bottom.** This is the place the commitment is
   hardest to keep, and it deserves the scrutiny. Making rebinding opt-in (R19.10) is right for the
   jam entry's effort budget and wrong for its players, since the likely outcome is a game with zero
-  remappable controls (§20.R20.1). The resolution is not to flip the default — that would ship
+  remappable controls (R20.1). The resolution is not to flip the default — that would ship
   unintended rebinding surfaces — but to make the accessible path *cheap*: declaring a whole
   context's buttons mappable should be one line, not one line per action. Where a default trades
   away accessibility, the obligation is to shorten the accessible path, not to accept the trade.
@@ -78,19 +78,19 @@ what does not:
 
 | | |
 | --- | --- |
-| Actions as types with a derive | As in BEI, and unlike LWIM's one-enum-per-map, which no other crate can add to (§1). Note the asymmetry the other way: BEI's actions are entities, so a third-party crate can add one to a context it does not own; bindings compiled at app build cannot. |
-| A richer state machine than pressed/just_pressed | `Building` / `Firing` / `Fired` / `Canceled`, extending BEI and Unreal's `Ongoing` — needed for holds, chords, and hold-to-confirm UI (§3). |
-| A declared name, separate from the Rust type | **Neither has one.** LWIM's saved bindings key on the enum variant, BEI's on the type path, so a rename — or, for BEI, a module move — orphans what a player saved. D6 requires a `PATH` that a refactor cannot touch, and which doubles as the label's localization key (§1, §17). |
-| Contexts with priority | As in BEI, plus Steam's _additive layers_, which override part of a context rather than replacing it (§7). |
-| Deadzones owned end to end | **Differs from both.** Both read the `Gamepad` component, downstream of `GamepadSettings`, and apply their own deadzone above it; this crate consumes raw events and owns all three stages, because a clamp applied below you cannot be undone above you (§14). |
-| Fixed vs. render timing | **All three address it; the difference is what survives the gaps.** BEI names a schedule per context and keys consumption by it; LWIM keeps a second `ActionState` swapped in around `FixedMain`. Both sample `ButtonInput`, a level, so a press and release inside one frame is invisible to either. §9 asks for edges preserved and drained by window. |
-| Determinism and rollback | **Both have an action-level seam**, LWIM's `ActionDiff` most maturely; §10 puts the seam at L1 instead, so a replay re-derives through the bindings rather than past them. |
-| Local multiplayer | **Both route gamepads per instance**, neither routes keyboard and mouse; §15 treats device-to-player assignment as many-to-many rather than an index. |
-| Prompts, rebinding UI | **Both expose bindings for iteration and mutation**, which is a workable basis; what neither has is a presentation model distinct from the binding model, capture with conflict detection, or overrides as a diff against a retained declaration (§18, §19). Glyphs: none of the three. |
-| External binding backends | **BEI has `ExternallyMocked`**, per action, which is most of the authority case; §0 and §18 add the source half, device suppression at L0, and a reverse lookup the backend can answer. |
+| Actions as types with a derive | As in BEI, and unlike LWIM's one-enum-per-map, which no other crate can add to (R1). Note the asymmetry the other way: BEI's actions are entities, so a third-party crate can add one to a context it does not own; bindings compiled at app build cannot. |
+| A richer state machine than pressed/just_pressed | `Building` / `Firing` / `Fired` / `Canceled`, extending BEI and Unreal's `Ongoing` — needed for holds, chords, and hold-to-confirm UI (R3). |
+| A declared name, separate from the Rust type | **Neither has one.** LWIM's saved bindings key on the enum variant, BEI's on the type path, so a rename — or, for BEI, a module move — orphans what a player saved. D6 requires a `PATH` that a refactor cannot touch, and which doubles as the label's localization key (R1, R17). |
+| Contexts with priority | As in BEI, plus Steam's _additive layers_, which override part of a context rather than replacing it (R7). |
+| Deadzones owned end to end | **Differs from both.** Both read the `Gamepad` component, downstream of `GamepadSettings`, and apply their own deadzone above it; this crate consumes raw events and owns all three stages, because a clamp applied below you cannot be undone above you (R14). |
+| Fixed vs. render timing | **All three address it; the difference is what survives the gaps.** BEI names a schedule per context and keys consumption by it; LWIM keeps a second `ActionState` swapped in around `FixedMain`. Both sample `ButtonInput`, a level, so a press and release inside one frame is invisible to either. R9 asks for edges preserved and drained by window. |
+| Determinism and rollback | **Both have an action-level seam**, LWIM's `ActionDiff` most maturely; R10 puts the seam at L1 instead, so a replay re-derives through the bindings rather than past them. |
+| Local multiplayer | **Both route gamepads per instance**, neither routes keyboard and mouse; R15 treats device-to-player assignment as many-to-many rather than an index. |
+| Prompts, rebinding UI | **Both expose bindings for iteration and mutation**, which is a workable basis; what neither has is a presentation model distinct from the binding model, capture with conflict detection, or overrides as a diff against a retained declaration (R18, R19). Glyphs: none of the three. |
+| External binding backends | **BEI has `ExternallyMocked`**, per action, which is most of the authority case; R0 and R18 add the source half, device suppression at L0, and a reverse lookup the backend can answer. |
 
 The sections most worth reading closely, because they contain requirements that are easy to discover
-too late, are §9 (timing), §14 (deadzones), §15 (pairing), and §17 (persistence). The claims in the
+too late, are R9 (timing), R14 (deadzones), R15 (pairing), and R17 (persistence). The claims in the
 table above are substantiated against both crates' source, version by version, in
 [docs/comparison.md](./docs/comparison.md).
 
@@ -124,11 +124,11 @@ outside the mapping pipeline, presentation must not assume our binding tables ex
 must be delegable to the backend's own UI.
 
 - **R0.1 (MUST)** Each layer is usable without the layers above it. L1 alone must be a usable
-  normalized input API; L2 must be drivable from a hand-constructed L1 frame. _(§9's timing
+  normalized input API; L2 must be drivable from a hand-constructed L1 frame. _(R9's timing
   requirements are unsatisfiable by a snapshot, in which a press and release inside one frame
   collapse to nothing.)_
 - **R0.2 (MUST)** L2 must not read `ButtonInput`/`Axis`/raw `Message`s directly; it consumes only
-  L1. This is the single most important structural rule — determinism (§10), testing (§21), replay,
+  L1. This is the single most important structural rule — determinism (R10), testing (R21), replay,
   and external binding backends all depend on it.
 - **R0.3 (MUST)** No layer may require a `World` singleton resource that prevents multiple
   independent instances (per player, per replay stream, per test).
@@ -147,11 +147,11 @@ must be delegable to the backend's own UI.
 
 - **Focus-based event dispatch and bubbling.** Delegated to `bevy_input_focus` (`InputFocus`,
   `FocusedInput<E>`) and `bevy_picking`. We must _interoperate_ closely — a focused widget has to be
-  able to claim inputs that would otherwise reach the game (§22) — but we do not own the dispatch
+  able to claim inputs that would otherwise reach the game (R22) — but we do not own the dispatch
   tree, and we trigger bubbling rather than implementing it.
 - Pointer→world raycasting (`bevy_picking`), aim assist, anti-cheat, gesture recognition beyond what
-  the OS reports, and full haptics authoring (§14 covers only routing haptics to the right device).
-- Shipping glyph _assets_ (§18 defines identifiers; assets are the app's problem).
+  the OS reports, and full haptics authoring (R14 covers only routing haptics to the right device).
+- Shipping glyph _assets_ (R18 defines identifiers; assets are the app's problem).
 
 ---
 
@@ -221,7 +221,7 @@ cost because R1.1 already forces the id to be decoupled from the type.
 - **R1.2 (MUST)** The action set must be open: two independent crates can define actions that
   coexist in one context with no coordinating enum. _(Satisfied by D5.)_
 - **R1.3 (MUST)** The runtime representation is an interned `ActionId`, obtainable from a type
-  (`ActionId::of::<Move>()`) and resolvable from a stable name (needed by §17 persistence and §18
+  (`ActionId::of::<Move>()`) and resolvable from a stable name (needed by R17 persistence and R18
   external backends anyway). Runtime _declaration_ of new actions is out of scope for v1; APIs
   should nonetheless accept `ActionId` rather than a type parameter wherever they do not need the
   type, so that adding it later is additive.
@@ -229,10 +229,10 @@ cost because R1.1 already forces the id to be decoupled from the type.
 - **R1.5 (SHOULD)** Namespacing to avoid collisions between crates. _(Under D6 this is a property of
   the declared path rather than of the type path, so it is carried by the naming convention in R1.8
   rather than enforced by the compiler.)_
-- **R1.6 (MUST)** The derive must be able to express, at minimum: output shape and intent
-  (§2.R2.3, R2.7), a **category** for grouping in a rebinding UI (§19.R19.6), and default consume
-  behavior (§8.R8.2). Rebindability is _not_ on the action — it is a property of a declared mapping
-  (§19.R19.10), since one action can have several bindings of which only some are player-mappable.
+- **R1.6 (MUST)** The derive must be able to express, at minimum: output shape and intent (R2.3,
+  R2.7), a **category** for grouping in a rebinding UI (R19.6), and default consume behavior (R8.2).
+  Rebindability is _not_ on the action — it is a property of a declared mapping (R19.10), since one
+  action can have several bindings of which only some are player-mappable.
 
   _(The player-visible **name** belongs to the mapping (R19.9), not here; the category stays here.
   Both are localization keys per R19.14, not display text.)_
@@ -244,7 +244,7 @@ cost because R1.1 already forces the id to be decoupled from the type.
   naming convention for them and follow it throughout its own documentation, examples, and tests.
   The convention must cover the separator, the case, and how a crate namespaces the actions it
   contributes, and must state the stability obligation: a path is a serialized key, so changing one
-  breaks saved bindings and is a breaking change to be migrated (§17.R17.3), whereas renaming or
+  breaks saved bindings and is a breaking change to be migrated (R17.3), whereas renaming or
   relocating the Rust type is not.
 
 ---
@@ -266,8 +266,8 @@ them produces a value whose units are undefined. Steam makes the distinction fir
 is declared as `StickPadGyro`, `AnalogTrigger`, or `Button`, and a two-axis action further declares
 an `input_mode` of `joystick_move` or `absolute_mouse`, which Steam's binding UI then uses to decide
 which physical controls may drive it ([IGA file][steam-iga]). Two things in this document need that
-distinction: what a rebinding UI may legally offer for a mapping (§19.R19.1), and what happens when
-sources of different kinds feed one action (R2.9, §13.R13.2).
+distinction: what a rebinding UI may legally offer for a mapping (R19.1), and what happens when
+sources of different kinds feed one action (R2.9, R13.2).
 
 - **R2.1 (MUST)** Support bool, 1D, 2D, 3D value shapes in one runtime value type.
 - **R2.2 (MUST)** Dimension conversion rules must be explicit, documented, and total, and the
@@ -292,8 +292,8 @@ sources of different kinds feed one action (R2.9, §13.R13.2).
   **loses the sign**, so an action that wants a signed reading must be bound to a single axis rather
   than to a whole stick — the crate provides both as separate sources for exactly this reason. And
   the bool conversion is a test against rest, **not** against a press threshold: a control's press
-  threshold (§14.R14.2) is applied where the control is read, before the value is stored, so by the
-  time a stored value is being reshaped the question has already been answered.
+  threshold (R14.2) is applied where the control is read, before the value is stored, so by the time
+  a stored value is being reshaped the question has already been answered.
 - **R2.3 (MUST)** Each action declares its output shape in its derive (D5); a binding whose natural
   shape differs is either converted per R2.2 or rejected with a clear diagnostic. Because the shape
   is an associated type, typed reads must be checked at compile time — binding a `Vec2` action and
@@ -307,24 +307,23 @@ sources of different kinds feed one action (R2.9, §13.R13.2).
 
   Withdrawn because what sends people to `PassThrough` is wanting to know _which device_ produced
   the input, not wanting different arbitration — and that is answered here without a second kind of
-  action: device scoping by §15.R15.3 and R15.4, per-source visibility by R22.2's inspector dump, a
+  action: device scoping by R15.3 and R15.4, per-source visibility by R22.2's inspector dump, a
   value that remembers its origin by R2.6. What was left was a second storage shape on every action
   so that a few could use it. A case that genuinely needs different _arbitration_ should arrive as
-  its own requirement with that case attached.
-  (docs/decisions.md D54)
+  its own requirement with that case attached. (docs/decisions.md D54)
 
 - **R2.5 (SHOULD)** Values must not be normalized/clamped implicitly; clamping is an explicit
-  modifier so that e.g. mouse deltas and analog sticks can share a pipeline (§5).
+  modifier so that e.g. mouse deltas and analog sticks can share a pipeline (R5).
 - **R2.6 (MAY)** Carry a "source" tag on the value (which device/binding produced it) for prompts
-  and for last-used-device tracking (§18).
+  and for last-used-device tracking (R18).
 - **R2.7 (MUST)** An action declares an **intent** in addition to its output shape (R2.3). The
   taxonomy must at minimum distinguish: digital button; analog 1D (trigger-like); 2D directional
   (stick-like — a position implying a rate); and 2D delta (mouse-like — a displacement already
   expressed per frame). Intent is a property of the action, shape is a property of its value, and
   neither implies the other.
 - **R2.8 (MUST)** Intent constrains which control sources a binding may use, and is what a rebinding
-  UI filters candidate controls on (§19.R19.1). Without it, a rebinding UI can only filter by shape,
-  and will offer the player bindings that are legal but nonsensical.
+  UI filters candidate controls on (R19.1). Without it, a rebinding UI can only filter by shape, and
+  will offer the player bindings that are legal but nonsensical.
 - **R2.9 (MUST)** When bindings of differing intent feed one action — mouse-and-stick look being the
   near-universal case — the conversion into the action's declared intent must be explicit and
   documented per source kind. Summing a per-frame displacement and a per-second rate into one value
@@ -332,10 +331,10 @@ sources of different kinds feed one action (R2.9, §13.R13.2).
 - **R2.10 (MUST)** The **shape of the source channel** is a third independent property, distinct
   from both the action's intent (R2.7) and its output shape (R2.3); the binding layer must not
   assume any two of the three agree. Two cases from real hardware, both verified against an Xbox
-  Series controller on Bevy's gamepad path (see §14):
+  Series controller on Bevy's gamepad path (see R14):
   - an **analog trigger** arrives on a *button* channel carrying a fractional value
     (`GamepadButton::LeftTrigger2`/`RightTrigger2`, `f32` in `0.0..=1.0`), not on an axis;
-  - a **D-pad** arrives as *four discrete buttons*, never as an axis pair (§14).
+  - a **D-pad** arrives as *four discrete buttons*, never as an axis pair (R14).
 
   Therefore an `Analog1` action must be bindable to a button-shaped source without a special case,
   and a `Directional2` action must accept a four-button composite identically whether the parts are
@@ -367,7 +366,7 @@ LWIM: polled `ActionState` with `current_duration()` and explicit `consume()`.
   detected by hand to tell apart. Canceled is only meaningful against started or building: what
   distinguishes it from completed is whether the action ever actually happened.)_
 - **R3.2 (MUST)** Both polling and event/observer access to state. Polling is required for
-  `FixedUpdate` simulation code (§9); events are required for UI and for one-shot commands. Event
+  `FixedUpdate` simulation code (R9); events are required for UI and for one-shot commands. Event
   delivery must be attachable **declaratively**, not only from imperative setup code — a scene
   format that supports observer attachment should be able to bind a handler to an action without a
   system running first. Satisfying this means transitions are published as generic entity events
@@ -375,9 +374,9 @@ LWIM: polled `ActionState` with `current_duration()` and explicit `consume()`.
   pattern `bevy_input_focus` already uses for `FocusedInput<M>`. Delivery must not require the
   action set to be known at plugin-build time.
 - **R3.3 (MUST)** Every transition must be observable — an action that fires and completes within
-  one tick must not be silently collapsed (§9.R9.4).
+  one tick must not be silently collapsed (R9.4).
 - **R3.4 (MUST)** Expose elapsed time in the current state, measured in the same simulated seconds
-  the action's own conditions use (§9.R9.6), and part of serializable state (§10.R10.3).
+  the action's own conditions use (R9.6), and part of serializable state (R10.3).
 
   _(Not a clock the caller selects: the answer is given in the clock the action's own conditions
   counted with.)_
@@ -407,40 +406,40 @@ Unreal maps context→key→(triggers, modifiers). Steam moves the whole binding
 - **R4.1 (MUST)** An action may have N bindings; a binding may target one control or a composite.
 - **R4.1a (MUST)** The bindable control set covers **keyboard keys, mouse buttons, mouse motion,
   gamepad buttons and gamepad axes**. Mouse buttons are stated rather than implied: "keyboard and
-  mouse" is one control scheme (§17.R17.4), and a crate that names that scheme while binding only
-  half of it cannot express "fire on left click" — which is not an exotic binding, it is the
-  commonest one in the genre. A mouse button reports on a button channel, so anywhere a key can go
-  a mouse button can: as a whole binding, as a part of a composite, and as a member of a chord.
+  mouse" is one control scheme (R17.4), and a crate that names that scheme while binding only half
+  of it cannot express "fire on left click" — which is not an exotic binding, it is the commonest
+  one in the genre. A mouse button reports on a button channel, so anywhere a key can go a mouse
+  button can: as a whole binding, as a part of a composite, and as a member of a chord.
 - **R4.2 (MUST)** Composites: 1D axis from two buttons, 2D from four (WASD/D-pad), 2D from a stick,
   chord (all-of), and "button with modifier(s)".
 - **R4.3 (MUST)** Bindings must be expressible against a _device class_ (any gamepad) as well as a
-  _specific device instance_ (player 2's pad) — see §14.
+  _specific device instance_ (player 2's pad) — see R14.
 - **R4.4 (SHOULD)** Semantic control aliases (`Submit`, `Cancel`, `MenuLeft`) that resolve per
   device class, so UI code binds once. This is Unity's "usages" and Steam's action-set convention;
-  it is also what makes console confirm-button region swaps (§18.R18.7) tractable. An alias resolves
-  to _one_ control per device class; R4.9 is the same idea where the answer is a set.
-- **R4.5 (MUST)** Per-binding modifiers and conditions (§5, §6), not only per-action — the same
+  it is also what makes console confirm-button region swaps (R18.7) tractable. An alias resolves to
+  _one_ control per device class; R4.9 is the same idea where the answer is a set.
+- **R4.5 (MUST)** Per-binding modifiers and conditions (R5, R6), not only per-action — the same
   action needs different deadzones for stick vs. mouse.
 - **R4.6 (MUST)** Bindings are data: constructible at runtime, serializable, diffable against
-  defaults (§17).
+  defaults (R17).
 - **R4.7 (SHOULD)** Whether a binding is player-_rebindable_ is expressed by declaring a mapping for
-  it (§19.R19.9, R19.10), not by a flag on the binding. Whether it is _listed_ is a separate
-  question with the opposite default (R19.10): a binding is shown to players unless it asks not to
-  be, and only rebinding waits to be declared.
+  it (R19.9, R19.10), not by a flag on the binding. Whether it is _listed_ is a separate question
+  with the opposite default (R19.10): a binding is shown to players unless it asks not to be, and
+  only rebinding waits to be declared.
 - **R4.8 (MUST)** Building or mutating bindings must produce actionable errors (unknown control,
   shape mismatch, duplicate) rather than silently doing nothing.
 - **R4.9 (MUST)** A binding may target a **control class** — a named set of controls — as well as a
-  single control or a composite. §8.R8.4 and §12.R12.6 both require a focused text field to claim
+  single control or a composite. R8.4 and R12.6 both require a focused text field to claim
   character-producing keys "as a class, without the app author enumerating them"; this is the
-  mechanism that satisfies them, and the same vocabulary serves capture filtering (§19.R19.1),
-  exclusion lists (R19.2), and reserved controls (D42).
+  mechanism that satisfies them, and the same vocabulary serves capture filtering (R19.1), exclusion
+  lists (R19.2), and reserved controls (D42).
 
   Three properties, each ruling out an implementation that looks obvious:
 
   - **Classes are defined by the properties a control declares, never by enumerating controls.** A
     class means "every control whose declared shape is button-like", not a list of `KeyCode` and
-    `GamepadButton` variants. This is what lets §11.R11.2's third-party device kinds join a class
-    the day their backend ships, rather than requiring a registry they would have to be added to.
+    `GamepadButton` variants. This is what lets R11.2's third-party device kinds join a class the
+    day their backend ships, rather than requiring a registry they would have to be added to.
   - **Membership may depend on the event, not only on the control.** "Character-producing" cannot be
     a static set of keys: a dead key produces nothing until the following key decides what it
     becomes, and an IME composition consumes keys that produce no text until it commits (R12.6). The
@@ -474,7 +473,7 @@ with circle vs. axis deadzones.
 
 **Open questions.** Are modifiers trait objects (open, boxed, harder to serialize/determinize) or a
 closed reflected enum (serializable, extensible only via a registry)? Frame-rate dependence is the
-subtle trap: a "smoothing" modifier is a stateful filter and must therefore be rewindable (§10).
+subtle trap: a "smoothing" modifier is a stateful filter and must therefore be rewindable (R10).
 
 - **R5.1 (MUST)** An ordered, per-binding modifier chain with documented, deterministic evaluation
   order.
@@ -498,23 +497,23 @@ subtle trap: a "smoothing" modifier is a stateful filter and must therefore be r
   counted if two operations answer to one word.
 - **R5.3 (MUST)** Deadzone semantics must be explicit about rescaling — whether output is remapped
   to 0..1 after the inner radius is removed (almost always desired; frequently gotten wrong). Per
-  D20 (§14) at most one stage in the deadzone stack may rescale, so a deadzone modifier must be able
+  D20 (R14) at most one stage in the deadzone stack may rescale, so a deadzone modifier must be able
   to state that it does not.
 - **R5.4 (MUST)** Stateful modifiers (smoothing, accumulation, rate limiting) must declare their
-  state and make it serializable and resettable, or be forbidden from the deterministic path (§10).
+  state and make it serializable and resettable, or be forbidden from the deterministic path (R10).
 - **R5.5 (MUST)** Time-dependent modifiers must receive `dt` explicitly and behave identically under
   variable frame rate for the same simulated time.
 - **R5.6 (MUST)** Third-party modifiers must be registerable without forking the crate, and must
   round-trip through serialization via the type registry.
 - **R5.7 (MUST)** Modifiers must be pure functions of (input, state, dt) with no world access, so
-  they can run during rollback resimulation. _(A `MUST` rather than a `SHOULD` because §10.R10.2
-  makes purity of the whole mapping step a `MUST` and a modifier runs inside that step: anything
-  weaker here would admit an impure modifier that breaks a `MUST` there. The same reasoning applies
-  to conditions via R6.6.)_
+  they can run during rollback resimulation. _(A `MUST` rather than a `SHOULD` because R10.2 makes
+  purity of the whole mapping step a `MUST` and a modifier runs inside that step: anything weaker
+  here would admit an impure modifier that breaks a `MUST` there. The same reasoning applies to
+  conditions via R6.6.)_
 - **R5.8 (MUST)** Modifiers are a **developer-facing** mechanism and must never be surfaced directly
   in a player-facing UI. Negate, swizzle, and curve are adapters for fitting a source to an action,
   not choices a player can meaningfully make. Where a modifier parameter should be
-  player-adjustable, it is exposed as a named tunable (§19.R19.11) that drives it.
+  player-adjustable, it is exposed as a named tunable (R19.11) that drives it.
 
 ---
 
@@ -535,7 +534,7 @@ none of the above handle natively.
   _explicit_ (any one satisfies), _implicit_ (all must hold), _blocking_ (any one vetoes). Unreal's
   three-way split is the clearest formulation found; adopt it or document a deliberate alternative.
 - **R6.3 (MUST)** All duration/interval thresholds are configurable per binding and expressed in
-  simulated seconds (§9.R9.6).
+  simulated seconds (R9.6).
 - **R6.4 (WITHDRAWN)** ~~Sequence/combo conditions (ordered inputs within a time window) — needed
   for double-tap-dash, motion inputs, and cheat codes; if deferred, the condition trait must be able
   to express them without a breaking change.~~
@@ -570,7 +569,7 @@ none of the above handle natively.
   several of the crate's own actions is no more one matching model than checking against app state
   is.
 - **R6.6 (MUST)** Third-party conditions registerable, same constraints as R5.6/R5.7.
-- **R6.7 (MUST)** Conditions must not depend on real time or on frame count (§10).
+- **R6.7 (MUST)** Conditions must not depend on real time or on frame count (R10).
 
 ---
 
@@ -593,7 +592,7 @@ replacements) — the layer concept is underused elsewhere and is exactly right 
 
   _(A limit, not a goal. It bites only in the direction nobody wants: what claims controls is UI,
   UI runs at the render rate, and what it claims from is simulation.)_
-- **R7.2 (MUST)** Contexts must be scoped per player/entity, not only global (§15).
+- **R7.2 (MUST)** Contexts must be scoped per player/entity, not only global (R15).
 - **R7.3 (MUST)** Additive layers: a layer that overrides a subset of bindings without redefining
   the whole context.
 - **R7.4 (MUST)** Deactivating a context must resolve in-flight actions deterministically: ongoing
@@ -604,7 +603,7 @@ replacements) — the layer concept is underused elsewhere and is exactly right 
   its value instead: it has no fire to suppress, and an axis need never report rest, so a latch
   waiting for one may never lift.
 - **R7.6 (SHOULD)** Context activation must be cheap enough to do per-frame (no rebuild of the whole
-  binding graph); if a rebuild is needed it must be incremental and change-detection driven (§23).
+  binding graph); if a rebuild is needed it must be incremental and change-detection driven (R23).
 - **R7.7 (SHOULD)** A declarative way to express "these contexts are mutually exclusive" (a stack)
   as well as free-form sets, since most games want a stack and reimplement it every time.
 - **R7.8 (MUST)** A context may declare itself **exclusive**: while active, every context whose
@@ -642,13 +641,13 @@ dispatch level. Unity: no arbitration for PassThrough actions, first-match for o
   Roadmap.md's deferred table for the fix under consideration and why it is not yet built.
 - **R8.3 (MUST)** Consumption must be resolvable in one deterministic pass with no ordering
   ambiguity between systems.
-- **R8.4 (MUST)** Interop with focus/UI: per D23 (§22), a focused widget claims controls by
+- **R8.4 (MUST)** Interop with focus/UI: per D23 (R22), a focused widget claims controls by
   activating a context, and normal context priority does the rest — there is no separate suppression
   mechanism. A focused text field must be able to claim character-producing keys as a class, without
   the app author enumerating them — see R4.9 for the mechanism.
 - **R8.5 (SHOULD)** A diagnostic that answers "why did action X not fire" by naming the consumer /
-  clash / inactive context (§22).
-- **R8.6 (SHOULD)** Conflicts must be _detectable statically_ for rebinding UI (§19), i.e. the same
+  clash / inactive context (R22).
+- **R8.6 (SHOULD)** Conflicts must be _detectable statically_ for rebinding UI (R19), i.e. the same
   arbitration logic must be queryable offline against a hypothetical binding.
 
 ---
@@ -720,7 +719,7 @@ a stored input stream, and a deterministic test is a replay with assertions.
 - **R10.7 (SHOULD)** Document precisely which parts of the pipeline are guaranteed deterministic
   across platforms and which are not (trig in response curves, `f32` ordering in accumulation).
 - **R10.8 (MUST)** Record/replay of raw input frames must reproduce identical action output given
-  identical bindings — and must be testable in CI headlessly (§21).
+  identical bindings — and must be testable in CI headlessly (R21).
 
 ---
 
@@ -743,7 +742,7 @@ is unmodeled.
   crate doesn't know, proven on the presentation side by `ControlOrigin::Foreign`. Reopening this
   needs a real device in hand, not a second guess.
 - **R11.3 (MUST)** Capability queries: available controls, analog vs digital, rumble, motion/gyro,
-  touchpad, battery, LED — used by prompts (§18) and by "can this player play at all" checks.
+  touchpad, battery, LED — used by prompts (R18) and by "can this player play at all" checks.
 - **R11.4 (MUST)** Hot-plug: connect/disconnect events, and a documented policy for the state of
   actions held on a device that disappears (must release, must cancel — never stick).
 - **R11.5 (MUST)** Stable persistent device identity where the platform allows
@@ -772,16 +771,16 @@ is unmodeled.
   and the choice must be explicit — WASD must bind physically (so AZERTY gets ZQSD), while `Ctrl+Z`
   should bind logically.
 - **R12.2 (MUST)** Display strings must show the _logical_ key for the user's current layout even
-  when the binding is physical (§18) — showing "W" to an AZERTY user is a bug.
+  when the binding is physical (R18) — showing "W" to an AZERTY user is a bug.
 - **R12.3 (MUST)** Modifier handling: left/right variants plus "either" as a first-class concept;
-  and a modifier participating in a chord must be able to suppress the unmodified binding (§8.R8.1).
+  and a modifier participating in a chord must be able to suppress the unmodified binding (R8.1).
 - **R12.4 (MUST)** Platform-conventional modifier abstraction (`Cmd` on macOS ≡ `Ctrl` elsewhere) as
   a named modifier, resolved at binding time.
 - **R12.5 (MUST)** OS key-repeat events (`KeyboardInput::repeat`) must be distinguishable and
   excluded by default from press-edge conditions, while remaining available for text/navigation
   repeat.
 - **R12.6 (MUST)** Text entry: a focused text field must be able to claim character-producing keys
-  as a class (R4.9) via D23's focus-activated context (§22), rather than through a bespoke
+  as a class (R4.9) via D23's focus-activated context (R22), rather than through a bespoke
   suppression mode. Must cover the cases where a keypress is not one character: **IME composition**,
   where Chinese, Japanese, and Korean input builds a character over several keystrokes that must not
   reach gameplay bindings; **dead keys**, where a key such as `´` produces nothing until the
@@ -789,7 +788,7 @@ is unmodeled.
   reports when a Windows dead key cannot combine with what follows
   ([`KeyboardInput::text`][bevy-keyboard-src]).
 - **R12.7 (SHOULD)** Keyboard layout changes at runtime must invalidate cached display strings
-  (§18).
+  (R18).
 
 ---
 
@@ -802,8 +801,8 @@ pointers that appear and vanish. Most bugs in this area come from treating one o
 
 - **R13.0 (MUST)** Mouse **buttons** are bindable controls in their own right, on the same terms as
   keyboard keys: a whole binding, a part of a composite, a member of a chord, and something capture
-  will take for a mappable slot. They belong to the keyboard-and-mouse scheme (§17.R17.4), so a
-  mouse button may be captured for a mapping a key currently holds and the two never conflict with a
+  will take for a mappable slot. They belong to the keyboard-and-mouse scheme (R17.4), so a mouse
+  button may be captured for a mapping a key currently holds and the two never conflict with a
   gamepad binding. This is the third of the three signals the problem statement above separates, and
   the only one that behaves like an ordinary button.
 
@@ -815,7 +814,7 @@ pointers that appear and vanish. Most bugs in this area come from treating one o
 - **R13.2 (MUST)** Mouse motion for camera look must be frame-rate independent and must not be
   multiplied by `dt` (a common bug: deltas are already per-frame quantities, unlike stick
   positions). The pipeline must let a binding declare which kind it is — this is the same
-  distinction as the action intent of §2.R2.7, and R2.9 governs what happens when a delta-kind and a
+  distinction as the action intent of R2.7, and R2.9 governs what happens when a delta-kind and a
   rate-kind binding drive one action.
 - **R13.3 (MUST)** Scroll: handle `MouseScrollUnit::{Line, Pixel}` and normalize them with an
   app-configurable lines→pixels factor; high-resolution trackpad scroll must not be quantized away.
@@ -839,7 +838,7 @@ pointers that appear and vanish. Most bugs in this area come from treating one o
 - **R13.8 (SHOULD)** Drag semantics that a mapping layer can express: press threshold, click-vs-drag
   disambiguation, double-click interval sourced from OS settings where available.
 - **R13.9 (SHOULD)** Pointer capture during drag so a drag continues when the pointer leaves the
-  window; this must coordinate with `bevy_picking` rather than compete with it (§22).
+  window; this must coordinate with `bevy_picking` rather than compete with it (R22).
 
 ---
 
@@ -851,7 +850,7 @@ need to exist, and a stick's resting value is a property of the individual unit 
 model. Much of this section is about not discarding information before the game has decided what it
 needs.
 
-- **R14.1 (MUST)** Bind to "any gamepad" (class), "the gamepad owned by this player" (§15), or "this
+- **R14.1 (MUST)** Bind to "any gamepad" (class), "the gamepad owned by this player" (R15), or "this
   specific device" (instance).
 - **R14.2 (MUST)** Analog triggers exposed as axes _and_ as buttons with a configurable threshold
   and hysteresis (separate press/release thresholds), to avoid chatter at the boundary. Note the
@@ -864,7 +863,7 @@ needs.
   the 2D view is likewise synthesized — by the same composite that turns four keyboard keys into a
   `Vec2`, not by separate hat-handling machinery.
 - **R14.4 (MUST)** _(D20)_ Stick deadzone shape configurable (radial vs. per-axis) per binding, with
-  rescaling (§5.R5.3), sourced from raw values per R14.9 and layered per the model below.
+  rescaling (R5.3), sourced from raw values per R14.9 and layered per the model below.
 
 ### The deadzone stack (D20)
 
@@ -883,11 +882,11 @@ answering **three different questions**, which belong at three different stages:
 | ------------------ | -------------------------------------------------------------------------------- | ------------------ | ------------------------------ |
 | **1. Calibration** | Where is this physical stick's true center, and how much does it jitter at rest? | per device _unit_  | measured, with player override |
 | **2. Design**      | What deadzone shape and response curve does this mechanic want?                  | per binding/action | game developer                 |
-| **3. Preference**  | Scale the above for comfort, accessibility, or a worn thumbstick.                | per player         | player (§20.R20.5)             |
+| **3. Preference**  | Scale the above for comfort, accessibility, or a worn thumbstick.                | per player         | player (R20.5)             |
 
 Stage 1 varies by individual unit, not just by model — drift is a wear characteristic — so it must
 be _measured_, capturing a center **offset** as well as a radius, not assumed symmetric about zero.
-Stage 2 is where radial-vs-axial and curves live (§5). Stage 3 modulates, and must not be able to
+Stage 2 is where radial-vs-axial and curves live (R5). Stage 3 modulates, and must not be able to
 reduce stage 1 below what the hardware actually needs.
 
 **The rule that makes them compose: at most one stage may rescale.** If a lower stage removes a
@@ -935,7 +934,7 @@ digital bumpers (R2.10). Two negative results are also worth keeping: the same c
 which gilrs enumerates it but receives no values at all; and a Switch-protocol clone advertises a
 HID descriptor whose declared layout does not match the report it actually sends, so gilrs decodes
 its timer byte as buttons and emits ~500 phantom presses per second with no stick data. Neither is
-fixable at our layer, and both argue for §11's device-capability model and for R21.x mocking over
+fixable at our layer, and both argue for R11's device-capability model and for R21.x mocking over
 hardware-dependent tests.
 
 The honest caveat: "raw" is only raw relative to Bevy. XInput applies its own deadzone below the
@@ -949,8 +948,8 @@ measurement-based rather than assuming a centered zero.
   Bevy's defaults: because the raw messages are emitted before those settings are applied, a game
   that configures them and expects a binding to honour it gets silence rather than an error.
 - **R14.10 (MUST)** _(D20, D22)_ When an authority backend supplies action values, stages 1–3 are
-  the backend's and must not be applied again on our side (§0.R0.4).
-- **R14.11 (SHOULD)** Stage 1 calibration must be persistable per device identity (§11.R11.5) and
+  the backend's and must not be applied again on our side (R0.4).
+- **R14.11 (SHOULD)** Stage 1 calibration must be persistable per device identity (R11.5) and
   offerable as an explicit player-facing calibration step, since auto-detection of a worn stick's
   resting envelope needs samples the game may not otherwise collect.
 - **R14.5 (SHOULD)** Motion/gyro as a bindable 3D source where the platform exposes it (
@@ -982,13 +981,13 @@ handle "two players on one keyboard" gracefully.
 - **R15.4 (MUST)** Join flow support: observe input from _unassigned_ devices (with bindings
   applied, so "press Start to join" works per device class) and assign on demand.
 - **R15.5 (MUST)** _(D73)_ Leave / disconnect: on device loss, the owning player must be
-  identifiable, in-flight actions canceled (§7.R7.4), and a signal raised so the app can pause and
-  show a reconnect prompt (handling this is a common console certification requirement, though the
+  identifiable, in-flight actions canceled (R7.4), and a signal raised so the app can pause and show
+  a reconnect prompt (handling this is a common console certification requirement, though the
   specific requirements documents are under NDA and cannot be cited here).
 - **R15.6 (MUST)** Reconnect must be able to restore the previous assignment via persistent identity
-  (§11.R11.5).
+  (R11.5).
 - **R15.7 (WITHDRAWN)** ~~Control schemes: named device-requirement sets (KBM, Gamepad) with
-  required and optional devices, used for auto-assignment and prompt selection (§18).~~ _Withdrawn:
+  required and optional devices, used for auto-assignment and prompt selection (R18).~~ _Withdrawn:
   taken from Unity's `InputControlScheme`, where a scheme also selects which of one asset's bindings
   are live for a player. That job does not exist here — bindings resolve per device family at lookup
   — and of the two consumers this named, prompt selection went with R18.6. What is left is
@@ -1018,7 +1017,7 @@ boundary, not a special case per platform.
 - **R16.1 (MUST)** On window focus loss (`KeyboardFocusLost`), all held controls must be released
   and ongoing actions canceled — the alt-tab stuck-key bug must be impossible.
 - **R16.2 (MUST)** On regaining focus, controls physically held must not produce press edges
-  (require-reset, per §7.R7.5).
+  (require-reset, per R7.5).
 - **R16.3 (MUST)** Suspend/resume (mobile, console) treated the same as focus loss, with device
   re-enumeration on resume.
 - **R16.4 (SHOULD)** Web: document that [pointer lock][mdn-pointerlock] and [gamepad][mdn-gamepad]
@@ -1055,7 +1054,7 @@ that assumes any of that is stable loses player data silently on the next patch.
 - **R17.4 (SHOULD)** Multiple named profiles per user, and separate override sets per control scheme
   (a KBM remap must not disturb the gamepad layout).
 - **R17.5 (SHOULD)** Serialization must go through `Reflect` + the type registry so third-party
-  modifiers/conditions (§5.R5.6) round-trip.
+  modifiers/conditions (R5.6) round-trip.
 - **R17.6 (MAY)** Bindings as a hot-reloadable asset, for iteration without recompiling.
 - **R17.7 (MUST)** A saved override set distinguishes three states per mapping, and a format with
   only two loses one of them:
@@ -1064,24 +1063,23 @@ that assumes any of that is stable loses player data silently on the next patch.
   | --- | --- | --- |
   | **absent** | use whatever the game shipped | a mapping the player never touched |
   | **cleared** | the player deliberately removed the binding | R19.3's unbind-the-other policy, or an explicit "clear" |
-  | **not ours** | an external backend owns this action (§0.R0.4, R19.8) | Steam Input and equivalents |
+  | **not ours** | an external backend owns this action (R0.4, R19.8) | Steam Input and equivalents |
 
   The distinction is easy to miss because a diff against defaults (R17.1) makes absence meaningful:
   once "missing" already says "default", clearing a binding has nothing left to say with. The third
   state matters for the same reason — a backend-owned action must not read as one the player
   cleared, and saving must not invent rows for actions we do not own.
 - **R17.8 (MUST)** Binding overrides must not carry device identity. What a player bound is a
-  control on a device *class*; which physical unit drives which player is pairing state (§15.R15.6),
-  and how a particular stick rests is calibration state (§11.R11.7). Three stores, keyed
-  differently, and conflating them breaks the case they exist for: two players with identical
-  controllers and identical mappings differ only in pairing, and must not need two copies of one
-  binding table to say so.
+  control on a device *class*; which physical unit drives which player is pairing state (R15.6), and
+  how a particular stick rests is calibration state (R11.7). Three stores, keyed differently, and
+  conflating them breaks the case they exist for: two players with identical controllers and
+  identical mappings differ only in pairing, and must not need two copies of one binding table to
+  say so.
 - **R17.9 (MUST)** _(D49)_ The serialized form of a control is a stable format this crate owns and
   round-trip tests, not the `Debug` or `serde` representation of an upstream type. A control name is
   a serialized key with D6's stability obligation, and deriving it from `KeyCode`'s variant names
   would put that obligation somewhere we do not control. The format must also carry what the binding
-  layer already distinguishes: physical versus logical keys (§12.R12.1) and device class, at
-  minimum.
+  layer already distinguishes: physical versus logical keys (R12.1) and device class, at minimum.
 - **R17.10 (MUST)** _(D59)_ The portable saved type claims no field besides `action_map_version`,
   `bindings`, and `tunables`, and the version field is not a bare `version`. A settings layer that
   merges several resources' fields into one shared TOML table by name may place this type's fields
@@ -1104,7 +1102,7 @@ the game. Unity `ToDisplayString` + `InputBinding.MaskByGroup`. Unreal's
 
 - **R18.1 (MUST)** Reverse lookup: given an action (and optionally a context and device class),
   return the bindings that would currently fire it, in a stable, ranked order.
-- **R18.2 (MUST)** The result must reflect active contexts and consumption (§8) — showing a prompt
+- **R18.2 (MUST)** The result must reflect active contexts and consumption (R8) — showing a prompt
   for an action that a higher-priority context is currently consuming is wrong.
 - **R18.3 (MUST)** Display strings must be produced without hard-coding English: return a structured
   descriptor (control identity + composite structure, e.g. "hold", "chord of A and B") that a
@@ -1121,15 +1119,15 @@ the game. Unity `ToDisplayString` + `InputBinding.MaskByGroup`. Unreal's
   what can be observed rather than work left undone, and it becomes schedulable if winit surfaces
   the layout._
 - **R18.6 (WITHDRAWN)** ~~Track a per-player "most recently used device" for prompt selection,
-  subject to §15.R15.8 hysteresis.~~ _Superseded: which device a prompt speaks for is the
-  app's call, supplied to the lookup rather than inferred by it. R18.1 already takes a device class,
-  and an app knows why it is showing the prompt — which screen, opened how — where the crate would
-  only be guessing from what was pressed last. Split-screen is where the difference stops being
-  academic: a menu one player opened speaks for that player's device, which the app knows from who
-  opened it, and "most recently used" would be answering a question nobody asked while both players
-  are pressing things. What would revive this is R15.8's auto-switching,
-  which is a §15 question about the player model rather than a presentation one: if that lands, a
-  prompt reads the player's paired device rather than tracking one of its own._
+  subject to R15.8 hysteresis.~~ _Superseded: which device a prompt speaks for is the app's call,
+  supplied to the lookup rather than inferred by it. R18.1 already takes a device class, and an app
+  knows why it is showing the prompt — which screen, opened how — where the crate would only be
+  guessing from what was pressed last. Split-screen is where the difference stops being academic: a
+  menu one player opened speaks for that player's device, which the app knows from who opened it,
+  and "most recently used" would be answering a question nobody asked while both players are
+  pressing things. What would revive this is R15.8's auto-switching, which is a R15 question about
+  the player model rather than a presentation one: if that lands, a prompt reads the player's paired
+  device rather than tracking one of its own._
 - **R18.7 (SHOULD)** Support a confirm/cancel button-convention policy as one setting rather than
   scattered `if cfg!` checks. The case that forces this: on PlayStation in Japan, ○ (East) has
   historically meant confirm and ✕ (South) cancel, while the rest of the world uses the opposite —
@@ -1188,7 +1186,7 @@ and response curves ([IGA file][steam-iga]).
 
 - **R19.1 (MUST)** Interactive capture ("press a key now") that reports the control that would be
   bound and can be canceled. Capture must be filtered by the target mapping's intent and shape
-  (§2.R2.7), so a mapping expecting a button only accepts buttons.
+  (R2.7), so a mapping expecting a button only accepts buttons.
 
   **Capture reads L1 directly; it is not a binding.** What it reports is a control _identity_, which
   a binding would have discarded on the way to producing a value — recovering it afterwards would
@@ -1198,7 +1196,7 @@ and response curves ([IGA file][steam-iga]).
   and reserved controls share one way of naming a set of controls rather than three.
 - **R19.2 (MUST)** Exclusion lists during capture (do not capture `Escape`, mouse position, or the
   UI's own navigation controls) so the rebinding UI remains operable.
-- **R19.3 (MUST)** Conflict detection against the same arbitration rules used at runtime (§8.R8.6),
+- **R19.3 (MUST)** Conflict detection against the same arbitration rules used at runtime (R8.6),
   with the app choosing the policy: reject, swap, duplicate-allowed, or unbind-the-other. Conflicts
   are scoped **per control scheme** — a keyboard binding cannot conflict with a gamepad binding,
   because the two are never active as alternatives for the same player at the same moment.
@@ -1208,7 +1206,7 @@ and response curves ([IGA file][steam-iga]).
 - **R19.6 (SHOULD)** Rebinding must respect R4.7 (non-rebindable bindings) and expose a name per
   _slot_ and a category per _action_ (R1.6, R19.9) for the UI to label and group by. Both are
   localization keys (R19.14).
-- **R19.7 (SHOULD)** Rebind per control scheme independently (§17.R17.4).
+- **R19.7 (SHOULD)** Rebind per control scheme independently (R17.4).
 - **R19.8 (MUST)** _(D22)_ When a backend is authoritative for an action, rebinding must delegate to
   that backend's own UI (Steam's [`ShowBindingPanel`][steam-isteaminput]) rather than presenting our
   capture flow. The rebinding API must be able to report "not rebindable here, delegate instead" as
@@ -1250,11 +1248,11 @@ and response curves ([IGA file][steam-iga]).
   the default belongs to them.
 - **R19.11 (MUST)** Player-adjustable parameters are exposed as **named tunables**, not as modifier
   chains. A tunable is a declared, typed, named, range-bounded parameter on a binding —
-  `sensitivity: f32 in 0.1..=10.0`, `invert_y: bool`, `deadzone: f32 in 0.0..=0.5`, `hold_or_toggle:
-  enum`, `curve: enum of presets` — that a generic UI can render as a slider, checkbox, or dropdown
-  without knowing what it drives. **Modifiers (§5) must never be surfaced directly to players**; a
-  tunable that happens to drive a modifier parameter is the supported path, and it is what satisfies
-  R20.5.
+  `sensitivity: f32 in 0.1..=10.0`, `invert_y: bool`, `deadzone: f32 in 0.0..=0.5`,
+  `hold_or_toggle: enum`, `curve: enum of presets` — that a generic UI can render as a slider,
+  checkbox, or dropdown without knowing what it drives. **Modifiers (R5) must never be surfaced
+  directly to players**; a tunable that happens to drive a modifier parameter is the supported path,
+  and it is what satisfies R20.5.
 - **R19.12 (SHOULD)** **Presets**: named alternative arrangements of mappings and tunables
   ("Default", "Southpaw", "Lefty") that a player selects as a unit, moving several rows — including
   a `Fixed` one a capture screen never offers a button for — in one step. It is also how a game
@@ -1290,14 +1288,14 @@ and response curves ([IGA file][steam-iga]).
     row R19.9 exists to remove.
   - **Two fixed rows deriving one key** are not a collision either. Uniqueness exists to stop a
     saved override landing on the wrong row, and a row nobody can rebind is never written to a save
-    (§17). This is what makes listing by default affordable: under R19.10 one action bound in two
+    (R17). This is what makes listing by default affordable: under R19.10 one action bound in two
     contexts produces two listed rows under one name, and demanding a distinct key for each would
     tax every game that never offers a rebind at all. The collision returns the moment either side
     becomes rebindable, which is the only moment it can do harm.
   - **Two different actions answering to one name**, and **the same action mappable in two
     contexts**, are collisions when either side is rebindable. The second is a collision even though
     the action is the same, because the two are separate rows in contexts that may be live at
-    different times, while the override store is keyed by mapping alone (§17).
+    different times, while the override store is keyed by mapping alone (R17).
 
 - **R19.16 (MUST)** _(D30)_ Several actions may deliberately read one control — tap to dodge and
   hold to sprint, a throttle that opens up when it is held — and the player rebinds **the control**,
@@ -1343,12 +1341,12 @@ Video Accessibility Act, which reaches game communication features).
   revive this is the crate holding a per-threshold direction of forgiveness, which is the half of
   this that was coherent and which nothing has asked for._
 - **R20.5 (SHOULD)** Sensitivity and deadzone must be user-adjustable per device without editing
-  bindings — via named tunables (§19.R19.11), which is the mechanism that makes this possible
-  without exposing the modifier chain.
+  bindings — via named tunables (R19.11), which is the mechanism that makes this possible without
+  exposing the modifier chain.
 - **R20.6 (MAY)** Sticky-modifier / one-handed support at the mapping layer.
 - **R20.7 (SHOULD)** A timing threshold — hold duration, tap window, multi-tap gap, pulse interval —
-  must be declarable as a named tunable (§19.R19.11), on the same terms as a dead zone, so a game
-  can offer the player whichever timings it judges safe to move, each bounded by a range it chooses.
+  must be declarable as a named tunable (R19.11), on the same terms as a dead zone, so a game can
+  offer the player whichever timings it judges safe to move, each bounded by a range it chooses.
 
 ---
 
@@ -1364,7 +1362,7 @@ indistinguishable from a real one.
 - **R21.2 (MUST)** Time must be injectable so hold/tap conditions can be tested without sleeping.
 - **R21.3 (MUST)** Mock a device (including hot-plug and disconnect) in tests.
 - **R21.4 (SHOULD)** Record and replay raw input streams as a supported feature, not a test-only
-  hack (§10.R10.8) — also useful for bug reports and automated soak tests.
+  hack (R10.8) — also useful for bug reports and automated soak tests.
 - **R21.5 (SHOULD)** Ship an example per major area (rebinding UI, local multiplayer join,
   fixed-update gameplay, prompts) — for an upstream Bevy contribution these are effectively
   required.
@@ -1413,7 +1411,7 @@ withdrawal is why bubbling turned out not to be the mechanism this needed.
 
 This is a better shape than blanket suppression: interception becomes declarative and inspectable
 (R22.1 can say _which_ focus-activated context consumed a control), and text-entry suppression
-(§12.R12.6) stops being a special case — a focused text field simply activates a context that claims
+(R12.6) stops being a special case — a focused text field simply activates a context that claims
 character keys.
 
 - **R22.7 (WITHDRAWN)** ~~An action's effect must be expressible as "dispatch as a bubbling event at
@@ -1458,15 +1456,15 @@ character keys.
   over type paths, or something else — is deferred to the design phase. What is fixed here is the
   dependency direction, because it is the part that cannot be renegotiated later without breaking
   users.
-- **R22.10 (SHOULD)** Focus integration as a whole should sit behind a feature flag (§24.R24.1), so
-  that a game using this crate with no UI at all pays nothing for it — the same "vice versa" that
-  R22.9 requires of the widget side.
+- **R22.10 (SHOULD)** Focus integration as a whole should sit behind a feature flag (R24.1), so that
+  a game using this crate with no UI at all pays nothing for it — the same "vice versa" that R22.9
+  requires of the widget side.
 - **R22.11 (MUST)** Focus changes must resolve _before_ the same frame's actions are evaluated, or a
   one-frame window exists in which the previously focused widget's map is still live.
-- **R22.12 (MUST)** Focus changing mid-action must cancel that action's in-flight state per §7.R7.4
-  — holding `Increment` on a slider and then tab-navigating away must not leave a hold running.
+- **R22.12 (MUST)** Focus changing mid-action must cancel that action's in-flight state per R7.4 —
+  holding `Increment` on a slider and then tab-navigating away must not leave a hold running.
 - **R22.13 (MUST)** _(D23)_ Interception is **static**: a focus-activated context claims a control
-  before dispatch, and §8's ordinary priority decides the winner in one deterministic pass. A widget
+  before dispatch, and R8's ordinary priority decides the winner in one deterministic pass. A widget
   does not decide at handling time whether to let an input fall through, so no two-phase
   dispatch/collect/resolve ordering is needed and R8.3 is preserved.
 
@@ -1498,10 +1496,10 @@ editor, or serialized template gets the same benefit.
   with `on(...)`. This is why R3.2's delivery mechanism is constrained rather than left open: a
   global event stream, a resource-level callback, or an event targeted at an internal entity cannot
   be attached declaratively.
-- **R22.16 (MAY)** Binding sets, mappings (§19.R19.9), and tunables (§19.R19.11) may themselves
-  be authorable as scene or asset data, letting a game ship alternative control schemes without
+- **R22.16 (MAY)** Binding sets, mappings (R19.9), and tunables (R19.11) may themselves be
+  authorable as scene or asset data, letting a game ship alternative control schemes without
   recompiling. Lower priority than R22.14 and R22.15, and it must remain optional — code-defined
-  bindings stay the primary path (§17.R17.6).
+  bindings stay the primary path (R17.6).
 - **R22.17 (SHOULD)** None of the above may become a dependency. The crate must build and function
   with `bevy_scene` absent or unused, and must not require its macros or types in the public API —
   the same both-directions independence R22.9 requires of widget libraries. Satisfying R22.15 with a
@@ -1525,18 +1523,18 @@ properties that decided the state layout, as **D8**.
   and a rule naming only allocation does not catch it.)_
 - **R23.3 (MUST)** Context activation/deactivation must not cause structural ECS churn proportional
   to the number of actions — activating a context should not spawn, despawn, insert, or remove per
-  action. A layout that does so must show the cost is acceptable at the action counts in §23.R23.1.
+  action. A layout that does so must show the cost is acceptable at the action counts in R23.1.
 - **R23.4 (SHOULD)** _(D8)_ Change detection on action state, so that UI which reacts to bindings or
-  action values (§18 prompts especially) can subscribe rather than poll; unchanged actions must not
+  action values (R18 prompts especially) can subscribe rather than poll; unchanged actions must not
   mark themselves changed every frame. Settled by D8: the dirty set is per action, and the
   component's own change tick is set only on a tick where one moved.
 - **R23.5 (MUST)** Action state must be snapshot-able and restorable cheaply enough to run per
-  rollback tick (§10.R10.3), and reachable from an `ActionId` in O(1) without a hash lookup on the
-  hot path. _How_ — see **D8**.
+  rollback tick (R10.3), and reachable from an `ActionId` in O(1) without a hash lookup on the hot
+  path. _How_ — see **D8**.
 - **R23.6 (SHOULD)** A context instance may live as a component on an entity or standalone; the
   storage model must be identical in both cases, so per-player, global, and test-harness contexts
-  share one code path (§0.R0.3).
-- **R23.7 (MUST)** The same action may be present in two simultaneously-active layers (§7.R7.3) and
+  share one code path (R0.3).
+- **R23.7 (MUST)** The same action may be present in two simultaneously-active layers (R7.3) and
   must be able to hold **independent in-flight state in each** — a half-completed hold in the base
   context must not be clobbered by the overriding layer's copy. Any storage keyed globally by
   `ActionId` alone fails this; state must be keyed by (context instance, action).
@@ -1556,7 +1554,7 @@ to produce APIs in which the simplest case stops being simple.
 - **R24.2 (MUST)** Minimal dependency surface (upstream review will scrutinize every new dep).
 - **R24.3 (MUST)** All public data types `Reflect` where Bevy's conventions require it.
 - **R24.4 (MUST)** Fallible operations return Bevy-style results/errors, not panics;
-  misconfiguration is a first-class error case with actionable messages (§4.R4.8).
+  misconfiguration is a first-class error case with actionable messages (R4.8).
 
   Two failure kinds live here and must not be conflated. **Runtime**
   failures — a device gone, an unresolved binding, an action read that finds nothing — must return
@@ -1572,12 +1570,12 @@ to produce APIs in which the simplest case stops being simple.
   lines. Comprehensiveness (this document) must not produce a system that requires 40 lines for the
   trivial case; an ergonomic façade over the general model is a requirement, not a nicety.
 - **R24.7 (MUST)** Every mechanism that exists for a funded studio must be **additive**: absent
-  until declared, and with defaulted behaviour that is correct in its absence. Nothing in §15, §17,
-  §18, §19, or R19.14 may become a step a game must perform before an action fires. A new
+  until declared, and with defaulted behaviour that is correct in its absence. Nothing in R15, R17,
+  R18, R19, or R19.14 may become a step a game must perform before an action fires. A new
   requirement that fails this test is a finding, not a feature.
 - **R24.8 (MUST)** Defaults must be correct on hardware, layouts, and locales the author cannot test
-  — a second gamepad, a controller that misreports itself (§14), AZERTY, a right-to-left locale.
-  Where correctness cannot be defaulted, the mistake must be caught by a diagnostic (§4.R4.8) rather
+  — a second gamepad, a controller that misreports itself (R14), AZERTY, a right-to-left locale.
+  Where correctness cannot be defaulted, the mistake must be caught by a diagnostic (R4.8) rather
   than left to a QA pass the author does not have.
 
 ---

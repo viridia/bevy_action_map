@@ -9,9 +9,9 @@ stay correct only because people are careful. This reports every reference that 
     scripts/xref.py --report    also list requirements nothing cites
     scripts/xref.py --quiet     failures only, no summary
 
-A bare `§` is genuinely ambiguous: both `Requirements.md` and `docs/design.md` carry numbered
-sections and both are cited bare, so a reference is accepted when it resolves in either. Where a
-citation names its document the name is used instead, which is the stricter check.
+Each numbered document owns a prefix, so a reference resolves without knowing where it is written:
+`R19` is a section of `Requirements.md` and `R19.14` a requirement inside it, `TD5.3` a subsection of
+`docs/design.md`. The section sign these replaced is retired, and finding one is an error.
 """
 
 import argparse
@@ -26,20 +26,11 @@ R_CITE = re.compile(r"\bR\d+\.\d+[a-z]?\b")
 R_STAR = re.compile(r"\*\*R\d+\.\d+[a-z]?")
 D_DEF = re.compile(r"^### (D\d+)\b")
 D_CITE = re.compile(r"\bD\d+\b")
-SECTION = re.compile(r"§(\d+(?:\.\d+)?)")
+R_SECTION = re.compile(r"\bR(\d+)\b(?!\.\d)")
+TD_SECTION = re.compile(r"\bTD(\d+(?:\.\d+)?)\b")
+RETIRED = re.compile(r"§")
 H2_NUM = re.compile(r"^## (\d+)\.")
 H3_NUM = re.compile(r"^### (\d+\.\d+)\b")
-
-# A citation may name its document first. The bare word "design" is the most common form by far --
-# most of decisions.md's table cells read `| design §10.3 |`.
-QUALIFIER = re.compile(
-    r"`?Requirements\.md`?"
-    r"|[\w./`\[\]()-]*design\.md[`)\]]*"
-    r"|\b[Dd]esign\b"
-)
-# What may sit between a qualifier and a section number it still governs: the separators of a list,
-# so that `design.md §7.3, §8.2 and §10` qualifies all three.
-INHERITS = re.compile(r"[\s,]*(?:and[\s,]*)?(?:§[\d.]+[\s,]*(?:and[\s,]*)?)*")
 
 
 def sources():
@@ -65,19 +56,6 @@ def prose(path):
 
 def headings(path, pattern):
     return {m.group(1) for _, l in prose(path) for m in [pattern.match(l)] if m}
-
-
-def qualifying_doc(line, pos):
-    """The document named before the section reference at `pos`, or None if it stands bare."""
-    named = None
-    for m in QUALIFIER.finditer(line):
-        if m.end() > pos:
-            break
-        if INHERITS.fullmatch(line[m.end() : pos]):
-            named = m.group()
-    if named is None:
-        return None
-    return "requirements" if "Requirements" in named else "design"
 
 
 def main():
@@ -128,14 +106,20 @@ def main():
                 if not R_DEF.match(line):
                     fail(path, n, f"{m.group()} is bold but is not a definition")
 
-            for m in SECTION.finditer(line):
-                sec, doc = m.group(1), qualifying_doc(line, m.start())
-                if doc == "requirements" and sec not in req_sections:
-                    fail(path, n, f"§{sec} is not a section of Requirements.md")
-                elif doc == "design" and sec not in des_sections:
-                    fail(path, n, f"§{sec} is not a section of docs/design.md")
-                elif doc is None and sec not in req_sections and sec not in des_sections:
-                    fail(path, n, f"§{sec} resolves in neither Requirements.md nor docs/design.md")
+            # Markdown only: `R90` is a Rotation variant in the examples, and a bare R-number is
+            # indistinguishable from any other short identifier. Requirement citations are dotted,
+            # so they stay checked everywhere; only the section form is narrowed.
+            if path in md:
+                for m in R_SECTION.finditer(line):
+                    if m.group(1) not in req_sections:
+                        fail(path, n, f"R{m.group(1)} is not a section of Requirements.md")
+
+            for m in TD_SECTION.finditer(line):
+                if m.group(1) not in des_sections:
+                    fail(path, n, f"TD{m.group(1)} is not a section of docs/design.md")
+
+            if RETIRED.search(line):
+                fail(path, n, "a retired section sign survived the TD/R migration")
 
     for path, n, rid in r_dupes:
         fail(path, n, f"{rid} is defined more than once")
@@ -147,7 +131,9 @@ def main():
     for pattern, actual, what in (
         (r"`D1`–`D(\d+)`", str(highest_d), "highest decision number"),
         (r"(\d+) numbered requirements", str(len(r_defined)), "requirement count"),
-        (r"in sections \d+–(\d+)", max(req_sections, key=int), "highest section number"),
+        (r"in sections `R\d+`–`R(\d+)`", max(req_sections, key=int), "highest requirements section"),
+        (r"in sections `TD\d+`–`TD(\d+)`",
+         max((s for s in des_sections if "." not in s), key=int), "highest design section"),
     ):
         m = re.search(pattern, text)
         if not m:

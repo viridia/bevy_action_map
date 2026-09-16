@@ -316,9 +316,9 @@ impl bevy_app::Plugin for ActionMapPlugin {
             player::watch_gamepad_connections.in_set(ActionMapSystems::Dispatch),
         );
 
-        // Two clearing points, per docs/design.md §5.2. The frame's starts everything from
+        // Two clearing points, per TD5.2. The frame's starts everything from
         // nothing; the fixed one lets a schedule that runs several times decide afresh each run
-        // while what `PreUpdate` claimed still stands. The exclusion ceiling (§5.3) clears at the
+        // while what `PreUpdate` claimed still stands. The exclusion ceiling (TD5.3) clears at the
         // same point as the frame's consumption release and nowhere else — see `ExclusionCeiling`.
         app.add_systems(
             bevy_app::PreUpdate,

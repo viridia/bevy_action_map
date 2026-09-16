@@ -254,7 +254,7 @@ LWIM read a value someone else has already decided the filtering policy for, and
 one nobody has.)*
 
 What the crate does with that is three stages, because three parties have a claim on the number and
-they are answering different questions ([design.md](./design.md) §8.4):
+they are answering different questions (TD8.4):
 
 1. **Calibration** — this physical unit's true centre and rest envelope, measured by an explicit
    "move the sticks and let go" step the game drives, applied as the event is recorded. Per device
@@ -389,10 +389,10 @@ default is right: a refactor is free, and breaking a player's settings takes a d
   distinct, constructible, serializable object, with the whole mapping layer a pure function of it,
   so a replay re-derives through conditions, chords, consumption and contexts rather than bypassing
   them — something an action-level mock cannot exercise. A network peer instead targets the
-  authority-backend seam (§11), the same door Steam Input uses: an already-resolved `ActionValue`
-  rather than a raw frame, so two peers never need to share a `Plan`. That is the same job LWIM's
-  `ActionDiff` does, not a lower-level alternative to it. Action state is two `Copy` slices plus a
-  dirty bitset either way, so snapshot/restore is two slice copies.
+  authority-backend seam (D22, D51), the same door Steam Input uses: an already-resolved
+  `ActionValue` rather than a raw frame, so two peers never need to share a `Plan`. That is the same
+  job LWIM's `ActionDiff` does, not a lower-level alternative to it. Action state is two `Copy`
+  slices plus a dirty bitset either way, so snapshot/restore is two slice copies.
 
 The record/replay half of this is proven; chunk 83 exercises it directly. The network half is
 **designed and not proven** — there is no testbed in tree that sends a frame over a wire, and
