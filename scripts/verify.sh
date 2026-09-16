@@ -5,21 +5,28 @@
 # A warning counts as a failure here even though cargo's own exit code ignores it, because
 # CLAUDE.md's convention is that this tree is warning-free in every configuration below.
 #
-# The doctest run is split out from `cargo test --all-features`: it is known to *compile* but
-# fail to *run* here, because of `dynamic_linking` on the `bevy` dev-dependency (chunk 28 owns
-# the fix). That known failure is reported, not treated as a regression; anything else from the
-# doctest step is.
-#
-# Usage: scripts/verify.sh [--full]
+# Usage: scripts/verify.sh [--full] [--doc]
 #   --full   also builds all eight device-feature combinations. Only needed when a `cfg` group
 #            changed — see CLAUDE.md's "Context, and what not to economize on" — so it is not
 #            part of the default run.
+#   --doc    also runs the doctests. Out of the default run because the doc examples are stable
+#            and the step pays for a separate compile of the merged doctest binary.
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 full=0
-[[ "${1:-}" == "--full" ]] && full=1
+doc=0
+for arg in "$@"; do
+    case "${arg}" in
+        --full) full=1 ;;
+        --doc) doc=1 ;;
+        *)
+            echo "usage: $0 [--full] [--doc]" >&2
+            exit 2
+            ;;
+    esac
+done
 
 failed=0
 declare -a fail_names=()
@@ -53,26 +60,29 @@ run_step() {
     echo
 }
 
-# The doctest step's known failure mode: compiles, then crashes at run time on a missing dylib.
-# Anything else — a genuine compile error, a different runtime failure — is a real regression.
-run_doctest_step() {
-    local name="cargo test --all-features --doc"
-    echo "== ${name} =="
-    local output status
-    output=$(cargo test --all-features --doc 2>&1)
-    status=$?
-
-    if [[ ${status} -eq 0 ]]; then
-        echo "pass: ${name} (better than expected — dynamic_linking issue may be fixed; check chunk 28)"
-    elif printf '%s\n' "${output}" | grep -q 'Library not loaded:.*libstd-'; then
-        echo "known failure (dynamic_linking, chunk 28), not a regression: ${name}"
-    else
-        printf '%s\n' "${output}"
-        echo "FAILED (exit ${status}, not the known dynamic_linking failure): ${name}"
-        failed=1
-        fail_names+=("${name}")
+# `dynamic_linking` on the `bevy` dev-dependency leaves the merged doctest binary without an rpath
+# to the toolchain's own libstd, so it builds and then dies in dyld. Pointing dyld at the directory
+# rather than the hashed filename keeps this correct across toolchain updates, and FALLBACK is
+# consulted only after normal resolution, so it cannot shadow a real linking failure.
+#
+# This repairs the run, not the crate — a plain `cargo test --doc` still dies, and on anything but
+# macOS so does this. The portable fix is chunk 28's.
+run_doc_step() {
+    local name="cargo test --workspace --all-features --doc"
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        echo "== ${name} =="
+        echo "skipped: the dyld workaround is macOS-only — chunk 28 owns the portable fix"
+        echo
+        return
     fi
-    echo
+    local libdir
+    libdir="$(rustc --print target-libdir)"
+    # Appended rather than assigned: setting this variable at all discards dyld's own fallback list.
+    export DYLD_FALLBACK_LIBRARY_PATH="${libdir}:${HOME}/lib:/usr/local/lib:/usr/lib"
+    # `--workspace`: a bare `cargo test` takes the root package, which leaves the macros crate's
+    # own doctest unreached — it had never been compiled.
+    run_step "${name}" cargo test --workspace --all-features --doc
+    unset DYLD_FALLBACK_LIBRARY_PATH
 }
 
 run_step "cargo fmt --check" cargo fmt --check
@@ -86,7 +96,7 @@ run_step "cargo clippy --all-features --all-targets" cargo clippy --all-features
 run_step "cargo clippy --no-default-features --features libm" \
     cargo clippy --no-default-features --features libm
 run_step "cargo test --all-features --lib --tests" cargo test --all-features --lib --tests
-run_doctest_step
+[[ ${doc} -eq 1 ]] && run_doc_step
 run_step "cargo test --no-default-features --features libm --test no_devices" \
     cargo test --no-default-features --features libm --test no_devices
 run_step "cargo test --no-default-features --features std,mouse,gamepad --test focus_loss_without_keyboard" \

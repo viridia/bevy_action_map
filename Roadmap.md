@@ -659,10 +659,17 @@ feature (`Cargo.toml:116-123`) never re-adds it.
 
 ### 28. Docs that run
 
-- **Make the doctests execute.** `dynamic_linking` on the `bevy` dev-dependency breaks the merged
-  doctest binary, so every `///` example compiles but none runs. Fixing it means making
-  `dynamic_linking` opt-in, at the cost of slower example builds — a trade-off to make deliberately
+- **Make the doctests execute anywhere.** `scripts/verify.sh --doc` runs them on macOS, pointing
+  dyld at the toolchain's libstd that `dynamic_linking` on the `bevy` dev-dependency leaves the
+  merged doctest binary unable to find. That repairs the run, not the crate — a plain
+  `cargo test --doc` still dies, and so does the workaround on Linux. The portable fix is making
+  `dynamic_linking` opt-in, at the cost of slower example builds, a trade-off to make deliberately
   rather than inherit.
+- **The 42 `ignore` fences**, against nine doctests that are live code. The rest are fragments
+  written to read mid-prose — `context.bind::<Move>(Stick::Left).dead_zone(…)` — compilable only
+  inside an `App` and a context closure, so each needs hidden `#` scaffolding before the compiler
+  checks it. Some twenty files, and the bulk of what "docs that run" means. One of the 42 is the
+  macros crate's only doctest, which until now no step reached at all.
 - **The README rewrite** — a user-facing introduction, feature list and quickstart, with examples
   lifted from a real game rather than invented.
 - **`src/lib.rs`'s crate-level docs, alongside it.** The `//!` block largely mirrors the README's

@@ -166,7 +166,7 @@ prefer it to running each command by hand.
 
 ```sh
 cargo fmt --check
-cargo test --all-features
+cargo test --all-features --lib --tests
 cargo clippy --all-features --all-targets
 cargo clippy --no-default-features --features libm      # the no-devices build
 cargo test --no-default-features --features libm --test no_devices
@@ -182,12 +182,22 @@ for f in "" keyboard mouse gamepad keyboard,mouse keyboard,gamepad mouse,gamepad
 done
 ```
 
-**Known, not regressions:** doctests compile but fail to *run* (`dynamic_linking` on the `bevy`
-dev-dependency — chunk 28 owns the fix); `scripts/verify.sh` reports this apart from a real failure.
-Everything else is warning-free in every configuration above, so a warning is a regression — treat
-one as such rather than assuming it was already there. The unit tests under `src/` assume a keyboard
-is available and do not build in the no-devices configuration, so `tests/no_devices.rs` is run on
-its own rather than as part of the full suite.
+Doctests are out of the default run, because the doc examples are stable and the step pays for a
+separate compile of the merged doctest binary. `scripts/verify.sh --doc` adds it; run that when a
+`///` example changes. By hand it needs the dyld workaround, since `dynamic_linking` on the `bevy`
+dev-dependency leaves that binary without an rpath to the toolchain's own libstd:
+
+```sh
+DYLD_FALLBACK_LIBRARY_PATH="$(rustc --print target-libdir)" cargo test --workspace --all-features --doc
+```
+
+**Known, not regressions:** 42 of the 51 doctests are `ignore` fences — fragments written to be read
+mid-prose rather than to stand alone — so they are neither compiled nor run, and chunk 28 owns
+making them execute. That workaround is macOS-only; elsewhere the doctest step skips rather than
+pretending to have run. The unit tests under `src/` assume a keyboard is available and do not build
+in the no-devices configuration, so `tests/no_devices.rs` is run on its own rather than as part of
+the full suite. Everything else is warning-free in every configuration above, so a warning is a
+regression — treat one as such rather than assuming it was already there.
 
 ## Context, and what not to economize on
 
