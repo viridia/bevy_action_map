@@ -803,9 +803,13 @@ refusal is `CompositeCannotEmpty`, the mirror of `CompositeCannotGrow`.
 **`MaxSlots` is the one length the crate has an opinion about**, and only on the apply path: a game
 that reads override sets it did not write inserts the resource, and a row naming more controls than
 that comes back as `TooManyControls` rather than being applied. Without the resource there is no
-limit, which is what a game whose save files are its own already assumes. Capture is unaffected —
-`for_slot` grows a row one slot at a time, so no sequence of captures walks a row past a limit the
-game shipped under.
+limit, which is what a game whose save files are its own already assumes.
+
+A capture can reach past it, because a capture fills the cell the player pressed and a screen may
+draw more columns than the game's own ceiling allows. That is the app disagreeing with itself about
+two numbers it owns both of, so the crate warns once when a session opens for a slot at or past the
+ceiling rather than refusing the session: `slot >= limit` settles it without looking the row up, and
+the apply path is still what turns the row down.
 
 Uniqueness is per family, and two mappable bindings collide only when they name different actions.
 
@@ -908,8 +912,10 @@ game declares, and rebinding one overwrites it with the position captured; reset
 brings it back.
 
 A session skips whatever is already queued on its first run, so the press that opened it is not what
-it binds. A slot more than one past what the mapping currently holds is refused, which keeps a
-capture from leaving a hole in a list whose order is what primary and secondary mean.
+it binds. Any slot number is addressable: `for_slot` fills the cell the screen names, growing the
+row to reach it and leaving the slots skipped on the way empty, so a screen offers whatever cells it
+draws without first asking how long the row happens to be. The only refusal left is a mapping the
+player may not change.
 
 **Three refusals, and one silent guard.**
 

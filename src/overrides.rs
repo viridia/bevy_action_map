@@ -126,6 +126,15 @@ impl Overrides {
     /// to draw beside it is the screen's business rather than something a saved row should carry. A
     /// list with nothing left in it is [`Override::Cleared`] and is stored as such, since a row
     /// holding nothing and a row that is not there mean different things.
+    ///
+    /// Interior empties are kept, because a fixed-column table means something by *which* column a
+    /// control sits in. A growable list — an editor's shortcuts for one command, where position is
+    /// an artefact of iteration — wants the opposite, and closes the gaps on the way in:
+    ///
+    /// ```ignore
+    /// overrides.bind(family, key, row);                        // a table: keep the gaps
+    /// overrides.bind(family, key, row.into_iter().flatten());  // a list: close them
+    /// ```
     pub fn bind<C: Into<Option<Control>>>(
         &mut self,
         family: DeviceFamily,
@@ -145,6 +154,45 @@ impl Overrides {
                 Override::Controls(controls)
             },
         );
+    }
+
+    /// Empties one slot of a row, leaving the slots after it where they are.
+    ///
+    /// What a "clear this cell" button does. The slots after the one emptied keep their positions,
+    /// so clearing the primary of a two-control row leaves the secondary in the second column — a
+    /// row is a table, and removing an element from the middle of it would promote the secondary
+    /// into a column the player was not looking at.
+    ///
+    /// `mapping` is the row as it stands, which is where the slots this set does not mention come
+    /// from — pass the row from [`mappings`](crate::mapping::mappings), and rows this set has
+    /// already changed are read from the set rather than from it. A slot the row does not reach is
+    /// already empty, so clearing one does nothing.
+    ///
+    /// The row normalizes on the way in as it does for [`bind`](Self::bind): clearing the last
+    /// filled slot shortens the row, and clearing the only one leaves
+    /// [`Override::Cleared`](Override::Cleared).
+    pub fn unbind(&mut self, mapping: &ActionMapping, slot: usize) {
+        let mut controls = self.slots_of(mapping);
+        if slot >= controls.len() {
+            return;
+        }
+        controls[slot] = None;
+        self.bind(mapping.family, mapping.key, controls);
+    }
+
+    /// What this set makes of one row: its own controls where it has changed the row, and the
+    /// declared ones where it has not.
+    ///
+    /// The three states read the way applying reads them, so a screen showing an unconfirmed
+    /// working copy shows what confirming it would produce. [`NotOurs`](Override::NotOurs) reads as
+    /// untouched, since something else owns that row and this set neither fills it in nor treats it
+    /// as emptied.
+    pub fn slots_of(&self, mapping: &ActionMapping) -> Vec<Option<Control>> {
+        match self.get(mapping.family, mapping.key) {
+            Some(Override::Controls(controls)) => controls.clone(),
+            Some(Override::Cleared) => Vec::new(),
+            Some(Override::NotOurs) | None => mapping.slots.clone(),
+        }
     }
 
     /// Sets a row directly, for the two states [`bind`](Self::bind) cannot express.
@@ -229,7 +277,7 @@ impl Overrides {
     }
 }
 
-/// The most controls one mapping may hold, for a game that reads override sets it did not write.
+/// How far one mapping's row may reach, for a game that reads override sets it did not write.
 ///
 /// A mapping is an ordered list with no length of its own: how many controls a row *ought* to hold
 /// is a question its settings screen answers, by deciding how many cells to draw. This is the other
@@ -244,10 +292,13 @@ impl Overrides {
 /// app.insert_resource(MaxSlots(8));
 /// ```
 ///
-/// Only [`apply_overrides`] and its variants consult it, so a row past the limit comes back as
-/// [`OverrideProblemKind::TooManyControls`] and the rest of the set still applies. Rebinding in
-/// your own screen is unaffected: a capture adds one control at a time, so a player cannot walk a
-/// row past a limit the game shipped under.
+/// Only [`apply_overrides`] and its variants enforce it, so a row past the limit comes back as
+/// [`OverrideProblemKind::TooManyControls`] and the rest of the set still applies.
+///
+/// **Set it at least as high as your widest table.** A capture fills the cell the player pressed,
+/// so a screen drawing more columns than this allows will capture a control and then have the row
+/// turned down when it is applied. The crate warns once when a capture opens for a slot the ceiling
+/// would refuse, because the two numbers are both yours and only the game can reconcile them.
 ///
 /// **What your game declares is never limited.** A row holds however many controls its bindings
 /// give it, whatever this says — the limit is about what an override set may *do* to a row, not how
@@ -302,28 +353,31 @@ pub enum OverrideProblemKind {
         /// The reserved control.
         control: Control,
     },
-    /// More controls in one row than [`MaxSlots`] allows.
+    /// A row reaching further than [`MaxSlots`] allows.
     TooManyControls {
         /// The ceiling the game set.
         limit: usize,
-        /// How many the row named.
+        /// How many slots the row reached. An empty slot counts: it is a column the row has, and
+        /// the ceiling is about how far a row reaches rather than how full it is.
         given: usize,
     },
     /// The row is one direction of a composite, and the game shipped no second composite to put
     /// another control in.
     ///
-    /// A movement binding is four keys, and a second "move forward" key is one part of a second set
-    /// of four — so a row like this grows only when the whole composite does. Ship the alternative
-    /// as a second `mappable` binding of the same action and the player gets a filled second slot on
-    /// all four rows at once, which is how a keyboard table with two columns is actually written.
+    /// A composite is one binding read as several rows — four for a movement pad, two for an axis —
+    /// so a second "move forward" key is one part of a second whole composite. A row like this
+    /// grows only when the composite does. Ship the alternative as a second `mappable` binding of
+    /// the same action and the player gets a filled second slot on every one of its rows at once,
+    /// which is how a keyboard table with two columns is actually written.
     CompositeCannotGrow,
     /// The row is one direction of a composite, and emptying it alone would empty the others.
     ///
     /// The mirror of [`CompositeCannotGrow`](Self::CompositeCannotGrow), and the same fact read the
-    /// other way round: the four rows of a movement binding are four parts of *one* binding, so
-    /// there is no "move forward" to take away on its own. A direction that was never separately
-    /// bound is not separately unbindable — clear the row and the player still has the control, or
-    /// rebind it to something they will not press by accident.
+    /// other way round: a composite's rows are parts of *one* binding — four for a movement pad,
+    /// two for an axis — so there is no "move forward" to take away on its own, and emptying it
+    /// would empty the rest of the composite with it. A direction that was never separately bound
+    /// is not separately unbindable. Rebind the row to something the player will not press by
+    /// accident, or clear every row of the composite together.
     CompositeCannotEmpty,
     /// A saved control name this build does not recognize.
     ///
@@ -2016,6 +2070,121 @@ mod tests {
         );
     }
 
+    /// What a "clear this cell" button does, across the three shapes a row can normalize to: a hole
+    /// where something still follows it, a shorter row where nothing does, and `Cleared` where the
+    /// row held one thing.
+    #[test]
+    fn unbinding_one_slot_empties_it_in_place() {
+        let mut app = app();
+        let jump = row(&app, "override_tests.jump");
+        let space = Control::PhysicalKey(KeyCode::Space);
+        let j = Control::PhysicalKey(KeyCode::KeyJ);
+
+        let mut overrides = Overrides::new();
+        overrides.bind(jump.family, jump.key, [space, j]);
+
+        // The primary, with the secondary still there: a hole, and the secondary stays second.
+        overrides.unbind(&jump, 0);
+        assert_eq!(
+            overrides.get(jump.family, jump.key),
+            Some(&Override::Controls(alloc::vec![None, Some(j)]))
+        );
+
+        // And the secondary of that same row, which leaves nothing at all.
+        overrides.unbind(&jump, 1);
+        assert_eq!(
+            overrides.get(jump.family, jump.key),
+            Some(&Override::Cleared),
+            "a row with nothing left is the state that already means that"
+        );
+
+        // Reading through to the declared row rather than only what this set holds: nothing has
+        // been said about `move.up`, so clearing its only slot clears what the game shipped.
+        let up = row(&app, "override_tests.move.up");
+        assert_eq!(up.slots.len(), 1);
+        overrides.unbind(&up, 0);
+        assert_eq!(overrides.get(up.family, up.key), Some(&Override::Cleared));
+
+        // A slot the row does not reach is already empty.
+        overrides.unbind(&jump, 9);
+        assert_eq!(
+            overrides.get(jump.family, jump.key),
+            Some(&Override::Cleared),
+            "clearing past the end changes nothing"
+        );
+
+        // And the whole thing still applies — `move.up` is a composite part, so that one is refused
+        // and the rest goes through.
+        let problems = apply_overrides(app.world_mut(), &overrides);
+        assert_eq!(
+            problems
+                .iter()
+                .map(|problem| problem.kind.clone())
+                .collect::<Vec<_>>(),
+            [OverrideProblemKind::CompositeCannotEmpty]
+        );
+        assert!(slots(&app, "override_tests.jump").is_empty());
+    }
+
+    /// A slot is addressed, not appended: writing to the third cell of a one-control row gives a
+    /// row of three with a blank in the middle, rather than two controls side by side.
+    #[test]
+    fn a_sparse_row_applies_and_keeps_its_hole() {
+        let mut app = app();
+        let jump = row(&app, "override_tests.jump");
+
+        // What a screen writes when the player fills the third cell of a row holding one control:
+        // the cell they pressed, not the next one free.
+        let mut overrides = Overrides::new();
+        overrides.bind(
+            jump.family,
+            jump.key,
+            [
+                Some(Control::PhysicalKey(KeyCode::Space)),
+                None,
+                Some(Control::PhysicalKey(KeyCode::KeyL)),
+            ],
+        );
+        let problems = apply_overrides(app.world_mut(), &overrides);
+        assert!(problems.is_empty(), "{problems:?}");
+
+        assert_eq!(
+            slots(&app, "override_tests.jump"),
+            [
+                Some(Control::PhysicalKey(KeyCode::Space)),
+                None,
+                Some(Control::PhysicalKey(KeyCode::KeyL))
+            ],
+            "three slots with the middle one empty, not two controls side by side"
+        );
+    }
+
+    /// The two ways a screen writes a row back, which is the whole of what an editor-style growable
+    /// list needs over a fixed-column table: one keeps the holes, the other closes them.
+    #[test]
+    fn a_row_can_be_written_back_with_its_gaps_closed() {
+        let app = app();
+        let jump = row(&app, "override_tests.jump");
+        let row_with_a_hole = alloc::vec![None, Some(Control::PhysicalKey(KeyCode::KeyJ))];
+
+        let mut overrides = Overrides::new();
+        overrides.bind(jump.family, jump.key, row_with_a_hole.clone());
+        assert_eq!(
+            overrides.get(jump.family, jump.key),
+            Some(&Override::Controls(row_with_a_hole.clone())),
+            "a table means something by which column a control is in"
+        );
+
+        overrides.bind(jump.family, jump.key, row_with_a_hole.into_iter().flatten());
+        assert_eq!(
+            overrides.get(jump.family, jump.key),
+            Some(&Override::Controls(alloc::vec![Some(
+                Control::PhysicalKey(KeyCode::KeyJ)
+            )])),
+            "a list does not, and closes the gap on the way in"
+        );
+    }
+
     /// Trailing empties are not a row's business: a row is as long as its last filled slot, and how
     /// many cells to draw past that is the screen's decision rather than something a save carries.
     #[test]
@@ -2037,6 +2206,76 @@ mod tests {
         assert_eq!(
             overrides.get(jump.family, jump.key),
             Some(&Override::Cleared)
+        );
+    }
+
+    /// The two-part shape of the same thing, which is what a turn axis actually is: two rows from
+    /// one binding rather than four, and two such bindings feeding both columns of both rows.
+    /// Emptying either column of either row still takes a whole binding away, so it is refused on
+    /// the same terms as the four-part case.
+    #[test]
+    fn one_end_of_an_axis_cannot_be_emptied_on_its_own() {
+        #[derive(InputAction)]
+        #[action(path = "override_tests.turn", output = f32, intent = Analog1)]
+        struct Turn;
+
+        #[derive(InputContext)]
+        #[context(path = "override_tests.flying", tick = Render)]
+        struct Flying;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<Flying>(|controls| {
+            controls
+                .bind::<Turn>(crate::binding::AxisButtons::ad())
+                .mappable();
+            controls
+                .bind::<Turn>(crate::binding::AxisButtons::left_right())
+                .mappable();
+        });
+
+        let left = row(&app, "override_tests.turn.negative");
+        assert_eq!(
+            left.slots,
+            filled([
+                Control::PhysicalKey(KeyCode::KeyA),
+                Control::PhysicalKey(KeyCode::ArrowLeft)
+            ]),
+            "one row with both composites' negative ends in it"
+        );
+
+        // Clearing the primary, which is what the screen's clear gesture writes.
+        let mut overrides = Overrides::new();
+        overrides.unbind(&left, 0);
+        let problems = apply_overrides(app.world_mut(), &overrides);
+        assert_eq!(
+            problems
+                .iter()
+                .map(|problem| problem.kind.clone())
+                .collect::<Vec<_>>(),
+            [OverrideProblemKind::CompositeCannotEmpty],
+            "A drives the left half of one composite; taking it away takes D with it"
+        );
+
+        // And the secondary, which normalizes to a shorter row rather than to a hole.
+        let mut overrides = Overrides::new();
+        overrides.unbind(&left, 1);
+        let problems = apply_overrides(app.world_mut(), &overrides);
+        assert_eq!(
+            problems
+                .iter()
+                .map(|problem| problem.kind.clone())
+                .collect::<Vec<_>>(),
+            [OverrideProblemKind::CompositeCannotEmpty]
+        );
+
+        assert_eq!(
+            slots(&app, "override_tests.turn.positive"),
+            filled([
+                Control::PhysicalKey(KeyCode::KeyD),
+                Control::PhysicalKey(KeyCode::ArrowRight)
+            ]),
+            "the other end of the axis is untouched either way"
         );
     }
 
@@ -2205,6 +2444,43 @@ mod tests {
             slots(&bounded, "override_tests.jump"),
             filled([Control::PhysicalKey(KeyCode::Space)]),
             "refused whole, so the row still holds what the game shipped"
+        );
+    }
+
+    /// A capture can now reach past the ceiling, which it could not while a row grew one slot at a
+    /// time. The session is still made — the warning is for the developer whose screen draws more
+    /// columns than their own `MaxSlots` allows — and the apply is what turns the row down.
+    #[test]
+    fn a_capture_past_the_ceiling_is_refused_where_it_lands() {
+        let mut app = app();
+        app.insert_resource(MaxSlots(2));
+        let jump = row(&app, "override_tests.jump");
+
+        let session = crate::capture::CaptureSession::for_slot(&jump, 2)
+            .expect("a slot past the ceiling is still addressable");
+        assert_eq!(session.slot(), 2);
+        app.world_mut().spawn(session);
+        app.update();
+
+        // Filling slot 2 makes a row of three, which is what the ceiling refuses.
+        let mut overrides = Overrides::new();
+        overrides.bind(
+            jump.family,
+            jump.key,
+            [
+                Some(Control::PhysicalKey(KeyCode::Space)),
+                None,
+                Some(Control::PhysicalKey(KeyCode::KeyL)),
+            ],
+        );
+        let problems = apply_overrides(app.world_mut(), &overrides);
+        assert_eq!(
+            problems
+                .iter()
+                .map(|problem| problem.kind.clone())
+                .collect::<Vec<_>>(),
+            [OverrideProblemKind::TooManyControls { limit: 2, given: 3 }],
+            "a hole counts toward the length, since it is a column the row reaches"
         );
     }
 

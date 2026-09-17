@@ -256,20 +256,18 @@ impl CaptureSession {
     /// drawn as columns — so which slot the player activated is what a capture has to carry, or the
     /// answer has nowhere to go but the front of the row.
     ///
-    /// Returns `None` for a slot more than one past the controls the mapping holds now, which is
-    /// what stops a capture leaving a hole in a list whose *order* is what primary and secondary
-    /// mean. A row grows one slot at a time, so a screen offering a spare cell beside a filled one
-    /// always gets a session; offering two spare cells at once does not. It also returns `None` for
-    /// a mapping the player may not change at all — see
+    /// Any slot number is addressable, whether the row reaches that far yet or not: the row grows
+    /// to fit, and the slots skipped on the way are left empty. Writing to the third cell of a row
+    /// holding one control gives a row of three, the middle one blank — so a screen can offer
+    /// whatever cells it draws without first checking how long the row happens to be.
+    ///
+    /// Returns `None` only for a mapping the player may not change at all — see
     /// [`RebindPolicy`](crate::mapping::RebindPolicy).
     pub fn for_slot(mapping: &ActionMapping, slot: usize) -> Option<Self> {
         // A mapping the player cannot change has nothing to capture *for*. It is on the screen so
         // they can read it, and a screen that asked anyway would be offering a rebind it could not
         // then apply.
         if !mapping.rebind_policy.is_rebindable() {
-            return None;
-        }
-        if slot > mapping.slots.len() {
             return None;
         }
         Some(Self {
@@ -616,6 +614,37 @@ fn arrival(
         // Losing focus never arrives as a control a player meant to bind.
         #[cfg(any(feature = "keyboard", feature = "mouse"))]
         RawEvent::FocusLost => None,
+    }
+}
+
+/// Says so when a screen opens a capture for a slot its own [`MaxSlots`] would then refuse.
+///
+/// Filling slot `n` makes the row at least `n + 1` long, so the slot number alone settles it and
+/// nothing has to look the row up. The capture still runs and the control is still captured; it is
+/// [`apply_overrides`](crate::overrides::apply_overrides) that turns the row down, and this is the
+/// line that says why before the player finds out by pressing something.
+///
+/// A game that set no ceiling has no cell this could be wrong about, so the observer costs it one
+/// absent-resource check per session.
+pub(crate) fn warn_if_past_the_ceiling(
+    session: bevy_ecs::prelude::On<'_, '_, bevy_ecs::lifecycle::Insert<CaptureSession>>,
+    sessions: Query<'_, '_, &CaptureSession>,
+    max_slots: Option<Res<'_, crate::overrides::MaxSlots>>,
+) {
+    let Some(max) = max_slots else {
+        return;
+    };
+    let Ok(started) = sessions.get(session.entity) else {
+        return;
+    };
+    if started.slot >= max.0 {
+        bevy_utils::once!(log::warn!(
+            "a capture was opened for slot {} of a row, but `MaxSlots` is {} — the control will be \
+             captured and then refused when the override set is applied. The screen is offering a \
+             cell past the ceiling the game set",
+            started.slot,
+            max.0
+        ));
     }
 }
 
@@ -1140,8 +1169,8 @@ mod tests {
         );
     }
 
-    /// A capture says which slot it fills, and a row grows one slot at a time: the next empty slot
-    /// is reachable and the one after it is not.
+    /// A capture says which slot it fills, and a slot is addressed rather than appended: a screen
+    /// offers whatever cells it draws without first asking how long the row happens to be.
     #[test]
     fn a_row_is_addressed_by_slot() {
         let mut app = app();
@@ -1157,16 +1186,15 @@ mod tests {
         );
         assert!(CaptureSession::for_slot(&jump, 1).is_some(), "the next one");
         assert!(
-            CaptureSession::for_slot(&jump, 2).is_none(),
-            "it would leave slot 1 empty behind it"
+            CaptureSession::for_slot(&jump, 4).is_some(),
+            "and one well past the end: the row grows to reach it"
         );
 
-        // The rule is the row's own length rather than a number anything declared, so a row that
-        // ships two defaults offers a third cell and no more.
-        let crouch = mapping(&app, "capture_tests.crouch");
-        assert_eq!(crouch.slots.len(), 2);
-        assert!(CaptureSession::for_slot(&crouch, 2).is_some());
-        assert!(CaptureSession::for_slot(&crouch, 3).is_none());
+        // A row the player may not change has nothing to capture for, at any slot — the one rule
+        // left.
+        let settings = mapping(&app, "capture_tests.settings");
+        assert!(!settings.rebind_policy.is_rebindable());
+        assert!(CaptureSession::for_slot(&settings, 0).is_none());
 
         // And the slot the session was made for is what reaches the observer.
         app.world_mut()

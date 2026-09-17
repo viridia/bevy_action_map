@@ -3,8 +3,10 @@
 //!
 //! Press `F2` (or Y on a pad) to open it. It can be operated end to end from a gamepad without
 //! touching the keyboard — the stick and the D-pad move the selection, A presses what is selected,
-//! X confirms and B cancels. Pressing a boxed cell listens for the next control and puts it there;
-//! if that control already belongs to another row, this row takes it and the other row loses it.
+//! X confirms, B cancels and L1 empties the selected cell. Pressing a boxed cell listens for the
+//! next control and puts it there; if that control already belongs to another row, this row takes
+//! it and the other row loses it, leaving a gap in the column it came out of rather than closing
+//! up.
 //!
 //! There are separate tables for keyboard and gamepad, because the rebinding strategies are
 //! different: keyboard allows rebinding of individual keys, while gamepad allows a choice of
@@ -31,12 +33,14 @@ use bevy::ui::UiSystems;
 use bevy::ui::auto_directional_navigation::AutoDirectionalNavigator;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_action_map::mapping::{Tunable, TunableValue, fallback_label, tunables};
-use bevy_action_map::overrides::{Override, Overrides, apply_overrides_with_preset};
+use bevy_action_map::overrides::{Overrides, apply_overrides_with_preset};
 use bevy_action_map::prelude::*;
 use bevy_action_map::preset::Preset;
 use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
-use crate::actions::{Back, Confirm, Menu, Navigate, TURN_DEAD_ZONE_KEY, ToggleSettings, Turn};
+use crate::actions::{
+    Back, Clear, Confirm, Menu, Navigate, TURN_DEAD_ZONE_KEY, ToggleSettings, Turn,
+};
 use crate::common::prompt_ui::{IconPromptSpan, PromptFamily, PromptSpan};
 use crate::common::widget_focus::{
     Adjusted, ButtonFocused, Stepper, decrement_pressed, focusable, increment_pressed,
@@ -300,6 +304,40 @@ pub(crate) fn confirm(_: On<Fired<Confirm>>, mut commands: Commands) {
     commands.queue(apply_and_close);
 }
 
+/// Empties the selected cell — the one gesture on this screen that makes a gap on purpose.
+///
+/// The cell keeps its column: clearing a primary leaves the secondary in the second box rather than
+/// sliding it up, which is the difference between "this cell is empty" and "this row is shorter".
+/// Only a boxed cell can be cleared, since [`RebindCell`] is what marks the ones this screen owns.
+fn clear_cell(
+    _: On<Fired<Clear>>,
+    focus: Res<InputFocus>,
+    cells: Query<&RebindCell>,
+    mut commands: Commands,
+) {
+    let Some(focused) = focus.get() else {
+        return;
+    };
+    let Ok(&RebindCell(family, key, slot)) = cells.get(focused) else {
+        return;
+    };
+    commands.queue(move |world: &mut World| {
+        let Some(row) = mappings(world)
+            .into_iter()
+            .find(|row| row.family == family && row.key == key)
+        else {
+            return;
+        };
+        // Into the captures rather than the merged copy, on the same terms as a steal: the player
+        // made this, so it outlives whichever preset is selected.
+        world
+            .resource_mut::<PendingOverrides>()
+            .0
+            .captures
+            .unbind(&row, slot);
+    });
+}
+
 /// The two ways Confirm is reached — the action above, and the button below — end here.
 ///
 /// The one place the working copy leaves this screen, so it is also the one place the choice is
@@ -308,7 +346,13 @@ pub(crate) fn confirm(_: On<Fired<Confirm>>, mut commands: Commands) {
 fn apply_and_close(world: &mut World) {
     let controls = world.resource::<PendingOverrides>().0.clone();
     let (merged, preset_rows) = working_copy(world, &controls);
-    apply_overrides_with_preset(world, &merged, &preset_rows);
+    // A refused row is dropped without the screen having shown it as anything but applied, which is
+    // a worse silence than it looks: the cells were drawn from the working copy, so the player saw
+    // the change take. A shipped game says so on screen; this one says so on the console, because
+    // the machinery for a message is a screen of its own and this example is about the bindings.
+    for problem in apply_overrides_with_preset(world, &merged, &preset_rows) {
+        warn!("`{}` was not applied: {:?}", problem.mapping, problem.kind);
+    }
     saved_controls::store(world, &controls);
     world.resource_mut::<AppliedControls>().0 = controls;
     world
@@ -404,6 +448,7 @@ fn screen(world: &World) -> impl Scene {
         on(navigate)
         on(back)
         on(confirm)
+        on(clear_cell)
         on(toggle)
         // Over the game and the debug overlay both, since it covers them.
         GlobalZIndex(10)
@@ -467,12 +512,22 @@ fn screen(world: &World) -> impl Scene {
                  press what you want bound there; everything else is listed so you can see \
                  what it does.\nPress "
             )
+            // Three spans rather than one sentence with the controls written into it: each is what
+            // would fire *now*, so they follow the player's own rebinding while the screen is up.
             Node {
                 margin: UiRect::axes(percent(10), px(0))
             }
             TextFont { font_size: 13.0_f32 }
             TextColor(FIXED)
             Children [
+                PromptSpan({Clear::id()})
+                TextFont { font_size: 13.0_f32 }
+                TextColor(TITLE)
+                --
+                TextSpan::new(" to empty the selected cell, or ")
+                TextFont { font_size: 13.0_f32 }
+                TextColor(FIXED)
+                --
                 PromptSpan({ToggleSettings::id()})
                 TextFont { font_size: 13.0_f32 }
                 TextColor(TITLE)
@@ -870,7 +925,8 @@ fn redraw_pending(world: &mut World) {
             continue;
         };
         *text = Text::new(
-            effective(row, &pending)
+            pending
+                .slots_of(row)
                 .get(cell.2)
                 .copied()
                 .flatten()
@@ -885,7 +941,8 @@ fn redraw_pending(world: &mut World) {
             continue;
         };
         *text = Text::new(
-            effective(row, &pending)
+            pending
+                .slots_of(row)
                 .get(cell.2)
                 .copied()
                 .flatten()
@@ -1249,17 +1306,6 @@ fn captured(captured: On<ControlCaptured>, cells: Query<&RebindCell>, mut comman
     });
 }
 
-/// What a mapping currently holds, the working copy laid over its declared slots — [`Overrides`]'s
-/// own three-state rule, read the same way [`apply_overrides_with_preset`] and `conflicts_pending`
-/// both do.
-fn effective(mapping: &ActionMapping, pending: &Overrides) -> Vec<Option<Control>> {
-    match pending.get(mapping.family, mapping.key) {
-        Some(Override::Controls(controls)) => controls.clone(),
-        Some(Override::Cleared) => Vec::new(),
-        Some(Override::NotOurs) | None => mapping.slots.clone(),
-    }
-}
-
 /// A captured control is stolen from whatever else already holds it, rather than being refused or
 /// left to duplicate.
 ///
@@ -1295,23 +1341,35 @@ fn resolve_capture(
         else {
             continue;
         };
-        let mut controls = effective(other, &working);
-        // Emptied in place rather than removed. Taking a control out of another row must not
-        // promote that row's secondary into the column the player was looking at — `bind` drops the
-        // empty again if it was the last thing the row held.
-        for held in &mut controls {
-            if *held == Some(control) {
-                *held = None;
-            }
-        }
+        let mut controls = working.slots_of(other);
+        take_from(&mut controls, control);
         pending.0.captures.bind(other.family, other.key, controls);
     }
 
-    let mut controls = effective(&target, &working);
-    if slot < controls.len() {
-        controls[slot] = Some(control);
-    } else {
-        controls.push(Some(control));
+    // The cell the player pressed is the cell that gets it, so the row grows to reach that column
+    // if it has to. This is what lets the second cell be filled on a row whose first one is empty —
+    // the state a steal leaves behind.
+    let mut controls = working.slots_of(&target);
+    if slot >= controls.len() {
+        controls.resize(slot + 1, None);
     }
+    // The row steals from itself too. `conflicts_pending` answers about *other* rows, so a control
+    // this row already holds in another column is invisible to the loop above, and without this the
+    // player gets one control in two cells of one row.
+    take_from(&mut controls, control);
+    controls[slot] = Some(control);
     pending.0.captures.bind(target.family, target.key, controls);
+}
+
+/// Empties whichever cells of a row hold `control`, leaving the gap where it was.
+///
+/// Emptied in place rather than removed: taking a control out of a row must not promote that row's
+/// secondary into the column the player was looking at. `bind` drops the empty again if it was the
+/// last thing the row held.
+fn take_from(controls: &mut [Option<Control>], control: Control) {
+    for held in controls {
+        if *held == Some(control) {
+            *held = None;
+        }
+    }
 }

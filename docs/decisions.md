@@ -751,6 +751,13 @@ table has. The workaround it forced was a second row under an alias name — `th
 `thrust_alt` — telling the player two things are separate when they are the same thing twice. A
 fixed two cannot express the "add shortcut" button that tools grow instead.
 
+**A slot is addressed, not appended.** `for_slot` takes whatever slot number the screen names and
+grows the row to reach it, leaving the slots skipped on the way empty — assignment, the way writing
+to index four of a JavaScript array gives you five. The rule it replaced refused anything more than
+one past the end, which existed to stop a capture leaving a hole and became arbitrary once a hole
+was legal: it allowed the primary of an emptied two-cell row and refused the secondary, on no
+principle a screen could explain. What bounds a row now is the number of cells the screen draws.
+
 **Save format.** A row holds a list because a mapping does, and position is which slot, so a cleared
 middle slot needs the cleared marker rather than a shortened list — which would silently promote the
 secondary to primary. It is the same word an emptied *row* uses, one level down, so a person opening

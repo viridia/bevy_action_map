@@ -178,6 +178,9 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 117q | The preview stops showing unchanged code                          |
 | 119  | Bevy 0.20.0-rc.1, from crates.io rather than git                  |
 | 118a | Capacity is the app's business, and a resource-set ceiling replaces it |
+| 118b | A slot may be empty                                                    |
+| 118c | A slot is addressed, not appended                                     |
+| 120  | A cell the player can empty, and a refusal that says so               |
 
 ---
 
@@ -330,71 +333,6 @@ to the player as a named tunable, the way `tunable_dead_zone` already offers a d
 ## Presentation and prompts
 
 What the player is shown, once the crate knows what is bound.
-
-### 118b. A slot may be empty
-
-`Vec<Option<Control>>` through `ActionMapping::slots` and `Override::Controls`, so a player emptying
-the primary leaves a gap rather than promoting the secondary into it.
-
-- **Why the container rather than a sentinel.** A `Control::Empty` variant would cost every consumer
-  of `Control` an arm meaning "not a control" — the frame, prompts, `fallback_label`, `admissible`,
-  conflict comparison — and `conflicts` acquires a bug the first time two empty slots compare equal.
-  A `BTreeMap<usize, Control>` answers a sparse-at-index-9000 question nobody asked and gives up the
-  scalar shorthand TD10.3 keeps on purpose.
-- **The wire word already exists.** Every real control name carries a `/`, which is what lets
-  `"cleared"` and `"external"` be bare words that cannot collide with one (R17.7). An empty slot
-  inside a list is `"cleared"` — one word meaning the same thing at both levels, no JSON `null`, and
-  a file a player can still edit by hand.
-- **Trailing empties are not written.** A row normalizes to its last filled slot before
-  serialization, so a two-column table whose secondaries are mostly blank does not fill a settings
-  file with the word; a short list read back means the rest are empty. Deliberately less orthogonal
-  than writing them out, because the file is a thing people open. `[Some(x), None]` therefore still
-  takes the scalar shorthand, and `[None]` still folds to `Cleared`.
-- **`rewrite` grows a fourth case, and it is issue 1010's.** `slot` indexes both the override list
-  and `contributors`, which is dense by construction — an author cannot declare a gap — so the new
-  arm is "the override emptied a slot the defaults fill", which drops one binding mid-row. That is
-  the shape that empties the other three rows of a composite. **1010 is routed here.**
-- **A composite's row empties only when the whole composite does**, which is 1010's answer and the
-  exact mirror of `CompositeCannotGrow` one line above it in `refusal`. One direction of a movement
-  binding is one part of one binding, so emptying it alone has nothing to write:
-  `DirectionalButtons` holds four controls and no absence. The alternative — `Option<ButtonControl>`
-  through the composite types — is a change to the *binding* model reaching the per-tick evaluator,
-  for a partly-unbound composite nothing wants. Rejected rather than deferred: a direction that was
-  never independently bound is not independently unbindable.
-- **D48's three slot cases become four**, and D29 gains the empty slot.
-- **Not doing: a per-slot reset.** `reset` is per row, and whether "restore just this cell" means
-  the declared control or an empty one is a question no screen in tree asks.
-- **Not doing: reaching a hole from a screen**, which is 118c. This chunk makes a gap representable
-  and keeps `for_slot`'s density rule, so the only way to make one is to clear a slot that was
-  filled.
-- **Verified by:** clearing Disasteroids' primary and keeping the secondary, saved and reloaded with
-  the gap intact; and a composite's other three directions surviving one of them being emptied.
-
-### 118c. A slot is addressed, not appended
-
-`CaptureSession::for_slot` stops refusing a slot past the end of the row, so a screen addresses the
-cell the player pressed and the row resizes to fit — assignment, the way a JavaScript array grows
-when you write to index four.
-
-- **The density rule was there to prevent holes**, and 118b makes them legal. Left alone it gives an
-  arbitrary answer: the secondary of an emptied two-cell row is refused because `1 > 0` while the
-  primary is allowed. Removing it leaves `for_slot` with one rule, the rebindable gate, and how far
-  a row may be addressed becomes the screen's column count.
-- **The app-side row edit goes with it.** `examples/capture.rs` writes a row with
-  `if slot < len { controls[slot] = c } else { controls.push(c) }`, which cannot make a gap; it has
-  to resize to `slot + 1` and fill the difference with empties. Disasteroids' screen writes rows the
-  same way and changes with it.
-- **`MaxSlots` becomes reachable from the capture path**, which it is not in 118a or 118b. One
-  capture into a high slot makes a long row with no file involved, so the claim that a capture
-  cannot exceed the ceiling — written in `MaxSlots`'s own doc and in TD9.1 — is revised, and the
-  ceiling gains a guard there. `session.slot >= limit` is the whole test, needing no lookup of the
-  row, so an `On<Add<CaptureSession>>` observer with a `warn_once` is the cheap shape.
-- **Bulk `"cleared"` in a file is new here.** Trailing empties are stripped and interior ones are
-  not, so a sparse assignment writes the word once per skipped slot. The format is unchanged and
-  118b already writes it singly; this is the first time it appears in a run, which is worth stating
-  rather than discovering in a settings file.
-- **Verified by:** a capture into Disasteroids' secondary on a row whose primary the player just
-  emptied, which 118b refuses and this chunk allows, saved and reloaded with the gap intact.
 
 ### 73. A key rendered through a catalogue
 

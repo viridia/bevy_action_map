@@ -161,10 +161,13 @@ fn begin(world: &mut World) {
 /// Every slot this walk offers for a row: the ones holding something, plus the next empty one where
 /// the row can take it.
 ///
-/// One empty slot and no more, which is the rule `CaptureSession::for_slot` enforces — a list whose
-/// *order* is what primary and secondary mean cannot have a hole in it. The exception is a row that
-/// is one direction of a composite: a second "forward" key is one part of a second set of four, so
-/// those rows grow only when the whole composite does and the walk stops at what they hold.
+/// One spare and no more is *this walk's* choice, not a rule the crate enforces — `for_slot` takes
+/// whatever slot number it is handed and grows the row to reach it, exactly as a settings screen
+/// with four columns would want. A console walk has no columns, so one at a time is what reads.
+///
+/// The exception is a row that is one direction of a composite: a second "forward" key is one part
+/// of a second set of four, so those rows grow only when the whole composite does and the walk
+/// stops at what they hold.
 fn slots(mapping: &mapping::ActionMapping) -> std::ops::Range<usize> {
     let filled = mapping.slots.len();
     0..if mapping.key.part() == BindingPart::Whole {
@@ -300,13 +303,15 @@ fn rebind(world: &mut World, control: Control) {
 
     // A row is written whole, so the slot-level edit — "put this in the secondary" — happens here,
     // against the list the row currently holds. The crate's unit is the row; the cell is the
-    // screen's.
+    // screen's. Assignment rather than appending: the cell the player pressed is the cell that gets
+    // the control, whether or not the row reaches that far yet. A row that does not is grown, and
+    // the slots skipped on the way stay empty — writing to the third cell of a one-control row
+    // gives a row of three with a blank in the middle, not a row of two.
     let mut controls = row.slots.clone();
-    if slot < controls.len() {
-        controls[slot] = Some(control);
-    } else {
-        controls.push(Some(control));
+    if slot >= controls.len() {
+        controls.resize(slot + 1, None);
     }
+    controls[slot] = Some(control);
 
     let mut chosen = world.remove_resource::<Chosen>().unwrap_or_default();
     chosen.0.bind(row.family, row.key, controls);

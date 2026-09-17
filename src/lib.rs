@@ -308,6 +308,7 @@ impl bevy_app::Plugin for ActionMapPlugin {
             bevy_app::PreUpdate,
             capture::run_captures.in_set(ActionMapSystems::Capture),
         );
+        app.add_observer(capture::warn_if_past_the_ceiling);
 
         // Not inside `evaluate_context`; see the system's own doc.
         #[cfg(feature = "gamepad")]

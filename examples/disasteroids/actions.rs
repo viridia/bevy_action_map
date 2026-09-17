@@ -93,6 +93,11 @@ pub struct Back;
 #[action(path = "disasteroids.confirm", output = bool, intent = Button, category = "disasteroids.menu")]
 pub struct Confirm;
 
+/// Empties the selected cell, leaving the cells after it where they are.
+#[derive(InputAction)]
+#[action(path = "disasteroids.clear", output = bool, intent = Button, category = "disasteroids.menu")]
+pub struct Clear;
+
 /// The context a living ship flies under.
 ///
 /// Fixed tick, because the ship integrates its own velocity and a frame-rate-dependent burn would
@@ -291,6 +296,13 @@ pub fn plugin(app: &mut App) {
         controls.bind::<Back>(KeyCode::Escape).press();
 
         controls.bind::<Confirm>(GamepadButton::West).press();
+
+        // A shoulder rather than a face button: all four faces are spoken for here — South presses
+        // what the selection is on, East backs out, West confirms and North closes the screen — and
+        // clearing a cell is rare enough to sit off to the side rather than displace one of them.
+        controls.bind::<Clear>(KeyCode::Delete).press();
+        controls.bind::<Clear>(KeyCode::Backspace).press();
+        controls.bind::<Clear>(GamepadButton::LeftTrigger).press();
 
         // Duplicated from `Shell` rather than reached through it, because `Shell` is exactly what
         // this context shadows while it is up — the inconsistency with `Pause`, which stays
