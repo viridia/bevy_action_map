@@ -655,8 +655,8 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
         let chord: alloc::vec::Vec<crate::binding::Control> = alloc::vec::Vec::new();
         let condition = crate::condition::describe(&binding.conditions);
 
-        // By part rather than by control, so that a composite answers once per direction and a
-        // stick answers once rather than twice — the same view the presentation model takes.
+        // By part rather than by control, so that a stick answers once rather than twice — the same
+        // view the presentation model takes.
         binding.input.for_each_part(|part, control| {
             prompts.push(BoundControl {
                 action,
@@ -666,7 +666,7 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
                 condition,
             });
         });
-        // Claims are by control, because taking a composite takes every control in it.
+        // Claims are by control, because taking a stick takes both of its axes.
         if binding.consume {
             binding
                 .input

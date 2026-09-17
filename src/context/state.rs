@@ -3122,9 +3122,10 @@ mod tests {
             + size_of_val(&*state.tunable_scratch)
             + size_of_val(state.dirty.as_slice());
 
-        // Three actions and seven bindings' worth of working memory. The bound is generous, and
-        // the point of it is the order of magnitude: a rollback window of sixty ticks over four
-        // players is kilobytes, not megabytes.
+        // Three actions and six bindings, four of them WASD, and none with a modifier, a condition
+        // or a press to remember. The bound is generous, and the point of it is the order of
+        // magnitude: a rollback window of sixty ticks over four players is kilobytes, not
+        // megabytes.
         assert!(
             bytes < 512,
             "a three-action context snapshots {bytes} bytes"

@@ -130,9 +130,10 @@ shapes can serve which intent, and a binding whose channel cannot serve its acti
 refused when the context is declared. The derive checks output against intent in a compile-time
 assertion.
 
-A directional **composite** — several controls arranged as one binding (TD8.1) — reports `Axis2` as
-four buttons read together; a gamepad stick's is the one exception, a single `Control::GamepadStick`
-reporting a position the same way `MouseMotion` reports a displacement.
+A directional **composite** is four buttons written as one `bind` call and declared as four bindings
+(TD8.1), each part reporting `Axis2` as the unit vector it pushes, which the fold of TD5.5 turns
+back into one direction. A gamepad stick is a single `Control::GamepadStick` reporting a position
+the same way `MouseMotion` reports a displacement.
 
 ### 3.2 Runtime values
 
@@ -193,7 +194,8 @@ and require-reset flags stay aligned across the swap. Only the scratch is rebuil
 
 **Diagnostics** are produced by a separate pass from compilation, so a rebinding UI can ask about
 bindings it has no intention of installing. `add_context` runs it first and refuses the context
-rather than compiling a plan that cannot work.
+rather than compiling a plan that cannot work. A composite's parts share every combinator, so a
+diagnostic repeated across the parts of one `bind` call is reported once.
 
 ```rust
 pub enum Severity { Error, Warning }
@@ -201,10 +203,11 @@ pub enum Severity { Error, Warning }
 pub enum DiagnosticKind {
     IntentMismatch { .. }, RateFromDelta { .. }, ChainedRescaling { .. },
     DuplicateBinding { .. }, ConsumeDisagreement { .. },
-    DuplicateMappingKey { .. }, RebindingDisagreement { .. }, MixedSchemeMapping,
+    DuplicateMappingKey { .. }, RebindingDisagreement { .. },
     ReservedAndMappable, FollowsNothing { .. }, FollowsUnlisted { .. },
     DuplicateClassBinding { .. }, DuplicateTunableKey { .. },
-    TunableShapeDisagreement { .. },
+    TunableShapeDisagreement { .. }, DeadZoneAtFullDeflection { .. },
+    BoundAndDelegated, CombinedWithoutBindings,
 }
 ```
 
@@ -392,7 +395,7 @@ State divides in two, and both halves are dense arrays of `Copy` types indexed b
 | | Holds | Belongs to |
 | --- | --- | --- |
 | `ActionState` | value, phase | the action |
-| `Scratch` | hold timers, tap counts, previous value, flags | the binding's conditions and modifiers |
+| `Scratch` | hold timers, tap counts, previous value, flags | the binding's conditions and modifiers, and a `Button` action's derived press |
 
 ```rust
 pub struct Scratch {
@@ -666,15 +669,19 @@ is lowercased on the way in, since a capital is shift's doing rather than a key 
 folding aside, nothing about a logical control is layout-aware at read time: the frame already
 carries `logical_key`, and this reads it.
 
-A `BindingInput` is one control or an arrangement of them. Composites carry a `BindingPart` naming
-which piece of the whole a control drives:
+A `BindingInput` is what one binding reads, and a `BindingPart` names which piece of an arrangement
+it is:
 
 ```rust
 pub enum BindingPart { Whole, Negative, Positive, Up, Down, Left, Right }
 ```
 
-`AxisButtons` makes a bipolar axis from two buttons; `DirectionalButtons` makes a direction from
-four (`DirectionalButtons::wasd()` is the named case); `Stick` and `MouseMove` are the analog
+`AxisButtons` makes a bipolar axis from two buttons and `DirectionalButtons` a direction from four
+(`DirectionalButtons::wasd()` is the named case), but neither reaches the plan. They are authoring
+shorthand: `IntoBindingInput` yields one input per value, so `bind` declares one binding per part,
+each a `BindingInput::Part(ButtonControl, BindingPart)` that contributes its part's unit vector
+while held. Every combinator chained onto that `bind` applies to each part, and a tunable declared
+there is one tunable, because the parts share its key. `Stick` and `MouseMove` are the analog
 inputs, and both read as `BindingPart::Whole` — a stick has no part a player rebinds one of.
 `GamepadStick` is `Control`'s only member naming what another one of its members names in part: a
 whole stick, for presentation, override application and capture, reporting `ChannelShape::Axis2` the
@@ -796,8 +803,8 @@ otherwise:
 | `follow::<F, L>()` | on `L`'s row, as a subordinate line | with `L`'s row |
 
 `mappable` takes no arguments. The parts of a composite name themselves, so a key derives as
-`gameplay.move.up`; the family is inferred from the controls, and a binding whose parts span both
-families is refused. `mappable_as` replaces the derived key where one is needed.
+`gameplay.move.up`, and the family is inferred from the control. `mappable_as` replaces the derived
+key where one is needed.
 
 **A row has no declared width.** `slots` is however many controls the row holds, and how many cells
 to draw beside them is the screen's own decision — a table with a spare column draws one more than
@@ -816,10 +823,6 @@ Because a binding list records what is bound and never in which column, a gap ca
 re-deriving rows from the rewritten bindings. `rewrite` therefore carries the accepted override's
 own list through to the presentation rows — the derivation stays the authority on *which* controls,
 and the override on where the holes are.
-
-One direction of a composite cannot be emptied alone, for the reason it cannot be grown alone: the
-four rows are four parts of one binding, and taking that binding away would empty all four. The
-refusal is `CompositeCannotEmpty`, the mirror of `CompositeCannotGrow`.
 
 **`MaxSlots` is the one length the crate has an opinion about**, and only on the apply path: a game
 that reads override sets it did not write inserts the resource, and a row naming more controls than
@@ -1000,11 +1003,10 @@ what was in flight and re-arms require-reset. Followers riding a row that change
 `InputContextPlan<C>` is left untouched, so the next patch's revised defaults still reach a player
 who never touched that row.
 
-Three slot cases: a slot the defaults fill has its binding's input rewritten; a slot they left
-empty is filled by *copying* the binding beside it, so a secondary carries the same modifiers and
-conditions as the primary; and a slot the override no longer has takes its binding away. Copying
-only works where a binding reads one control, so a row that is one part of a composite is refused a
-slot the defaults did not ship.
+Three slot cases: a slot the defaults fill has its binding's input rewritten; a slot they left empty
+is filled by *copying* the binding beside it, so a secondary carries the same modifiers and
+conditions as the primary; and a slot the override no longer has takes its binding away. A row that
+is one direction of a composite is no exception, since that direction is a binding of its own.
 
 **Overrides do not compose.** Each apply starts from the pristine declaration, so the argument must
 be the *whole* working copy — a preset's rows and any manual captures together. A smaller second
@@ -1017,9 +1019,8 @@ apply and persist independently, with the world-wide plan untouched.
 
 ```rust
 pub enum OverrideProblemKind {
-    NoSuchMapping, NotRebindable, WrongScheme { .. }, WrongShape { .. },
-    Reserved { .. }, TooManyControls { .. }, CompositeCannotGrow, CompositeCannotEmpty,
-    UnknownControl { .. },
+    NoSuchMapping, NotRebindable, WrongFamily { .. }, WrongShape { .. },
+    Reserved { .. }, TooManyControls { .. }, UnknownControl { .. },
 }
 ```
 

@@ -44,6 +44,8 @@ pub(crate) struct BindingSpec {
     pub(crate) tunable: Option<TunableDecl>,
     // Whether the controls this binding reads are withheld from capture across their family.
     pub(crate) reserved: bool,
+    // Set on every part of a composite after the first, which were declared by the same `bind`.
+    pub(crate) continues_declaration: bool,
     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
     pub(crate) chord: Vec<ButtonControl>,
 }
@@ -136,9 +138,11 @@ impl MappingDecl {
 }
 
 /// Configures the binding that was just declared, one chained call at a time.
+///
+/// A composite declares one binding per part, and each call here applies to all of them.
 pub struct BindingBuilder<'a, C> {
     builder: &'a mut InputContextBuilder<C>,
-    index: usize,
+    indices: core::ops::Range<usize>,
 }
 
 /// Configures the class binding that was just declared, one chained call at a time.
@@ -163,12 +167,20 @@ impl<C> ClassBindingBuilder<'_, C> {
 }
 
 impl<'a, C> BindingBuilder<'a, C> {
+    fn bindings(&mut self) -> &mut [BindingSpec] {
+        &mut self.builder.bindings[self.indices.clone()]
+    }
+
     fn push_modifier(&mut self, modifier: BindingModifier) {
-        self.builder.bindings[self.index].modifiers.push(modifier);
+        for binding in self.bindings() {
+            binding.modifiers.push(modifier.clone());
+        }
     }
 
     fn push_condition(&mut self, condition: BindingCondition) {
-        self.builder.bindings[self.index].conditions.push(condition);
+        for binding in self.bindings() {
+            binding.conditions.push(condition.clone());
+        }
     }
 
     /// Fires on the press rather than for as long as the control is held.
@@ -279,8 +291,11 @@ impl<'a, C> BindingBuilder<'a, C> {
     /// not also trigger a plain `S` binding, and `Ctrl+Shift+S` does not trigger either of the
     /// other two. Nothing has to be declared for that; it follows from the lengths.
     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-    pub fn with(self, control: impl Into<ButtonControl>) -> Self {
-        self.builder.bindings[self.index].chord.push(control.into());
+    pub fn with(mut self, control: impl Into<ButtonControl>) -> Self {
+        let control = control.into();
+        for binding in self.bindings() {
+            binding.chord.push(control);
+        }
         self
     }
 
@@ -296,8 +311,10 @@ impl<'a, C> BindingBuilder<'a, C> {
     ///
     /// An action can ask for this on all of its bindings at once with `#[action(consume)]`, which
     /// is usually what a menu action wants. This is the same switch, one binding at a time.
-    pub fn consume(self) -> Self {
-        self.builder.bindings[self.index].consume = true;
+    pub fn consume(mut self) -> Self {
+        for binding in self.bindings() {
+            binding.consume = true;
+        }
         self
     }
 
@@ -306,8 +323,10 @@ impl<'a, C> BindingBuilder<'a, C> {
     /// Only needed to make an exception of one binding on an action declared with
     /// `#[action(consume)]` — say a menu action that claims its keyboard key but shares the
     /// gamepad button with the game behind it.
-    pub fn without_consuming(self) -> Self {
-        self.builder.bindings[self.index].consume = false;
+    pub fn without_consuming(mut self) -> Self {
+        for binding in self.bindings() {
+            binding.consume = false;
+        }
         self
     }
 
@@ -362,15 +381,17 @@ impl<'a, C> BindingBuilder<'a, C> {
     ///
     /// If the same binding was also declared `mappable`. One binding cannot be both hidden from the
     /// player and rebindable by them.
-    pub fn private(self) -> Self {
-        assert!(
-            !self.builder.bindings[self.index]
-                .mapping
-                .is_some_and(|decl| decl.rebind_policy.is_rebindable()),
-            "a binding cannot be both `mappable` and `private`: one says the player may change it, \
-             the other says they may not see it"
-        );
-        self.builder.bindings[self.index].mapping = None;
+    pub fn private(mut self) -> Self {
+        for binding in self.bindings() {
+            assert!(
+                !binding
+                    .mapping
+                    .is_some_and(|decl| decl.rebind_policy.is_rebindable()),
+                "a binding cannot be both `mappable` and `private`: one says the player may change \
+                 it, the other says they may not see it"
+            );
+            binding.mapping = None;
+        }
         self
     }
 
@@ -384,26 +405,28 @@ impl<'a, C> BindingBuilder<'a, C> {
         self.declare_mapping(Some(key))
     }
 
-    fn declare_mapping(self, prefix: Option<&'static str>) -> Self {
-        let existing = self.builder.bindings[self.index].mapping;
-        assert!(
-            self.builder.bindings[self.index].follows.is_none(),
-            "a binding cannot be both `follows` and `mappable`: one rides another action's mapping, \
-             the other gives it one of its own"
-        );
-        assert!(
-            existing.is_some(),
-            "a binding cannot be both `private` and `mappable`: one says the player may not see it, \
-             the other says they may change it"
-        );
-        self.builder.bindings[self.index].mapping = Some(MappingDecl {
-            // A later call names the mapping; `mappable_as(..).mappable()` must not silently drop
-            // the name, and neither order should surprise.
-            prefix: prefix.or(existing.and_then(|decl| decl.prefix)),
-            // Every one of this method's callers is a `mappable*`, so reaching here is the author
-            // asking for the upgrade from the listed-but-fixed default.
-            rebind_policy: crate::mapping::RebindPolicy::Here,
-        });
+    fn declare_mapping(mut self, prefix: Option<&'static str>) -> Self {
+        for binding in self.bindings() {
+            let existing = binding.mapping;
+            assert!(
+                binding.follows.is_none(),
+                "a binding cannot be both `follows` and `mappable`: one rides another action's \
+                 mapping, the other gives it one of its own"
+            );
+            assert!(
+                existing.is_some(),
+                "a binding cannot be both `private` and `mappable`: one says the player may not see \
+                 it, the other says they may change it"
+            );
+            binding.mapping = Some(MappingDecl {
+                // A later call names the mapping; `mappable_as(..).mappable()` must not silently
+                // drop the name, and neither order should surprise.
+                prefix: prefix.or(existing.and_then(|decl| decl.prefix)),
+                // Every one of this method's callers is a `mappable*`, so reaching here is the
+                // author asking for the upgrade from the listed-but-fixed default.
+                rebind_policy: crate::mapping::RebindPolicy::Here,
+            });
+        }
         self
     }
 
@@ -435,8 +458,10 @@ impl<'a, C> BindingBuilder<'a, C> {
     ///
     /// Reserving and [`mappable`](Self::mappable) contradict each other, and declaring both is
     /// refused when the context is declared.
-    pub fn reserved(self) -> Self {
-        self.builder.bindings[self.index].reserved = true;
+    pub fn reserved(mut self) -> Self {
+        for binding in self.bindings() {
+            binding.reserved = true;
+        }
         self
     }
 
@@ -475,7 +500,8 @@ impl<'a, C> BindingBuilder<'a, C> {
         key: &'static str,
         range: core::ops::RangeInclusive<f32>,
     ) -> Self {
-        let value = match self.builder.bindings[self.index].modifiers.last() {
+        // Every part was given the same chain, so the first speaks for them all.
+        let value = match self.builder.bindings[self.indices.start].modifiers.last() {
             Some(BindingModifier::DeadZone(dead_zone)) => dead_zone.lower,
             _ => panic!(
                 "`tunable_dead_zone` needs a `dead_zone` declared first on the same binding, so \
@@ -492,17 +518,19 @@ impl<'a, C> BindingBuilder<'a, C> {
         )
     }
 
-    fn declare_tunable(self, key: &'static str, default: crate::mapping::TunableValue) -> Self {
-        assert!(
-            self.builder.bindings[self.index].tunable.is_none(),
-            "a binding may declare at most one tunable"
-        );
-        let modifier_index = self.builder.bindings[self.index].modifiers.len() - 1;
-        self.builder.bindings[self.index].tunable = Some(TunableDecl {
-            key,
-            modifier_index,
-            default,
-        });
+    // A composite's parts all declare the same key, which makes them one tunable to the player.
+    fn declare_tunable(mut self, key: &'static str, default: crate::mapping::TunableValue) -> Self {
+        for binding in self.bindings() {
+            assert!(
+                binding.tunable.is_none(),
+                "a binding may declare at most one tunable"
+            );
+            binding.tunable = Some(TunableDecl {
+                key,
+                modifier_index: binding.modifiers.len() - 1,
+                default,
+            });
+        }
         self
     }
 
@@ -735,7 +763,7 @@ impl<C> Default for InputContextBuilder<C> {
 }
 
 impl<C> InputContextBuilder<C> {
-    fn push_binding<A: InputAction>(&mut self, input: BindingInput) -> BindingBuilder<'_, C> {
+    fn push_binding<A: InputAction>(&mut self, input: BindingInput) {
         self.bindings.push(BindingSpec {
             action: A::id(),
             intent: A::INTENT,
@@ -751,14 +779,10 @@ impl<C> InputContextBuilder<C> {
             follows: None,
             tunable: None,
             reserved: false,
+            continues_declaration: false,
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
             chord: Vec::new(),
         });
-        let index = self.bindings.len() - 1;
-        BindingBuilder {
-            builder: self,
-            index,
-        }
     }
 
     /// Binds an action to an input value.
@@ -790,7 +814,18 @@ impl<C> InputContextBuilder<C> {
     /// context.bind::<Look>(MouseMove);
     /// ```
     pub fn bind<A: InputAction>(&mut self, input: impl IntoBindingInput) -> BindingBuilder<'_, C> {
-        self.push_binding::<A>(input.into_binding_input())
+        let start = self.bindings.len();
+        for input in input.into_binding_inputs() {
+            self.push_binding::<A>(input);
+        }
+        let indices = start..self.bindings.len();
+        for binding in &mut self.bindings[start + 1..] {
+            binding.continues_declaration = true;
+        }
+        BindingBuilder {
+            builder: self,
+            indices,
+        }
     }
 
     /// Declares `Follower` as riding every one of `Leader`'s bindings, one for one.
@@ -840,13 +875,17 @@ impl<C> InputContextBuilder<C> {
             Leader::PATH
         );
         for input in inputs {
-            let binding = self.push_binding::<Follower>(input);
-            binding.builder.bindings[binding.index].mapping = None;
-            binding.builder.bindings[binding.index].follows = Some(FollowsDecl {
+            self.push_binding::<Follower>(input);
+            let index = self.bindings.len() - 1;
+            self.bindings[index].mapping = None;
+            self.bindings[index].follows = Some(FollowsDecl {
                 action: Leader::id(),
                 path: Leader::PATH,
             });
-            configure(binding);
+            configure(BindingBuilder {
+                builder: self,
+                indices: index..index + 1,
+            });
         }
     }
 
@@ -864,7 +903,7 @@ impl<C> InputContextBuilder<C> {
     /// [`Button`](crate::action::ActionIntent::Button), since the same control reads as a
     /// continuous fraction for anything else (a trigger driving an analog action), and toggling
     /// that would flatten it to on/off. A stick, an axis, mouse motion, or a composite are never
-    /// eligible — there is no single press for any of them to toggle. Every eligible binding shares
+    /// eligible, because none of them reports a plain press to toggle. Every eligible binding shares
     /// one latch: press any of them, release, press another, and the action reads one consistent
     /// state throughout — never one control turning it on while a different one turns it back off.
     ///
@@ -953,8 +992,8 @@ impl<C> InputContextBuilder<C> {
     ///
     /// Calling this again for the same action adds to what was declared before. It may come before
     /// or after the bindings. An action declared here must have at least one binding in the same
-    /// context, and one handed to [`delegate`](Self::delegate) cannot have any, so both are
-    /// refused when the context is declared.
+    /// context, and one handed to [`delegate`](Self::delegate) cannot have any, so both are refused
+    /// when the context is declared.
     pub fn combined<A: InputAction>(&mut self) -> CombinedBuilder<'_, C> {
         let index = match self.combined.iter().position(|spec| spec.action == A::id()) {
             Some(index) => index,
@@ -1309,6 +1348,64 @@ mod tests {
                 max: 0.5,
             }
         );
+    }
+
+    /// A composite is one binding per part, and whatever is chained onto it reaches every one.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_composite_declares_a_binding_per_part_and_configures_each() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder
+            .bind::<DummyVec2>(DirectionalButtons::wasd())
+            .with(KeyCode::ShiftLeft)
+            .press()
+            .consume()
+            .mappable();
+
+        let (bindings, ..) = builder.finish();
+        let parts: Vec<_> = bindings.iter().map(|binding| binding.input).collect();
+        assert_eq!(
+            parts,
+            [
+                BindingInput::Part(ButtonControl::PhysicalKey(KeyCode::KeyW), BindingPart::Up),
+                BindingInput::Part(ButtonControl::PhysicalKey(KeyCode::KeyS), BindingPart::Down),
+                BindingInput::Part(ButtonControl::PhysicalKey(KeyCode::KeyA), BindingPart::Left),
+                BindingInput::Part(
+                    ButtonControl::PhysicalKey(KeyCode::KeyD),
+                    BindingPart::Right
+                ),
+            ]
+        );
+        for binding in &bindings {
+            assert_eq!(
+                binding.chord,
+                [ButtonControl::PhysicalKey(KeyCode::ShiftLeft)]
+            );
+            assert_eq!(binding.conditions.len(), 1);
+            assert!(binding.consume);
+            assert!(
+                binding
+                    .mapping
+                    .is_some_and(|decl| decl.rebind_policy.is_rebindable())
+            );
+        }
+    }
+
+    /// Declared once on a composite, a tunable is one setting for the player, shared by the parts.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_tunable_on_a_composite_is_one_tunable() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder
+            .bind::<DummyVec2>(DirectionalButtons::wasd())
+            .dead_zone(DeadZone::radial(0.2))
+            .tunable_dead_zone("tests.keys_deadzone", 0.0..=0.5);
+        assert_eq!(builder.diagnostics(), &[]);
+
+        let (bindings, ..) = builder.finish();
+        let tunables = crate::mapping::tunables_of(&bindings, "tests");
+        assert_eq!(tunables.len(), 1);
+        assert_eq!(tunables[0].key, "tests.keys_deadzone");
     }
 
     #[cfg(feature = "keyboard")]

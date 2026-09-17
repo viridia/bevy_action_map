@@ -77,6 +77,10 @@ impl From<GamepadButton> for ButtonControl {
 ///
 /// Note what the second line is doing: a stick axis already reports signed, so it needs no
 /// composite. Both bindings feed the same action, and the player may use either.
+///
+/// Binding a composite declares one binding per button, and anything chained onto the `bind` call
+/// applies to each of them. That is what lets a player rebind or clear one half of the axis on its
+/// own.
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AxisButtons {
@@ -129,6 +133,10 @@ impl AxisButtons {
 ///
 /// The parts are named for the direction each one pushes rather than for its position on a device,
 /// which is what a rebinding screen needs in order to say "Move Forward" next to one of them.
+///
+/// Binding a composite declares one binding per button, and anything chained onto the `bind` call
+/// applies to each of them. Each direction is then a binding of its own, which a player can rebind,
+/// give a second key, or clear without touching the other three.
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DirectionalButtons {
@@ -448,8 +456,8 @@ fn set_button(part: &mut ButtonControl, control: Control) -> bool {
 
 /// The input that reads exactly this one control.
 ///
-/// Every control is an input on its own; the composites are the inputs that are *not* reachable
-/// this way, since no single control carries a direction or a signed axis.
+/// Every control is an input on its own; a composite's parts are the inputs that are *not*
+/// reachable this way, since a part also carries the direction it pushes.
 impl From<Control> for BindingInput {
     fn from(control: Control) -> Self {
         match control {
@@ -482,12 +490,10 @@ pub enum BindingInput {
     /// A mouse button.
     #[cfg(feature = "mouse")]
     MouseButton(MouseButton),
-    /// A two-button signed axis composite.
+    /// One part of an [`AxisButtons`] or [`DirectionalButtons`] composite: a button that, while
+    /// held, pushes the way its part names. Never [`BindingPart::Whole`].
     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-    Axis1(AxisButtons),
-    /// A four-button directional composite.
-    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-    Directional2(DirectionalButtons),
+    Part(ButtonControl, BindingPart),
     /// Mouse motion.
     MouseMotion,
     /// A gamepad button.
@@ -504,11 +510,9 @@ pub enum BindingInput {
 impl BindingInput {
     /// Calls `visit` with every physical control this input reads.
     ///
-    /// One for a plain control, four for a directional composite, two for a stick — its two axes,
-    /// never [`Control::GamepadStick`] itself, so that a plain binding on one axis and a binding on
-    /// the whole stick still contest the same control. This is what consumption and chord clashes
-    /// are recorded against, so that taking a composite takes its parts rather than an arrangement
-    /// nothing else can name.
+    /// One for a plain control, two for a stick — its two axes, never [`Control::GamepadStick`]
+    /// itself, so that a plain binding on one axis and a binding on the whole stick still contest
+    /// the same control. This is what consumption and chord clashes are recorded against.
     ///
     /// Allocation-free, because it runs per binding per tick. Use [`controls`](Self::controls)
     /// where a collection is more convenient than a callback.
@@ -521,17 +525,7 @@ impl BindingInput {
             #[cfg(feature = "mouse")]
             Self::MouseButton(button) => visit(Control::MouseButton(*button)),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            Self::Axis1(parts) => {
-                visit(parts.negative.into());
-                visit(parts.positive.into());
-            }
-            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            Self::Directional2(parts) => {
-                visit(parts.up.into());
-                visit(parts.down.into());
-                visit(parts.left.into());
-                visit(parts.right.into());
-            }
+            Self::Part(button, _) => visit((*button).into()),
             Self::MouseMotion => visit(Control::MouseMotion),
             #[cfg(feature = "gamepad")]
             Self::GamepadButton(button) => visit(Control::GamepadButton(*button)),
@@ -559,17 +553,7 @@ impl BindingInput {
             #[cfg(feature = "mouse")]
             Self::MouseButton(button) => visit(BindingPart::Whole, Control::MouseButton(*button)),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            Self::Axis1(parts) => {
-                visit(BindingPart::Negative, parts.negative.into());
-                visit(BindingPart::Positive, parts.positive.into());
-            }
-            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            Self::Directional2(parts) => {
-                visit(BindingPart::Up, parts.up.into());
-                visit(BindingPart::Down, parts.down.into());
-                visit(BindingPart::Left, parts.left.into());
-                visit(BindingPart::Right, parts.right.into());
-            }
+            Self::Part(button, part) => visit(*part, (*button).into()),
             // A stick and a mouse have no parts a player would rebind one of. They are one thing
             // as far as the presentation model is concerned, and what they get instead of
             // per-part rebinding is a tunable.
@@ -613,19 +597,7 @@ impl BindingInput {
                 BindingPart::Whole,
             ) => self.replace_whole(control),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            (Self::Axis1(parts), BindingPart::Negative) => set_button(&mut parts.negative, control),
-            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            (Self::Axis1(parts), BindingPart::Positive) => set_button(&mut parts.positive, control),
-            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            (Self::Directional2(parts), BindingPart::Up) => set_button(&mut parts.up, control),
-            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            (Self::Directional2(parts), BindingPart::Down) => set_button(&mut parts.down, control),
-            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            (Self::Directional2(parts), BindingPart::Left) => set_button(&mut parts.left, control),
-            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            (Self::Directional2(parts), BindingPart::Right) => {
-                set_button(&mut parts.right, control)
-            }
+            (Self::Part(button, held), part) if *held == part => set_button(button, control),
             _ => false,
         }
     }
@@ -654,11 +626,11 @@ impl BindingInput {
             Self::Button(_) | Self::LogicalKey(_) => ChannelShape::Button,
             #[cfg(feature = "mouse")]
             Self::MouseButton(_) => ChannelShape::Button,
-            // Buttons, but an axis and a direction by the time anything binds to them.
+            // A button, but an axis or a direction by the time anything binds to it.
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            Self::Axis1(_) => ChannelShape::Axis1,
+            Self::Part(_, BindingPart::Negative | BindingPart::Positive) => ChannelShape::Axis1,
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            Self::Directional2(_) => ChannelShape::Axis2,
+            Self::Part(_, _) => ChannelShape::Axis2,
             Self::MouseMotion => ChannelShape::Delta2,
             #[cfg(feature = "gamepad")]
             Self::GamepadButton(_) => ChannelShape::Button,
@@ -713,69 +685,98 @@ impl Stick {
 /// declared. This is what lets one trigger drive a button action in one game and an analog action
 /// in another.
 pub trait IntoBindingInput {
+    /// The bindings this value declares: one for a control, one per part for a composite.
+    type Inputs: IntoIterator<Item = BindingInput>;
+
     /// Converts this value into the internal binding representation.
-    fn into_binding_input(self) -> BindingInput;
+    fn into_binding_inputs(self) -> Self::Inputs;
 }
 
 #[cfg(feature = "keyboard")]
 impl IntoBindingInput for KeyCode {
-    fn into_binding_input(self) -> BindingInput {
-        BindingInput::Button(self)
+    type Inputs = [BindingInput; 1];
+
+    fn into_binding_inputs(self) -> Self::Inputs {
+        [BindingInput::Button(self)]
     }
 }
 
 #[cfg(feature = "keyboard")]
 impl IntoBindingInput for LogicalKey {
-    fn into_binding_input(self) -> BindingInput {
-        BindingInput::LogicalKey(self.character())
+    type Inputs = [BindingInput; 1];
+
+    fn into_binding_inputs(self) -> Self::Inputs {
+        [BindingInput::LogicalKey(self.character())]
     }
 }
 
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 impl IntoBindingInput for AxisButtons {
-    fn into_binding_input(self) -> BindingInput {
-        BindingInput::Axis1(self)
+    type Inputs = [BindingInput; 2];
+
+    fn into_binding_inputs(self) -> Self::Inputs {
+        [
+            BindingInput::Part(self.negative, BindingPart::Negative),
+            BindingInput::Part(self.positive, BindingPart::Positive),
+        ]
     }
 }
 
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 impl IntoBindingInput for DirectionalButtons {
-    fn into_binding_input(self) -> BindingInput {
-        BindingInput::Directional2(self)
+    type Inputs = [BindingInput; 4];
+
+    fn into_binding_inputs(self) -> Self::Inputs {
+        [
+            BindingInput::Part(self.up, BindingPart::Up),
+            BindingInput::Part(self.down, BindingPart::Down),
+            BindingInput::Part(self.left, BindingPart::Left),
+            BindingInput::Part(self.right, BindingPart::Right),
+        ]
     }
 }
 
 impl IntoBindingInput for MouseMove {
-    fn into_binding_input(self) -> BindingInput {
-        BindingInput::MouseMotion
+    type Inputs = [BindingInput; 1];
+
+    fn into_binding_inputs(self) -> Self::Inputs {
+        [BindingInput::MouseMotion]
     }
 }
 
 #[cfg(feature = "mouse")]
 impl IntoBindingInput for MouseButton {
-    fn into_binding_input(self) -> BindingInput {
-        BindingInput::MouseButton(self)
+    type Inputs = [BindingInput; 1];
+
+    fn into_binding_inputs(self) -> Self::Inputs {
+        [BindingInput::MouseButton(self)]
     }
 }
 
 #[cfg(feature = "gamepad")]
 impl IntoBindingInput for GamepadButton {
-    fn into_binding_input(self) -> BindingInput {
-        BindingInput::GamepadButton(self)
+    type Inputs = [BindingInput; 1];
+
+    fn into_binding_inputs(self) -> Self::Inputs {
+        [BindingInput::GamepadButton(self)]
     }
 }
 
 #[cfg(feature = "gamepad")]
 impl IntoBindingInput for GamepadAxis {
-    fn into_binding_input(self) -> BindingInput {
-        BindingInput::GamepadAxis(self)
+    type Inputs = [BindingInput; 1];
+
+    fn into_binding_inputs(self) -> Self::Inputs {
+        [BindingInput::GamepadAxis(self)]
     }
 }
 
 #[cfg(feature = "gamepad")]
 impl IntoBindingInput for Stick {
-    fn into_binding_input(self) -> BindingInput {
-        BindingInput::GamepadStick(self)
+    type Inputs = [BindingInput; 1];
+
+    fn into_binding_inputs(self) -> Self::Inputs {
+        [BindingInput::GamepadStick(self)]
     }
 }
 
@@ -864,10 +865,10 @@ mod tests {
                 BindingInput::Button(KeyCode::Space).channel_shape(),
                 ChannelShape::Button
             );
-            assert_eq!(
-                BindingInput::Directional2(DirectionalButtons::wasd()).channel_shape(),
-                ChannelShape::Axis2
-            );
+            let [up, _, _, _] = DirectionalButtons::wasd().into_binding_inputs();
+            assert_eq!(up.channel_shape(), ChannelShape::Axis2);
+            let [negative, _] = AxisButtons::ad().into_binding_inputs();
+            assert_eq!(negative.channel_shape(), ChannelShape::Axis1);
         }
 
         assert_eq!(
@@ -913,7 +914,7 @@ mod tests {
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_rebind_overwrites_a_logical_binding_with_the_position_captured() {
-        let mut input = LogicalKey('z').into_binding_input();
+        let [mut input] = LogicalKey('z').into_binding_inputs();
         assert_eq!(input.channel_shape(), ChannelShape::Button);
         assert_eq!(input.controls(), [Control::LogicalKey('z')]);
 
@@ -932,8 +933,8 @@ mod tests {
     fn a_logical_key_is_the_same_key_in_either_case() {
         assert_eq!(LogicalKey('Z').character(), 'z');
         assert_eq!(
-            LogicalKey('Z').into_binding_input(),
-            LogicalKey('z').into_binding_input()
+            LogicalKey('Z').into_binding_inputs(),
+            LogicalKey('z').into_binding_inputs()
         );
         // Left alone where lowercasing would not be one-for-one.
         assert_eq!(LogicalKey('İ').character(), 'İ');

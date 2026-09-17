@@ -623,6 +623,10 @@ confirm is still true.
 - **`MappedPart` caches two facts it could derive.** `family` is always `control.family()` and `key`
   is always `MappingKey::new(prefix_of(binding), part)` — which `mappings_of`'s follower pass
   recomputes from the same inputs twenty lines later rather than reading.
+- **`BindingInput::for_each_part` always visits exactly once.** A composite expands into a binding
+  per part, so every input is one part holding one control, and the callback, `MappedPart` being
+  collected per part, and `binding_family` returning an `Option` all describe more than one. The
+  method is public, so narrowing it to a single `(BindingPart, Control)` is a breaking change.
 
 Unrouted.
 

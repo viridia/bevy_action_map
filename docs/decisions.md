@@ -385,8 +385,8 @@ Each expands at declaration into one binding per part, and the part is both the 
 the direction it contributes. `Analog1` and `Directional2` fold per axis, as the strongest positive
 contribution plus the strongest negative one, which reverses D15 for those two intents; `Button`
 keeps strongest-wins and `Delta2` still sums. A stage after the fold, declared once per action, is
-where anything that shapes the combined value goes. Chunks 125–127 build it; chunk 126 is the fold,
-and until 127 lands D48 describes the composite.
+where anything that shapes the combined value goes. Chunks 125–127 built it: 125 the stage, 126 the
+fold, and 127 the expansion.
 
 **Rules out.** A composite the evaluator or the override path can see; a direction held as `negate`
 and `swizzle` modifiers, which is BEI's form; and a clamp built into the fold.
@@ -1197,10 +1197,9 @@ the swap, so only the scratch is rebuilt.
 slot they left empty is filled by *copying* the binding beside it, so a secondary carries the same
 modifiers and conditions as the primary rather than arriving bare. A slot the override no longer has
 takes its binding away, and so does a slot the override *emptied* while a later one still holds
-something. Copying only works where a binding reads one control — copy a composite and its other
-three directions land in their own rows a second time — so a row that is one part of a composite is
-refused a slot the defaults did not ship, and refused an emptying for the mirror reason: the binding
-that would be taken away is the other three directions too.
+something. Copying only works where a binding reads one control — copy a binding that read four and
+its other three directions would land in their own rows a second time — which is one reason a
+composite expands into a binding per part (D76).
 
 **A gap survives the rewrite only because it is carried, not derived.** Rows are otherwise
 re-derived from the rewritten bindings so that the two cannot disagree, but a binding list says what

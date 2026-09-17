@@ -49,8 +49,7 @@ impl BindingDiagnostic {
             DiagnosticKind::IntentMismatch { .. }
             | DiagnosticKind::RateFromDelta { .. }
             | DiagnosticKind::ChainedRescaling { .. } => Severity::Error,
-            DiagnosticKind::MixedFamilyMapping
-            | DiagnosticKind::DuplicateMappingKey { .. }
+            DiagnosticKind::DuplicateMappingKey { .. }
             | DiagnosticKind::RebindingDisagreement { .. }
             | DiagnosticKind::ReservedAndMappable
             | DiagnosticKind::FollowsNothing { .. }
@@ -119,8 +118,6 @@ pub enum DiagnosticKind {
         /// The name they share.
         key: crate::mapping::MappingKey,
     },
-    /// A mappable binding reads controls from more than one kind of device.
-    MixedFamilyMapping,
     /// A binding is declared both rebindable and reserved, which cannot both be true.
     ReservedAndMappable,
     /// A binding follows an action that reads nothing like it in this context.
@@ -210,13 +207,6 @@ impl core::fmt::Display for BindingDiagnostic {
                  both; say the same thing on every binding that feeds it",
                 self.action
             ),
-            DiagnosticKind::MixedFamilyMapping => write!(
-                f,
-                "`{}` is mappable but reads controls from more than one kind of device, so there \
-                 is no one device family to rebind it in. Bind the devices separately, one \
-                 mappable binding each",
-                self.action
-            ),
             DiagnosticKind::ReservedAndMappable => write!(
                 f,
                 "`{}` is declared both mappable and reserved. Reserving withholds a control from \
@@ -267,7 +257,7 @@ impl core::fmt::Display for BindingDiagnostic {
                 f,
                 "`{}` declares a deadzone at {lower}, at or beyond full deflection. Ordinary \
                  input never escapes it — only a control whose magnitude overshoots 1.0, such as \
-                 a diagonal directional composite, produces anything",
+                 mouse motion, produces anything",
                 self.action
             ),
             DiagnosticKind::BoundAndDelegated => write!(
@@ -351,8 +341,14 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
         (crate::device::DeviceFamily, &'static str),
         (ActionId, crate::mapping::TunableValue),
     > = alloc::collections::BTreeMap::new();
+    // Where the diagnostics of the current `bind` call begin.
+    let mut declaration_start = 0;
 
     for (index, binding) in bindings.iter().enumerate() {
+        let before = found.len();
+        if !binding.continues_declaration {
+            declaration_start = before;
+        }
         let at = |kind| BindingDiagnostic {
             action: binding.path,
             kind,
@@ -423,8 +419,6 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
         if let Some(declaration) = binding.mapping {
             let prefix = declaration.prefix.unwrap_or(binding.path);
             let rebindable = declaration.rebind_policy.is_rebindable();
-            let mut family = None;
-            let mut mixed = false;
             binding.input.for_each_part(|part, control| {
                 let key = crate::mapping::MappingKey::new(prefix, part);
                 let (claimant, claimed_as) = keys
@@ -441,17 +435,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
                 } else if *claimed_as != declaration.rebind_policy {
                     found.push(at(DiagnosticKind::RebindingDisagreement { key }));
                 }
-                match family {
-                    Some(seen) if seen != control.family() => mixed = true,
-                    Some(_) => {}
-                    None => family = Some(control.family()),
-                }
             });
-            // A mapping the player cannot change needs no one family to change it *in*; it is a row
-            // in whichever table its first control belongs to, which is odd but harmless.
-            if mixed && rebindable {
-                found.push(at(DiagnosticKind::MixedFamilyMapping));
-            }
         }
 
         if let Some(decl) = &binding.tunable
@@ -494,6 +478,19 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
                     });
                 });
             }
+        }
+
+        // A composite's parts share every combinator, so they are wrong together, and one report
+        // of what the author wrote once is enough.
+        if binding.continues_declaration {
+            let (reported, new) = found.split_at(before);
+            let new: Vec<_> = new
+                .iter()
+                .filter(|diagnostic| !reported[declaration_start..].contains(diagnostic))
+                .cloned()
+                .collect();
+            found.truncate(before);
+            found.extend(new);
         }
     }
 
@@ -618,13 +615,16 @@ pub(crate) struct CompiledBinding {
     // Where this binding keeps its working memory: the modifiers, then the conditions, then the
     // press it derived. No two share a slot, even when they are the same kind.
     pub(crate) scratch_base: usize,
+    // Only a `Button` action thresholds a value into a press, so only its bindings get a slot to
+    // remember one in.
+    pub(crate) press_slot: bool,
     // Set when this binding's tunable is shared with at least one other binding — `hold_or_toggle`
     // reaching a primary and a secondary key, most often — to the index of the plan's shared cell
     // for the group. `None` is the ordinary case: the modifier keeps the private slot
     // `scratch_base` already gives it, and the binding runs its own chain. A binding with `Some`
-    // skips its own chain entirely instead of running it against a cell other bindings also write
-    // — see `resolve_shared_toggle`'s doc for why running it per binding is unsafe rather than
-    // merely redundant.
+    // skips its own chain entirely instead of running it against a cell other bindings also write —
+    // see `resolve_shared_toggle`'s doc for why running it per binding is unsafe rather than merely
+    // redundant.
     pub(crate) tunable_shared: Option<usize>,
 }
 
@@ -632,7 +632,7 @@ impl CompiledBinding {
     pub(crate) fn scratch_len(&self) -> usize {
         // The press gets a slot of its own because it is hysteretic: it has to remember what it
         // decided last tick.
-        self.modifiers.len() + self.conditions.len() + 1
+        self.modifiers.len() + self.conditions.len() + usize::from(self.press_slot)
     }
 }
 
@@ -852,7 +852,9 @@ impl<C> Plan<C> {
             };
 
             let scratch_base = scratch_count;
-            scratch_count += binding.modifiers.len() + binding.conditions.len() + 1;
+            let press_slot = binding.intent == ActionIntent::Button;
+            scratch_count +=
+                binding.modifiers.len() + binding.conditions.len() + usize::from(press_slot);
 
             compiled.push(CompiledBinding {
                 slot,
@@ -867,6 +869,7 @@ impl<C> Plan<C> {
                 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
                 chord: binding.chord,
                 scratch_base,
+                press_slot,
                 tunable_shared: tunable_shared.get(&index).copied(),
             });
         }
@@ -1378,9 +1381,10 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!((stage.modifiers.len(), stage.conditions.len()), (1, 1));
-        // WASD's press slot, then the arrows' condition and press slot.
-        assert_eq!(stage.scratch_base, 3);
-        assert_eq!(plan.scratch_count(), 5);
+        // The arrows' four conditions. A direction has no press to remember, so neither composite
+        // needs a slot for one.
+        assert_eq!(stage.scratch_base, 4);
+        assert_eq!(plan.scratch_count(), 6);
     }
 
     // A player emptying a binding shrinks the bindings' scratch, and the stage has to move down
@@ -1401,7 +1405,8 @@ mod tests {
         let mut template = Plan::<()>::from_bindings(bindings.clone(), class_bindings);
         template.combine(combined);
 
-        let variant = Plan::variant_of(&template, bindings[..1].to_vec());
+        // WASD emptied, and one arrow left with its condition.
+        let variant = Plan::variant_of(&template, bindings[4..5].to_vec());
         let slot = variant
             .slot_for_action(<Move as crate::action::InputAction>::id())
             .unwrap();

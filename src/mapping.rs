@@ -10,9 +10,9 @@
 //! ships. Declaring one action mappable twice in one family is how you ship both defaults: they
 //! arrive as one row holding two controls rather than as two rows.
 //!
-//! A mapping is not a binding. For anything composite the binding has no single control to show: a
-//! movement binding is four keys, so each *part* of it becomes a mapping of its own, which is how
-//! every shipped game presents movement and is why the composite never reaches the player.
+//! A mapping is not a binding. A movement composite is written once and binds four keys, and each
+//! becomes a mapping named for the direction it pushes, which is how every shipped game presents
+//! movement and is why the composite itself never reaches the player.
 //!
 //! **Every binding is listed; changing one is what has to be asked for.** A player is entitled to
 //! see what their controls do, so a binding appears here by saying nothing at all — as a row they
@@ -463,8 +463,8 @@ pub(crate) fn mappings_of(
             action: binding.action,
             action_path: binding.path,
             category: binding.category,
-            // A part of a composite holds a button, whatever the composite as a whole reports; a
-            // whole binding holds whatever its own input does.
+            // A composite's part holds a button, though it reports an axis or a direction; a whole
+            // binding holds whatever its own input does.
             accepts: match entry.part {
                 BindingPart::Whole => binding.input.channel_shape(),
                 _ => ChannelShape::Button,
@@ -560,8 +560,7 @@ pub(crate) fn tunables_of(
     tunables
 }
 
-/// The family a binding's input belongs to, for a binding that resolves to a single control — a
-/// tunable is only ever declared on one of those, never a composite.
+/// The family a binding's input belongs to.
 pub(crate) fn binding_family(input: &BindingInput) -> Option<crate::device::DeviceFamily> {
     let mut family = None;
     input.for_each_part(|_, control| family = Some(control.family()));
@@ -575,8 +574,8 @@ pub(crate) fn binding_family(input: &BindingInput) -> Option<crate::device::Devi
 /// A key or a mouse button always qualifies — neither has anything but a press to report. A gamepad
 /// button is the interesting case (R2.10): the same control reads as `Bool` when the action wants
 /// a plain press and as a continuous `Axis1` fraction otherwise (see `BindingInput::GamepadButton`
-/// in `eval.rs`), so it qualifies only when `intent` is `ActionIntent::Button`. Every composite,
-/// axis or motion input reports something other than `Bool` outright and never qualifies.
+/// in `eval.rs`), so it qualifies only when `intent` is `ActionIntent::Button`. A composite's part,
+/// an axis or motion reports something other than `Bool` outright and never qualifies.
 pub(crate) fn always_reports_bool(input: &BindingInput, intent: ActionIntent) -> bool {
     #[cfg(not(feature = "gamepad"))]
     let _ = intent;

@@ -403,7 +403,8 @@ LWIM: polled `ActionState` with `current_duration()` and explicit `consume()`.
 `VirtualDPad` / `ButtonlikeChord`. BEI `bindings![...]` with per-binding modifier/condition lists.
 Unreal maps context→key→(triggers, modifiers). Steam moves the whole binding layer out of the game.
 
-- **R4.1 (MUST)** An action may have N bindings; a binding may target one control or a composite.
+- **R4.1 (MUST)** An action may have N bindings; a binding targets one control, and a composite is
+  written once and declares one binding per part.
 - **R4.1a (MUST)** The bindable control set covers **keyboard keys, mouse buttons, mouse motion,
   gamepad buttons and gamepad axes**. Mouse buttons are stated rather than implied: "keyboard and
   mouse" is one control scheme (R17.4), and a crate that names that scheme while binding only half

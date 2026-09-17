@@ -52,7 +52,7 @@ use crate::binding::{BindingSpec, Control};
 use crate::capture::{ControlClass, RefusedReason, admissible};
 use crate::device::DeviceFamily;
 use crate::mapping::{ActionMapping, MappingKey, Tunable, TunableValue};
-use crate::mapping::{MappedPart, apply_tunable_value, mapped_parts};
+use crate::mapping::{apply_tunable_value, mapped_parts};
 
 /// What a player did to one mapping.
 ///
@@ -361,24 +361,6 @@ pub enum OverrideProblemKind {
         /// the ceiling is about how far a row reaches rather than how full it is.
         given: usize,
     },
-    /// The row is one direction of a composite, and the game shipped no second composite to put
-    /// another control in.
-    ///
-    /// A composite is one binding read as several rows — four for a movement pad, two for an axis —
-    /// so a second "move forward" key is one part of a second whole composite. A row like this
-    /// grows only when the composite does. Ship the alternative as a second `mappable` binding of
-    /// the same action and the player gets a filled second slot on every one of its rows at once,
-    /// which is how a keyboard table with two columns is actually written.
-    CompositeCannotGrow,
-    /// The row is one direction of a composite, and emptying it alone would empty the others.
-    ///
-    /// The mirror of [`CompositeCannotGrow`](Self::CompositeCannotGrow), and the same fact read the
-    /// other way round: a composite's rows are parts of *one* binding — four for a movement pad,
-    /// two for an axis — so there is no "move forward" to take away on its own, and emptying it
-    /// would empty the rest of the composite with it. A direction that was never separately bound
-    /// is not separately unbindable. Rebind the row to something the player will not press by
-    /// accident, or clear every row of the composite together.
-    CompositeCannotEmpty,
     /// A saved control name this build does not recognize.
     ///
     /// What a control renamed or removed since the file was written looks like. Distinct from
@@ -1044,14 +1026,7 @@ pub(crate) fn rewrite(
 
         let preset_authorized =
             preset.is_some_and(|preset| preset.get(row.family, row.key).is_some());
-        if let Some(kind) = refusal(
-            row,
-            wanted,
-            limits,
-            &contributors,
-            declared,
-            preset_authorized,
-        ) {
+        if let Some(kind) = refusal(row, wanted, limits, preset_authorized) {
             problems.push(OverrideProblem {
                 family: row.family,
                 mapping: row.key,
@@ -1151,8 +1126,6 @@ fn refusal(
     row: &ActionMapping,
     wanted: &[Option<Control>],
     limits: &Limits<'_>,
-    contributors: &[&MappedPart],
-    declared: &[BindingSpec],
     preset_authorized: bool,
 ) -> Option<OverrideProblemKind> {
     if !row.rebind_policy.is_rebindable() && !preset_authorized {
@@ -1167,23 +1140,6 @@ fn refusal(
             limit,
             given: wanted.len(),
         });
-    }
-    // A slot the defaults left empty is filled by copying the binding beside it, and that only
-    // works where the binding reads one control. Copy a *composite* and its other parts land in
-    // their own rows a second time — "Move Down: S | S", a wrong screen rather than an untidy one.
-    if wanted.len() > contributors.len()
-        && let Some(last) = contributors.last()
-        && parts_in(&declared[last.binding].input) > 1
-    {
-        return Some(OverrideProblemKind::CompositeCannotGrow);
-    }
-    // And the mirror of it. Emptying a slot takes its binding away, so emptying one direction of a
-    // composite would take the other three rows with it — the same "one part of one binding" fact,
-    // read the other way round.
-    if contributors.iter().enumerate().any(|(slot, part)| {
-        wanted.get(slot).is_none_or(Option::is_none) && parts_in(&declared[part.binding].input) > 1
-    }) {
-        return Some(OverrideProblemKind::CompositeCannotEmpty);
     }
     let accepts = ControlClass::of(row.accepts);
     for &control in wanted.iter().flatten() {
@@ -1209,14 +1165,6 @@ fn refusal(
         }
     }
     None
-}
-
-/// How many presentation rows one binding feeds: one for a plain control, four for a directional
-/// composite.
-fn parts_in(input: &crate::binding::BindingInput) -> usize {
-    let mut count = 0;
-    input.for_each_part(|_, _| count += 1);
-    count
 }
 
 /// Every binding riding `leader`'s mapping, and the slot of the leader list it was found at.
@@ -1384,6 +1332,22 @@ mod tests {
     /// written out with the `None` in place, so the two cannot be confused for one another.
     fn filled<const N: usize>(controls: [Control; N]) -> Vec<Option<Control>> {
         controls.into_iter().map(Some).collect()
+    }
+
+    /// Presses each key and runs a frame with them held.
+    fn hold(app: &mut App, keys: &[KeyCode]) {
+        use bevy_input::{ButtonState, keyboard::Key, keyboard::KeyboardInput};
+        for &key_code in keys {
+            app.world_mut().write_message(KeyboardInput {
+                key_code,
+                logical_key: Key::Unidentified(bevy_input::keyboard::NativeKey::Unidentified),
+                state: ButtonState::Pressed,
+                text: None,
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            });
+        }
+        app.update();
     }
 
     fn bind(app: &App, name: &str, controls: &[Control]) -> Overrides {
@@ -1766,7 +1730,6 @@ mod tests {
     fn every_unusable_row_is_reported_rather_than_dropped() {
         let mut app = app();
         let jump = row(&app, "override_tests.jump");
-        let up = row(&app, "override_tests.move.up");
         let look = row(&app, "override_tests.look");
         let gone = MappingKey::new(
             "override_tests.no_such_action",
@@ -1781,14 +1744,6 @@ mod tests {
         );
         overrides.bind(look.family, look.key, [Control::MouseMotion]);
         overrides.bind(jump.family, jump.key, [Control::PhysicalKey(KeyCode::F1)]);
-        overrides.bind(
-            up.family,
-            up.key,
-            [
-                Control::PhysicalKey(KeyCode::KeyI),
-                Control::PhysicalKey(KeyCode::KeyO),
-            ],
-        );
 
         let problems = apply_overrides(app.world_mut(), &overrides);
         let kinds: Vec<_> = problems
@@ -1804,19 +1759,11 @@ mod tests {
         assert!(kinds.contains(&OverrideProblemKind::Reserved {
             control: Control::PhysicalKey(KeyCode::F1)
         }));
-        assert!(
-            kinds.contains(&OverrideProblemKind::CompositeCannotGrow),
-            "{kinds:?}"
-        );
 
-        // Refused whole, never half: every one of those rows still holds what it shipped with.
+        // Refused whole, never half: the row still holds what it shipped with.
         assert_eq!(
             slots(&app, "override_tests.jump"),
             filled([Control::PhysicalKey(KeyCode::Space)])
-        );
-        assert_eq!(
-            slots(&app, "override_tests.move.up"),
-            filled([Control::PhysicalKey(KeyCode::KeyW)])
         );
     }
 
@@ -2113,17 +2060,11 @@ mod tests {
             "clearing past the end changes nothing"
         );
 
-        // And the whole thing still applies — `move.up` is a composite part, so that one is refused
-        // and the rest goes through.
+        // And the whole thing applies, one direction of the movement keys included.
         let problems = apply_overrides(app.world_mut(), &overrides);
-        assert_eq!(
-            problems
-                .iter()
-                .map(|problem| problem.kind.clone())
-                .collect::<Vec<_>>(),
-            [OverrideProblemKind::CompositeCannotEmpty]
-        );
+        assert!(problems.is_empty(), "{problems:?}");
         assert!(slots(&app, "override_tests.jump").is_empty());
+        assert!(slots(&app, "override_tests.move.up").is_empty());
     }
 
     /// A slot is addressed, not appended: writing to the third cell of a one-control row gives a
@@ -2209,12 +2150,10 @@ mod tests {
         );
     }
 
-    /// The two-part shape of the same thing, which is what a turn axis actually is: two rows from
-    /// one binding rather than four, and two such bindings feeding both columns of both rows.
-    /// Emptying either column of either row still takes a whole binding away, so it is refused on
-    /// the same terms as the four-part case.
+    /// One end of a turn axis empties on its own. Each end is a binding of its own, so the other
+    /// end, and the other composite's same end, are untouched.
     #[test]
-    fn one_end_of_an_axis_cannot_be_emptied_on_its_own() {
+    fn one_end_of_an_axis_empties_on_its_own() {
         #[derive(InputAction)]
         #[action(path = "override_tests.turn", output = f32, intent = Analog1)]
         struct Turn;
@@ -2248,41 +2187,43 @@ mod tests {
         let mut overrides = Overrides::new();
         overrides.unbind(&left, 0);
         let problems = apply_overrides(app.world_mut(), &overrides);
+        assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(
-            problems
-                .iter()
-                .map(|problem| problem.kind.clone())
-                .collect::<Vec<_>>(),
-            [OverrideProblemKind::CompositeCannotEmpty],
-            "A drives the left half of one composite; taking it away takes D with it"
+            slots(&app, "override_tests.turn.negative"),
+            [None, Some(Control::PhysicalKey(KeyCode::ArrowLeft))]
         );
-
-        // And the secondary, which normalizes to a shorter row rather than to a hole.
-        let mut overrides = Overrides::new();
-        overrides.unbind(&left, 1);
-        let problems = apply_overrides(app.world_mut(), &overrides);
-        assert_eq!(
-            problems
-                .iter()
-                .map(|problem| problem.kind.clone())
-                .collect::<Vec<_>>(),
-            [OverrideProblemKind::CompositeCannotEmpty]
-        );
-
         assert_eq!(
             slots(&app, "override_tests.turn.positive"),
             filled([
                 Control::PhysicalKey(KeyCode::KeyD),
                 Control::PhysicalKey(KeyCode::ArrowRight)
             ]),
-            "the other end of the axis is untouched either way"
+            "the other end of the axis is untouched"
+        );
+
+        let entity = app.world_mut().spawn(Flying).id();
+        hold(&mut app, &[KeyCode::KeyA]);
+        let state = app
+            .world()
+            .get::<InputContextState<Flying>>(entity)
+            .unwrap();
+        assert_eq!(state.value::<Turn>(), 0.0, "A turns nothing");
+        hold(&mut app, &[KeyCode::KeyD]);
+        let state = app
+            .world()
+            .get::<InputContextState<Flying>>(entity)
+            .unwrap();
+        assert_eq!(
+            state.value::<Turn>(),
+            1.0,
+            "and D, its other end, still turns"
         );
     }
 
-    /// 1010: emptying one direction of a composite would take the binding away, and that binding is
-    /// the other three directions too. Refused whole, the mirror of `CompositeCannotGrow`.
+    /// One direction of a composite empties on its own, and stays on the screen holding nothing so
+    /// there is somewhere to bind it back.
     #[test]
-    fn one_direction_of_a_composite_cannot_be_emptied_on_its_own() {
+    fn one_direction_of_a_composite_empties_on_its_own() {
         let mut app = app();
         let up = row(&app, "override_tests.move.up");
 
@@ -2290,39 +2231,32 @@ mod tests {
         overrides.set(up.family, up.key, Override::Cleared);
         let problems = apply_overrides(app.world_mut(), &overrides);
 
-        assert_eq!(
-            problems
-                .iter()
-                .map(|problem| problem.kind.clone())
-                .collect::<Vec<_>>(),
-            [OverrideProblemKind::CompositeCannotEmpty]
-        );
-        assert_eq!(
-            slots(&app, "override_tests.move.up"),
-            filled([Control::PhysicalKey(KeyCode::KeyW)]),
-            "refused whole, so the direction the player cleared is still bound"
-        );
+        assert!(problems.is_empty(), "{problems:?}");
+        assert!(slots(&app, "override_tests.move.up").is_empty());
         assert_eq!(
             slots(&app, "override_tests.move.down"),
             filled([Control::PhysicalKey(KeyCode::KeyS)]),
-            "and the other three did not quietly empty with it"
+            "and the other three did not empty with it"
+        );
+
+        let entity = app.world_mut().spawn(Playing).id();
+        hold(&mut app, &[KeyCode::KeyW, KeyCode::KeyD]);
+        let state = app
+            .world()
+            .get::<InputContextState<Playing>>(entity)
+            .unwrap();
+        assert_eq!(
+            state.value::<Move>(),
+            bevy_math::Vec2::X,
+            "W moves nothing, and D still moves right"
         );
     }
 
-    /// One direction of a composite cannot grow a slot alone: a second "forward" key is one part of
-    /// a second set of four, so the row is refused whole and the shipped controls stand.
+    /// One direction of a composite takes a second control on its own, and the new control drives
+    /// that direction.
     #[test]
-    fn one_direction_of_a_composite_cannot_grow_a_slot_on_its_own() {
-        #[derive(InputContext)]
-        #[context(path = "override_tests.wide", tick = Render)]
-        struct Wide;
-
-        let mut app = App::new();
-        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
-        app.add_context::<Wide>(|controls| {
-            controls.bind::<Move>(DirectionalButtons::wasd()).mappable();
-        });
-
+    fn one_direction_of_a_composite_grows_a_slot_on_its_own() {
+        let mut app = app();
         let up = row(&app, "override_tests.move.up");
         let mut overrides = Overrides::new();
         overrides.bind(
@@ -2335,27 +2269,53 @@ mod tests {
         );
         let problems = apply_overrides(app.world_mut(), &overrides);
 
-        assert_eq!(
-            problems
-                .iter()
-                .map(|problem| problem.kind.clone())
-                .collect::<Vec<_>>(),
-            [OverrideProblemKind::CompositeCannotGrow]
-        );
+        assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            filled([Control::PhysicalKey(KeyCode::KeyW)])
+            filled([
+                Control::PhysicalKey(KeyCode::KeyW),
+                Control::PhysicalKey(KeyCode::KeyI)
+            ])
         );
         assert_eq!(
             slots(&app, "override_tests.move.down"),
             filled([Control::PhysicalKey(KeyCode::KeyS)]),
-            "and the other three directions are untouched"
+            "and the other three directions did not grow with it"
         );
+
+        let entity = app.world_mut().spawn(Playing).id();
+        hold(&mut app, &[KeyCode::KeyI]);
+        let state = app
+            .world()
+            .get::<InputContextState<Playing>>(entity)
+            .unwrap();
+        assert_eq!(state.value::<Move>(), bevy_math::Vec2::Y);
     }
 
-    /// The remedy the refusal above points at, and proof it is a real one: a second composite is
-    /// how a two-column movement table is written, and each direction then rebinds its own
-    /// secondary independently.
+    /// Mapping keys name a part, as they did when a composite was one binding, so a save written
+    /// then lands on the same directions now.
+    #[test]
+    fn a_save_naming_composite_parts_applies_to_their_bindings() {
+        let mut app = app();
+        let up = row(&app, "override_tests.move.up");
+        let left = row(&app, "override_tests.move.left");
+        let mut overrides = Overrides::new();
+        overrides.bind(up.family, up.key, [Control::PhysicalKey(KeyCode::KeyI)]);
+        overrides.bind(left.family, left.key, [Control::PhysicalKey(KeyCode::KeyJ)]);
+        let problems = apply_overrides(app.world_mut(), &overrides);
+        assert!(problems.is_empty(), "{problems:?}");
+
+        let entity = app.world_mut().spawn(Playing).id();
+        hold(&mut app, &[KeyCode::KeyI, KeyCode::KeyJ]);
+        let state = app
+            .world()
+            .get::<InputContextState<Playing>>(entity)
+            .unwrap();
+        assert_eq!(state.value::<Move>(), bevy_math::Vec2::new(-1.0, 1.0));
+    }
+
+    /// A second composite is how a game ships a two-column movement table, and each direction then
+    /// rebinds its own secondary independently.
     #[test]
     fn a_second_composite_is_how_a_movement_row_gets_a_secondary() {
         #[derive(InputContext)]

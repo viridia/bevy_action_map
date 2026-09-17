@@ -560,12 +560,11 @@ impl<C: InputContext> InputContextState<C> {
             ..
         } = self;
 
-        // One predicate for every button-shaped part, so a composite and a plain button binding
-        // can never disagree about what "pressed" means.
+        // One predicate for every button-shaped part, so a composite's part and a plain button
+        // binding can never disagree about what "pressed" means.
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         let is_pressed = |control: ButtonControl| {
-            // A control another context has taken reads as untouched, rather than being skipped:
-            // one part of a composite going away should leave the other three working.
+            // A control another context has taken reads as untouched, rather than being skipped.
             if consumed.contains(control.into()) {
                 return false;
             }
@@ -687,18 +686,10 @@ impl<C: InputContext> InputContextState<C> {
                         !consumed.contains(Control::MouseButton(button))
                             && held_mouse_buttons.contains(&button),
                     ),
+                    // Four keys and a D-pad reach an action through this same arm, and the fold is
+                    // what turns their parts back into one direction.
                     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-                    BindingInput::Axis1(parts) => ActionValue::Axis1(axis_from_buttons(
-                        is_pressed(parts.negative),
-                        is_pressed(parts.positive),
-                    )),
-                    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-                    BindingInput::Directional2(parts) => {
-                        // Four keys and a D-pad reach an action through this same arm.
-                        let x = axis_from_buttons(is_pressed(parts.left), is_pressed(parts.right));
-                        let y = axis_from_buttons(is_pressed(parts.down), is_pressed(parts.up));
-                        ActionValue::Axis2(Vec2::new(x, y))
-                    }
+                    BindingInput::Part(button, part) => part_value(part, is_pressed(button)),
                     BindingInput::MouseMotion => {
                         ActionValue::Axis2(if consumed.contains(Control::MouseMotion) {
                             Vec2::ZERO
@@ -1039,11 +1030,20 @@ fn widen(value: ActionValue) -> Vec3 {
 }
 
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-fn axis_from_buttons(negative: bool, positive: bool) -> f32 {
-    match (negative, positive) {
-        (true, false) => -1.0,
-        (false, true) => 1.0,
-        _ => 0.0,
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+fn part_value(part: crate::binding::BindingPart, pressed: bool) -> ActionValue {
+    use crate::binding::BindingPart;
+    match (part, pressed) {
+        (BindingPart::Negative | BindingPart::Positive, false) => ActionValue::Axis1(0.0),
+        (BindingPart::Negative, true) => ActionValue::Axis1(-1.0),
+        (BindingPart::Positive, true) => ActionValue::Axis1(1.0),
+        (_, false) => ActionValue::Axis2(Vec2::ZERO),
+        (BindingPart::Up, true) => ActionValue::Axis2(Vec2::Y),
+        (BindingPart::Down, true) => ActionValue::Axis2(Vec2::NEG_Y),
+        (BindingPart::Left, true) => ActionValue::Axis2(Vec2::NEG_X),
+        (BindingPart::Right, true) => ActionValue::Axis2(Vec2::X),
+        // Expansion never builds one.
+        (BindingPart::Whole, true) => ActionValue::Bool(false),
     }
 }
 

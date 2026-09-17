@@ -1548,7 +1548,7 @@ mod prompt_tests {
         assert_eq!(labels(&prompts), ["Space", "J"]);
     }
 
-    /// A composite has no single control to name, so it answers once per direction — the same view
+    /// A composite binds a control per direction, so it answers once per direction — the same view
     /// the presentation model takes, and what lets a caption say which key turns which way.
     #[test]
     fn a_composite_answers_once_per_direction() {
