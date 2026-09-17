@@ -757,7 +757,7 @@ pub struct ActionMapping {
     pub category: Option<&'static str>,
     pub family: DeviceFamily,        // KeyboardMouse | Gamepad
     pub accepts: ChannelShape,
-    pub slots: Vec<Control>,         // ordered; slot 0 is the primary
+    pub slots: Vec<Option<Control>>, // ordered; slot 0 is the primary, None is an emptied cell
     pub rebind_policy: RebindPolicy, // Here | Fixed
     pub context: &'static str,
     pub followers: Vec<Follower>,
@@ -784,12 +784,28 @@ the row holds and a capture fills it. Declaring two mappable bindings of one act
 how a game ships a default primary *and* secondary: they merge into one row with two slots, not two
 rows.
 
+**A slot may be empty.** `None` is a cell the player cleared with something still bound after it, so
+clearing a primary leaves the secondary in the second column rather than promoting it — position is
+what primary and secondary mean. Only an override makes a gap; an author cannot declare one, so a
+row derived from bindings alone is always dense. Trailing empties are not kept: a row is as long as
+its last filled slot, and a row with nothing left is `Override::Cleared` rather than a list of
+`None`s.
+
+Because a binding list records what is bound and never in which column, a gap cannot be recovered by
+re-deriving rows from the rewritten bindings. `rewrite` therefore carries the accepted override's
+own list through to the presentation rows — the derivation stays the authority on *which* controls,
+and the override on where the holes are.
+
+One direction of a composite cannot be emptied alone, for the reason it cannot be grown alone: the
+four rows are four parts of one binding, and taking that binding away would empty all four. The
+refusal is `CompositeCannotEmpty`, the mirror of `CompositeCannotGrow`.
+
 **`MaxSlots` is the one length the crate has an opinion about**, and only on the apply path: a game
 that reads override sets it did not write inserts the resource, and a row naming more controls than
 that comes back as `TooManyControls` rather than being applied. Without the resource there is no
 limit, which is what a game whose save files are its own already assumes. Capture is unaffected —
-`for_slot` grows a row one slot at a time, so nothing a player does in a screen can walk past a
-limit the game shipped under.
+`for_slot` grows a row one slot at a time, so no sequence of captures walks a row past a limit the
+game shipped under.
 
 Uniqueness is per family, and two mappable bindings collide only when they name different actions.
 
@@ -927,9 +943,9 @@ nothing about where it ends up.
 
 ```rust
 pub enum Override {
-    Controls(Vec<Control>),   // in slot order; replaces the mapping's whole list
-    Cleared,                  // deliberately emptied — distinct from a missing row
-    NotOurs,                  // an external authority owns this mapping
+    Controls(Vec<Option<Control>>), // in slot order; None is an emptied cell, trailing ones dropped
+    Cleared,                        // deliberately emptied — distinct from a missing row
+    NotOurs,                        // an external authority owns this mapping
 }
 ```
 
@@ -975,7 +991,8 @@ apply and persist independently, with the world-wide plan untouched.
 ```rust
 pub enum OverrideProblemKind {
     NoSuchMapping, NotRebindable, WrongScheme { .. }, WrongShape { .. },
-    Reserved { .. }, TooManyControls { .. }, CompositeCannotGrow, UnknownControl { .. },
+    Reserved { .. }, TooManyControls { .. }, CompositeCannotGrow, CompositeCannotEmpty,
+    UnknownControl { .. },
 }
 ```
 
@@ -1030,6 +1047,7 @@ action_map_version = 1
 
 [bindings.keyboard_mouse]
 "gameplay.jump"    = ["key/Space", "key/KeyJ"]   # primary, secondary
+"gameplay.fire"    = ["cleared", "key/KeyF"]     # primary emptied; the secondary stays second
 "gameplay.move.up" = "key/KeyI"                  # a scalar is a one-element list
 "ui.settings"      = "external"
 
@@ -1037,15 +1055,17 @@ action_map_version = 1
 ```
 
 A row holding one control writes as a bare scalar and reads back from either form; position in a
-list is which slot, so a cleared middle slot needs `"cleared"` rather than a shortened list. The two
-state words cannot collide with a control name, because the control encoding is a format this crate
-owns rather than `Debug` or serde on Bevy's own types — an upstream rename becomes a compile error
-in an exhaustive match while the stored string stays what it was. A logical key writes as `char/`
-and the character, `char/z`; the remainder is taken whole, so the separator needs no escape, and a
-name carrying anything but one character reads back as no control at all. `bindings`/`gamepad` sorts
-ahead of `bindings`/`keyboard_mouse` alphabetically rather than in `DeviceFamily`'s own declared
-order, and an empty `tunables` still gets a header — both accepted costs of a plain, structurally
-reflected type over a hand-rolled one.
+list is which slot, so a cleared middle slot needs `"cleared"` rather than a shortened list — the
+same word a whole emptied row uses, meaning the same thing one level down. Trailing empties are not
+written, so a short list read back means the rest are empty, and a list of nothing but the word
+reads as a cleared row. The two state words cannot collide with a control name, because the control
+encoding is a format this crate owns rather than `Debug` or serde on Bevy's own types — an upstream
+rename becomes a compile error in an exhaustive match while the stored string stays what it was. A
+logical key writes as `char/` and the character, `char/z`; the remainder is taken whole, so the
+separator needs no escape, and a name carrying anything but one character reads back as no control
+at all. `bindings`/`gamepad` sorts ahead of `bindings`/`keyboard_mouse` alphabetically rather than
+in `DeviceFamily`'s own declared order, and an empty `tunables` still gets a header — both accepted
+costs of a plain, structurally reflected type over a hand-rolled one.
 
 **`SavedOverrides` claims no field besides `action_map_version`, `bindings` and `tunables`, and none
 of those is a bare `version`** (R17.10, D59). A settings layer that lets several resources share one

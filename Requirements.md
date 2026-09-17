@@ -1221,9 +1221,12 @@ and response curves ([IGA file][steam-iga]).
   (R19.1), and the control scheme it belongs to. Its category comes from the action it belongs to
   (R1.6).
 
-  A mapping holds an **ordered list of slots** _(D29)_, each holding one control. The first slot is
-  primary by convention, so order is part of the data rather than an artefact of iteration. A screen
-  draws one cell per slot; "cell" is the drawing and never the data.
+  A mapping holds an **ordered list of slots** _(D29)_, each holding one control or nothing. The
+  first slot is primary by convention, so order is part of the data rather than an artefact of
+  iteration. A screen draws one cell per slot; "cell" is the drawing and never the data.
+
+  A slot may be **empty**, and emptying one must leave the slots after it where they were: a list
+  that closes the gap changes which control is primary without the player having asked for that.
 
   ~~A mapping carries a **capacity** saying how many slots it has — "primary and secondary" is a
   common arrangement, a keyboard row with two cells — inferred from the declared defaults and

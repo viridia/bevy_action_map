@@ -729,8 +729,15 @@ third chance to disagree with what is actually bound.
 ### D29 — A mapping is an ordered list of slots
 
 **Decided.** A *mapping* is the named thing a player rebinds; a *slot* is one position in it holding
-one control; a screen draws one cell per slot. How many cells a screen draws is the screen's
-business, not the mapping's.
+one control, **or nothing**; a screen draws one cell per slot. How many cells a screen draws is the
+screen's business, not the mapping's.
+
+**An empty slot is `None` in the list, not a variant of `Control`.** A `Control::Empty` would cost
+every consumer of a control an arm meaning "not a control" — the frame, prompts, labels,
+admissibility, conflict comparison — and conflict detection acquires a bug the first time two empty
+slots compare equal. With the container it cannot: `Some(control)` never matches an empty cell. A
+map keyed by index answers a sparse-at-index-9000 question nobody asked and gives up the scalar
+shorthand the save format keeps on purpose.
 
 **Rules out.** One control per mapping, and a fixed two. Also a per-mapping capacity: how long a row
 *may* grow was once a property of the mapping, and it stopped being one when the width it expressed
@@ -746,7 +753,10 @@ fixed two cannot express the "add shortcut" button that tools grow instead.
 
 **Save format.** A row holds a list because a mapping does, and position is which slot, so a cleared
 middle slot needs the cleared marker rather than a shortened list — which would silently promote the
-secondary to primary.
+secondary to primary. It is the same word an emptied *row* uses, one level down, so a person opening
+the file has one thing to learn rather than two. Trailing empties are not written, because a row is
+as long as its last filled slot and a two-column table whose secondaries are mostly blank should not
+fill a settings file with the word.
 
 **Note on the nouns.** The first version called the row a slot and had to invent a second word for
 the position. "Cell" was what it reached for, and a cell belongs to the table a screen draws rather
@@ -1116,12 +1126,21 @@ which exists to catch a typo and is precisely wrong for a control somebody delib
 Keeping the table also means an instance's action states and require-reset flags stay aligned across
 the swap, so only the scratch is rebuilt.
 
-**Three slot cases, and the third bites.** A slot the defaults fill has its source rewritten. A slot
-they left empty is filled by *copying* the binding beside it, so a secondary carries the same
+**Four slot cases, and the last two bite.** A slot the defaults fill has its source rewritten. A
+slot they left empty is filled by *copying* the binding beside it, so a secondary carries the same
 modifiers and conditions as the primary rather than arriving bare. A slot the override no longer has
-takes its binding away. Copying only works where a binding reads one control — copy a composite and
-its other three directions land in their own rows a second time — so a row that is one part of a
-composite is refused a slot the defaults did not ship.
+takes its binding away, and so does a slot the override *emptied* while a later one still holds
+something. Copying only works where a binding reads one control — copy a composite and its other
+three directions land in their own rows a second time — so a row that is one part of a composite is
+refused a slot the defaults did not ship, and refused an emptying for the mirror reason: the binding
+that would be taken away is the other three directions too.
+
+**A gap survives the rewrite only because it is carried, not derived.** Rows are otherwise
+re-derived from the rewritten bindings so that the two cannot disagree, but a binding list says what
+is bound and never in which column — an emptied primary and a row that only ever held a secondary
+compile to the same single binding. So the accepted override's own list is carried through to the
+presentation row. The derivation stays the authority on which controls are bound; only the override
+knows where the holes are.
 
 ### D49 — The control encoding is a format we own
 

@@ -80,26 +80,6 @@ half — saying so somewhere a game reads before it hits this.
 
 ## 2. Latent — the code is wrong and nothing in tree takes the path
 
-### 1010 Clearing one part of a composite empties the other three
-
-`overrides.rs:941` · **verified** against a headless `App`: four empty rows, no problem reported
-
-`rewrite` drops a whole _binding_ per slot the row no longer has, and a composite's four rows are
-four _parts of one binding_. So `Override::Cleared` on `move.up` takes the binding away and
-`move.down`, `.left` and `.right` come back holding nothing.
-
-Nothing in tree produces a `Cleared` row — `settings.rs:1218` is the only site that reads one — but
-the state is R17.7's and first-class, and `Overrides::bind` with an empty list is the door. A
-settings screen with an "unbind" button is the obvious way in.
-
-`CompositeCannotGrow` refuses the mirror case in the same pass, so the refusal list already knows
-the shape and covers only the growing half.
-
-_Fix:_ **chunk 118b**, which grows `rewrite` a fourth case for the same reason and owns the design
-question this was unrouted for: dropping per part instead of per binding, or refusing the clear
-outright. Both are defensible, and which is right is a question about what clearing one arrow of a
-movement composite means.
-
 ### 1046 A class binding on an analog source has no dead zone
 
 `binding.rs`'s own doc for `bind_class` — "it skips modifiers, conditions and the presentation

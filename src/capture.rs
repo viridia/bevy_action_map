@@ -514,7 +514,10 @@ fn conflicts_in(
     mappings
         .iter()
         .filter(|mapping| {
-            Some(mapping.key) != target && effective_slots(mapping, pending).contains(&control)
+            // `Some(control)` rather than a scan over filled slots: an empty slot is `None` and
+            // never equals a control, so two rows with a gap apiece are not a clash.
+            Some(mapping.key) != target
+                && effective_slots(mapping, pending).contains(&Some(control))
         })
         .map(|mapping| MappingConflict {
             mapping: mapping.key,
@@ -537,7 +540,7 @@ fn conflicts_in(
 fn effective_slots<'a>(
     mapping: &'a ActionMapping,
     pending: Option<&'a Overrides>,
-) -> &'a [Control] {
+) -> &'a [Option<Control>] {
     match pending.and_then(|pending| pending.get(mapping.family, mapping.key)) {
         Some(Override::Controls(controls)) => controls,
         Some(Override::Cleared) => &[],

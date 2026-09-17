@@ -872,6 +872,8 @@ fn redraw_pending(world: &mut World) {
         *text = Text::new(
             effective(row, &pending)
                 .get(cell.2)
+                .copied()
+                .flatten()
                 .map(|control| control.fallback_label().into_owned())
                 .unwrap_or_default(),
         );
@@ -885,6 +887,8 @@ fn redraw_pending(world: &mut World) {
         *text = Text::new(
             effective(row, &pending)
                 .get(cell.2)
+                .copied()
+                .flatten()
                 .map_or_else(String::new, |control| {
                     cell.3.fallback_format(&control.fallback_label())
                 }),
@@ -988,12 +992,12 @@ fn cells(mapping: &ActionMapping, columns: usize) -> Vec<Cell> {
         // Every cell of a changeable row is one the player can put a control in, filled or not — an
         // empty box is what a spare secondary looks like before it is used. A fixed row shows what
         // it holds and stops: no capture will ever reach the cell after it, so a box there would be
-        // a promise this screen cannot keep.
-        let filled = column < mapping.slots.len();
+        // a promise this screen cannot keep. Past the end of the row and emptied by the player draw
+        // the same: a blank cell. Which one it is matters to the crate, not to the table.
+        let held = mapping.slots.get(column).copied().flatten();
+        let filled = held.is_some();
         cells.push(Cell {
-            text: mapping
-                .slots
-                .get(column)
+            text: held
                 .map(|control| control.fallback_label().into_owned())
                 .unwrap_or_default(),
             width: CONTROL_WIDTH,
@@ -1032,14 +1036,17 @@ fn follower_cells(mapping: &ActionMapping, follower: &Follower, columns: usize) 
     }];
 
     for column in 0..columns {
-        let text = mapping
-            .slots
-            .get(column)
-            .map_or_else(String::new, |control| {
-                follower
-                    .condition
-                    .fallback_format(&control.fallback_label())
-            });
+        let text =
+            mapping
+                .slots
+                .get(column)
+                .copied()
+                .flatten()
+                .map_or_else(String::new, |control| {
+                    follower
+                        .condition
+                        .fallback_format(&control.fallback_label())
+                });
         cells.push(Cell {
             text,
             width: CONTROL_WIDTH,
@@ -1245,7 +1252,7 @@ fn captured(captured: On<ControlCaptured>, cells: Query<&RebindCell>, mut comman
 /// What a mapping currently holds, the working copy laid over its declared slots — [`Overrides`]'s
 /// own three-state rule, read the same way [`apply_overrides_with_preset`] and `conflicts_pending`
 /// both do.
-fn effective(mapping: &ActionMapping, pending: &Overrides) -> Vec<Control> {
+fn effective(mapping: &ActionMapping, pending: &Overrides) -> Vec<Option<Control>> {
     match pending.get(mapping.family, mapping.key) {
         Some(Override::Controls(controls)) => controls.clone(),
         Some(Override::Cleared) => Vec::new(),
@@ -1289,15 +1296,22 @@ fn resolve_capture(
             continue;
         };
         let mut controls = effective(other, &working);
-        controls.retain(|&held| held != control);
+        // Emptied in place rather than removed. Taking a control out of another row must not
+        // promote that row's secondary into the column the player was looking at — `bind` drops the
+        // empty again if it was the last thing the row held.
+        for held in &mut controls {
+            if *held == Some(control) {
+                *held = None;
+            }
+        }
         pending.0.captures.bind(other.family, other.key, controls);
     }
 
     let mut controls = effective(&target, &working);
     if slot < controls.len() {
-        controls[slot] = control;
+        controls[slot] = Some(control);
     } else {
-        controls.push(control);
+        controls.push(Some(control));
     }
     pending.0.captures.bind(target.family, target.key, controls);
 }

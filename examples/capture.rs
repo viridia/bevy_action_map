@@ -237,7 +237,14 @@ fn bound(mapping: &mapping::ActionMapping) -> String {
     mapping
         .slots
         .iter()
-        .map(|control| control.fallback_label().into_owned())
+        .map(|slot| {
+            // A slot the player emptied, with something still bound after it. Printed rather than
+            // skipped, so "the row holds —, J" says which column the J is in.
+            slot.map_or_else(
+                || String::from("—"),
+                |control| control.fallback_label().into_owned(),
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -296,9 +303,9 @@ fn rebind(world: &mut World, control: Control) {
     // screen's.
     let mut controls = row.slots.clone();
     if slot < controls.len() {
-        controls[slot] = control;
+        controls[slot] = Some(control);
     } else {
-        controls.push(control);
+        controls.push(Some(control));
     }
 
     let mut chosen = world.remove_resource::<Chosen>().unwrap_or_default();
@@ -323,6 +330,7 @@ fn rebind(world: &mut World, control: Control) {
             follower.action_path,
             now.slots
                 .iter()
+                .flatten()
                 .map(|held| follower.condition.fallback_format(&held.fallback_label()))
                 .collect::<Vec<_>>()
                 .join(", "),

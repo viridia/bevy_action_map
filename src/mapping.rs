@@ -188,9 +188,14 @@ pub struct ActionMapping {
     /// Usually one. Two mappable bindings of the same action in the same family arrive here as one
     /// row with two slots filled rather than as two rows.
     ///
+    /// **A slot may be empty.** A player who clears the primary of a two-control row leaves a gap
+    /// rather than promoting the secondary into it, because position is what primary and secondary
+    /// mean — so `None` is a cell the screen draws blank, and a later capture puts a control back in
+    /// the same column it left. A row the player emptied entirely is simply short.
+    ///
     /// How many cells to draw is the screen's decision, not this list's: a table offering a spare
     /// column draws one more cell than the row holds, and a capture fills it.
-    pub slots: Vec<Control>,
+    pub slots: Vec<Option<Control>>,
     /// Whether the player may change what is in those slots.
     ///
     /// A screen draws a row of buttons for [`Here`](RebindPolicy::Here) and a row of labels for
@@ -446,7 +451,7 @@ pub(crate) fn mappings_of(
                 && mapping.family == entry.family
                 && mapping.action == binding.action
         }) {
-            mapping.slots.push(entry.control);
+            mapping.slots.push(Some(entry.control));
             // Bindings that disagree about whether the player may change the row are a plan-build
             // error, so the first one's `rebind_policy` wins here only so that the value is
             // deterministic while the context is being refused.
@@ -465,7 +470,8 @@ pub(crate) fn mappings_of(
                 _ => ChannelShape::Button,
             },
             family: entry.family,
-            slots: alloc::vec![entry.control],
+            // An author cannot declare a gap, so a derived row is dense; only an override makes one.
+            slots: alloc::vec![Some(entry.control)],
             rebind_policy: declaration.rebind_policy,
             context,
             followers: Vec::new(),
@@ -691,8 +697,14 @@ mod tests {
 
         // Each part carries the controls it currently holds, which is what a read-only screen
         // shows. One apiece here: nothing declared a second mappable binding.
-        assert_eq!(mappings[0].slots, [Control::PhysicalKey(KeyCode::KeyW)]);
-        assert_eq!(mappings[4].slots, [Control::PhysicalKey(KeyCode::Space)]);
+        assert_eq!(
+            mappings[0].slots,
+            [Some(Control::PhysicalKey(KeyCode::KeyW))]
+        );
+        assert_eq!(
+            mappings[4].slots,
+            [Some(Control::PhysicalKey(KeyCode::Space))]
+        );
 
         // The category comes from the action, so the four movement rows file together.
         assert_eq!(mappings[0].category, Some("mapping_tests.movement"));
@@ -785,7 +797,10 @@ mod tests {
 
         let mappings = mappings(app.world());
         assert_eq!(mappings.len(), 1);
-        assert_eq!(mappings[0].slots, [Control::PhysicalKey(KeyCode::Space)]);
+        assert_eq!(
+            mappings[0].slots,
+            [Some(Control::PhysicalKey(KeyCode::Space))]
+        );
         assert_eq!(mappings[0].rebind_policy, RebindPolicy::Fixed);
         assert!(!mappings[0].rebind_policy.is_rebindable());
     }
@@ -897,8 +912,8 @@ mod tests {
         assert_eq!(
             mappings[0].slots,
             [
-                Control::PhysicalKey(KeyCode::Space),
-                Control::PhysicalKey(KeyCode::Enter)
+                Some(Control::PhysicalKey(KeyCode::Space)),
+                Some(Control::PhysicalKey(KeyCode::Enter))
             ],
             "in the order they were declared, which is what makes the first one primary"
         );
@@ -1056,7 +1071,7 @@ mod tests {
         assert_eq!(mappings[0].key.to_string(), "mapping_tests.jump");
         assert_eq!(
             mappings[0].slots,
-            [Control::PhysicalKey(KeyCode::Space)],
+            [Some(Control::PhysicalKey(KeyCode::Space))],
             "a follower contributes no control of its own to the row it rides"
         );
 

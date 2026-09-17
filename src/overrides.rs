@@ -66,7 +66,12 @@ pub enum Override {
     /// Position is which slot, so this is written and read in order: the first is the primary. It
     /// replaces the mapping's whole list rather than one position in it — a screen that edits a
     /// single cell edits the list and then writes the row.
-    Controls(Vec<Control>),
+    ///
+    /// `None` is a slot the player emptied while a later one still holds something. That is what
+    /// keeps the secondary of a cleared primary where it is instead of promoting it, and it is the
+    /// only way a gap arises: a game cannot declare one. A row with nothing left is
+    /// [`Cleared`](Self::Cleared) rather than a list of empties.
+    Controls(Vec<Option<Control>>),
     /// The player deliberately emptied the mapping.
     ///
     /// The action stays declared and stays readable; nothing fires it. Distinct from a missing row,
@@ -108,15 +113,29 @@ impl Overrides {
 
     /// Puts controls in a mapping.
     ///
-    /// The whole list, in slot order. An empty list is [`Override::Cleared`] and is stored as such,
-    /// since a row holding nothing and a row that is not there mean different things.
-    pub fn bind(
+    /// The whole list, in slot order. Takes controls or `Option<Control>`s, so a screen editing one
+    /// cell of a row writes the row back as it stands — `None` for a cell the player emptied whose
+    /// position still matters:
+    ///
+    /// ```ignore
+    /// overrides.bind(family, jump, [Control::PhysicalKey(KeyCode::Space)]);
+    /// overrides.bind(family, jump, [None, Some(Control::PhysicalKey(KeyCode::KeyJ))]);
+    /// ```
+    ///
+    /// Trailing empties are dropped: a row is as long as its last filled slot, and how many cells
+    /// to draw beside it is the screen's business rather than something a saved row should carry. A
+    /// list with nothing left in it is [`Override::Cleared`] and is stored as such, since a row
+    /// holding nothing and a row that is not there mean different things.
+    pub fn bind<C: Into<Option<Control>>>(
         &mut self,
         family: DeviceFamily,
         mapping: MappingKey,
-        controls: impl IntoIterator<Item = Control>,
+        controls: impl IntoIterator<Item = C>,
     ) {
-        let controls: Vec<Control> = controls.into_iter().collect();
+        let mut controls: Vec<Option<Control>> = controls.into_iter().map(Into::into).collect();
+        while controls.last().is_some_and(Option::is_none) {
+            controls.pop();
+        }
         self.set(
             family,
             mapping,
@@ -298,6 +317,14 @@ pub enum OverrideProblemKind {
     /// as a second `mappable` binding of the same action and the player gets a filled second slot on
     /// all four rows at once, which is how a keyboard table with two columns is actually written.
     CompositeCannotGrow,
+    /// The row is one direction of a composite, and emptying it alone would empty the others.
+    ///
+    /// The mirror of [`CompositeCannotGrow`](Self::CompositeCannotGrow), and the same fact read the
+    /// other way round: the four rows of a movement binding are four parts of *one* binding, so
+    /// there is no "move forward" to take away on its own. A direction that was never separately
+    /// bound is not separately unbindable — clear the row and the player still has the control, or
+    /// rebind it to something they will not press by accident.
+    CompositeCannotEmpty,
     /// A saved control name this build does not recognize.
     ///
     /// What a control renamed or removed since the file was written looks like. Distinct from
@@ -315,6 +342,17 @@ pub enum OverrideProblemKind {
 /// as this one — see [`UnsupportedVersion`] (D58).
 #[cfg(feature = "serialize")]
 const FORMAT_VERSION: u32 = 1;
+
+/// The word a saved file uses for an emptied row, and for an emptied slot inside one.
+///
+/// One word at both levels because it means the same thing at both: nothing is bound here. Every
+/// real control name carries a `/`, so neither this nor [`EXTERNAL`] can collide with one.
+#[cfg(feature = "serialize")]
+const CLEARED: &str = "cleared";
+
+/// The word a saved file uses for a row something outside this crate owns.
+#[cfg(feature = "serialize")]
+const EXTERNAL: &str = "external";
 
 /// The name a saved file uses for a device family, stable independent of [`DeviceFamily`]'s own
 /// variant names.
@@ -358,8 +396,8 @@ impl serde::Serialize for SavedRow {
         match self {
             // Bare words a person reads as neither a control nor a mistake — every real control
             // name carries a `/`, so the two can never collide with one (R17.7).
-            SavedRow::Cleared => serializer.serialize_str("cleared"),
-            SavedRow::NotOurs => serializer.serialize_str("external"),
+            SavedRow::Cleared => serializer.serialize_str(CLEARED),
+            SavedRow::NotOurs => serializer.serialize_str(EXTERNAL),
             // A scalar is the same thing as a one-element list, and most rows hold one — a player
             // editing this by hand should not have to type brackets to say so (TD10.3).
             SavedRow::Controls(names) if names.len() == 1 => serializer.serialize_str(&names[0]),
@@ -382,8 +420,8 @@ impl<'de> serde::Deserialize<'de> for SavedRow {
 
             fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
                 Ok(match v {
-                    "cleared" => SavedRow::Cleared,
-                    "external" => SavedRow::NotOurs,
+                    CLEARED => SavedRow::Cleared,
+                    EXTERNAL => SavedRow::NotOurs,
                     other => SavedRow::Controls(alloc::vec![String::from(other)]),
                 })
             }
@@ -505,10 +543,17 @@ pub fn save_overrides(overrides: &Overrides) -> SavedOverrides {
     let mut bindings: BTreeMap<String, BTreeMap<String, SavedRow>> = BTreeMap::new();
     for (family, key, value) in overrides.iter() {
         let row = match value {
+            // An empty slot is the same word a whole emptied row uses. `bind` has already dropped
+            // any trailing ones, so the word only ever appears where a filled slot follows it.
             Override::Controls(controls) => SavedRow::Controls(
                 controls
                     .iter()
-                    .map(|control| control.name().into_owned())
+                    .map(|slot| {
+                        slot.map_or_else(
+                            || String::from(CLEARED),
+                            |control| control.name().into_owned(),
+                        )
+                    })
                     .collect(),
             ),
             Override::Cleared => SavedRow::Cleared,
@@ -660,8 +705,14 @@ pub fn resolve_saved(
             let mut controls = Vec::with_capacity(names.len());
             let mut all_known = true;
             for name in &names {
+                // The word inside a list is a slot the player emptied, and a short list read back
+                // means the rest are empty too — the trailing ones are not written.
+                if name == CLEARED {
+                    controls.push(None);
+                    continue;
+                }
                 match Control::from_name(name) {
-                    Some(control) => controls.push(control),
+                    Some(control) => controls.push(Some(control)),
                     None => {
                         all_known = false;
                         problems.push(OverrideProblem {
@@ -673,8 +724,8 @@ pub fn resolve_saved(
                 }
             }
             if all_known {
-                // `bind` folds an empty list into `Cleared`, so a hand-edited `[]` reads exactly
-                // like the dedicated word does.
+                // `bind` folds a list with nothing left in it into `Cleared`, so a hand-edited `[]`
+                // or `["cleared"]` reads exactly like the bare word does.
                 overrides.bind(family, mapping.key, controls);
             }
         }
@@ -904,6 +955,9 @@ pub(crate) fn rewrite(
     let mut problems = Vec::new();
     let mut dropped = alloc::collections::BTreeSet::new();
     let mut grown: Vec<BindingSpec> = Vec::new();
+    // What each row was actually given, for the rows that took it — `current_rows` needs this to
+    // put the holes back, since nothing in a binding list records which column a control sits in.
+    let mut accepted: Vec<Option<Vec<Option<Control>>>> = alloc::vec![None; rows.len()];
 
     // Both computed against the *declared* bindings and never re-derived as we go: `leader_of`
     // matches a follower to its leader by the controls the two read, so once an input has been
@@ -913,11 +967,11 @@ pub(crate) fn rewrite(
         .map(|index| crate::mapping::leader_of(declared, index))
         .collect();
 
-    for row in rows {
+    for (index, row) in rows.iter().enumerate() {
         let Some(over) = overrides.get(row.family, row.key) else {
             continue;
         };
-        let wanted: &[Control] = match over {
+        let wanted: &[Option<Control>] = match over {
             // The defaults stand, and deliberately are not read as an empty row: nobody cleared
             // this, somebody else owns it.
             Override::NotOurs => continue,
@@ -951,20 +1005,30 @@ pub(crate) fn rewrite(
             });
             continue;
         }
+        accepted[index] = Some(wanted.to_vec());
 
         for (slot, &control) in wanted.iter().enumerate() {
-            match contributors.get(slot) {
+            match (contributors.get(slot), control) {
                 // A slot the defaults already fill: the binding stays where it is and reads
                 // something else.
-                Some(part) => {
+                (Some(part), Some(control)) => {
                     variant[part.binding].input.set_part(part.part, control);
                     rewrite_followers(declared, &leaders, &mut variant, part.binding);
+                }
+                // A slot the defaults fill that the player emptied, with something still bound
+                // after it. The binding goes, exactly as it does for a slot past the end of the
+                // row, and the slots after it keep their positions because position is which slot.
+                (Some(part), None) => {
+                    dropped.insert(part.binding);
+                    dropped.extend(
+                        followers_of(declared, &leaders, part.binding).map(|(index, _)| index),
+                    );
                 }
                 // A slot the game shipped nothing for — the empty secondary a screen drew beside
                 // the primary. The last binding feeding the row is cloned onto the new control, so
                 // the secondary behaves like the primary rather than like a bare input with no
                 // modifiers or conditions on it.
-                None => {
+                (None, Some(control)) => {
                     let Some(last) = contributors.last() else {
                         continue;
                     };
@@ -975,6 +1039,9 @@ pub(crate) fn rewrite(
                         grown.push(clone_onto(&variant[follower], last.part, control));
                     }
                 }
+                // An empty slot the defaults never filled either, so the row already agrees. `bind`
+                // drops these from the end of a row, which makes this an interior one.
+                (None, None) => {}
             }
         }
 
@@ -1016,7 +1083,7 @@ pub(crate) fn rewrite(
         }
     }
 
-    let current = current_rows(&variant, rows, context);
+    let current = current_rows(&variant, rows, &accepted, context);
     let current_tunables = crate::mapping::tunables_of(&variant, context);
     (variant, current, current_tunables, problems)
 }
@@ -1028,7 +1095,7 @@ pub(crate) fn rewrite(
 /// rule below it: a preset moves a `Fixed` row on purpose, which is the whole point of one.
 fn refusal(
     row: &ActionMapping,
-    wanted: &[Control],
+    wanted: &[Option<Control>],
     limits: &Limits<'_>,
     contributors: &[&MappedPart],
     declared: &[BindingSpec],
@@ -1056,8 +1123,16 @@ fn refusal(
     {
         return Some(OverrideProblemKind::CompositeCannotGrow);
     }
+    // And the mirror of it. Emptying a slot takes its binding away, so emptying one direction of a
+    // composite would take the other three rows with it — the same "one part of one binding" fact,
+    // read the other way round.
+    if contributors.iter().enumerate().any(|(slot, part)| {
+        wanted.get(slot).is_none_or(Option::is_none) && parts_in(&declared[part.binding].input) > 1
+    }) {
+        return Some(OverrideProblemKind::CompositeCannotEmpty);
+    }
     let accepts = ControlClass::of(row.accepts);
-    for &control in wanted {
+    for &control in wanted.iter().flatten() {
         // Shared with capture, which is what stops one control getting two different reasons
         // depending on whether it arrived from a press or from a file.
         match admissible(
@@ -1138,18 +1213,27 @@ fn clone_onto(
 /// The presentation rows for a variant, keyed to the declared ones.
 ///
 /// Derived from the rewritten bindings rather than patched, so the rows and the plan cannot
-/// disagree about what is bound — with one exception the derivation cannot express on its own: a
-/// row the player emptied has no bindings left and so derives nothing at all, and it has to stay on
+/// disagree about what is bound — with two exceptions the derivation cannot express on its own.
+///
+/// A row the player emptied has no bindings left and so derives nothing at all; it has to stay on
 /// the screen holding nothing, or there is nowhere to bind it back.
+///
+/// And **a gap has no binding to derive from.** A binding list says what is bound, never in which
+/// column, so an emptied primary and a row that only ever held a secondary compile to the same one
+/// binding. `accepted` is what the player asked for on each row that was not refused, and it is the
+/// authority on shape for exactly those rows: it and the derivation always agree about *which*
+/// controls, and only it knows where the holes are.
 fn current_rows(
     variant: &[BindingSpec],
     declared: &[ActionMapping],
+    accepted: &[Option<Vec<Option<Control>>>],
     context: &'static str,
 ) -> Vec<ActionMapping> {
     let derived = crate::mapping::mappings_of(variant, context);
     declared
         .iter()
-        .map(|row| {
+        .enumerate()
+        .map(|(index, row)| {
             derived
                 .iter()
                 .find(|current| {
@@ -1158,6 +1242,15 @@ fn current_rows(
                         && current.action == row.action
                 })
                 .cloned()
+                .map(
+                    |current| match accepted.get(index).and_then(Option::as_ref) {
+                        Some(slots) => ActionMapping {
+                            slots: slots.clone(),
+                            ..current
+                        },
+                        None => current,
+                    },
+                )
                 .unwrap_or_else(|| ActionMapping {
                     slots: Vec::new(),
                     followers: row.followers.clone(),
@@ -1229,8 +1322,14 @@ mod tests {
             .unwrap_or_else(|| panic!("no mapping named {name}"))
     }
 
-    fn slots(app: &App, name: &str) -> Vec<Control> {
+    fn slots(app: &App, name: &str) -> Vec<Option<Control>> {
         row(app, name).slots
+    }
+
+    /// A row with every slot filled, which is what most of these expect. A row with a gap is
+    /// written out with the `None` in place, so the two cannot be confused for one another.
+    fn filled<const N: usize>(controls: [Control; N]) -> Vec<Option<Control>> {
+        controls.into_iter().map(Some).collect()
     }
 
     fn bind(app: &App, name: &str, controls: &[Control]) -> Overrides {
@@ -1246,7 +1345,7 @@ mod tests {
         let mut app = app();
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::PhysicalKey(KeyCode::KeyW)]
+            filled([Control::PhysicalKey(KeyCode::KeyW)])
         );
 
         let overrides = bind(
@@ -1259,12 +1358,12 @@ mod tests {
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::PhysicalKey(KeyCode::KeyI)]
+            filled([Control::PhysicalKey(KeyCode::KeyI)])
         );
         // And only that part of the composite: the other three keys are where they were.
         assert_eq!(
             slots(&app, "override_tests.move.left"),
-            [Control::PhysicalKey(KeyCode::KeyA)]
+            filled([Control::PhysicalKey(KeyCode::KeyA)])
         );
     }
 
@@ -1287,7 +1386,7 @@ mod tests {
             .expect("the row is still declared");
         assert_eq!(
             declared.slots,
-            [Control::PhysicalKey(KeyCode::KeyW)],
+            filled([Control::PhysicalKey(KeyCode::KeyW)]),
             "still W"
         );
 
@@ -1296,7 +1395,7 @@ mod tests {
         apply_overrides(app.world_mut(), &Overrides::new());
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::PhysicalKey(KeyCode::KeyW)]
+            filled([Control::PhysicalKey(KeyCode::KeyW)])
         );
     }
 
@@ -1316,7 +1415,7 @@ mod tests {
         apply_overrides(app.world_mut(), &overrides);
 
         let jump = row(&app, "override_tests.jump");
-        assert_eq!(jump.slots, [Control::PhysicalKey(KeyCode::KeyK)]);
+        assert_eq!(jump.slots, filled([Control::PhysicalKey(KeyCode::KeyK)]));
         // The follower is still on the row rather than orphaned onto a row of its own...
         assert_eq!(jump.followers.len(), 1);
         assert_eq!(jump.followers[0].action, Lunge::id());
@@ -1382,10 +1481,10 @@ mod tests {
 
         assert_eq!(
             slots(&app, "override_tests.jump"),
-            [
+            filled([
                 Control::PhysicalKey(KeyCode::Space),
                 Control::PhysicalKey(KeyCode::KeyK)
-            ]
+            ])
         );
         // The follower rides both, and is still one sub-row rather than two.
         let jump = row(&app, "override_tests.jump");
@@ -1431,7 +1530,7 @@ mod tests {
 
         assert_eq!(
             slots(&app, "override_tests.jump"),
-            [Control::PhysicalKey(KeyCode::KeyK)]
+            filled([Control::PhysicalKey(KeyCode::KeyK)])
         );
         let prompts = BindingTable::new(app.world()).prompts(Lunge::id(), PromptScope::ANY);
         assert_eq!(
@@ -1577,7 +1676,7 @@ mod tests {
         // future one, ever sees Jump listed on anything but Space.
         assert_eq!(
             slots(&app, "override_tests.jump"),
-            [Control::PhysicalKey(KeyCode::Space)]
+            filled([Control::PhysicalKey(KeyCode::Space)])
         );
     }
 
@@ -1659,11 +1758,11 @@ mod tests {
         // Refused whole, never half: every one of those rows still holds what it shipped with.
         assert_eq!(
             slots(&app, "override_tests.jump"),
-            [Control::PhysicalKey(KeyCode::Space)]
+            filled([Control::PhysicalKey(KeyCode::Space)])
         );
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::PhysicalKey(KeyCode::KeyW)]
+            filled([Control::PhysicalKey(KeyCode::KeyW)])
         );
     }
 
@@ -1730,11 +1829,11 @@ mod tests {
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(
             slots(&app, "override_tests.stick.move"),
-            [Control::GamepadStick(Stick::Right)]
+            filled([Control::GamepadStick(Stick::Right)])
         );
         assert_eq!(
             slots(&app, "override_tests.stick.look"),
-            [Control::GamepadStick(Stick::Left)]
+            filled([Control::GamepadStick(Stick::Left)])
         );
     }
 
@@ -1780,7 +1879,7 @@ mod tests {
         apply_overrides(app.world_mut(), &overrides);
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::PhysicalKey(KeyCode::KeyW)]
+            filled([Control::PhysicalKey(KeyCode::KeyW)])
         );
     }
 
@@ -1811,7 +1910,7 @@ mod tests {
         );
         assert_eq!(
             slots(&app, "override_tests.settings"),
-            [Control::PhysicalKey(KeyCode::F1)]
+            filled([Control::PhysicalKey(KeyCode::F1)])
         );
 
         // The same row moves once the same rows are named as the preset authorizing it.
@@ -1819,7 +1918,7 @@ mod tests {
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(
             slots(&app, "override_tests.settings"),
-            [Control::PhysicalKey(KeyCode::F2)]
+            filled([Control::PhysicalKey(KeyCode::F2)])
         );
     }
 
@@ -1836,8 +1935,138 @@ mod tests {
         assert!(problems.is_empty());
         assert_eq!(
             slots(&app, "override_tests.jump"),
-            [Control::PhysicalKey(KeyCode::Space)],
+            filled([Control::PhysicalKey(KeyCode::Space)]),
             "not ours is not cleared"
+        );
+    }
+
+    /// The point of the whole container: emptying the primary of a two-control row leaves the gap
+    /// where it was. Position is what primary and secondary mean, so a secondary that slid up into
+    /// the column the player just cleared would be a different binding than the one they asked for.
+    #[test]
+    fn emptying_a_slot_leaves_a_gap_rather_than_promoting_what_follows() {
+        let mut app = app();
+        let jump = row(&app, "override_tests.jump");
+
+        let mut overrides = Overrides::new();
+        overrides.bind(
+            jump.family,
+            jump.key,
+            [
+                Control::PhysicalKey(KeyCode::Space),
+                Control::PhysicalKey(KeyCode::KeyJ),
+            ],
+        );
+        let problems = apply_overrides(app.world_mut(), &overrides);
+        assert!(problems.is_empty(), "{problems:?}");
+
+        // What a screen writes when the player clears the first cell of that row.
+        overrides.bind(
+            jump.family,
+            jump.key,
+            [None, Some(Control::PhysicalKey(KeyCode::KeyJ))],
+        );
+        let problems = apply_overrides(app.world_mut(), &overrides);
+        assert!(problems.is_empty(), "{problems:?}");
+
+        assert_eq!(
+            slots(&app, "override_tests.jump"),
+            [None, Some(Control::PhysicalKey(KeyCode::KeyJ))],
+            "the secondary is still the secondary"
+        );
+
+        // And the plan agrees with the row, which is the half taking the shape from the override
+        // rather than from the rewritten bindings could get wrong: the emptied primary's binding is
+        // gone, and the secondary's is the one still reading.
+        use bevy_input::{ButtonState, keyboard::Key, keyboard::KeyboardInput};
+
+        let entity = app.world_mut().spawn(Playing).id();
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::Space,
+            logical_key: Key::Space,
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert!(
+            !app.world()
+                .get::<InputContextState<Playing>>(entity)
+                .unwrap()
+                .value::<Jump>(),
+            "the control the player cleared fires nothing"
+        );
+
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::KeyJ,
+            logical_key: Key::Character("j".into()),
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert!(
+            app.world()
+                .get::<InputContextState<Playing>>(entity)
+                .unwrap()
+                .value::<Jump>(),
+            "and the one in the second column still does"
+        );
+    }
+
+    /// Trailing empties are not a row's business: a row is as long as its last filled slot, and how
+    /// many cells to draw past that is the screen's decision rather than something a save carries.
+    #[test]
+    fn a_row_normalizes_to_its_last_filled_slot() {
+        let app = app();
+        let jump = row(&app, "override_tests.jump");
+        let space = Control::PhysicalKey(KeyCode::Space);
+
+        let mut overrides = Overrides::new();
+        overrides.bind(jump.family, jump.key, [Some(space), None]);
+        assert_eq!(
+            overrides.get(jump.family, jump.key),
+            Some(&Override::Controls(alloc::vec![Some(space)])),
+            "a blank second cell is not something to write down"
+        );
+
+        // And a row with nothing left in it is the state that already means that.
+        overrides.bind(jump.family, jump.key, [None, None]);
+        assert_eq!(
+            overrides.get(jump.family, jump.key),
+            Some(&Override::Cleared)
+        );
+    }
+
+    /// 1010: emptying one direction of a composite would take the binding away, and that binding is
+    /// the other three directions too. Refused whole, the mirror of `CompositeCannotGrow`.
+    #[test]
+    fn one_direction_of_a_composite_cannot_be_emptied_on_its_own() {
+        let mut app = app();
+        let up = row(&app, "override_tests.move.up");
+
+        let mut overrides = Overrides::new();
+        overrides.set(up.family, up.key, Override::Cleared);
+        let problems = apply_overrides(app.world_mut(), &overrides);
+
+        assert_eq!(
+            problems
+                .iter()
+                .map(|problem| problem.kind.clone())
+                .collect::<Vec<_>>(),
+            [OverrideProblemKind::CompositeCannotEmpty]
+        );
+        assert_eq!(
+            slots(&app, "override_tests.move.up"),
+            filled([Control::PhysicalKey(KeyCode::KeyW)]),
+            "refused whole, so the direction the player cleared is still bound"
+        );
+        assert_eq!(
+            slots(&app, "override_tests.move.down"),
+            filled([Control::PhysicalKey(KeyCode::KeyS)]),
+            "and the other three did not quietly empty with it"
         );
     }
 
@@ -1876,11 +2105,11 @@ mod tests {
         );
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [Control::PhysicalKey(KeyCode::KeyW)]
+            filled([Control::PhysicalKey(KeyCode::KeyW)])
         );
         assert_eq!(
             slots(&app, "override_tests.move.down"),
-            [Control::PhysicalKey(KeyCode::KeyS)],
+            filled([Control::PhysicalKey(KeyCode::KeyS)]),
             "and the other three directions are untouched"
         );
     }
@@ -1905,10 +2134,10 @@ mod tests {
 
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [
+            filled([
                 Control::PhysicalKey(KeyCode::KeyW),
                 Control::PhysicalKey(KeyCode::ArrowUp)
-            ]
+            ])
         );
 
         let up = row(&app, "override_tests.move.up");
@@ -1926,18 +2155,18 @@ mod tests {
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(
             slots(&app, "override_tests.move.up"),
-            [
+            filled([
                 Control::PhysicalKey(KeyCode::KeyW),
                 Control::PhysicalKey(KeyCode::KeyI)
-            ],
+            ]),
             "the secondary moved and the primary did not"
         );
         assert_eq!(
             slots(&app, "override_tests.move.down"),
-            [
+            filled([
                 Control::PhysicalKey(KeyCode::KeyS),
                 Control::PhysicalKey(KeyCode::ArrowDown)
-            ],
+            ]),
             "and the other rows kept both of theirs"
         );
     }
@@ -1958,7 +2187,7 @@ mod tests {
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(
             slots(&unbounded, "override_tests.jump"),
-            long,
+            filled(long),
             "a game that set no ceiling reads whatever its own file says"
         );
 
@@ -1974,7 +2203,7 @@ mod tests {
         );
         assert_eq!(
             slots(&bounded, "override_tests.jump"),
-            [Control::PhysicalKey(KeyCode::Space)],
+            filled([Control::PhysicalKey(KeyCode::Space)]),
             "refused whole, so the row still holds what the game shipped"
         );
     }
@@ -2172,6 +2401,85 @@ mod tests {
             assert_eq!(loaded, overrides);
         }
 
+        /// An emptied slot inside a row is the same bare word an emptied row is, and it survives
+        /// the trip out to text and back. One word at both levels is the whole of the format
+        /// change: no `null`, nothing a person opening the file has to be taught.
+        #[test]
+        fn an_emptied_slot_round_trips_as_the_word_inside_the_list() {
+            const GOLDEN_WITH_A_GAP: &str = "action_map_version = 1\n\
+                \n\
+                [bindings.keyboard_mouse]\n\
+                \"persist_tests.jump\" = [\"cleared\", \"key/KeyJ\"]\n\
+                \n\
+                [tunables]\n";
+
+            let declared = declared();
+            let registry = types();
+            let types = registry.read();
+            let jump = mapping_key(&declared, DeviceFamily::KeyboardMouse, "persist_tests.jump");
+
+            let mut overrides = Overrides::new();
+            overrides.bind(
+                DeviceFamily::KeyboardMouse,
+                jump,
+                [None, Some(Control::PhysicalKey(KeyCode::KeyJ))],
+            );
+
+            let saved = save_overrides(&overrides);
+            let serializer = TypedReflectSerializer::new(&saved, &types);
+            let text = toml::to_string(&serializer).expect("serializes");
+            assert_eq!(text, GOLDEN_WITH_A_GAP);
+
+            let registration = types
+                .get(core::any::TypeId::of::<SavedOverrides>())
+                .unwrap();
+            let value: toml::Value = toml::from_str(&text).expect("parses");
+            let reflected = TypedReflectDeserializer::new(registration, &types)
+                .deserialize(value)
+                .expect("deserializes");
+            let loaded_saved =
+                <SavedOverrides as FromReflect>::from_reflect(&*reflected).expect("round-trips");
+
+            let (loaded, problems, unresolved) =
+                resolve_saved(&loaded_saved, &declared, &[]).expect("a version this build wrote");
+            assert!(problems.is_empty(), "{problems:?}");
+            assert!(unresolved.is_empty(), "{unresolved:?}");
+            assert_eq!(loaded, overrides, "the gap came back where it was");
+        }
+
+        /// A hand-written row of nothing but the word is the state that already means that, so a
+        /// person editing the file cannot produce a row of empties the crate would have to explain.
+        #[test]
+        fn a_row_of_nothing_but_empties_reads_as_cleared() {
+            let declared = declared();
+            let saved = SavedOverrides {
+                action_map_version: 1,
+                bindings: BTreeMap::from([(
+                    "keyboard_mouse".to_string(),
+                    BTreeMap::from([(
+                        "persist_tests.jump".to_string(),
+                        SavedRow::Controls(alloc::vec![
+                            "cleared".to_string(),
+                            "cleared".to_string()
+                        ]),
+                    )]),
+                )]),
+                tunables: BTreeMap::new(),
+            };
+
+            let (loaded, problems, unresolved) =
+                resolve_saved(&saved, &declared, &[]).expect("a version this build wrote");
+            assert!(problems.is_empty(), "{problems:?}");
+            assert!(unresolved.is_empty(), "{unresolved:?}");
+            assert_eq!(
+                loaded.get(
+                    DeviceFamily::KeyboardMouse,
+                    mapping_key(&declared, DeviceFamily::KeyboardMouse, "persist_tests.jump")
+                ),
+                Some(&Override::Cleared)
+            );
+        }
+
         /// A version this build never shipped refuses the whole set at once (D58).
         #[test]
         fn an_unrecognized_version_refuses_the_whole_set() {
@@ -2254,8 +2562,8 @@ mod tests {
                     DeviceFamily::KeyboardMouse,
                     mapping_key(&declared, DeviceFamily::KeyboardMouse, "persist_tests.jump")
                 ),
-                Some(&Override::Controls(alloc::vec![Control::PhysicalKey(
-                    KeyCode::Space
+                Some(&Override::Controls(alloc::vec![Some(
+                    Control::PhysicalKey(KeyCode::Space)
                 )]))
             );
         }

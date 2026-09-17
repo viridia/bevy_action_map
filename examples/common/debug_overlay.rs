@@ -137,11 +137,13 @@ fn redraw(world: &mut World) {
     let mut rebindable = String::from("rebindable\n");
     for mapping in mappings(world) {
         // Both halves of the row are keys with a fallback, so a game that ships a translation
-        // catalogue swaps in two lookups here and nothing else changes.
+        // catalogue swaps in two lookups here and nothing else changes. An emptied slot prints as a
+        // dash rather than being skipped: this is a dump of what the row holds, and a gap between
+        // two controls is part of that.
         let bound = mapping
             .slots
             .iter()
-            .map(|control| control.fallback_label())
+            .map(|slot| slot.map_or_else(|| "—".into(), |control| control.fallback_label()))
             .collect::<Vec<_>>()
             .join(", ");
         let _ = writeln!(
