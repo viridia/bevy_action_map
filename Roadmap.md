@@ -248,21 +248,23 @@ is split that is the only place a diagonal can be normalized.
 - **Verified by:** unit tests on the stage, and `move_and_jump` moving diagonally at the speed it
   moves straight.
 
-### 126. Analog and directional bindings add up
+### 126. Opposite contributions cancel
 
-D76: `Analog1` and `Directional2` fold by summing. `Button` keeps strongest-wins, and `Delta2`
-already sums. This is what lets chunk 127 split a composite without losing the diagonal.
+D76: `Analog1` and `Directional2` fold per axis as the strongest positive contribution plus the
+strongest negative one. `Button` keeps strongest-wins, and `Delta2` still sums. This is what lets
+chunk 127 split a composite without losing the diagonal or the cancelling of opposite keys.
 
-- **Depends on chunk 125**, which is where an action that now overshoots puts its clamp.
-- **Only an action with several bindings held at once changes.** Composites are still whole, so
-  nothing inside one does. Each example binding two sources to one analog or directional action is
-  checked and given a clamp where it overshoots: Disasteroids' `Turn` reads a stick, A and D, and
-  the arrows, so A and Left held together reach -2.
-- **Declaration order stops being a tiebreak**, since a sum has none. TD5.5 loses that sentence and
-  D15 is marked superseded for these two intents.
+- **Independent of chunk 125.** The fold cannot exceed its strongest contributor on an axis, so no
+  action needs a new clamp for it.
+- **Only opposite contributions from separate bindings change.** Composites are still whole, and
+  within one sign the strongest still wins. In tree that is a stick against a key on Disasteroids'
+  `Turn`, or A against Right, which now cancel rather than taking whichever was declared first.
+- **Two accumulators, not one**, as locals of the fold loop: no scratch, and no change to a
+  snapshot.
+- **Declaration order stops being a tiebreak**, since a maximum has none. TD5.5 loses that sentence.
 - **Not doing: splitting composites** — chunk 127.
-- **Verified by:** tests for opposite keys on two bindings cancelling, and a half-deflected stick
-  plus a key clamped by the action.
+- **Verified by:** tests that same-direction contributions do not add, that opposite ones cancel,
+  and that reordering the declarations gives the same value.
 
 ### 127. A composite expands into one binding per part
 

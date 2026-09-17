@@ -375,16 +375,18 @@ buttons would jump twice.
 **Note.** Keying the fold on intent stops the units error between actions. What stops a mouse delta
 being bound to a directional action in the first place is D7's channel check, at declaration time.
 
-**Superseded in part by D76** once chunk 126 lands: `Analog1` and `Directional2` sum.
+**Superseded in part by D76** once chunk 126 lands: `Analog1` and `Directional2` add the strongest
+positive and strongest negative contribution on each axis.
 
-### D76 — A composite is a way to write bindings, and analog contributions add up
+### D76 — A composite is a way to write bindings, and opposite contributions cancel
 
 **Decided.** `DirectionalButtons` and `AxisButtons` are authoring shorthand, not a kind of binding.
 Each expands at declaration into one binding per part, and the part is both the binding's name and
-the direction it contributes. `Analog1` and `Directional2` fold by summing, reversing D15 for those
-two intents; `Button` keeps strongest-wins and `Delta2` already sums. A stage after the fold,
-declared once per action, is where anything that shapes the combined value goes. Chunks 125–127
-build it; until they land, D15 and D48 describe the code.
+the direction it contributes. `Analog1` and `Directional2` fold per axis, as the strongest positive
+contribution plus the strongest negative one, which reverses D15 for those two intents; `Button`
+keeps strongest-wins and `Delta2` still sums. A stage after the fold, declared once per action, is
+where anything that shapes the combined value goes. Chunks 125–127 build it; until they land, D15
+and D48 describe the code.
 
 **Rules out.** A composite the evaluator or the override path can see; a direction held as `negate`
 and `swizzle` modifiers, which is BEI's form; and a clamp built into the fold.
@@ -401,21 +403,31 @@ first, so split parts lose the diagonal.
 player has no reason to think Forward and Back are joined because they share a column. BEI's
 `Cardinal` spawns four bindings and sums by default (`Accumulation::Cumulative`), as Unreal's
 Enhanced Input does. Unity keeps a composite with addressable parts, and carries the same inability
-to grow one part.
+to grow one part. The fold has no precedent found: Unity's per-composite choice of which side wins
+is its nearest relative.
+
+**Why the fold splits by sign.** It is the rule that answers every case the other two each got
+wrong. Opposite contributions cancel, which strongest-wins does not: A and D on separate bindings
+read as whichever was declared first. Same-direction contributions do not add, which a sum does: A
+and Left together reach -2, and two half-deflected sticks read as one full deflection, which is
+D15's own objection. Within one sign the strongest wins as before, so a player holding one key per
+direction sees what the composite gave, and a maximum does not depend on declaration order.
 
 **Why the direction is not a modifier.** The part names the row. A direction held as modifiers would
 have to be read back into a name, which a custom modifier defeats, and it costs two modifier calls
 per key per tick where one match arm does.
 
-**Why the fold does not clamp.** Modifiers run per binding before the fold, so a `scale` on an
-analog binding is legitimate and a fold clamping to unit length would cap it silently. Diagonal
-normalization was never automatic: a four-key composite reaches 1.414 unless `clamp_magnitude` is
-added.
+**Why the fold does not clamp.** It has no need to on an axis, since no sign can exceed its
+strongest contributor. And modifiers run per binding before the fold, so a `scale` on an analog
+binding is legitimate and a fold clamping to unit length would cap it silently. The length of a
+diagonal is a different matter and was never automatic: W and D give (1, 1), as a four-key composite
+does today, and `clamp_magnitude` in the stage after the fold is what normalizes it.
 
-**Accepted price.** D15's case returns: two half-deflected sticks on one action read as one full
-deflection, and a stick plus a key overshoots unless the action clamps. Nothing in tree binds two
-sticks to one action. A composite costs four passes of per-binding bookkeeping rather than one; the
-control lookups, which dominate, are unchanged.
+**Accepted price.** Taking each axis's maximum separately can bend the direction when two analog
+vectors combine, which nothing in tree does; a button-sourced part feeds one axis and cannot. The
+fold keeps two accumulators rather than one, which are locals of the loop and never state. A
+composite costs four passes of per-binding bookkeeping rather than one; the control lookups, which
+dominate, are unchanged.
 
 **Unresolved.** Whether the stage after the fold takes conditions as well as modifiers, which chunk
 125 settles. A condition on a composite judges the whole vector; split, it judges each key.
