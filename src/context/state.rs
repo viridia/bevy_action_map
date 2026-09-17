@@ -75,6 +75,9 @@ pub struct InputContextState<C> {
     // a context activates, so a control the player was already holding does not read as a fresh
     // press.
     pub(crate) require_reset: FixedBitSet,
+    // Parallel to `actions`: switched off one at a time by the game (R3.7). Evaluation skips these
+    // slots on the same terms as it skips an inactive context.
+    pub(crate) disabled: FixedBitSet,
     // Every phase change since the last dispatch, in order. Evaluation appends and the dispatcher
     // drains, which is what keeps observers — arbitrary code with `&mut World` — outside the
     // evaluator (R10.2).
@@ -121,6 +124,7 @@ impl<C: InputContext> InputContextState<C> {
             tunable_scratch: alloc::vec![Scratch::default(); tunable_scratch_slots],
             chord_claims: Vec::new(),
             require_reset: FixedBitSet::with_capacity(slots),
+            disabled: FixedBitSet::with_capacity(slots),
             transitions: Vec::new(),
             class_fires: Vec::new(),
             read_through,
@@ -325,6 +329,9 @@ impl<C: InputContext> InputContextState<C> {
         if !self.is_active() {
             return ActionObstacle::ContextInactive;
         }
+        if self.disabled[slot] {
+            return ActionObstacle::Disabled;
+        }
         match self.actions[slot].phase {
             ActionPhase::Fired | ActionPhase::Firing => return ActionObstacle::None,
             ActionPhase::Started | ActionPhase::Building => {
@@ -482,6 +489,64 @@ impl<C: InputContext> InputContextState<C> {
         self.cancel_in_flight();
     }
 
+    /// Switches one action off without unbinding it.
+    ///
+    /// The action stops reading its controls and stays at rest, while the rest of the context
+    /// carries on. Whatever it had in flight is reported as [`Canceled`](ActionPhase::Canceled), as
+    /// [`deactivate`](Self::deactivate) does for a whole context. A disabled action also stops
+    /// consuming controls and stops out-ranking shorter chords, so a control it would have taken
+    /// is free for the other bindings to read.
+    pub fn disable<A>(&mut self)
+    where
+        A: InputAction,
+    {
+        let Some(slot) = self.plan.slot_for_action(A::id()) else {
+            self.warn_unbound::<A>();
+            return;
+        };
+        if self.disabled[slot] {
+            return;
+        }
+        self.disabled.set(slot, true);
+        self.cancel_slot(slot);
+    }
+
+    /// Switches an action back on, ignoring a control the player is already holding.
+    ///
+    /// A button held for the whole time the action was off does not fire the moment it comes
+    /// back: the player lets go and presses again, the same rule [`activate`](Self::activate)
+    /// applies to a whole context. An analog action has no press to hold back, and picks up its
+    /// value straight away.
+    ///
+    /// Enabling an action that is already enabled does nothing, so a system can call this every
+    /// tick without holding a button back forever.
+    pub fn enable<A>(&mut self)
+    where
+        A: InputAction,
+    {
+        let Some(slot) = self.plan.slot_for_action(A::id()) else {
+            self.warn_unbound::<A>();
+            return;
+        };
+        if !self.disabled[slot] {
+            return;
+        }
+        self.disabled.set(slot, false);
+        self.require_reset.set(slot, true);
+    }
+
+    /// Whether an action is switched on. See [`disable`](Self::disable).
+    ///
+    /// An action this context does not bind reads as enabled, since it was never switched off.
+    pub fn is_enabled<A>(&self) -> bool
+    where
+        A: InputAction,
+    {
+        self.plan
+            .slot_for_action(A::id())
+            .is_none_or(|slot| !self.disabled[slot])
+    }
+
     /// Suppresses this context for as long as a higher-priority exclusive context is active.
     ///
     /// Cancels in-flight actions as `deactivate` does: a control held through a modal opening must
@@ -510,25 +575,27 @@ impl<C: InputContext> InputContextState<C> {
     /// began is still in flight, and leaving it at `Started` would strand it there until the
     /// context reactivates, which is the "held forever" R7.4 forbids.
     fn cancel_in_flight(&mut self) {
-        for (slot, state) in self.actions.iter_mut().enumerate() {
-            if !matches!(
-                state.phase,
-                ActionPhase::Started
-                    | ActionPhase::Building
-                    | ActionPhase::Fired
-                    | ActionPhase::Firing
-            ) {
-                continue;
-            }
-            state.phase = ActionPhase::Canceled;
-            state.value = rest_like(state.value);
-            self.dirty.set(slot, true);
-            self.transitions.push(Transition {
-                slot,
-                phase: ActionPhase::Canceled,
-                value: state.value,
-            });
+        for slot in 0..self.actions.len() {
+            self.cancel_slot(slot);
         }
+    }
+
+    fn cancel_slot(&mut self, slot: usize) {
+        let state = &mut self.actions[slot];
+        if !matches!(
+            state.phase,
+            ActionPhase::Started | ActionPhase::Building | ActionPhase::Fired | ActionPhase::Firing
+        ) {
+            return;
+        }
+        state.phase = ActionPhase::Canceled;
+        state.value = rest_like(state.value);
+        self.dirty.set(slot, true);
+        self.transitions.push(Transition {
+            slot,
+            phase: ActionPhase::Canceled,
+            value: state.value,
+        });
     }
 }
 
@@ -593,7 +660,10 @@ pub enum ActionObstacle {
     Unbound,
     /// The context is not active, so none of its bindings are being read.
     ContextInactive,
-    /// The context has just activated and this control was already held.
+    /// The game has switched this action off. See [`disable`](InputContextState::disable).
+    Disabled,
+    /// The context has just activated, or this action was just enabled, and its control was
+    /// already held.
     ///
     /// It will fire once the player has let go and pressed again. See
     /// [`activate`](InputContextState::activate).
@@ -1478,6 +1548,166 @@ mod tests {
         assert!(
             app.world().resource::<Seen>().0,
             "priority 20 is above the exclusive context's 10, so it was never shadowed"
+        );
+    }
+
+    /// One action switched off while the rest of its context carries on, and switched back on
+    /// under the same require-reset rule activation follows: a key held across the boundary is not
+    /// a fresh press (R3.7).
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_disabled_action_rests_and_returns_without_a_fresh_press() {
+        #[derive(InputAction)]
+        #[action(path = "tests.crouch", output = bool, intent = Button)]
+        struct Crouch;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+            context.bind::<Crouch>(KeyCode::KeyC);
+        });
+        let player = app.world_mut().spawn(FreeLook).id();
+
+        let space = |app: &mut App, state| {
+            app.world_mut()
+                .write_message(press(KeyCode::Space, Key::Space, state));
+        };
+        fn input(
+            app: &mut App,
+            player: Entity,
+        ) -> bevy_ecs::world::Mut<'_, InputContextState<FreeLook>> {
+            app.world_mut().get_mut(player).unwrap()
+        }
+        let why_not = |app: &App| {
+            app.world()
+                .get::<InputContextState<FreeLook>>(player)
+                .unwrap()
+                .why_not::<Jump>(app.world().resource(), None)
+        };
+
+        space(&mut app, ButtonState::Pressed);
+        app.world_mut().write_message(press(
+            KeyCode::KeyC,
+            Key::Character("c".into()),
+            ButtonState::Pressed,
+        ));
+        app.update();
+        assert!(input(&mut app, player).value::<Jump>());
+
+        input(&mut app, player).disable::<Jump>();
+        assert_eq!(
+            input(&mut app, player).phase::<Jump>(),
+            ActionPhase::Canceled
+        );
+        assert!(!input(&mut app, player).is_enabled::<Jump>());
+
+        app.update();
+        assert!(
+            !input(&mut app, player).value::<Jump>(),
+            "still held, and still off"
+        );
+        assert!(
+            input(&mut app, player).value::<Crouch>(),
+            "its neighbour is untouched"
+        );
+        assert_eq!(why_not(&app), ActionObstacle::Disabled);
+
+        input(&mut app, player).enable::<Jump>();
+        app.update();
+        assert!(
+            !input(&mut app, player).value::<Jump>(),
+            "held across the enable, so not a press"
+        );
+        assert_eq!(why_not(&app), ActionObstacle::AwaitingRelease);
+
+        space(&mut app, ButtonState::Released);
+        app.update();
+        space(&mut app, ButtonState::Pressed);
+        app.update();
+        assert!(
+            input(&mut app, player).fired::<Jump>(),
+            "released and pressed again"
+        );
+    }
+
+    /// A disabled action is out of the running entirely, so what it would have claimed goes to
+    /// whoever else reads the control: a context below it, and a shorter chord beside it.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_disabled_action_neither_consumes_nor_out_ranks() {
+        #[derive(InputAction)]
+        #[action(path = "tests.dismiss", output = bool, intent = Button)]
+        struct Dismiss;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.save", output = bool, intent = Button)]
+        struct Save;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.type_s", output = bool, intent = Button)]
+        struct TypeS;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.disabled_menu", tick = Render, priority = 10)]
+        struct Menu;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.disabled_behind", tick = Render, priority = 0)]
+        struct Behind;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Menu>(|context| {
+            context.bind::<Dismiss>(KeyCode::Escape).consume();
+            context
+                .bind::<Save>(KeyCode::KeyS)
+                .with(KeyCode::ControlLeft);
+            context.bind::<TypeS>(KeyCode::KeyS);
+        });
+        app.add_context::<Behind>(|context| {
+            context.bind::<Jump>(KeyCode::Escape);
+        });
+        let menu = app.world_mut().spawn(Menu).id();
+        let behind = app.world_mut().spawn(Behind).id();
+
+        {
+            let mut state = app
+                .world_mut()
+                .get_mut::<InputContextState<Menu>>(menu)
+                .unwrap();
+            state.disable::<Dismiss>();
+            state.disable::<Save>();
+        }
+
+        app.world_mut()
+            .write_message(press(KeyCode::Escape, Key::Escape, ButtonState::Pressed));
+        app.world_mut().write_message(press(
+            KeyCode::ControlLeft,
+            Key::Control,
+            ButtonState::Pressed,
+        ));
+        app.world_mut().write_message(press(
+            KeyCode::KeyS,
+            Key::Character("s".into()),
+            ButtonState::Pressed,
+        ));
+        app.update();
+
+        let world = app.world();
+        assert!(
+            world
+                .get::<InputContextState<Behind>>(behind)
+                .unwrap()
+                .value::<Jump>(),
+            "the disabled binding did not take escape"
+        );
+        assert!(
+            world
+                .get::<InputContextState<Menu>>(menu)
+                .unwrap()
+                .value::<TypeS>(),
+            "the disabled chord did not take s"
         );
     }
 

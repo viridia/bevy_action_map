@@ -544,6 +544,7 @@ impl<C: InputContext> InputContextState<C> {
             dirty,
             transitions,
             require_reset,
+            disabled,
             scratch,
             tunable_scratch,
             chord_claims,
@@ -591,7 +592,7 @@ impl<C: InputContext> InputContextState<C> {
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         if plan.has_chords() {
             for binding in plan.bindings() {
-                if !binding.chord.iter().copied().all(&is_pressed) {
+                if disabled[binding.slot] || !binding.chord.iter().copied().all(&is_pressed) {
                     continue;
                 }
                 binding.input.for_each_control(|control| {
@@ -625,10 +626,9 @@ impl<C: InputContext> InputContextState<C> {
         for (scratch_index, cell) in tunable_scratch.iter_mut().enumerate() {
             let mut actuated = false;
             let mut active = false;
-            for binding in bindings
-                .iter()
-                .filter(|binding| binding.tunable_shared == Some(scratch_index))
-            {
+            for binding in bindings.iter().filter(|binding| {
+                binding.tunable_shared == Some(scratch_index) && !disabled[binding.slot]
+            }) {
                 active = crate::binding::toggle_active(&binding.modifiers);
                 if crate::binding::as_button_control(&binding.input).is_some_and(&is_pressed) {
                     actuated = true;
@@ -649,7 +649,7 @@ impl<C: InputContext> InputContextState<C> {
                 Fold::Delta => intent == ActionIntent::Delta2,
                 Fold::Level | Fold::Interrupted => intent != ActionIntent::Delta2,
             };
-            if !wanted {
+            if !wanted || disabled[slot] {
                 while index < bindings.len() && bindings[index].slot == slot {
                     index += 1;
                 }
@@ -871,10 +871,15 @@ impl<C: InputContext> InputContextState<C> {
             dirty,
             transitions,
             require_reset,
+            disabled,
             ..
         } = self;
 
-        for &slot in plan.delegated_slots() {
+        for &slot in plan
+            .delegated_slots()
+            .iter()
+            .filter(|&&slot| !disabled[slot])
+        {
             let intent = plan.intent_for_slot(slot);
             let value = authority
                 .and_then(|values| values.value_of(plan.slot_actions()[slot]))
@@ -1254,6 +1259,27 @@ mod tests {
         values.set::<Serve>(true);
         state.apply_authority(Some(&values), TICK);
         assert_eq!(state.phase::<Serve>(), ActionPhase::Fired);
+    }
+
+    /// A disabled delegated action does not listen to its authority either, and comes back under
+    /// the same guard as a bound one.
+    #[test]
+    fn a_disabled_delegated_action_ignores_its_authority() {
+        let mut state = delegated_context();
+        let mut values = AuthorityValues::new();
+        values.set::<Serve>(true);
+
+        state.disable::<Serve>();
+        state.apply_authority(Some(&values), TICK);
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Idle);
+
+        state.enable::<Serve>();
+        state.apply_authority(Some(&values), TICK);
+        assert_eq!(
+            state.phase::<Serve>(),
+            ActionPhase::Idle,
+            "a value held across the enable is not a press"
+        );
     }
 
     #[cfg(feature = "keyboard")]

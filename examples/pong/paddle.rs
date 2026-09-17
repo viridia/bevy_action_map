@@ -69,7 +69,7 @@ pub fn bindings(controls: &mut InputContextBuilder<Paddle>) {
 /// Both paddles are the same scene, [`paddle`]; player one gets a [`Paddle`] and a [`Paired`]
 /// added straight onto the spawned entity, since there is nothing to wait for. Player two starts
 /// with neither, and stays that way until [`pair_gamepad`] finds it a device.
-fn spawn(mut commands: Commands) {
+pub fn spawn(mut commands: Commands) {
     commands
         .spawn_scene(paddle(Side::LEFT, -(HALF_EXTENT.x - INSET)))
         .insert((Paddle, Paired::to(DeviceHandle::KeyboardMouse)));
@@ -113,7 +113,7 @@ pub fn walk<C: InputContext + Component>(
 /// code path for both. `unpaired.single()` is safe because player one is paired at spawn — the only
 /// entity this query can ever find is player two's paddle, before it has one, and there is nothing
 /// left to find once it does.
-fn pair_gamepad(
+pub fn pair_gamepad(
     mut commands: Commands,
     gamepads: Query<Entity, Added<Gamepad>>,
     unpaired: Query<Entity, (With<Side>, Without<Paired>)>,

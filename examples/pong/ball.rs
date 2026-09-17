@@ -15,23 +15,26 @@ const MAX_BOUNCE_ANGLE: f32 = 60.0_f32 * core::f32::consts::PI / 180.0;
 pub struct Ball;
 
 #[derive(Component, Clone, Copy, Default, Deref, DerefMut)]
-struct Velocity(Vec2);
+pub struct Velocity(pub Vec2);
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Startup, ball.spawn());
+    app.add_systems(Startup, |mut commands: Commands| {
+        commands.spawn_scene(ball(serve()));
+    });
     app.add_systems(FixedUpdate, (fly, bounce, check_goal).chain());
 }
 
-fn ball() -> impl Scene {
+/// The ball, leaving center at `velocity`.
+pub fn ball(velocity: Vec2) -> impl Scene {
     bsn! {
         Ball
         Mesh2d(asset_value(Circle::new(RADIUS)))
         MeshMaterial2d::<ColorMaterial>(asset_value(Color::WHITE))
-        Velocity(serve())
+        Velocity(velocity)
     }
 }
 
-fn fly(time: Res<Time>, mut ball: Query<(&mut Transform, &Velocity), With<Ball>>) {
+pub fn fly(time: Res<Time>, mut ball: Query<(&mut Transform, &Velocity), With<Ball>>) {
     let Ok((mut transform, velocity)) = ball.single_mut() else {
         return;
     };
@@ -45,7 +48,7 @@ fn fly(time: Res<Time>, mut ball: Query<(&mut Transform, &Velocity), With<Ball>>
 /// it, which reads as the paddle reaching through the court. What the ball leaves a paddle with is
 /// entirely a function of where it landed on the paddle, per [`depart`] — its incoming velocity
 /// never enters the calculation, which is the classic Pong rule.
-fn bounce(
+pub fn bounce(
     mut ball: Query<(&mut Transform, &mut Velocity), With<Ball>>,
     paddles: Query<(&Side, &Transform), Without<Ball>>,
 ) {
@@ -88,16 +91,23 @@ fn check_goal(
     let Ok((mut transform, mut velocity)) = ball.single_mut() else {
         return;
     };
-    let x = transform.translation.x;
-    if x - RADIUS > HALF_EXTENT.x {
-        score.add(Side::LEFT);
-    } else if x + RADIUS < -HALF_EXTENT.x {
-        score.add(Side::RIGHT);
-    } else {
+    let Some(side) = scorer(transform.translation.x) else {
         return;
-    }
+    };
+    score.add(side);
     transform.translation = Vec3::ZERO;
     velocity.0 = serve();
+}
+
+/// Which side just scored, if the ball at `x` has left the court.
+pub fn scorer(x: f32) -> Option<Side> {
+    if x - RADIUS > HALF_EXTENT.x {
+        Some(Side::LEFT)
+    } else if x + RADIUS < -HALF_EXTENT.x {
+        Some(Side::RIGHT)
+    } else {
+        None
+    }
 }
 
 /// The ball's velocity leaving a paddle: away from that side, at a fixed speed, angled by how far
@@ -110,7 +120,7 @@ fn depart(side: Side, offset: f32) -> Vec2 {
 
 /// A fresh serve toward a random side, angled at random within the same range a paddle hit can
 /// produce.
-fn serve() -> Vec2 {
+pub fn serve() -> Vec2 {
     let side = if rand_unit() < 0.5 {
         Side::LEFT
     } else {

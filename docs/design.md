@@ -418,7 +418,7 @@ what keeps the shape uniform across every built-in condition and stateful modifi
 - `tunable_scratch`, one cell per group of bindings sharing a tunable, rather than a private slot
   per binding;
 - `chord_claims`, reused between folds;
-- `require_reset`, parallel to the action table;
+- `require_reset` and `disabled`, parallel to the action table;
 - `transitions` and `class_fires`, appended by evaluation and drained by dispatch;
 - `read_through`, this instance's frame cursor, seeded at spawn so a context added mid-session
   starts from the present;
@@ -464,6 +464,11 @@ press, and must be released once first. The latch holds back `Button` actions on
 action has no synthesized fire to guard against, and its value simply resumes.
 `activate_including_held` skips the arming, which is what a context taking over from another
 driving the same controls wants. Deactivation cancels whatever is in flight.
+
+One action can be switched off on its own with `disable::<A>()`, and back on with `enable::<A>()`,
+without unbinding it. Disabling cancels that action's in-flight state and takes its slot out of the
+fold entirely, so it consumes nothing and out-ranks no chord; enabling arms require-reset for that
+slot alone. `ActionObstacle::Disabled` reports it.
 
 ### 7.3 Reading
 

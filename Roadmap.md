@@ -185,6 +185,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 125  | A stage after the fold, declared once per action                      |
 | 126  | Opposite contributions cancel                                         |
 | 127  | A composite expands into one binding per part                         |
+| 35   | Disabling an action                                                   |
 
 ---
 
@@ -321,21 +322,9 @@ ordered topologically, and a cycle rejected at plan build with a diagnostic nami
   answer different questions — `follow` says the mapping is shared, a condition says the value is
   derived — but check when this lands whether the overlap is large enough that one should go, since
   carrying both when either would do is what an outside reader notices first.
-
-### 35. Disabling an action
-
-R3.7: an action switched off without being unbound, and switched back on without firing for a
-control the player was already holding.
-
-- **Depends on chunk 95.** The demo is a Pong variant: paddle movement is disabled for the serve
-  countdown and switched back on when play resumes, without manufacturing a fire for a key the
-  player was already holding through the countdown — the exact case R3.7 exists for, with no new
-  content beyond the countdown itself.
-- **The mechanism is probably already there.** `require_reset` is per slot and `StateFlags` has
-  room; what is missing is the public verb and what it means for a disabled action's in-flight
-  state. Cancel, on the same terms as deactivating a context, is the answer to beat.
-- **Why it exists as its own chunk.** A `MUST` whose only record of a destination was in the log is
-  exactly what ground rule 5 forbids.
+- **`pong_countdown` already has a serve.** Chunk 35 gates it by disabling `Serve` outside the wait,
+  from a system. The likely demo is that gate replaced by a condition, on that variant, rather than
+  a second `Serve` in another.
 
 ### 115. A timing declared as a tunable
 
@@ -479,6 +468,8 @@ the expensive part.
 - **What stays deferred:** injection and reconciliation — feeding a remote player's resolved action
   through the authority-backend seam (D69), and disagreeing with the authority about what happened.
   Those want a network; rewinding does not, and the injection point itself is already chunk 111's.
+- **`disabled` is state a restore must bring back**, beside `require_reset`: chunk 35's per-action
+  switch, parallel to the action table.
 - **Split if it grows.** Making the state snapshot-able with a differential test is separable from
   the example that rewinds, and ground rule 1 says that split happens before the code, not during.
 - **Depends on chunk 95.** The visible rewind reuses its Pong base rather than a third vehicle — the

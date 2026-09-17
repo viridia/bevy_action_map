@@ -486,6 +486,20 @@ stage-2 dead zone entirely leaves a drifting stick that is never seen at rest �
 recovers. What the latch guards against is a _fire_ synthesized from a control already held, and an
 analog action has none to synthesize.
 
+### D77 — A disabled action is out of evaluation, as an inactive context is
+
+**Decided.** Disabling one action cancels what it had in flight and takes its slot out of the fold:
+its bindings read nothing, advance no scratch, claim no control and out-rank no chord, and an
+authority's value for it is ignored. Enabling re-arms require-reset on that slot alone, and only
+when it was disabled. The switch is per instance. Chunk 35 built it.
+
+**Rules out.** Evaluating a disabled action and discarding the result, which would keep a hold
+counting across the gap.
+
+**Reversal.** A disabled action would go on consuming its controls and winning chords, so a context
+below it, or a shorter chord beside it, stays deaf to a control nothing visibly uses. Gating those
+two separately is a second meaning of "off" beside the one an inactive context already has.
+
 ### D26 — Failures surface at the earliest tier that can catch them
 
 **Decided.** Three tiers. The compiler catches a wrong output shape. Plan build catches an unknown
