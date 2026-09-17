@@ -186,6 +186,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 126  | Opposite contributions cancel                                         |
 | 127  | A composite expands into one binding per part                         |
 | 35   | Disabling an action                                                   |
+| 94b  | Either modifier                                                       |
 
 ---
 
@@ -229,32 +230,33 @@ explicit player-facing step. `DeviceId` is the identity to key it by, and it exi
 What a binding can name, and when it counts as firing. Each of these is a gap a game runs into
 rather than a defect in what exists.
 
-### 94b. Either modifier
+### 128. A rebinding row that shows its chord
 
-R12.3: a chord's modifier should be able to say "either Ctrl", as one binding rather than two.
-`with` takes a single `ButtonControl`, so a game wanting either `LeftCtrl` or `RightCtrl` to arm a
-chord writes both bindings by hand today. R4.10 already assigns this to the chord mechanism by name,
-so the requirement has a destination in `Requirements.md` and, until this chunk, none in the plan.
+`docs/issues.md` 1059's reading half, and the Disasteroids shortcut that makes it visible. 94b put
+chords on the prompt path, so a caption already reads `Ctrl+N` — but `mappings_of` fills a row's
+slots from the binding's primary input and drops the chord, so a settings screen listing the same
+binding reads "N". One example would then describe one binding two ways.
 
-- **Self-contained**, and independent of 94c — a different corner of the same requirements
-  section, not a shared mechanism.
-- **Closed over the four keyboard modifiers, not generic.** A new
-  `with_modifier(ChordModifier, Side)` carries this, where `ChordModifier` is
-  `Ctrl | Shift | Alt | Super` and `Side` is `Left | Right | Either` — not
-  `with_either(impl Into<ButtonControl>, impl Into<ButtonControl>)` over two arbitrary controls.
-  R12.3 sits under R12, "Keyboard specifics", and never asked for an either-shaped bumper or any
-  other pairing; a permissive signature would only add combinations nobody asked for and nothing
-  downstream can describe. `with` is unchanged for every other chord entry.
-- **`Side::Either` is `Fixed`, and stays that way.** It is declared at bind time, not observed:
-  capture resolves one keypress to one concrete control, and no keypress means "either side" for it
-  to answer with. A rebind touching this row could only replace it with a concrete `Left` or
-  `Right`, never hand `Either` back, so the row carries no mapping. A game wanting a rebindable
-  "either" still writes two `Fixed` rows by hand, one physical key apiece.
-- **Presentation gets a chord-level `fallback_label`, and it is total.** A chord entry is either an
-  ordinary control (unchanged) or one of the four modifiers under `Either`, which reads as the bare
-  modifier name — `Shift`, not `Left Shift, Right Shift`. Every case is enumerated because the type
-  admits nothing else, so there is no pair this can fail to name and nothing for a caller to
-  decompose.
+- **Disasteroids gets a `NewGame` shortcut on `Ctrl+N`**, in `Shell` beside `Pause` and
+  `ToggleSettings`, and it is the acceptance test: the caption and the settings row have to agree.
+  `text_field` exercises chords with no rebinding screen at all, which is why it could not catch
+  this.
+- **`SmartBomb` moves to both upper triggers**, `RightTrigger` chorded with `LeftTrigger`, replacing
+  the plain `West` binding while keeping `hold_once(BOMB_CHARGE)` and the keyboard `B`. It is the
+  gamepad half of the same test — the pad rows are listed-but-fixed, so the row has to name both
+  bumpers or name neither — and it is the first same-family chord in tree that is not keyboard.
+  Deliberately not attempted before this chunk: the row would have read as one bumper.
+- **The `slots` shape is this chunk's decision, and it is the real work.** A parallel
+  `chords: Vec<Vec<ChordEntry>>` leaves the 31 `.slots` call sites alone but is the index-aligned
+  shape 1059 argues against for the saved format; carrying the chord inside the slot is consistent
+  with 1059 and touches all 31. Deciding that is what this chunk is for, and doing it inside 94b
+  would have been deciding it in passing.
+- **Not the writing half.** Editing a chord stays unrouted in 1059: what the row *shows* is
+  separable from what an override may rewrite, and only the first has a caller.
+- **Watch for a row a player can see and cannot change.** A chorded binding declared `mappable`
+  draws a `Ctrl` the capture cell will never fill, since capture takes a key and a chord is not a
+  slot. That is Blender's behaviour too, but Blender draws its modifiers as toggles and so never
+  implies otherwise; a row that shows one and offers no way to edit it may need to say so.
 
 ### 94c. A platform modifier
 
@@ -263,7 +265,10 @@ binding time rather than something every cross-platform game re-derives by hand.
 
 - **Resolved at binding time, not read time.** The name a game binds does not change per platform;
   what it expands to does, once, when the plan is built — not on every frame the control is read.
-- **Self-contained**, and independent of 94b.
+- **One more `ModifierKey`, and 94b landed the enum.** A platform modifier is a fifth variant in the
+  same position rather than a mechanism beside it, which is what makes it a binding-time expansion
+  of a name a game already had a way to write. `text_field`'s two `cfg(target_os)` constants are the
+  hand-rolling this removes, and the caller it needs.
 
 ### 121. A camera that takes the mouse, and gives it back
 

@@ -435,6 +435,27 @@ bindings. Up held then Right pressed fired the diagonal and repeated it on one t
 split, it fired Right alone, then alternated Up and Right on two timers, and releasing Right moved
 nothing. A condition per part judges a key, and a menu is asking about a direction.
 
+### D78 — A modifier is a chord entry the runtime reads, not shorthand that expands
+
+**Decided.** `ModifierKey` names one of the four keyboard modifier pairs and reaches the compiled
+plan intact, as a `ChordEntry::Modifier` satisfied at read time by either key of the pair. Chord
+length counts entries, so a modifier contributes one however many keys satisfy it.
+`ControlOrigin::Modifier` carries it to presentation and is the only variant answering `None` to
+`control()`. Side-agnostic is the short spelling and a `KeyCode` is how one physical key is named,
+because either-side is the case a chord almost always wants. Chunk 94b built it.
+
+**Rules out.** D76's treatment, applied to modifiers: expansion at declaration would double the
+*binding* rather than the entry, since both keys of a pair are live at once. A `Side` enum whose
+`Either` variant sits beside `Left` and `Right`, which would make the ordinary case the elaborate
+one. Naming a representative key in a caption.
+
+**Reversal.** Expansion is cheaper to evaluate — one lookup per entry rather than two — and is what
+a plan with no presentation surface could afford. What it costs is that `Ctrl+S` becomes two
+bindings on one row, so a rebinding screen lists the shortcut twice and a caption names a side the
+player is free to ignore. This is the same question D76 answered the other way, and the answers
+differ because a composite's parts are alternatives the player rebinds separately while a modifier's
+two keys are one thing they press either of.
+
 ### D16 — Nothing user-defined runs inside the evaluator
 
 **Decided.** Evaluation writes state and appends to a transition log. A separate system drains that

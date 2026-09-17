@@ -28,7 +28,7 @@ chunk's own commit, and `docs/design.md` or `docs/decisions.md` where anything a
 are the record. A gap in the sequence below is a retired finding, not an omission. The next
 unassigned number is stated here; keep it up to date when numbering new items.
 
-**Next: 1059.**
+**Next: 1062.**
 
 **The calibration warning, stated up front because it is fair.** Most of these entries came from
 asking a model to scan `src/`, and a model asked to find sixty problems will find sixty. Some of
@@ -139,16 +139,6 @@ legally offer, not what it must say when it says no. It is here because ground r
 examples the acceptance test, and an example that swallows a diagnostic is not demonstrating the
 thing the diagnostic was built for.
 
-### 1017 Either modifier
-
-R12.3: a chord's modifier should be able to say "either Ctrl", as one binding rather than two.
-`with` takes a single `ButtonControl`, so a game wanting either `LeftCtrl` or `RightCtrl` to arm a
-chord writes both bindings by hand today. R4.10 already assigns this to the chord mechanism by name.
-
-Self-contained, independent of 1018.
-
-_Fix:_ **chunk 94b**.
-
 ### 1018 A platform modifier
 
 R12.4: `Cmd` on macOS should be usable as `Ctrl` everywhere else, as a named modifier resolved at
@@ -161,6 +151,94 @@ winit — [winit#4606][] and [winit#2678][] — and are the deferred table's row
 
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678
+
+### 1059 An app cannot edit a chord, because an override rewrites slots only
+
+Drawing and editing a chord is the app's business, not this crate's. What is wrong is that the crate
+blocks the second: an override addresses a mapping's `slots`, a chord is not a slot, and no public
+type names one. So a game offering a player-editable `Ctrl+S` has nowhere to put the result.
+
+Reading one is not blocked, and was never as blocked as this entry first said. A chord reaches
+`Prompt::with` as `ControlOrigin`, which is public and exists for exactly this — so a caption reads
+`Ctrl+S` today. What it does not reach is a rebinding *row*: `mappings_of` fills slots from the
+binding's primary input and drops the chord, so the same binding captions as `Ctrl+N` and lists as
+"N". That half is **chunk 128**.
+
+Confirmed by reading `mapping.rs`, `overrides.rs` and `present.rs`.
+
+No requirement is violated. R12.2 governs layout labels rather than chords, and nothing in R18 or
+R19 says a row must name what is held alongside it. R19's rebinding surface is written in terms of
+slots throughout, so the omission is consistent rather than an oversight.
+
+_Fix:_ **unrouted**, but cheaper than it looks, and the sketch is worth keeping so nobody re-prices
+it. A saved row is already `Vec<String>`, one string per slot, parsed into `Option<Control>` on load
+(`SavedRow::Controls`), so a chord rides in the string a slot already has:
+
+```json
+"editor.save": ["ctrl+key/KeyS", "alt+key/KeyW"]
+```
+
+That leaves `Control` atomic, so the clash pass, `indexed_controls`, capture and reverse lookup are
+untouched; what widens is the override layer's own slot type. The parse stays decidable on the
+invariant the format already states — every real control name carries a `/`, so modifiers are the
+`+`-separated tokens before the first segment containing one, and `char/+` survives intact. Applying
+it is free: an override already recompiles a variant plan, and a chord is compiled from the same
+spec as the slots.
+
+Two parallel arrays — controls beside modifiers — is the shape to avoid. Chords are per slot rather
+than per row, so the arrays must stay index-aligned, and `cleared` would then have a place to be
+said in each of them and a way to disagree.
+
+What is left is the genuine cost: the clash pass compares at control granularity and knowingly
+over-reports, "two bindings that share a control but differ in their chords are reported as an
+overlap" (`capture.rs`). That errs toward harmless noise while chords are fixed. Once a player can
+edit one, they can author the overlap it reports, and the trade-off wants revisiting.
+
+A game needing this today re-declares the context with the chord it wants.
+
+### 1060 A chord spanning two device families escapes conflict detection
+
+`binding_family` (`mapping.rs`) derives a row's family from the binding's primary input alone; the
+chord is never consulted. So a gamepad binding chorded with a keyboard key files under `Gamepad`,
+and since conflicts are per family, that key is invisible to keyboard conflict detection — a player
+could bind it elsewhere and nothing would report the overlap. Confirmed by reading `mapping.rs` and
+`capture.rs`.
+
+What is wrong is the family crossing rather than the device. `DeviceFamily` has two variants, and a
+chord inside either is ordinary: `Shift + Right Mouse` is one family, and so is a gamepad binding
+that wants both triggers held, or a shoulder button standing in as a modifier. Only a chord with a
+foot in each family has no family to file under, and it is also the combination nobody wants —
+`Shift + Left Trigger` asks a player to reach for two devices at once. Nothing in tree writes either
+kind today, so this is latent rather than live.
+
+_Fix:_ **unrouted**. A plan-build diagnostic refusing a chord entry whose family differs from the
+primary's, which chunk 17b's machinery already supports, and which leaves every same-family chord
+alone. Cheap, but it is a new refusal, so it wants a deliberate yes rather than being folded into
+whichever chunk next touches chords.
+
+### 1061 An icon prompt drops what the chord requires
+
+`examples/common/prompt_ui.rs` resolves a glyph for `prompt.origin` and returns `Resolved::Icon`,
+which holds one icon; `prompt.with` is read only on the text path, by `caption`. So an action bound
+to a chord and shown as an icon draws the primary control alone — a player told to press one bumper
+when two are wanted. The text path is correct, and the crate hands over everything needed: this is
+the example's shared prompt code, not `Prompt` or `Glyph`.
+
+Latent, and reachable rather than hypothetical: no chorded binding in tree carries an icon prompt
+today — `SmartBomb` has no prompt span at all — but chunk 128 puts `SmartBomb` on two bumpers, and
+adding an `IconPromptSpan` for it afterwards is the obvious next step. Confirmed by reading
+`prompt_ui.rs`.
+
+_Fix:_ **unrouted**, and the mechanism wants checking before the shape is decided. `bevy_text` has
+an `inline_box` module, which is the name for putting a non-text box inside a text run and would
+make a chord one mixed span — glyph, `+`, glyph — rather than a row of siblings. **Not read**; noted
+because it would beat the obvious alternative, `Resolved::Icon` holding a sequence of paths with the
+text caption as the fallback whenever any entry lacks a glyph. `GhostNode` is the wrong tool either
+way: it is `ghost_nodes`-gated and experimental, and it hoists children through *layout* rather than
+through the text-span hierarchy, which is what would have to traverse it.
+
+Either shape is the example's to build — arranging glyphs is a layout question `prompt_ui.rs` owns,
+which is why this is not a crate change.
 
 ### 1019 The types a scene would author carry no `Reflect`, and auto-registration is switched off
 

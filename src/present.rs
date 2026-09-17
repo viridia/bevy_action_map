@@ -691,6 +691,13 @@ pub fn resolve_glyph(
 pub enum ControlOrigin {
     /// A control this crate knows.
     Ours(Control),
+    /// A keyboard modifier, standing for either key of its pair.
+    ///
+    /// Only ever a chord entry — [`with`](Prompt::with) — never the control that fires a binding.
+    /// It exists so a caption can read "Ctrl+S" rather than naming one of the two Control keys and
+    /// implying the other will not do.
+    #[cfg(feature = "keyboard")]
+    Modifier(crate::binding::ModifierKey),
     /// A control only whatever reported it knows.
     Foreign {
         /// What it is stored and looked up under, on the same terms as [`Control::name`]: an
@@ -708,11 +715,52 @@ pub enum ControlOrigin {
     },
 }
 
+/// The catalogue key for a modifier, on the same terms as [`Control::name`]: a `/` like every
+/// other, so a modifier and a key can share one lookup table without colliding.
+#[cfg(feature = "keyboard")]
+const fn modifier_name(modifier: crate::binding::ModifierKey) -> &'static str {
+    use crate::binding::ModifierKey;
+
+    match modifier {
+        ModifierKey::Ctrl => "mod/ctrl",
+        ModifierKey::Shift => "mod/shift",
+        ModifierKey::Alt => "mod/alt",
+        ModifierKey::Super => "mod/super",
+    }
+}
+
+/// What a modifier reads as with no catalogue: the bare name, naming no side, because either key of
+/// the pair does.
+#[cfg(feature = "keyboard")]
+const fn modifier_label(modifier: crate::binding::ModifierKey) -> &'static str {
+    use crate::binding::ModifierKey;
+
+    match modifier {
+        ModifierKey::Ctrl => "Ctrl",
+        ModifierKey::Shift => "Shift",
+        ModifierKey::Alt => "Alt",
+        ModifierKey::Super => "Super",
+    }
+}
+
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+impl From<crate::binding::ChordEntry> for ControlOrigin {
+    fn from(entry: crate::binding::ChordEntry) -> Self {
+        match entry {
+            crate::binding::ChordEntry::Control(control) => Self::Ours(control.into()),
+            #[cfg(feature = "keyboard")]
+            crate::binding::ChordEntry::Modifier(modifier) => Self::Modifier(modifier),
+        }
+    }
+}
+
 impl ControlOrigin {
     /// What this control is stored and looked up under.
     pub fn name(&self) -> alloc::borrow::Cow<'_, str> {
         match self {
             Self::Ours(control) => control.name(),
+            #[cfg(feature = "keyboard")]
+            Self::Modifier(modifier) => alloc::borrow::Cow::Borrowed(modifier_name(*modifier)),
             Self::Foreign { name, .. } => alloc::borrow::Cow::Borrowed(name),
         }
     }
@@ -721,6 +769,8 @@ impl ControlOrigin {
     pub fn fallback_label(&self) -> alloc::borrow::Cow<'_, str> {
         match self {
             Self::Ours(control) => control.fallback_label(),
+            #[cfg(feature = "keyboard")]
+            Self::Modifier(modifier) => alloc::borrow::Cow::Borrowed(modifier_label(*modifier)),
             Self::Foreign { label, .. } => alloc::borrow::Cow::Borrowed(label),
         }
     }
@@ -729,6 +779,8 @@ impl ControlOrigin {
     pub const fn family(&self) -> Option<DeviceFamily> {
         match self {
             Self::Ours(control) => Some(control.family()),
+            #[cfg(feature = "keyboard")]
+            Self::Modifier(_) => Some(DeviceFamily::KeyboardMouse),
             Self::Foreign { family, .. } => *family,
         }
     }
@@ -741,17 +793,21 @@ impl ControlOrigin {
     pub const fn class(&self) -> Option<ControlClass> {
         match self {
             Self::Ours(control) => Some(ControlClass::of(control.shape())),
+            #[cfg(feature = "keyboard")]
+            Self::Modifier(_) => Some(ControlClass::of(crate::action::ChannelShape::Button)),
             Self::Foreign { class, .. } => *class,
         }
     }
 
     /// The control itself, for a caller that needs more than a name for it.
     ///
-    /// `None` for one that came from somewhere else, which is a case every caller of this has to
-    /// have an answer for.
+    /// `None` for one that came from somewhere else, and for a modifier, which stands for two keys
+    /// rather than one. Both are cases every caller of this has to have an answer for.
     pub const fn control(&self) -> Option<Control> {
         match self {
             Self::Ours(control) => Some(*control),
+            #[cfg(feature = "keyboard")]
+            Self::Modifier(_) => None,
             Self::Foreign { .. } => None,
         }
     }
@@ -923,12 +979,7 @@ impl Prompts for BindingTable<'_> {
                 }
                 let prompt = Prompt {
                     origin: ControlOrigin::Ours(entry.control),
-                    with: entry
-                        .chord
-                        .iter()
-                        .copied()
-                        .map(ControlOrigin::Ours)
-                        .collect(),
+                    with: entry.chord.clone(),
                     part: entry.part,
                     condition: entry.condition,
                     context: Some(context.path),
@@ -1032,7 +1083,9 @@ pub(crate) struct BoundControl {
     pub(crate) action: ActionId,
     pub(crate) part: BindingPart,
     pub(crate) control: Control,
-    pub(crate) chord: Vec<Control>,
+    /// Already in prompt terms, because a modifier stands for two controls and `Control` cannot say
+    /// so. Converted where the plan is read rather than here.
+    pub(crate) chord: Vec<ControlOrigin>,
     pub(crate) condition: ConditionDescriptor,
 }
 
@@ -1586,6 +1639,30 @@ mod prompt_tests {
                 KeyCode::ControlLeft
             ))]
         );
+    }
+
+    /// A modifier reaches the prompt as itself rather than as one of its two keys, so the caption
+    /// reads "Ctrl" and does not name a side the player is free to ignore.
+    #[test]
+    fn a_modifier_captions_without_naming_a_side() {
+        use crate::binding::ModifierKey;
+
+        let mut app = app();
+        app.add_context::<Shell>(|controls| {
+            controls.bind::<Save>(KeyCode::KeyS).with(ModifierKey::Ctrl);
+        });
+        app.world_mut().spawn(Shell);
+
+        let prompts = BindingTable::new(app.world()).prompts(Save::id(), PromptScope::ANY);
+        assert_eq!(
+            prompts[0].with,
+            vec![ControlOrigin::Modifier(ModifierKey::Ctrl)]
+        );
+        assert_eq!(prompts[0].with[0].fallback_label(), "Ctrl");
+        // Not one of the pair: a caller asking for the control has to have an answer for a modifier
+        // standing for two of them.
+        assert_eq!(prompts[0].with[0].control(), None);
+        assert_eq!(prompts[0].with[0].name(), "mod/ctrl");
     }
 
     /// `Thrust` and `Afterburner` share a control and a prompt is the only place that would

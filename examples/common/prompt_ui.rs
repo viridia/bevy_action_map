@@ -358,7 +358,11 @@ fn refresh_icon_prompts(world: &mut World) {
                             |glyph| Resolved::Icon(inline_icon_path(glyph)),
                         )
                     }
-                    ControlOrigin::Foreign { .. } => Resolved::Text(caption(prompt, labelled)),
+                    // A modifier is only ever a chord entry, never what fires a binding, so this
+                    // arm is here for exhaustiveness; the caption is the right answer regardless.
+                    ControlOrigin::Modifier(_) | ControlOrigin::Foreign { .. } => {
+                        Resolved::Text(caption(prompt, labelled))
+                    }
                 },
             };
             (entity, resolved)

@@ -608,7 +608,7 @@ pub(crate) struct CompiledBinding {
     pub(crate) conditions: Vec<BindingCondition>,
     pub(crate) consume: bool,
     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-    pub(crate) chord: alloc::vec::Vec<crate::binding::ButtonControl>,
+    pub(crate) chord: alloc::vec::Vec<crate::binding::ChordEntry>,
     // How specific this binding is: one for the control it names, plus one per control it requires
     // alongside. The clash between two bindings on one control is decided by this and nothing else.
     pub(crate) chord_len: u8,

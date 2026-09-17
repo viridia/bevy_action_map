@@ -373,10 +373,10 @@ pub mod prelude {
     pub use crate::binding::Stick;
     // Also in `bevy::prelude`, so a glob import of both resolves to the same item. Without this,
     // `bind::<Jump>(KeyCode::Space)` — the crate's own quick start — does not compile on its own.
-    #[cfg(feature = "keyboard")]
-    pub use crate::binding::LogicalKey;
     #[cfg(any(feature = "keyboard", feature = "gamepad"))]
     pub use crate::binding::{AxisButtons, DirectionalButtons};
+    #[cfg(feature = "keyboard")]
+    pub use crate::binding::{LogicalKey, ModifierKey};
     #[cfg(feature = "keyboard")]
     pub use bevy_input::keyboard::KeyCode;
     // `MouseMove` is ungated because `BindingInput::MouseMotion` is.

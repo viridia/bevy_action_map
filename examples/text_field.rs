@@ -2,25 +2,39 @@
 //!
 //! Run it: `cargo run --example text_field`.
 //!
-//! `bind_characters` had never had a caller before this example. Two contexts are active at once:
-//! `TextField` claims every character-producing key with `bind_characters` and consumes it;
-//! `OnFoot`, at the default (lower) priority, binds the same `Space` to `Jump`.
+//! `bind_characters` had never had a caller before this example. Three contexts are active at once:
+//! `TextCommands` holds the editing shortcuts, every one of them a chord; `TextField` claims every
+//! character-producing key with `bind_characters` and consumes it; `OnFoot`, at the lowest
+//! priority, binds the same `Space` to `Jump` and the arrow keys to `Move`.
 //!
 //! Type some letters into the box — they land in it the ordinary way, through
 //! `EditableText::queue_edit`. Then press Space on its own: it lands in the field as a space
-//! character, and the console stays silent about `Jump`. That is the whole test — a key a text
+//! character, and the console stays silent about `Jump`. That is the first test — a key a text
 //! field and a gameplay action both want, decided by consumption rather than by the app checking
 //! which one has focus.
+//!
+//! The arrow keys are the second, and they are where the chords show. Press Left on its own and the
+//! player moves, exactly as before. Hold Shift and press Left and the selection extends instead,
+//! because `TextCommands` evaluates first, fires, and consumes the arrow for that tick — so
+//! `OnFoot` reads a control nobody pressed. Release Shift and the player moves again. Nothing
+//! declares that hand-off; it falls out of a chord being satisfied or not.
+//!
+//! Hold both Ctrl and Shift and the cursor moves a whole word and selects it. Three bindings read
+//! the same arrow key — one requiring Shift, one Ctrl, one both — and the longest chord takes it,
+//! which is also not declared anywhere.
+//!
+//! Why the shortcuts live in a context of their own: a class binding yields any control an ordinary
+//! binding in the *same* plan names, so `Ctrl+A` declared beside `bind_characters` would stop the
+//! letter A typing at all. Split across two contexts, the class binding never sees the conflict,
+//! and `Ctrl+A` reaches the field only because it consumes the key before the character binding is
+//! asked.
 //!
 //! `InputDispatchPlugin` is disabled, the same call Disasteroids makes and for the same reason:
 //! left enabled, `bevy_ui_widgets`' own text-input handling reads a bubbled
 //! `FocusedInput<KeyboardInput>` that never asks the mapper anything, so Space would land in the
 //! field *and* still reach `OnFoot` — the exact bypass this example exists to rule out. With it
 //! disabled, `EditableText` is a plain data structure with nothing feeding it but the observers
-//! below, which turn `ClassFired<TypedCharacter>` and the two editing actions into `TextEdit`s.
-//!
-//! The arrow keys drive `Move` in `OnFoot` and are untouched by any of this: they carry no text, so
-//! `bind_characters` never sees them, and typing does not stop the player moving.
+//! below, which turn `ClassFired<TypedCharacter>` and each editing action into a `TextEdit`.
 
 #![allow(missing_docs)]
 
@@ -51,6 +65,73 @@ struct Submit;
 #[context(path = "text_field.field", tick = Render, priority = 10)]
 struct TextField;
 
+/// What a modifier means on this platform, since the crate has no platform modifier yet.
+///
+/// macOS puts the editing commands on Command and word motion on Option; everywhere else both are
+/// Control. Naming a side would be wrong for either: a player who reaches for the right-hand
+/// Control expects `Ctrl+A` to work, which is what [`ModifierKey`] says and `KeyCode` cannot.
+#[cfg(target_os = "macos")]
+const COMMAND: ModifierKey = ModifierKey::Super;
+#[cfg(not(target_os = "macos"))]
+const COMMAND: ModifierKey = ModifierKey::Ctrl;
+#[cfg(target_os = "macos")]
+const WORD: ModifierKey = ModifierKey::Alt;
+#[cfg(not(target_os = "macos"))]
+const WORD: ModifierKey = ModifierKey::Ctrl;
+
+// `TextCursorStyle`'s defaults are drawn for a light background: a slate cursor and a pale sky
+// selection vanish against this window's dark one, which is no way to show off a selection. White
+// text stays readable over the blue, so `selected_text_color` is left alone.
+const CURSOR_COLOR: Color = Color::srgb(1.0, 1.0, 1.0);
+const SELECTION_COLOR: Color = Color::srgb(0.15, 0.35, 0.75);
+const UNFOCUSED_SELECTION_COLOR: Color = Color::srgb(0.24, 0.26, 0.32);
+
+#[derive(InputAction)]
+#[action(path = "text_field.select_all", output = bool, intent = Button)]
+struct SelectAll;
+
+#[derive(InputAction)]
+#[action(path = "text_field.copy", output = bool, intent = Button)]
+struct Copy;
+
+#[derive(InputAction)]
+#[action(path = "text_field.cut", output = bool, intent = Button)]
+struct Cut;
+
+#[derive(InputAction)]
+#[action(path = "text_field.paste", output = bool, intent = Button)]
+struct Paste;
+
+#[derive(InputAction)]
+#[action(path = "text_field.extend_left", output = bool, intent = Button)]
+struct ExtendLeft;
+
+#[derive(InputAction)]
+#[action(path = "text_field.extend_right", output = bool, intent = Button)]
+struct ExtendRight;
+
+#[derive(InputAction)]
+#[action(path = "text_field.word_left", output = bool, intent = Button)]
+struct WordLeft;
+
+#[derive(InputAction)]
+#[action(path = "text_field.word_right", output = bool, intent = Button)]
+struct WordRight;
+
+#[derive(InputAction)]
+#[action(path = "text_field.word_extend_left", output = bool, intent = Button)]
+struct WordExtendLeft;
+
+#[derive(InputAction)]
+#[action(path = "text_field.word_extend_right", output = bool, intent = Button)]
+struct WordExtendRight;
+
+// Above `TextField`, so a chord takes its key before the class binding that would otherwise type
+// it.
+#[derive(InputContext)]
+#[context(path = "text_field.commands", tick = Render, priority = 20)]
+struct TextCommands;
+
 #[derive(InputAction)]
 #[action(path = "gameplay.move", output = Vec2, intent = Directional2)]
 struct Move;
@@ -79,6 +160,50 @@ fn main() {
             .disable::<InputDispatchPlugin>(),
         ActionMapPlugin,
     ));
+    // Every binding here consumes: a chord that fires has to take its key from whatever reads it
+    // next, which is the character class for the letters and `Move` for the arrows.
+    app.add_context::<TextCommands>(|controls| {
+        controls
+            .bind::<SelectAll>(KeyCode::KeyA)
+            .with(COMMAND)
+            .consume();
+        controls.bind::<Copy>(KeyCode::KeyC).with(COMMAND).consume();
+        controls.bind::<Cut>(KeyCode::KeyX).with(COMMAND).consume();
+        controls
+            .bind::<Paste>(KeyCode::KeyV)
+            .with(COMMAND)
+            .consume();
+
+        controls
+            .bind::<ExtendLeft>(KeyCode::ArrowLeft)
+            .with(ModifierKey::Shift)
+            .consume();
+        controls
+            .bind::<ExtendRight>(KeyCode::ArrowRight)
+            .with(ModifierKey::Shift)
+            .consume();
+
+        controls
+            .bind::<WordLeft>(KeyCode::ArrowLeft)
+            .with(WORD)
+            .consume();
+        controls
+            .bind::<WordRight>(KeyCode::ArrowRight)
+            .with(WORD)
+            .consume();
+
+        // Two entries, so these out-rank the single-modifier bindings above on the same key.
+        controls
+            .bind::<WordExtendLeft>(KeyCode::ArrowLeft)
+            .with(WORD)
+            .with(ModifierKey::Shift)
+            .consume();
+        controls
+            .bind::<WordExtendRight>(KeyCode::ArrowRight)
+            .with(WORD)
+            .with(ModifierKey::Shift)
+            .consume();
+    });
     app.add_context::<TextField>(|controls| {
         controls.bind_characters::<TypedCharacter>().consume();
         controls.bind::<Backspace>(KeyCode::Backspace).consume();
@@ -109,10 +234,14 @@ fn setup(mut commands: Commands) {
 
     let instructions = commands
         .spawn((
-            Text::new(
+            // The modifier names itself rather than being spelled out twice: the same label the
+            // crate would put in a prompt, so it stays right on a platform where `WORD` differs.
+            Text::new(format!(
                 "Type here. Space goes into the field, not to Jump.\n\
-                 Arrow keys still move the player — watch the console.",
-            ),
+                 Arrow keys move the player — watch the console.\n\
+                 Shift+arrow selects, {}+arrow moves by word.",
+                ControlOrigin::Modifier(WORD).fallback_label(),
+            )),
             TextFont {
                 font_size: 16.0.into(),
                 ..default()
@@ -123,6 +252,8 @@ fn setup(mut commands: Commands) {
     let field = commands
         .spawn((
             TextField,
+            // Both contexts ride the field entity, so every action fires at the observers below.
+            TextCommands,
             Node {
                 width: Val::Px(280.0),
                 border: UiRect::all(Val::Px(2.0)),
@@ -141,11 +272,26 @@ fn setup(mut commands: Commands) {
                 font_size: 18.0.into(),
                 ..default()
             },
-            TextCursorStyle::default(),
+            TextCursorStyle {
+                color: CURSOR_COLOR,
+                selection_color: SELECTION_COLOR,
+                unfocused_selection_color: UNFOCUSED_SELECTION_COLOR,
+                ..default()
+            },
         ))
         .observe(append_character)
         .observe(backspace)
         .observe(submit)
+        .observe(queues::<SelectAll>(TextEdit::SelectAll))
+        .observe(queues::<Copy>(TextEdit::Copy))
+        .observe(queues::<Cut>(TextEdit::Cut))
+        .observe(queues::<Paste>(TextEdit::Paste))
+        .observe(queues::<ExtendLeft>(TextEdit::Left(true)))
+        .observe(queues::<ExtendRight>(TextEdit::Right(true)))
+        .observe(queues::<WordLeft>(TextEdit::WordLeft(false)))
+        .observe(queues::<WordRight>(TextEdit::WordRight(false)))
+        .observe(queues::<WordExtendLeft>(TextEdit::WordLeft(true)))
+        .observe(queues::<WordExtendRight>(TextEdit::WordRight(true)))
         .id();
 
     commands.entity(root).add_children(&[instructions, field]);
@@ -165,6 +311,20 @@ fn append_character(fired: On<ClassFired<TypedCharacter>>, mut fields: Query<&mu
     };
     if let Ok(mut field) = fields.get_mut(fired.entity) {
         field.queue_edit(TextEdit::Insert(text.clone()));
+    }
+}
+
+/// An observer that queues one fixed edit whenever its action fires.
+///
+/// Ten shortcuts that differ only in which `TextEdit` they queue, so the observer is written once
+/// and the edit is the argument.
+fn queues<A: InputAction>(
+    edit: TextEdit,
+) -> impl Fn(On<Fired<A>>, Query<&mut EditableText>) + Clone {
+    move |fired, mut fields| {
+        if let Ok(mut field) = fields.get_mut(fired.entity) {
+            field.queue_edit(edit.clone());
+        }
     }
 }
 

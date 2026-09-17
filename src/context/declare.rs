@@ -645,14 +645,10 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
     for binding in plan.bindings() {
         let action = plan.slot_actions()[binding.slot];
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-        let chord: alloc::vec::Vec<crate::binding::Control> = binding
-            .chord
-            .iter()
-            .copied()
-            .map(crate::binding::Control::from)
-            .collect();
+        let chord: alloc::vec::Vec<crate::present::ControlOrigin> =
+            binding.chord.iter().copied().map(Into::into).collect();
         #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
-        let chord: alloc::vec::Vec<crate::binding::Control> = alloc::vec::Vec::new();
+        let chord: alloc::vec::Vec<crate::present::ControlOrigin> = alloc::vec::Vec::new();
         let condition = crate::condition::describe(&binding.conditions);
 
         // By part rather than by control, so that a stick answers once rather than twice — the same

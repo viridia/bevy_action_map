@@ -251,6 +251,18 @@ function of what is held, so before any binding is read the longest satisfied ch
 is found. A binding shorter than the winner on any of its controls reads as at rest. `Ctrl+S` beats
 a bare `S` with nothing declared for it.
 
+**A chord entry is a control or a modifier.** `ChordEntry::Control` names one control and is
+satisfied by that control alone. `ChordEntry::Modifier` names one of `ModifierKey`'s four pairs and
+is satisfied by either key of it, so a chord entry costs up to two lookups rather than one. The
+disjunction is resolved at read time rather than expanded at bind time, because both keys of a pair
+are live at once: expanding would duplicate the binding rather than the entry, and duplicate the
+mapping row with it. Length counts entries, so a modifier contributes one however many keys satisfy
+it.
+
+A modifier reaches presentation as `ControlOrigin::Modifier`, which is the only variant that answers
+`None` to `control()` — it stands for two controls, and a caption naming one of them would tell the
+player the other will not do.
+
 ### 5.2 Consumption
 
 A binding declared `consume` records its controls in `ConsumedControls` while it is `Fired` or

@@ -64,6 +64,100 @@ impl From<GamepadButton> for ButtonControl {
     }
 }
 
+/// A keyboard modifier, meaning either key of its pair.
+///
+/// `ModifierKey::Ctrl` is held when either Control key is down, which is what a chord almost always
+/// wants — a player reaching for the right-hand Control still expects `Ctrl+S` to save. Name a
+/// [`KeyCode`] instead for the rarer binding that means one particular physical key.
+///
+/// ```ignore
+/// context.bind::<Save>(KeyCode::KeyS).with(ModifierKey::Ctrl);
+/// context.bind::<Lean>(KeyCode::KeyQ).with(KeyCode::AltLeft);
+/// ```
+#[cfg(feature = "keyboard")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModifierKey {
+    /// Either Control key.
+    Ctrl,
+    /// Either Shift key.
+    Shift,
+    /// Either Alt key, labelled Option on Apple keyboards.
+    Alt,
+    /// Either Super key: Command on macOS, Windows elsewhere.
+    Super,
+}
+
+#[cfg(feature = "keyboard")]
+impl ModifierKey {
+    /// The pair this stands for, left first.
+    pub(crate) const fn keys(self) -> [KeyCode; 2] {
+        match self {
+            Self::Ctrl => [KeyCode::ControlLeft, KeyCode::ControlRight],
+            Self::Shift => [KeyCode::ShiftLeft, KeyCode::ShiftRight],
+            Self::Alt => [KeyCode::AltLeft, KeyCode::AltRight],
+            Self::Super => [KeyCode::SuperLeft, KeyCode::SuperRight],
+        }
+    }
+}
+
+/// One thing a chord requires held alongside its own control.
+///
+/// You seldom write this type. Anywhere [`with`](crate::binding::BindingBuilder::with) wants an
+/// entry, a control or a modifier will do: `with(KeyCode::ControlLeft)` and
+/// `with(ModifierKey::Ctrl)` both convert on the way in, and differ only in whether one key
+/// satisfies them or either of two.
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChordEntry {
+    /// One control, which must be the one held.
+    Control(ButtonControl),
+    /// A modifier, which either of its two keys satisfies.
+    #[cfg(feature = "keyboard")]
+    Modifier(ModifierKey),
+}
+
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+impl From<ButtonControl> for ChordEntry {
+    fn from(control: ButtonControl) -> Self {
+        Self::Control(control)
+    }
+}
+
+#[cfg(feature = "keyboard")]
+impl From<ModifierKey> for ChordEntry {
+    fn from(modifier: ModifierKey) -> Self {
+        Self::Modifier(modifier)
+    }
+}
+
+#[cfg(feature = "keyboard")]
+impl From<KeyCode> for ChordEntry {
+    fn from(key: KeyCode) -> Self {
+        Self::Control(key.into())
+    }
+}
+
+#[cfg(feature = "keyboard")]
+impl From<LogicalKey> for ChordEntry {
+    fn from(key: LogicalKey) -> Self {
+        Self::Control(key.into())
+    }
+}
+
+#[cfg(feature = "mouse")]
+impl From<MouseButton> for ChordEntry {
+    fn from(button: MouseButton) -> Self {
+        Self::Control(button.into())
+    }
+}
+
+#[cfg(feature = "gamepad")]
+impl From<GamepadButton> for ChordEntry {
+    fn from(button: GamepadButton) -> Self {
+        Self::Control(button.into())
+    }
+}
+
 /// Two buttons that together make a signed axis.
 ///
 /// Turning left and right, leaning, strafing, cycling a list — a great many controls are a pair of

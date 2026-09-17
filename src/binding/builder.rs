@@ -10,7 +10,7 @@ use crate::event::{Dispatch, dispatch_for};
 use crate::mapping::{always_reports_bool, mappings_of, tunables_of};
 
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-use super::control::ButtonControl;
+use super::control::ChordEntry;
 use super::control::{BindingInput, IntoBindingInput};
 use super::modifier::{BindingModifier, CompassPoints, DeadZone, Modifier};
 
@@ -47,7 +47,7 @@ pub(crate) struct BindingSpec {
     // Set on every part of a composite after the first, which were declared by the same `bind`.
     pub(crate) continues_declaration: bool,
     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-    pub(crate) chord: Vec<ButtonControl>,
+    pub(crate) chord: Vec<ChordEntry>,
 }
 
 /// One action as [`InputContextBuilder::delegate`] declared it: named, and left to an authority
@@ -282,19 +282,23 @@ impl<'a, C> BindingBuilder<'a, C> {
     /// more than once for a longer chord.
     ///
     /// ```ignore
-    /// context.bind::<Save>(KeyCode::KeyS).with(KeyCode::ControlLeft);
-    /// context.bind::<SaveAs>(KeyCode::KeyS).with(KeyCode::ControlLeft).with(KeyCode::ShiftLeft);
+    /// context.bind::<Save>(KeyCode::KeyS).with(ModifierKey::Ctrl);
+    /// context.bind::<SaveAs>(KeyCode::KeyS).with(ModifierKey::Ctrl).with(ModifierKey::Shift);
     /// ```
+    ///
+    /// A [`ModifierKey`] is satisfied by either key of its pair, which is almost always what a
+    /// chord wants. Pass a [`KeyCode`](bevy_input::keyboard::KeyCode) instead to require one
+    /// particular physical key.
     ///
     /// **A longer chord wins.** When several bindings read the same control, the one requiring the
     /// most held alongside it takes the control and the shorter ones do not fire — so `Ctrl+S` does
     /// not also trigger a plain `S` binding, and `Ctrl+Shift+S` does not trigger either of the
     /// other two. Nothing has to be declared for that; it follows from the lengths.
     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-    pub fn with(mut self, control: impl Into<ButtonControl>) -> Self {
-        let control = control.into();
+    pub fn with(mut self, control: impl Into<ChordEntry>) -> Self {
+        let entry = control.into();
         for binding in self.bindings() {
-            binding.chord.push(control);
+            binding.chord.push(entry);
         }
         self
     }
@@ -1379,7 +1383,9 @@ mod tests {
         for binding in &bindings {
             assert_eq!(
                 binding.chord,
-                [ButtonControl::PhysicalKey(KeyCode::ShiftLeft)]
+                [ChordEntry::Control(ButtonControl::PhysicalKey(
+                    KeyCode::ShiftLeft
+                ))]
             );
             assert_eq!(binding.conditions.len(), 1);
             assert!(binding.consume);

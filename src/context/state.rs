@@ -2131,6 +2131,111 @@ mod tests {
         );
     }
 
+    /// A modifier entry is satisfied by either key of its pair, and a sided entry by only its own.
+    /// The pair is the whole point: a player reaching for the right-hand Control still saves.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn either_key_of_a_modifier_satisfies_a_chord() {
+        #[derive(InputAction)]
+        #[action(path = "tests.save", output = bool, intent = Button)]
+        struct Save;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.lean", output = bool, intent = Button)]
+        struct Lean;
+
+        #[derive(Resource, Default, Debug, PartialEq)]
+        struct Fired {
+            save: bool,
+            lean: bool,
+        }
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context
+                .bind::<Save>(KeyCode::KeyS)
+                .with(crate::binding::ModifierKey::Ctrl);
+            // The contrast: one named side, satisfied by that key and no other.
+            context
+                .bind::<Lean>(KeyCode::KeyQ)
+                .with(KeyCode::ControlLeft);
+        });
+        app.world_mut().spawn(FreeLook);
+        app.init_resource::<Fired>();
+        app.add_systems(
+            Update,
+            |input: ContextActions<FreeLook>, mut fired: bevy_ecs::system::ResMut<'_, Fired>| {
+                *fired = Fired {
+                    save: input.value::<Save>(),
+                    lean: input.value::<Lean>(),
+                };
+            },
+        );
+
+        let hold = |app: &mut App, key, logical: Key, state| {
+            app.world_mut().write_message(press(key, logical, state));
+            app.update();
+        };
+
+        // Both letters down, no modifier: neither chord is satisfied.
+        hold(
+            &mut app,
+            KeyCode::KeyS,
+            Key::Character("s".into()),
+            ButtonState::Pressed,
+        );
+        hold(
+            &mut app,
+            KeyCode::KeyQ,
+            Key::Character("q".into()),
+            ButtonState::Pressed,
+        );
+        assert_eq!(
+            *app.world().resource::<Fired>(),
+            Fired {
+                save: false,
+                lean: false
+            }
+        );
+
+        // The left Control satisfies both the modifier and the sided entry.
+        hold(
+            &mut app,
+            KeyCode::ControlLeft,
+            Key::Control,
+            ButtonState::Pressed,
+        );
+        assert_eq!(
+            *app.world().resource::<Fired>(),
+            Fired {
+                save: true,
+                lean: true
+            }
+        );
+
+        // Swap sides. The modifier is still held; the binding that named the left key is not.
+        hold(
+            &mut app,
+            KeyCode::ControlLeft,
+            Key::Control,
+            ButtonState::Released,
+        );
+        hold(
+            &mut app,
+            KeyCode::ControlRight,
+            Key::Control,
+            ButtonState::Pressed,
+        );
+        assert_eq!(
+            *app.world().resource::<Fired>(),
+            Fired {
+                save: true,
+                lean: false
+            }
+        );
+    }
+
     /// A tap faster than the tick rate, end to end. Polling can only report where the tick ended —
     /// the key back up — so an observer is the only way to learn it happened at all.
     #[cfg(feature = "keyboard")]

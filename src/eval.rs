@@ -585,6 +585,18 @@ impl<C: InputContext> InputContextState<C> {
             }
         };
 
+        // A modifier entry is a disjunction: either key of the pair satisfies it, and both being
+        // live at once is why this cannot be expanded at bind time into one entry per side.
+        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+        let entry_held = |entry: crate::binding::ChordEntry| match entry {
+            crate::binding::ChordEntry::Control(control) => is_pressed(control),
+            #[cfg(feature = "keyboard")]
+            crate::binding::ChordEntry::Modifier(modifier) => modifier
+                .keys()
+                .into_iter()
+                .any(|key| is_pressed(ButtonControl::PhysicalKey(key))),
+        };
+
         // Which chord has the strongest claim on each control. Computed before anything is read,
         // because a binding cannot know it is out-ranked without looking at the others — and it is
         // a pure function of what is held, so it keeps no state and can be redone per fold.
@@ -592,7 +604,7 @@ impl<C: InputContext> InputContextState<C> {
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         if plan.has_chords() {
             for binding in plan.bindings() {
-                if disabled[binding.slot] || !binding.chord.iter().copied().all(&is_pressed) {
+                if disabled[binding.slot] || !binding.chord.iter().copied().all(&entry_held) {
                     continue;
                 }
                 binding.input.for_each_control(|control| {
@@ -665,7 +677,7 @@ impl<C: InputContext> InputContextState<C> {
                 // Two ways to be out of the running before the control is even read: the chord this
                 // binding needs is not held, or a longer one on the same control is (R8.1).
                 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-                let held_back = !binding.chord.iter().copied().all(&is_pressed)
+                let held_back = !binding.chord.iter().copied().all(&entry_held)
                     || (plan.has_chords() && out_ranked(binding));
                 #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
                 let held_back = false;
