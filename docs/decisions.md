@@ -375,6 +375,51 @@ buttons would jump twice.
 **Note.** Keying the fold on intent stops the units error between actions. What stops a mouse delta
 being bound to a directional action in the first place is D7's channel check, at declaration time.
 
+**Superseded in part by D76** once chunk 126 lands: `Analog1` and `Directional2` sum.
+
+### D76 — A composite is a way to write bindings, and analog contributions add up
+
+**Decided.** `DirectionalButtons` and `AxisButtons` are authoring shorthand, not a kind of binding.
+Each expands at declaration into one binding per part, and the part is both the binding's name and
+the direction it contributes. `Analog1` and `Directional2` fold by summing, reversing D15 for those
+two intents; `Button` keeps strongest-wins and `Delta2` already sums. A stage after the fold,
+declared once per action, is where anything that shapes the combined value goes. Chunks 125–127
+build it; until they land, D15 and D48 describe the code.
+
+**Rules out.** A composite the evaluator or the override path can see; a direction held as `negate`
+and `swizzle` modifiers, which is BEI's form; and a clamp built into the fold.
+
+**Reversal.** The player is already shown one row per part (R19.9, D27), and a composite underneath
+four independent rows is a model the player sees and cannot use: a row that is one part can neither
+take another control nor be emptied, because the binding behind it is the other directions too.
+Reinstating the composite reinstates `CompositeCannotGrow` and `CompositeCannotEmpty`, and the
+Disasteroids screen that shows a cleared cell which Confirm then refuses. The fold is the other half
+and is not separable: under strongest-wins, W and D held together read as whichever was declared
+first, so split parts lose the diagonal.
+
+**The player's side of it.** Shipped games show four movement rows that behave independently, and a
+player has no reason to think Forward and Back are joined because they share a column. BEI's
+`Cardinal` spawns four bindings and sums by default (`Accumulation::Cumulative`), as Unreal's
+Enhanced Input does. Unity keeps a composite with addressable parts, and carries the same inability
+to grow one part.
+
+**Why the direction is not a modifier.** The part names the row. A direction held as modifiers would
+have to be read back into a name, which a custom modifier defeats, and it costs two modifier calls
+per key per tick where one match arm does.
+
+**Why the fold does not clamp.** Modifiers run per binding before the fold, so a `scale` on an
+analog binding is legitimate and a fold clamping to unit length would cap it silently. Diagonal
+normalization was never automatic: a four-key composite reaches 1.414 unless `clamp_magnitude` is
+added.
+
+**Accepted price.** D15's case returns: two half-deflected sticks on one action read as one full
+deflection, and a stick plus a key overshoots unless the action clamps. Nothing in tree binds two
+sticks to one action. A composite costs four passes of per-binding bookkeeping rather than one; the
+control lookups, which dominate, are unchanged.
+
+**Unresolved.** Whether the stage after the fold takes conditions as well as modifiers, which chunk
+125 settles. A condition on a composite judges the whole vector; split, it judges each key.
+
 ### D16 — Nothing user-defined runs inside the evaluator
 
 **Decided.** Evaluation writes state and appends to a transition log. A separate system drains that

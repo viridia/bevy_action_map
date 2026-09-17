@@ -28,7 +28,7 @@ chunk's own commit, and `docs/design.md` or `docs/decisions.md` where anything a
 are the record. A gap in the sequence below is a retired finding, not an omission. The next
 unassigned number is stated here; keep it up to date when numbering new items.
 
-**Next: 1058.**
+**Next: 1059.**
 
 **The calibration warning, stated up front because it is fair.** Most of these entries came from
 asking a model to scan `src/`, and a model asked to find sixty problems will find sixty. Some of
@@ -58,29 +58,6 @@ unrouted can be read off the entries that stay silent.
 
 Every entry the `src/` scan filed here has landed (chunks 81, 84, 85, 86, 88, 89, 90, 91) and is
 retired. What follows was found another way.
-
-### 1058 Disasteroids' working copy shows a change that Confirm will refuse
-
-`examples/disasteroids/settings.rs` · **observed** in a running example: clearing a cell of "Turn
-Left" blanks it on screen, and the binding is back on the next visit
-
-The screen writes every gesture into `PendingOverrides` and `redraw_pending` draws from it, so a row
-is shown as changed the moment the player acts. Whether the row is *legal* is not asked until
-Confirm, where `apply_overrides_with_preset` refuses it. The player sees the change take, then
-silently lose it — worse than 1057's silence, because the screen made a claim rather than declining
-to explain one. Chunk 120 logs the refusal to the console, which tells a developer and not a player.
-
-**The only instance reachable today is composite-shaped**, and that is deliberately sidelined: the
-other refusals cannot reach the working copy, since a wrong family, a wrong shape and a reserved
-control are all turned down at capture (1057's path) and a `Fixed` row has no capturable cell. So
-this is one live case in an area under re-evaluation, filed rather than fixed.
-
-_Fix, when it is taken:_ the screen has no way to ask "would this be refused?" — `refusal` is
-private and wants the declared bindings, so answering needs a dry run of the apply against a world.
-That is a public API decision rather than an example change, which is why this is a finding and not
-a chunk. Cheaper alternatives if the general answer is not wanted: the crate could say on the row
-that it is one part of a multi-part binding, letting a screen decline the gesture; or the screen
-could apply eagerly and keep Confirm for persistence.
 
 ### 1056 `InputDispatchPlugin`, left enabled, bypasses consumption
 

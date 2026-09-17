@@ -225,6 +225,80 @@ explicit player-facing step. `DeviceId` is the identity to key it by, and it exi
 What a binding can name, and when it counts as firing. Each of these is a gap a game runs into
 rather than a defect in what exists.
 
+### 125. A stage after the fold, declared once per action
+
+D76, the first of three: chunks 125–127 turn a composite into a way to write bindings. Modifiers run
+per binding before the fold, so nothing can shape an action's combined value, and once a composite
+is split that is the only place a diagonal can be normalized.
+
+- **It stands on its own.** `move_and_jump` binds WASD beside a stick, and a diagonal on the keys
+  reaches 1.414 because nothing clamps it. One `clamp_magnitude` declared for the action fixes that
+  for every binding at once.
+- **First question, settled before any code: modifiers only, or conditions too.** A condition on a
+  composite judges the whole vector; after chunk 127 it is copied to each part and judges each key.
+  Disasteroids' menu navigation puts `on_change` on the D-pad composite, and holding Up then
+  pressing Right is where the two could differ. Settle it by running the menu, not by reading. If
+  they differ, conditions belong here, and the stick's and the D-pad's separate `on_change` become
+  one.
+- **The declaration's shape is offered as options before it is written**, beside `hold_or_toggle`,
+  which is already declared once per action.
+- **Nothing is allocated per tick** (R23.2): the stage's scratch is sized when the plan compiles,
+  and an action that declares nothing pays one empty-slice check.
+- **Not doing: changing the fold** — chunk 126.
+- **Verified by:** unit tests on the stage, and `move_and_jump` moving diagonally at the speed it
+  moves straight.
+
+### 126. Analog and directional bindings add up
+
+D76: `Analog1` and `Directional2` fold by summing. `Button` keeps strongest-wins, and `Delta2`
+already sums. This is what lets chunk 127 split a composite without losing the diagonal.
+
+- **Depends on chunk 125**, which is where an action that now overshoots puts its clamp.
+- **Only an action with several bindings held at once changes.** Composites are still whole, so
+  nothing inside one does. Each example binding two sources to one analog or directional action is
+  checked and given a clamp where it overshoots: Disasteroids' `Turn` reads a stick, A and D, and
+  the arrows, so A and Left held together reach -2.
+- **Declaration order stops being a tiebreak**, since a sum has none. TD5.5 loses that sentence and
+  D15 is marked superseded for these two intents.
+- **Not doing: splitting composites** — chunk 127.
+- **Verified by:** tests for opposite keys on two bindings cancelling, and a half-deflected stick
+  plus a key clamped by the action.
+
+### 127. A composite expands into one binding per part
+
+D76: `DirectionalButtons` and `AxisButtons` expand at declaration into one binding per part. The
+payoff is on the rebinding screen: a row that is one part of a composite can take another control
+and can be emptied, like any other row.
+
+- **Depends on chunk 126.**
+- **The refusals go in this chunk, not a later one.** `CompositeCannotGrow` and
+  `CompositeCannotEmpty` are decided by `parts_in(input) > 1`, so they cannot fire once no binding
+  holds more than one part. Removing them is removing dead code, along with the copy special case in
+  `overrides.rs`, and their tests become tests that growing and emptying a part now work. Both are
+  `OverrideProblemKind` variants, so this is a breaking change to a public enum.
+- **Takes what was `docs/issues.md` 1058.** Clearing a cell of "Turn Left" on Disasteroids' screen
+  blanks it, Confirm refuses it, and the binding is back on the next visit. Its only reachable
+  instance was `CompositeCannotEmpty`. The question it also raised, whether a screen can ask ahead
+  of Confirm if a row would be refused, has no instance left and is a deferred row.
+- **Otherwise an internal change, so the examples do not change**, and the composite tests in
+  `context/state.rs` are the regression suite and pass unedited. The one expected exception is
+  `a_snapshot_is_a_fixed_number_of_bytes_of_copy_data`, whose comment counts bindings.
+- **The part carries the direction** as its own binding input, read by one match arm: pressed
+  contributes the part's unit vector. Not `negate` and `swizzle`, for the reasons D76 gives.
+- **No press slot where nothing can read it.** `scratch_len` gives every binding one, and only a
+  `Button` action reading a non-boolean value consults it. A part feeding `Analog1` or
+  `Directional2` compiles without one, so a composite's four bindings snapshot no larger than its
+  one binding does today.
+- **A combinator on a composite applies to each part:** modifiers, conditions, chord and
+  consumption. A tunable declared on a composite stays one tunable shared by its parts.
+- **Saves written before this chunk apply identically.** Override keys are `action.part` on both
+  sides, and a test applies an `Overrides` written against a composite to prove it.
+- **Documents:** TD3.1's composite paragraph, TD8.1's `BindingInput`, TD9.1's refusal paragraph and
+  TD10.1's slot cases, and D48's sentence on refusing a part. Check R4.1's "a binding may target one
+  control or a composite" still reads true of what an author writes, and reword it if not.
+- **Verified by:** Disasteroids, clearing Turn Left's primary, confirming, and finding it still
+  cleared on the next visit; then capturing a third key for Turn Left and turning with it.
+
 ### 94b. Either modifier
 
 R12.3: a chord's modifier should be able to say "either Ctrl", as one binding rather than two.
@@ -666,6 +740,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Consumption-aware `FocusedInput` dispatch** (R8.2a) | **a game wanting `bevy_ui_widgets`' own widgets working generically, unmodified, without a context per widget kind.** A context per kind is the path to reach for first, and Disasteroids ships that way. A design for the filter was built and set aside: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline rather than a second raw-message read — keyboard only, since every keyboard-driven widget observer at 0.20 gates on `ButtonState::Pressed` and none reacts to a release |
 | **Promoting `WidgetKind` and the per-kind context into the crate** | [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native widget-kind id. Promoting a shape this crate invented first, ahead of that conversation, risks committing to the wrong one |
 | **Deleting `acquire_focus_directional`** | [bevy#25675][] landing. `examples/common/widget_focus.rs` carries a global `AcquireFocus` observer mirroring `acquire_focus_tab_index`, with `AutoDirectionalNavigation` standing in for `TabIndex`: `bevy_input_focus`'s `click_to_focus` bubbles an `AcquireFocus` on every pointer press, a screen navigating by anything but `TabIndex` intercepts it nowhere, so it reaches the window and clears focus — and a widget whose interactive children are separate entities, like a stepper's two chevrons, blinks on every press rather than rarely. The PR separates focusability from navigation policy behind a `Focusable` component and names [bevy#25596][], click-to-focus under directional navigation, as what it fixes, so it plausibly retires the observer outright. Approved and waiting on the author with conflicts as of September 2026. What to check when it lands is whether `Focusable` reaches a navigation scheme that is neither `TabIndex` nor one of upstream's own, which is the case the workaround actually covers |
+| **Asking whether a row would be refused, before Confirm** | **a refusal a screen's working copy can reach that capture does not already turn down.** Chunk 127 removes the last one: a wrong family, a wrong shape and a reserved control are refused at capture, and a `Fixed` row has no cell to capture into. The screen writes gestures into `PendingOverrides` and only Confirm asks whether they are legal, so a new refusal of that kind is shown taking and then silently lost. `refusal` is private and wants the declared bindings, so the general answer is a dry run of the apply, which is public API. The cheaper answers are for the row to say what would be refused so a screen can decline the gesture, or for the screen to apply eagerly and keep Confirm for persistence |
 | **A context-level exclusion from the mapping list** | a second screen needing the same filter and duplicating it. `ActionMapping::context` already carries the data, and one call site filtering on it costs one line — at two, the crate is the one paying for the repetition |
 | **An initial delay distinct from the repeat rate** (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both. Two numbers is a small change; what is missing is a case where equal is wrong, and a two-table settings screen is not it |
 | **Free-form mutually-exclusive context sets** (R7.7 remainder) | nothing in tree needs two independently-exclusive contexts to coexist rather than one dominating the other by priority |
