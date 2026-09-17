@@ -1071,8 +1071,15 @@ that assumes any of that is stable loses player data silently on the next patch.
   without failing the whole load; unresolved entries must be reported, not dropped silently.
 - **R17.3 (MUST)** _(D58)_ A version field. Loading refuses a saved set whose version this build
   never shipped rather than reinterpreting it as one it did.
-- **R17.4 (SHOULD)** Multiple named profiles per user, and separate override sets per control scheme
-  (a KBM remap must not disturb the gamepad layout).
+- **R17.4 (SHOULD)** Separate override sets per control scheme: a keyboard-and-mouse remap must not
+  disturb the gamepad layout.
+
+  ~~Multiple named profiles per user.~~ _Withdrawn: a named arrangement of controls is something a
+  game ships, not something a player authors. `Preset` is already that, and the per-situation case
+  the idea is usually invoked for — a layout per vehicle, per role — is what contexts are. Asked
+  directly, LWIM's maintainer reported named presets as occasionally done and first-party only. What
+  would revive this is a player-authored set that needs a name and a save path of its own, which is
+  a `String` where `Preset` holds a localization key rather than a second storage shape._
 - **R17.5 (SHOULD)** Serialization must go through `Reflect` + the type registry so third-party
   modifiers/conditions (R5.6) round-trip.
 - **R17.6 (MAY)** Bindings as a hot-reloadable asset, for iteration without recompiling.
@@ -1145,9 +1152,13 @@ the game. Unity `ToDisplayString` + `InputBinding.MaskByGroup`. Unreal's
   guessing from what was pressed last. Split-screen is where the difference stops being academic: a
   menu one player opened speaks for that player's device, which the app knows from who opened it,
   and "most recently used" would be answering a question nobody asked while both players are
-  pressing things. What would revive this is R15.8's auto-switching, which is a R15 question about
-  the player model rather than a presentation one: if that lands, a prompt reads the player's paired
-  device rather than tracking one of its own._
+  pressing things. Single player is the case that argument does not reach — one person pressing
+  things makes the question well posed — and it is where switching is reported to matter most; what
+  keeps the withdrawal standing there is that the app still knows better, a desktop game naming keys
+  with a pad plugged in being a deliberate choice rather than a stale reading. What would revive
+  this is R15.8's auto-switching, which is a R15 question about the player model rather than a
+  presentation one: if that lands, a prompt reads the player's paired device rather than tracking
+  one of its own._
 - **R18.7 (SHOULD)** Support a confirm/cancel button-convention policy as one setting rather than
   scattered `if cfg!` checks. The case that forces this: on PlayStation in Japan, ○ (East) has
   historically meant confirm and ✕ (South) cancel, while the rest of the world uses the opposite —
