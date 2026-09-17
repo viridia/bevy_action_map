@@ -306,10 +306,16 @@ value. The action's `ActionIntent` decides the rule:
 
 | Intent | Fold |
 | --- | --- |
-| `Button`, `Analog1`, `Directional2` | strongest contribution wins |
+| `Button` | strongest contribution wins |
+| `Analog1`, `Directional2` | per axis, the strongest positive contribution plus the strongest negative one |
 | `Delta2` | contributions are summed |
 
-Ties keep the earlier contribution, so declaration order is the tiebreak.
+Contributions are widened to three components and split by sign on each, into two accumulators that
+are locals of the loop. `Button` contributions are always `Bool` by then, so its per-sign maximum is
+strongest-wins, and `Delta2` adds into the same two. The result takes the widest shape any
+contribution had, so neither the value nor its shape depends on declaration order. The fold does not
+clamp: no axis can exceed its strongest contributor, and a diagonal's length is the stage's
+business.
 
 **The stage after the fold.** `combined::<A>()` declares a modifier chain and conditions that run on
 the folded value rather than on one binding's. It is held per slot, so an action that declares

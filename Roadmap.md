@@ -183,6 +183,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 120  | A cell the player can empty, and a refusal that says so               |
 | 124  | Disasteroids reserves the way back to its own settings screen         |
 | 125  | A stage after the fold, declared once per action                      |
+| 126  | Opposite contributions cancel                                         |
 
 ---
 
@@ -226,30 +227,12 @@ explicit player-facing step. `DeviceId` is the identity to key it by, and it exi
 What a binding can name, and when it counts as firing. Each of these is a gap a game runs into
 rather than a defect in what exists.
 
-### 126. Opposite contributions cancel
-
-D76: `Analog1` and `Directional2` fold per axis as the strongest positive contribution plus the
-strongest negative one. `Button` keeps strongest-wins, and `Delta2` still sums. This is what lets
-chunk 127 split a composite without losing the diagonal or the cancelling of opposite keys.
-
-- **No action needs a new clamp.** The fold cannot exceed its strongest contributor on an axis.
-- **Only opposite contributions from separate bindings change.** Composites are still whole, and
-  within one sign the strongest still wins. In tree that is a stick against a key on Disasteroids'
-  `Turn`, or A against Right, which now cancel rather than taking whichever was declared first.
-- **Two accumulators, not one**, as locals of the fold loop: no scratch, and no change to a
-  snapshot.
-- **Declaration order stops being a tiebreak**, since a maximum has none. TD5.5 loses that sentence.
-- **Not doing: splitting composites** — chunk 127.
-- **Verified by:** tests that same-direction contributions do not add, that opposite ones cancel,
-  and that reordering the declarations gives the same value.
-
 ### 127. A composite expands into one binding per part
 
 D76: `DirectionalButtons` and `AxisButtons` expand at declaration into one binding per part. The
 payoff is on the rebinding screen: a row that is one part of a composite can take another control
 and can be emptied, like any other row.
 
-- **Depends on chunk 126.**
 - **The refusals go in this chunk, not a later one.** `CompositeCannotGrow` and
   `CompositeCannotEmpty` are decided by `parts_in(input) > 1`, so they cannot fire once no binding
   holds more than one part. Removing them is removing dead code, along with the copy special case in

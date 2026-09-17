@@ -2682,52 +2682,123 @@ mod tests {
     }
 
     #[cfg(feature = "gamepad")]
+    fn stick(axis: GamepadAxis, value: f32) -> RawGamepadEvent {
+        RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
+            bevy_ecs::entity::Entity::PLACEHOLDER,
+            axis,
+            value,
+        ))
+    }
+
+    /// Holding W while the stick also pushes forward is one forward, not more; the stick's sideways
+    /// push lands on the other axis untouched, so the diagonal survives.
+    #[cfg(feature = "gamepad")]
     #[test]
-    fn a_directional_action_takes_its_strongest_binding() {
+    fn same_direction_contributions_do_not_add() {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<FreeLook>(|context| {
             context.bind::<Move>(DirectionalButtons::wasd());
             context.bind::<Move>(Stick::Left);
-            context.bind::<Look>(MouseMove);
         });
         app.world_mut().spawn(FreeLook);
         app.init_resource::<MotionProbe>();
         app.add_systems(Update, probe_motion);
 
-        // A half-deflected stick loses to a fully held key...
         app.world_mut().write_message(press(
             KeyCode::KeyW,
             Key::Character("w".into()),
             ButtonState::Pressed,
         ));
         app.world_mut()
-            .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
-                bevy_ecs::entity::Entity::PLACEHOLDER,
-                GamepadAxis::LeftStickX,
-                0.5,
-            )));
+            .write_message(stick(GamepadAxis::LeftStickY, 0.5));
         app.update();
         assert_eq!(app.world().resource::<MotionProbe>().movement, Vec2::Y);
 
-        // ...and wins once it is pushed further than the key can reach.
         app.world_mut()
-            .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
-                bevy_ecs::entity::Entity::PLACEHOLDER,
-                GamepadAxis::LeftStickX,
-                1.0,
-            )));
-        app.world_mut()
-            .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
-                bevy_ecs::entity::Entity::PLACEHOLDER,
-                GamepadAxis::LeftStickY,
-                0.5,
-            )));
+            .write_message(stick(GamepadAxis::LeftStickX, 0.5));
         app.update();
         assert_eq!(
             app.world().resource::<MotionProbe>().movement,
-            Vec2::new(1.0, 0.5)
+            Vec2::new(0.5, 1.0)
         );
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn opposite_contributions_cancel() {
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.bind::<Move>(DirectionalButtons::wasd());
+            context.bind::<Move>(Stick::Left);
+        });
+        app.world_mut().spawn(FreeLook);
+        app.init_resource::<MotionProbe>();
+        app.add_systems(Update, probe_motion);
+
+        // A pulled fully back against W held forward.
+        app.world_mut().write_message(press(
+            KeyCode::KeyW,
+            Key::Character("w".into()),
+            ButtonState::Pressed,
+        ));
+        app.world_mut()
+            .write_message(stick(GamepadAxis::LeftStickY, -1.0));
+        app.update();
+        assert_eq!(app.world().resource::<MotionProbe>().movement, Vec2::ZERO);
+
+        // Part way back leaves the key the rest of its reach.
+        app.world_mut()
+            .write_message(stick(GamepadAxis::LeftStickY, -0.25));
+        app.update();
+        assert_eq!(
+            app.world().resource::<MotionProbe>().movement,
+            Vec2::new(0.0, 0.75)
+        );
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn the_fold_does_not_depend_on_declaration_order() {
+        let mut values = Vec::new();
+        for keys_first in [true, false] {
+            let mut app = App::new();
+            app.add_plugins((InputPlugin, ActionMapPlugin));
+            app.add_context::<FreeLook>(move |context| {
+                if keys_first {
+                    context.bind::<Move>(DirectionalButtons::wasd());
+                    context.bind::<Move>(Stick::Left);
+                } else {
+                    context.bind::<Move>(Stick::Left);
+                    context.bind::<Move>(DirectionalButtons::wasd());
+                }
+            });
+            let entity = app.world_mut().spawn(FreeLook).id();
+
+            app.world_mut().write_message(press(
+                KeyCode::KeyD,
+                Key::Character("d".into()),
+                ButtonState::Pressed,
+            ));
+            // As far as the key reaches, so no contribution is stronger than the other.
+            app.world_mut()
+                .write_message(stick(GamepadAxis::LeftStickY, 1.0));
+            app.update();
+
+            let state = app
+                .world()
+                .get::<InputContextState<FreeLook>>(entity)
+                .unwrap();
+            let reading = state
+                .iter()
+                .find(|reading| reading.path == Move::PATH)
+                .unwrap();
+            values.push(reading.state.value);
+        }
+
+        assert_eq!(values[0], crate::action::ActionValue::Axis2(Vec2::ONE));
+        assert_eq!(values[0], values[1]);
     }
 
     #[test]

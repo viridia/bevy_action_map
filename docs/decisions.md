@@ -375,8 +375,8 @@ buttons would jump twice.
 **Note.** Keying the fold on intent stops the units error between actions. What stops a mouse delta
 being bound to a directional action in the first place is D7's channel check, at declaration time.
 
-**Superseded in part by D76** once chunk 126 lands: `Analog1` and `Directional2` add the strongest
-positive and strongest negative contribution on each axis.
+**Superseded in part by D76**: `Analog1` and `Directional2` add the strongest positive and strongest
+negative contribution on each axis, and declaration order is no longer a tiebreak.
 
 ### D76 — A composite is a way to write bindings, and opposite contributions cancel
 
@@ -385,8 +385,8 @@ Each expands at declaration into one binding per part, and the part is both the 
 the direction it contributes. `Analog1` and `Directional2` fold per axis, as the strongest positive
 contribution plus the strongest negative one, which reverses D15 for those two intents; `Button`
 keeps strongest-wins and `Delta2` still sums. A stage after the fold, declared once per action, is
-where anything that shapes the combined value goes. Chunks 125–127 build it; until they land, D15
-and D48 describe the code.
+where anything that shapes the combined value goes. Chunks 125–127 build it; chunk 126 is the fold,
+and until 127 lands D48 describes the composite.
 
 **Rules out.** A composite the evaluator or the override path can see; a direction held as `negate`
 and `swizzle` modifiers, which is BEI's form; and a clamp built into the fold.

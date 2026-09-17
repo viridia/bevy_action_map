@@ -657,7 +657,7 @@ impl<C: InputContext> InputContextState<C> {
                 continue;
             }
 
-            let mut combined = None;
+            let mut folded = Folded::default();
             let mut best = ConditionState::Idle;
 
             while index < bindings.len() && bindings[index].slot == slot {
@@ -778,7 +778,8 @@ impl<C: InputContext> InputContextState<C> {
                     (ActionIntent::Button, ActionValue::Bool(_)) => value,
                     (ActionIntent::Button, _) => {
                         let memory = &mut press_scratch[0];
-                        let pressed = threshold.pressed(magnitude(value), memory.prev.to_bool());
+                        let pressed =
+                            threshold.pressed(value.to_axis1().abs(), memory.prev.to_bool());
                         memory.prev = ActionValue::Bool(pressed);
                         ActionValue::Bool(pressed)
                     }
@@ -806,62 +807,56 @@ impl<C: InputContext> InputContextState<C> {
                     ActionValue::Bool(false)
                 };
 
-                combined = Some(match combined {
-                    Some(previous) => combine(previous, value, intent),
-                    None => value,
-                });
+                folded = folded.add(value, intent);
                 index += 1;
             }
 
-            if let Some(value) = combined {
-                let (value, condition_state) = match plan.stage(slot) {
-                    stage if stage.is_empty() => (value, best),
-                    stage => {
-                        let owned = &mut scratch[stage.scratch_base
-                            ..stage.scratch_base + stage.modifiers.len() + stage.conditions.len()];
-                        let (modifier_scratch, condition_scratch) =
-                            owned.split_at_mut(stage.modifiers.len());
-                        let value =
-                            apply_modifiers(value, &stage.modifiers, modifier_scratch, delta);
-                        if stage.conditions.is_empty() {
-                            (value, best)
+            let value = folded.value();
+            let (value, condition_state) = match plan.stage(slot) {
+                stage if stage.is_empty() => (value, best),
+                stage => {
+                    let owned = &mut scratch[stage.scratch_base
+                        ..stage.scratch_base + stage.modifiers.len() + stage.conditions.len()];
+                    let (modifier_scratch, condition_scratch) =
+                        owned.split_at_mut(stage.modifiers.len());
+                    let value = apply_modifiers(value, &stage.modifiers, modifier_scratch, delta);
+                    if stage.conditions.is_empty() {
+                        (value, best)
+                    } else {
+                        let judged = crate::condition::combine(
+                            &stage.conditions,
+                            value,
+                            condition_scratch,
+                            delta,
+                        );
+                        // A binding part way through a hold contributes rest, which the stage alone
+                        // would read as nothing happening, and the action would lose its `Started`.
+                        let judged = match (judged, best) {
+                            (ConditionState::Idle, ConditionState::Building) => best,
+                            _ => judged,
+                        };
+                        let value = if judged == ConditionState::Satisfied {
+                            value
                         } else {
-                            let judged = crate::condition::combine(
-                                &stage.conditions,
-                                value,
-                                condition_scratch,
-                                delta,
-                            );
-                            // A binding part way through a hold contributes rest, which the stage
-                            // alone would read as nothing happening, and the action would lose its
-                            // `Started`.
-                            let judged = match (judged, best) {
-                                (ConditionState::Idle, ConditionState::Building) => best,
-                                _ => judged,
-                            };
-                            let value = if judged == ConditionState::Satisfied {
-                                value
-                            } else {
-                                ActionValue::Bool(false)
-                            };
-                            (value, judged)
-                        }
+                            ActionValue::Bool(false)
+                        };
+                        (value, judged)
                     }
-                };
-                commit_slot(
-                    Commit {
-                        slot,
-                        intent,
-                        value,
-                        condition_state,
-                        kind,
-                    },
-                    actions,
-                    dirty,
-                    require_reset,
-                    transitions,
-                );
-            }
+                }
+            };
+            commit_slot(
+                Commit {
+                    slot,
+                    intent,
+                    value,
+                    condition_state,
+                    kind,
+                },
+                actions,
+                dirty,
+                require_reset,
+                transitions,
+            );
         }
     }
 
@@ -984,43 +979,49 @@ fn at_rest(intent: ActionIntent) -> ActionValue {
     }
 }
 
-/// Combines one more binding's contribution into an action's value.
-///
-/// A delta is a displacement, so two of them add. Everything else is a position or a press, where
-/// adding would be a units error: the strongest contribution wins instead, and ties keep the
-/// earlier one.
-fn combine(
-    accumulated: ActionValue,
-    contribution: ActionValue,
-    intent: ActionIntent,
-) -> ActionValue {
-    match intent {
-        ActionIntent::Delta2 => sum(accumulated, contribution),
-        ActionIntent::Button | ActionIntent::Analog1 | ActionIntent::Directional2 => {
-            if magnitude(contribution) > magnitude(accumulated) {
-                contribution
-            } else {
-                accumulated
+/// An action's value part way through the fold, split by sign on each axis (D76).
+#[derive(Clone, Copy, Default)]
+struct Folded {
+    positive: Vec3,
+    negative: Vec3,
+    /// The most components any contribution carried, so the result does not take its shape from
+    /// whichever binding was declared first.
+    rank: u8,
+}
+
+impl Folded {
+    /// Combines one more binding's contribution.
+    ///
+    /// A delta is a displacement, so two of them add. Everything else is a position or a press,
+    /// where adding would be a units error: each sign keeps its strongest contribution, so opposite
+    /// directions cancel and like ones do not add. A `Button` contribution is always a `Bool` by
+    /// now, which makes that strongest-wins.
+    fn add(self, contribution: ActionValue, intent: ActionIntent) -> Self {
+        let value = widen(contribution);
+        let (positive, negative) = match intent {
+            ActionIntent::Delta2 => (
+                self.positive + value.max(Vec3::ZERO),
+                self.negative + value.min(Vec3::ZERO),
+            ),
+            ActionIntent::Button | ActionIntent::Analog1 | ActionIntent::Directional2 => {
+                (self.positive.max(value), self.negative.min(value))
             }
+        };
+        Self {
+            positive,
+            negative,
+            rank: self.rank.max(rank(contribution)),
         }
     }
-}
 
-/// How strong a contribution is, for deciding which of two wins.
-// Not `to_axis1`, which keeps the sign: pushing a stick left is as strong as pushing it right, and
-// a comparison that thought otherwise would let the weaker of two bindings win.
-fn magnitude(value: ActionValue) -> f32 {
-    value.to_axis1().abs()
-}
-
-/// Adds two contributions, widening to whichever shape carries more components.
-fn sum(accumulated: ActionValue, contribution: ActionValue) -> ActionValue {
-    let total = widen(accumulated) + widen(contribution);
-    match rank(accumulated).max(rank(contribution)) {
-        0 => ActionValue::Bool(total != Vec3::ZERO),
-        1 => ActionValue::Axis1(total.x),
-        2 => ActionValue::Axis2(total.truncate()),
-        _ => ActionValue::Axis3(total),
+    fn value(self) -> ActionValue {
+        let total = self.positive + self.negative;
+        match self.rank {
+            0 => ActionValue::Bool(total != Vec3::ZERO),
+            1 => ActionValue::Axis1(total.x),
+            2 => ActionValue::Axis2(total.truncate()),
+            _ => ActionValue::Axis3(total),
+        }
     }
 }
 

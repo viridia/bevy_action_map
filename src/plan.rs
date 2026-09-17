@@ -871,8 +871,7 @@ impl<C> Plan<C> {
             });
         }
 
-        // A stable sort is what makes declaration order the tiebreak between two contributions of
-        // equal strength.
+        // Contiguous per slot, which is how the fold visits one action's bindings together.
         compiled.sort_by_key(|binding| binding.slot);
 
         let has_chords = compiled.iter().any(|binding| binding.chord_len > 1);

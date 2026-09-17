@@ -767,9 +767,12 @@ impl<C> InputContextBuilder<C> {
     /// the movement keys. Every binding for an action contributes to the same value, combined
     /// according to the action's [`ActionIntent`]:
     ///
-    /// - `Button`, `Analog1` and `Directional2` take the **strongest** contribution, so pushing the
-    ///   stick further wins over tapping a key, and either of two buttons fires the action. Equal
-    ///   contributions resolve in the order the bindings were declared.
+    /// - `Button` fires when **any** of its bindings does, so either of two jump buttons jumps.
+    /// - `Analog1` and `Directional2` take the **strongest push each way** on each axis and add the
+    ///   two. A key and a stick pushed the same way read as the further of them, not their sum, and
+    ///   pushed opposite ways they cancel. A key held forward with the stick pushed fully right
+    ///   gives a diagonal of `(1, 1)`; [`combined`](Self::combined) with
+    ///   [`clamp_magnitude`](CombinedBuilder::clamp_magnitude) limits it to unit length.
     /// - `Delta2` **sums** its contributions, because a delta is a displacement and two devices
     ///   moving at once should move the action by both.
     ///
@@ -792,9 +795,9 @@ impl<C> InputContextBuilder<C> {
 
     /// Declares `Follower` as riding every one of `Leader`'s bindings, one for one.
     ///
-    /// Use it where an action deliberately shares a control with another — tap to dodge and hold
-    /// to sprint, or a throttle that opens up when it is held down. `Leader` must already have
-    /// its bindings declared: this reads them off, generates one matching binding of `Follower` per
+    /// Use it where an action deliberately shares a control with another — tap to dodge and hold to
+    /// sprint, or a throttle that opens up when it is held down. `Leader` must already have its
+    /// bindings declared: this reads them off, generates one matching binding of `Follower` per
     /// device `Leader` reads, and runs `configure` on each. The player rebinds *the control*, once,
     /// and every action riding it moves with it.
     ///
@@ -861,10 +864,9 @@ impl<C> InputContextBuilder<C> {
     /// [`Button`](crate::action::ActionIntent::Button), since the same control reads as a
     /// continuous fraction for anything else (a trigger driving an analog action), and toggling
     /// that would flatten it to on/off. A stick, an axis, mouse motion, or a composite are never
-    /// eligible — there is no single press for any of them to toggle. Every eligible binding
-    /// shares one latch: press any of them, release, press another, and the action reads one
-    /// consistent state throughout — never one control turning it on while a different one turns
-    /// it back off.
+    /// eligible — there is no single press for any of them to toggle. Every eligible binding shares
+    /// one latch: press any of them, release, press another, and the action reads one consistent
+    /// state throughout — never one control turning it on while a different one turns it back off.
     ///
     /// Held is the default; nothing changes until a player (or a preset) turns toggle mode on.
     /// Downstream conditions read whatever the modifier chain produced, so `.down()` on a toggled
