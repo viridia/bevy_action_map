@@ -32,6 +32,9 @@ fn main() {
         context
             .bind::<Move>(Stick::Left)
             .dead_zone(DeadZone::radial(0.15));
+        // W and D together read (1, 1), which would walk a diagonal faster than a straight line.
+        // Clamped once for the action, after both bindings have had their say.
+        context.combined::<Move>().clamp_magnitude();
         context.bind::<Jump>(KeyCode::Space);
         context.bind::<Jump>(GamepadButton::South);
     });

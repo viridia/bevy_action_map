@@ -175,6 +175,7 @@ Bindings are authored as data and compiled once per context into a `Plan<C>`.
 | --- | --- |
 | action → slot assignment, and the reverse as a direct index | O(1) state access without hashing |
 | scratch slot assignment per condition and stateful modifier | TD6 |
+| each action's stage after the fold, its scratch placed after every binding's | TD5.5 |
 | each binding's chord length, and whether the plan has any | the clash pre-pass, skipped when there are no chords |
 | the set of controls any binding indexes | class-binding fallback, TD5.4 |
 | resolved dispatch per slot | turning a transition into a typed event |
@@ -220,6 +221,7 @@ raw event
   → modifier chain      negate · swizzle · scale · dead zone · curve · clamp · compass · custom
   → conditions          explicit: any satisfies · implicit: all hold · blocking: any vetoes
   → fold by intent      several bindings, one action
+  → stage after fold    modifiers · conditions, declared once per action
   → write ActionState, mark dirty, append transition
   → consume?            record the control so later contexts skip it
 ```
@@ -308,6 +310,15 @@ value. The action's `ActionIntent` decides the rule:
 | `Delta2` | contributions are summed |
 
 Ties keep the earlier contribution, so declaration order is the tiebreak.
+
+**The stage after the fold.** `combined::<A>()` declares a modifier chain and conditions that run on
+the folded value rather than on one binding's. It is held per slot, so an action that declares
+nothing costs one emptiness check, and it sits after every binding in the scratch layout, so a
+variant whose bindings shrank moves it down rather than rebuilding it. Its conditions replace the
+bindings' combined state, with one exception: a binding still `Building` keeps the action there when
+the stage alone would read `Idle`, since a hold in progress contributes rest to the fold. A stage on
+an action with no bindings in the context, delegated ones included, is refused, and a rescale in it
+counts against the most any one of the action's bindings already did.
 
 ### 5.6 Transitions and observers
 
@@ -700,6 +711,10 @@ Two further builder entry points:
   matching binding per device found, so a follower can ride some of a leader's devices by being
   declared before the rest. Every generated binding reads exactly the control it copied, which is
   what makes a rebind move both.
+- `combined::<A>()` returns a `CombinedBuilder` for the stage after the fold of TD5.5. It carries
+  the modifiers and conditions that mean the same on a combined value as on one control, and leaves
+  out `hold`, `hold_once`, `hold_and_release` and `multi_tap`, whose descriptor a prompt reads per
+  binding, as well as `dead_zone`, `rescale`, `per_second` and everything that names a control.
 - `hold_or_toggle::<A>(key)` declares a latch turning a momentary press into a sustained one, once
   per action rather than per binding, so every eligible control shares one runtime latch.
 

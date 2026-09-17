@@ -8,7 +8,7 @@ mod builder;
 mod control;
 mod modifier;
 
-pub use builder::{BindingBuilder, ClassBindingBuilder, InputContextBuilder};
+pub use builder::{BindingBuilder, ClassBindingBuilder, CombinedBuilder, InputContextBuilder};
 pub use control::{
     BindingInput, BindingPart, ButtonThreshold, Control, IntoBindingInput, MouseMove,
 };
@@ -23,7 +23,7 @@ pub(crate) use control::normalize_character;
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 pub use control::{AxisButtons, ButtonControl, DirectionalButtons};
 
-pub(crate) use builder::{BindingSpec, ClassBindingSpec, DelegatedSpec};
+pub(crate) use builder::{BindingSpec, ClassBindingSpec, CombinedSpec, DelegatedSpec};
 pub(crate) use modifier::{toggle_active, toggle_latch};
 
 // Both read a control, so neither exists in a build with no device to read one from.

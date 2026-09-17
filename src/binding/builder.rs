@@ -61,6 +61,19 @@ pub(crate) struct DelegatedSpec {
     pub(crate) dispatch: Dispatch,
 }
 
+/// What [`InputContextBuilder::combined`] declared for one action: a chain run on the value its
+/// bindings fold to, rather than on any one binding's.
+///
+/// Deliberately not a `BindingSpec`: it reads no control, so there is nothing to chord, consume,
+/// list or tune.
+#[derive(Clone)]
+pub(crate) struct CombinedSpec {
+    pub(crate) action: ActionId,
+    pub(crate) path: &'static str,
+    pub(crate) modifiers: Vec<BindingModifier>,
+    pub(crate) conditions: Vec<BindingCondition>,
+}
+
 /// One class binding as [`InputContextBuilder::bind_class`] declared it.
 ///
 /// Deliberately not a `BindingSpec`: a class binding has no input to modify, no chord, no mapping,
@@ -242,6 +255,10 @@ impl<'a, C> BindingBuilder<'a, C> {
     ///     .on_change()
     ///     .pulse(0.15);
     /// ```
+    ///
+    /// Where several controls drive the same action, declare this on
+    /// [`combined`](InputContextBuilder::combined) instead, so it judges the direction the player
+    /// asked for rather than each control separately.
     pub fn on_change(mut self) -> Self {
         self.push_condition(BindingCondition::Change);
         self
@@ -586,11 +603,117 @@ impl<'a, C> BindingBuilder<'a, C> {
     }
 }
 
+/// Shapes the value every binding of one action combines into, one chained call at a time.
+///
+/// Returned by [`InputContextBuilder::combined`]. The methods are [`BindingBuilder`]'s, less the
+/// ones that are about a single control, and they run in the same order: modifiers, then
+/// conditions.
+pub struct CombinedBuilder<'a, C> {
+    builder: &'a mut InputContextBuilder<C>,
+    index: usize,
+}
+
+impl<C> CombinedBuilder<'_, C> {
+    fn push_modifier(self, modifier: BindingModifier) -> Self {
+        self.builder.combined[self.index].modifiers.push(modifier);
+        self
+    }
+
+    fn push_condition(self, condition: BindingCondition) -> Self {
+        self.builder.combined[self.index].conditions.push(condition);
+        self
+    }
+
+    /// Fires on the tick the combined value leaves rest. See [`BindingBuilder::press`].
+    pub fn press(self) -> Self {
+        self.push_condition(BindingCondition::Press)
+    }
+
+    /// Fires on the tick the combined value returns to rest. See [`BindingBuilder::release`].
+    pub fn release(self) -> Self {
+        self.push_condition(BindingCondition::Release)
+    }
+
+    /// Requires the combined value to be off rest. See [`BindingBuilder::down`].
+    pub fn down(self) -> Self {
+        self.push_condition(BindingCondition::Down)
+    }
+
+    /// Fires on release after a short press. See [`BindingBuilder::tap`].
+    pub fn tap(self, max_duration: f32) -> Self {
+        self.push_condition(BindingCondition::Tap { max_duration })
+    }
+
+    /// Fires repeatedly while the combined value is off rest. See [`BindingBuilder::pulse`].
+    pub fn pulse(self, interval: f32) -> Self {
+        self.push_condition(BindingCondition::Pulse {
+            interval,
+            immediate: true,
+        })
+    }
+
+    /// Fires whenever the combined value differs from the tick before. See
+    /// [`BindingBuilder::on_change`].
+    pub fn on_change(self) -> Self {
+        self.push_condition(BindingCondition::Change)
+    }
+
+    /// Adds an application-defined condition.
+    pub fn when<K: Condition>(self, condition: K) -> Self {
+        self.push_condition(BindingCondition::Custom(Arc::new(condition)))
+    }
+
+    /// Adds a scale modifier.
+    pub fn scale(self, factor: f32) -> Self {
+        self.push_modifier(BindingModifier::Scale(factor))
+    }
+
+    /// Adds a negate modifier.
+    pub fn negate(self) -> Self {
+        self.push_modifier(BindingModifier::Negate)
+    }
+
+    /// Adds an x/y swizzle modifier.
+    pub fn swizzle(self) -> Self {
+        self.push_modifier(BindingModifier::Swizzle)
+    }
+
+    /// Adds a clamp modifier.
+    pub fn clamp(self, min: f32, max: f32) -> Self {
+        self.push_modifier(BindingModifier::Clamp { min, max })
+    }
+
+    /// Limits the combined value to unit length.
+    ///
+    /// Two keys held for a diagonal read `(1, 1)`, which is longer than a stick can reach. Clamping
+    /// here, once for the action, makes a diagonal on the keys as fast as a straight line, and
+    /// leaves the stick alone.
+    pub fn clamp_magnitude(self) -> Self {
+        self.push_modifier(BindingModifier::ClampMagnitude)
+    }
+
+    /// Adds a response-curve modifier.
+    pub fn curve(self, power: f32) -> Self {
+        self.push_modifier(BindingModifier::Curve(power))
+    }
+
+    /// Rounds the combined direction to the nearest compass point. See [`BindingBuilder::compass`].
+    pub fn compass(self, points: CompassPoints) -> Self {
+        self.push_modifier(BindingModifier::Compass(points))
+    }
+
+    /// Adds a custom modifier.
+    pub fn custom<M: Modifier>(self, modifier: M) -> Self {
+        self.push_modifier(BindingModifier::Custom(Arc::new(modifier)))
+    }
+}
+
 /// Builder used by [`crate::context::ActionMapAppExt::add_context`].
 pub struct InputContextBuilder<C> {
     bindings: Vec<BindingSpec>,
     class_bindings: Vec<ClassBindingSpec>,
     delegated: Vec<DelegatedSpec>,
+    combined: Vec<CombinedSpec>,
     // Installed against the `App` once the context has been declared. `None` leaves the context
     // live from the moment an entity carries it; see `active_if`, which lives in `context` because
     // everything it touches does.
@@ -604,6 +727,7 @@ impl<C> Default for InputContextBuilder<C> {
             bindings: Vec::new(),
             class_bindings: Vec::new(),
             delegated: Vec::new(),
+            combined: Vec::new(),
             activation: None,
             _marker: PhantomData,
         }
@@ -794,6 +918,60 @@ impl<C> InputContextBuilder<C> {
         );
     }
 
+    /// Shapes the value `A`'s bindings combine into, once for the whole action.
+    ///
+    /// Modifiers and conditions chained onto [`bind`](Self::bind) apply to that one control, before
+    /// its value is combined with the action's other bindings. Whatever is chained here applies
+    /// afterwards, to the combined value, so it is declared once and reaches every binding.
+    ///
+    /// Use it for anything that is a property of the action rather than of a control. Keeping a
+    /// diagonal on the keys from moving faster than a straight line is one:
+    ///
+    /// ```ignore
+    /// controls.bind::<Move>(DirectionalButtons::wasd());
+    /// controls.bind::<Move>(Stick::Left).dead_zone(DeadZone::radial(0.15));
+    /// controls.combined::<Move>().clamp_magnitude();
+    /// ```
+    ///
+    /// Menu navigation is another. When the selection moves is a question about the direction the
+    /// player is asking for, whichever control is asking, so the conditions go here and each
+    /// binding says only where a direction comes from:
+    ///
+    /// ```ignore
+    /// controls
+    ///     .bind::<Navigate>(Stick::Left)
+    ///     .dead_zone(DeadZone::radial(0.5))
+    ///     .compass(CompassPoints::Four);
+    /// controls.bind::<Navigate>(DirectionalButtons::dpad());
+    /// controls.combined::<Navigate>().on_change().pulse(0.25);
+    /// ```
+    ///
+    /// Written per binding instead, holding Up and then pressing Right would fire Right on its own
+    /// rather than the diagonal, and each direction would repeat on a timer of its own.
+    ///
+    /// Calling this again for the same action adds to what was declared before. It may come before
+    /// or after the bindings. An action declared here must have at least one binding in the same
+    /// context, and one handed to [`delegate`](Self::delegate) cannot have any, so both are
+    /// refused when the context is declared.
+    pub fn combined<A: InputAction>(&mut self) -> CombinedBuilder<'_, C> {
+        let index = match self.combined.iter().position(|spec| spec.action == A::id()) {
+            Some(index) => index,
+            None => {
+                self.combined.push(CombinedSpec {
+                    action: A::id(),
+                    path: A::PATH,
+                    modifiers: Vec::new(),
+                    conditions: Vec::new(),
+                });
+                self.combined.len() - 1
+            }
+        };
+        CombinedBuilder {
+            builder: self,
+            index,
+        }
+    }
+
     /// Binds to every control a [`ControlClass`](crate::capture::ControlClass) names, rather than
     /// to one control.
     ///
@@ -908,6 +1086,10 @@ impl<C> InputContextBuilder<C> {
             &self.bindings,
             &self.delegated,
         ));
+        found.extend(crate::plan::diagnose_combined(
+            &self.bindings,
+            &self.combined,
+        ));
         found
     }
 
@@ -940,6 +1122,11 @@ impl<C> InputContextBuilder<C> {
             // every other binding in the game on the strength of one chord mentioning it.
         }
         reserved
+    }
+
+    /// What [`combined`](Self::combined) declared, which `finish` leaves behind.
+    pub(crate) fn take_combined(&mut self) -> Vec<CombinedSpec> {
+        core::mem::take(&mut self.combined)
     }
 
     pub(crate) fn finish(self) -> (Vec<BindingSpec>, Vec<ClassBindingSpec>, Vec<DelegatedSpec>) {
@@ -1082,8 +1269,8 @@ mod tests {
         assert!(bindings[0].tunable.is_some());
     }
 
-    /// An action bound only through analog inputs has nothing `hold_or_toggle` can toggle, and
-    /// says so rather than silently doing nothing.
+    /// An action bound only through analog inputs has nothing `hold_or_toggle` can toggle, and says
+    /// so rather than silently doing nothing.
     #[cfg(feature = "gamepad")]
     #[test]
     #[should_panic(expected = "found no eligible binding")]
@@ -1143,8 +1330,8 @@ mod tests {
     }
 
     /// Two cases: a trigger that is button-shaped despite carrying a fraction, and a directional
-    /// composite that is direction-shaped despite being made of buttons.
-    /// A composite's parts are controls, not keys, so nothing stops them coming from two devices.
+    /// composite that is direction-shaped despite being made of buttons. A composite's parts are
+    /// controls, not keys, so nothing stops them coming from two devices.
     #[cfg(all(feature = "keyboard", feature = "gamepad"))]
     #[test]
     fn composite_parts_are_not_tied_to_one_device() {

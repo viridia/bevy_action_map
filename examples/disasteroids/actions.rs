@@ -273,28 +273,22 @@ pub fn plugin(app: &mut App) {
     // controls it names. What is left to bind is only what the screen itself does with a control,
     // not what it needs to keep from the game underneath.
     app.add_context::<Menu>(|controls| {
-        // `compass` and `on_change` are a pair. A stick reports a position, and a position is off
-        // centre every tick it is held — so a binding on it fires every tick. Rounding to four
-        // points turns that position into one of four answers, and `on_change` narrows the firing
-        // to the ticks on which the answer moved. Four rather than eight because this drives a
+        // A stick reports a position, and rounding it to four points turns that position into one
+        // of four answers, as a D-pad already gives. Four rather than eight because this drives a
         // table, where a diagonal is a way of asking for one of its neighbours rather than a
         // direction of its own.
         controls
             .bind::<Navigate>(Stick::Left)
             .dead_zone(DeadZone::radial(MENU_DEAD_ZONE))
-            .compass(CompassPoints::Four)
-            .on_change()
-            .pulse(MENU_REPEAT);
-        // A D-pad is already quantised, so it needs no compass — but it needs the same `on_change`,
-        // because a held button is held every tick exactly as a stick is. The two bindings behave
-        // identically from the selection's point of view, which is the test of whether the rounding
-        // was the right shape.
+            .compass(CompassPoints::Four);
+        controls.bind::<Navigate>(DirectionalButtons::dpad());
+        controls.bind::<Navigate>(DirectionalButtons::arrow_keys());
+        // A held direction is held every tick, so `on_change` narrows the firing to the ticks on
+        // which the answer moved. Declared on the combined value rather than per binding, because
+        // when to move is a question about the direction asked for and not the control asking:
+        // holding up and then pressing right is a diagonal, and one repeat timer drives it.
         controls
-            .bind::<Navigate>(DirectionalButtons::dpad())
-            .on_change()
-            .pulse(MENU_REPEAT);
-        controls
-            .bind::<Navigate>(DirectionalButtons::arrow_keys())
+            .combined::<Navigate>()
             .on_change()
             .pulse(MENU_REPEAT);
 

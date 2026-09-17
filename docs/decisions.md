@@ -429,8 +429,11 @@ fold keeps two accumulators rather than one, which are locals of the loop and ne
 composite costs four passes of per-binding bookkeeping rather than one; the control lookups, which
 dominate, are unchanged.
 
-**Unresolved.** Whether the stage after the fold takes conditions as well as modifiers, which chunk
-125 settles. A condition on a composite judges the whole vector; split, it judges each key.
+**The stage takes conditions as well as modifiers.** Settled by driving the menu's bindings
+headless: arrow keys under `on_change().pulse(0.25)`, as one composite and as four single-key
+bindings. Up held then Right pressed fired the diagonal and repeated it on one timer as a composite;
+split, it fired Right alone, then alternated Up and Right on two timers, and releasing Right moved
+nothing. A condition per part judges a key, and a menu is asking about a direction.
 
 ### D16 — Nothing user-defined runs inside the evaluator
 

@@ -5,7 +5,8 @@ use core::marker::PhantomData;
 
 use crate::action::{ActionId, ActionIntent, ChannelShape};
 use crate::binding::{
-    BindingInput, BindingModifier, BindingSpec, ClassBindingSpec, Control, DelegatedSpec,
+    BindingInput, BindingModifier, BindingSpec, ClassBindingSpec, CombinedSpec, Control,
+    DelegatedSpec,
 };
 use crate::capture::{ClassFilter, ControlClass};
 use crate::condition::BindingCondition;
@@ -56,7 +57,8 @@ impl BindingDiagnostic {
             | DiagnosticKind::FollowsUnlisted { .. }
             | DiagnosticKind::DuplicateTunableKey { .. }
             | DiagnosticKind::TunableShapeDisagreement { .. }
-            | DiagnosticKind::BoundAndDelegated => Severity::Error,
+            | DiagnosticKind::BoundAndDelegated
+            | DiagnosticKind::CombinedWithoutBindings => Severity::Error,
             DiagnosticKind::DuplicateBinding { .. }
             | DiagnosticKind::ConsumeDisagreement { .. }
             | DiagnosticKind::DuplicateClassBinding { .. }
@@ -154,6 +156,8 @@ pub enum DiagnosticKind {
     },
     /// An action is both bound in this context and delegated to an outside authority.
     BoundAndDelegated,
+    /// An action shapes its combined value, and has no bindings in this context to combine.
+    CombinedWithoutBindings,
 }
 
 impl core::fmt::Display for BindingDiagnostic {
@@ -271,6 +275,12 @@ impl core::fmt::Display for BindingDiagnostic {
                 "`{}` is bound to a control in this context and also delegated to an outside \
                  authority. Only one of the two can decide what the action does; drop whichever \
                  is not the authority here",
+                self.action
+            ),
+            DiagnosticKind::CombinedWithoutBindings => write!(
+                f,
+                "`{}` declares `combined`, but has no bindings in this context whose values it \
+                 could combine. Bind it here, or drop the declaration",
                 self.action
             ),
         }
@@ -538,6 +548,61 @@ pub(crate) fn diagnose_delegated(
         .collect()
 }
 
+/// Whether a `combined` declaration has anything to combine, and whether its chain rescales twice.
+///
+/// Refused rather than ignored: a clamp that silently never runs is the mistake most worth hearing
+/// about. A delegated action lands here too, since it has no bindings.
+pub(crate) fn diagnose_combined(
+    bindings: &[BindingSpec],
+    combined: &[CombinedSpec],
+) -> Vec<BindingDiagnostic> {
+    let mut found = Vec::new();
+    for spec in combined {
+        let at = |kind| BindingDiagnostic {
+            action: spec.path,
+            kind,
+        };
+        let rescales = |modifiers: &[BindingModifier]| {
+            modifiers
+                .iter()
+                .filter(|modifier| modifier.rescales())
+                .count()
+        };
+        let own = bindings
+            .iter()
+            .filter(|binding| binding.action == spec.action);
+        let Some(upstream) = own.map(|binding| rescales(&binding.modifiers)).max() else {
+            found.push(at(DiagnosticKind::CombinedWithoutBindings));
+            continue;
+        };
+        // The stage is the tail of every binding's chain, so it rescales twice if it rescales after
+        // a binding that already did. A binding's own double is `diagnose`'s to report.
+        let stage = rescales(&spec.modifiers);
+        if stage > 0 && upstream + stage > 1 {
+            found.push(at(DiagnosticKind::ChainedRescaling {
+                count: upstream + stage,
+            }));
+        }
+    }
+    found
+}
+
+/// What `combined` declared for one slot, with its working memory placed.
+// `Default` is the slot that declared nothing: two empty `Vec`s, which allocate nothing.
+#[derive(Clone, Default)]
+pub(crate) struct CompiledStage {
+    pub(crate) modifiers: Vec<BindingModifier>,
+    pub(crate) conditions: Vec<BindingCondition>,
+    // After every binding's scratch, so the bindings' own layout is the same with or without it.
+    pub(crate) scratch_base: usize,
+}
+
+impl CompiledStage {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.modifiers.is_empty() && self.conditions.is_empty()
+    }
+}
+
 /// An authored binding with its action resolved to a state slot.
 pub(crate) struct CompiledBinding {
     pub(crate) slot: usize,
@@ -620,6 +685,9 @@ pub struct Plan<C> {
     // id the context binds rather than by the registry, and held once per plan rather than per
     // instance, so the slack costs two bytes an id in one allocation.
     slot_by_action: Vec<u16>,
+    // Parallel to `slot_intents`: what `combined` runs on the slot's folded value. Held per slot
+    // rather than as a list to search, so a slot that declared nothing costs one emptiness check.
+    stages: Vec<CompiledStage>,
     // The slots an outside authority writes rather than the fold. Held as a list rather than a bit
     // per slot because the evaluator only ever walks it, and the overwhelmingly common plan
     // delegates nothing.
@@ -683,7 +751,35 @@ impl<C> Plan<C> {
         // a binding reads, and a delegated action has none to rewrite. The slots themselves survive
         // already, since `compile` starts from the template's slot tables.
         plan.delegated_slots.clone_from(&template.delegated_slots);
+        // Never rebindable either, but not copied whole: the bindings' scratch may have changed
+        // length, and the stages' sits after it.
+        plan.stages.clone_from(&template.stages);
+        plan.place_stages();
         plan
+    }
+
+    /// Attaches what `combined` declared to the slots its actions hold.
+    ///
+    /// After compilation, as `delegate` is, and for the same reason. An action with no slot is
+    /// never reached: `diagnose_combined` refuses the context first.
+    pub(crate) fn combine(&mut self, combined: Vec<CombinedSpec>) {
+        self.stages
+            .resize_with(self.slot_intents.len(), CompiledStage::default);
+        for spec in combined {
+            let Some(slot) = self.slot_for_action(spec.action) else {
+                continue;
+            };
+            self.stages[slot].modifiers.extend(spec.modifiers);
+            self.stages[slot].conditions.extend(spec.conditions);
+        }
+        self.place_stages();
+    }
+
+    fn place_stages(&mut self) {
+        for stage in self.stages.iter_mut().filter(|stage| !stage.is_empty()) {
+            stage.scratch_base = self.scratch_count;
+            self.scratch_count += stage.modifiers.len() + stage.conditions.len();
+        }
     }
 
     fn compile(bindings: Vec<BindingSpec>, template: Option<&Self>) -> Self {
@@ -780,6 +876,7 @@ impl<C> Plan<C> {
         compiled.sort_by_key(|binding| binding.slot);
 
         let has_chords = compiled.iter().any(|binding| binding.chord_len > 1);
+        let slot_count = slot_intents.len();
 
         // Recomputed on every compile, including a variant's: an override rewrites which controls
         // these bindings read, so a rebind has to move a control between "indexed" and "not" along
@@ -800,6 +897,7 @@ impl<C> Plan<C> {
             slot_paths,
             slot_actions,
             slot_by_action,
+            stages: alloc::vec![CompiledStage::default(); slot_count],
             delegated_slots: Vec::new(),
             scratch_count,
             tunable_scratch_count,
@@ -828,6 +926,7 @@ impl<C> Plan<C> {
                     self.slot_dispatch.push(spec.dispatch);
                     self.slot_paths.push(spec.path);
                     self.slot_actions.push(spec.action);
+                    self.stages.push(CompiledStage::default());
                     let slot = self.slot_intents.len() - 1;
                     self.slot_by_action[id] = encode_slot(slot);
                     slot
@@ -842,6 +941,10 @@ impl<C> Plan<C> {
 
     pub(crate) fn bindings(&self) -> &[CompiledBinding] {
         &self.bindings
+    }
+
+    pub(crate) fn stage(&self, slot: usize) -> &CompiledStage {
+        &self.stages[slot]
     }
 
     pub(crate) fn delegated_slots(&self) -> &[usize] {
@@ -1201,5 +1304,110 @@ mod tests {
         builder.bind_class::<AnyKey>(crate::capture::ControlClass::AnyButton);
 
         assert_eq!(builder.diagnostics(), &[]);
+    }
+
+    // A clamp that never runs is the mistake worth hearing about, whether the action was never
+    // bound here or was handed to an authority instead.
+    #[test]
+    fn combining_an_action_with_no_bindings_is_refused() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.combined::<Move>().clamp_magnitude();
+        builder.delegate::<Jump>();
+        builder.combined::<Jump>().press();
+
+        let found = builder.diagnostics();
+        assert_eq!(found.len(), 2, "{found:?}");
+        for diagnostic in &found {
+            assert_eq!(diagnostic.kind, DiagnosticKind::CombinedWithoutBindings);
+            assert_eq!(diagnostic.severity(), Severity::Error);
+        }
+    }
+
+    // The stage runs after every binding's chain, so a rescale there stacks on one a binding
+    // already did. Neither declaration is wrong on its own.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_stage_rescaling_after_a_binding_that_did_is_refused() {
+        use crate::action::{ActionValue, Scratch};
+        use crate::binding::{DeadZone, DirectionalButtons, Modifier};
+
+        struct Rescales;
+        impl Modifier for Rescales {
+            fn apply(&self, value: ActionValue, _: &mut Scratch, _: f32) -> ActionValue {
+                value
+            }
+
+            fn rescales(&self) -> bool {
+                true
+            }
+        }
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<Move>(DirectionalButtons::wasd());
+        builder.combined::<Move>().custom(Rescales);
+        assert_eq!(builder.diagnostics(), &[], "nothing upstream rescales");
+
+        builder
+            .bind::<Move>(DirectionalButtons::arrow_keys())
+            .dead_zone(DeadZone::radial(0.1));
+        let found = builder.diagnostics();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].kind, DiagnosticKind::ChainedRescaling { count: 2 });
+    }
+
+    // Declaring it again adds to it, as binding an action twice does, and the stage's working
+    // memory sits after every binding's.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_stage_accumulates_and_its_scratch_follows_the_bindings() {
+        use crate::binding::DirectionalButtons;
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<Move>(DirectionalButtons::wasd());
+        builder.combined::<Move>().clamp_magnitude();
+        builder
+            .bind::<Move>(DirectionalButtons::arrow_keys())
+            .press();
+        builder.combined::<Move>().on_change();
+        let combined = builder.take_combined();
+        let (bindings, class_bindings, _) = builder.finish();
+        let mut plan = Plan::<()>::from_bindings(bindings, class_bindings);
+        plan.combine(combined);
+
+        let stage = plan.stage(
+            plan.slot_for_action(<Move as crate::action::InputAction>::id())
+                .unwrap(),
+        );
+        assert_eq!((stage.modifiers.len(), stage.conditions.len()), (1, 1));
+        // WASD's press slot, then the arrows' condition and press slot.
+        assert_eq!(stage.scratch_base, 3);
+        assert_eq!(plan.scratch_count(), 5);
+    }
+
+    // A player emptying a binding shrinks the bindings' scratch, and the stage has to move down
+    // with it rather than keep an offset past the end.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_variant_places_the_stage_after_its_own_bindings() {
+        use crate::binding::DirectionalButtons;
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<Move>(DirectionalButtons::wasd());
+        builder
+            .bind::<Move>(DirectionalButtons::arrow_keys())
+            .press();
+        builder.combined::<Move>().on_change();
+        let combined = builder.take_combined();
+        let (bindings, class_bindings, _) = builder.finish();
+        let mut template = Plan::<()>::from_bindings(bindings.clone(), class_bindings);
+        template.combine(combined);
+
+        let variant = Plan::variant_of(&template, bindings[..1].to_vec());
+        let slot = variant
+            .slot_for_action(<Move as crate::action::InputAction>::id())
+            .unwrap();
+        assert_eq!(variant.stage(slot).conditions.len(), 1, "carried over");
+        assert_eq!(variant.stage(slot).scratch_base, 1);
+        assert_eq!(variant.scratch_count(), 2);
     }
 }

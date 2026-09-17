@@ -123,15 +123,11 @@ pub fn plugin(app: &mut App) {
         controls
             .bind::<Navigate>(Stick::Left)
             .dead_zone(DeadZone::radial(MENU_DEAD_ZONE))
-            .compass(CompassPoints::Four)
-            .on_change()
-            .pulse(MENU_REPEAT);
+            .compass(CompassPoints::Four);
+        controls.bind::<Navigate>(DirectionalButtons::dpad());
+        controls.bind::<Navigate>(DirectionalButtons::arrow_keys());
         controls
-            .bind::<Navigate>(DirectionalButtons::dpad())
-            .on_change()
-            .pulse(MENU_REPEAT);
-        controls
-            .bind::<Navigate>(DirectionalButtons::arrow_keys())
+            .combined::<Navigate>()
             .on_change()
             .pulse(MENU_REPEAT);
 

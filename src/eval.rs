@@ -814,12 +814,46 @@ impl<C: InputContext> InputContextState<C> {
             }
 
             if let Some(value) = combined {
+                let (value, condition_state) = match plan.stage(slot) {
+                    stage if stage.is_empty() => (value, best),
+                    stage => {
+                        let owned = &mut scratch[stage.scratch_base
+                            ..stage.scratch_base + stage.modifiers.len() + stage.conditions.len()];
+                        let (modifier_scratch, condition_scratch) =
+                            owned.split_at_mut(stage.modifiers.len());
+                        let value =
+                            apply_modifiers(value, &stage.modifiers, modifier_scratch, delta);
+                        if stage.conditions.is_empty() {
+                            (value, best)
+                        } else {
+                            let judged = crate::condition::combine(
+                                &stage.conditions,
+                                value,
+                                condition_scratch,
+                                delta,
+                            );
+                            // A binding part way through a hold contributes rest, which the stage
+                            // alone would read as nothing happening, and the action would lose its
+                            // `Started`.
+                            let judged = match (judged, best) {
+                                (ConditionState::Idle, ConditionState::Building) => best,
+                                _ => judged,
+                            };
+                            let value = if judged == ConditionState::Satisfied {
+                                value
+                            } else {
+                                ActionValue::Bool(false)
+                            };
+                            (value, judged)
+                        }
+                    }
+                };
                 commit_slot(
                     Commit {
                         slot,
                         intent,
                         value,
-                        condition_state: best,
+                        condition_state,
                         kind,
                     },
                     actions,
@@ -2537,5 +2571,117 @@ mod tests {
             layout_key(KeyCode::KeyZ, "Z", ButtonState::Released),
         );
         assert!(!state.value::<Jump>(), "let go, not stranded");
+    }
+
+    #[derive(crate::InputAction)]
+    #[action(path = "eval_tests.move", output = Vec2, intent = Directional2)]
+    struct Move;
+
+    /// A context compiled the way `add_context` compiles one, `combined` included.
+    fn context_declaring(
+        declare: impl FnOnce(&mut InputContextBuilder<Flying>),
+    ) -> InputContextState<Flying> {
+        let mut builder = InputContextBuilder::<Flying>::default();
+        declare(&mut builder);
+        let combined = builder.take_combined();
+        let (bindings, class_bindings, _) = builder.finish();
+        let mut plan = Plan::from_bindings(bindings, class_bindings);
+        plan.combine(combined);
+        InputContextState::<Flying>::new(Arc::new(plan), None)
+    }
+
+    /// Two keys held for a diagonal read `(1, 1)`, and a clamp declared once for the action pulls
+    /// that back to unit length without either binding naming it.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_diagonal_is_clamped_once_for_the_action() {
+        use crate::binding::DirectionalButtons;
+        use bevy_input::keyboard::KeyCode;
+
+        let mut state = context_declaring(|controls| {
+            controls.bind::<Move>(DirectionalButtons::wasd());
+            controls.combined::<Move>().clamp_magnitude();
+        });
+        let mut frame = InputFrame::default();
+
+        press(
+            &mut state,
+            &mut frame,
+            layout_key(KeyCode::KeyW, "w", ButtonState::Pressed),
+        );
+        assert_eq!(
+            state.value::<Move>(),
+            Vec2::Y,
+            "a straight line is already unit length"
+        );
+
+        press(
+            &mut state,
+            &mut frame,
+            layout_key(KeyCode::KeyD, "d", ButtonState::Pressed),
+        );
+        let diagonal = state.value::<Move>();
+        assert!((diagonal.length() - 1.0).abs() < 1e-5, "{diagonal}");
+        assert!(
+            (diagonal.x - diagonal.y).abs() < 1e-5,
+            "still a diagonal: {diagonal}"
+        );
+    }
+
+    /// A condition on the combined value judges the direction the player is asking for, not the
+    /// control asking. A second control agreeing with the first changes nothing, where the same
+    /// `on_change` on each binding would fire again for the second.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_second_control_agreeing_with_the_first_is_not_a_change() {
+        use crate::binding::DirectionalButtons;
+        use bevy_input::keyboard::KeyCode;
+
+        let mut state = context_declaring(|controls| {
+            controls.bind::<Move>(DirectionalButtons::arrow_keys());
+            controls.bind::<Move>(DirectionalButtons::wasd());
+            controls.combined::<Move>().on_change();
+        });
+        let mut frame = InputFrame::default();
+        let fired = |state: &mut InputContextState<Flying>| {
+            let fired = state
+                .transitions
+                .iter()
+                .any(|transition| transition.phase == ActionPhase::Fired);
+            state.transitions.clear();
+            fired
+        };
+
+        let up = |state| layout_key(KeyCode::ArrowUp, "", state);
+        let w = |state| layout_key(KeyCode::KeyW, "w", state);
+
+        press(&mut state, &mut frame, up(ButtonState::Pressed));
+        assert!(fired(&mut state), "up");
+
+        press(&mut state, &mut frame, w(ButtonState::Pressed));
+        assert!(!fired(&mut state), "W is up as well, and up is not news");
+
+        press(&mut state, &mut frame, up(ButtonState::Released));
+        assert!(!fired(&mut state), "W is still asking for up");
+
+        press(&mut state, &mut frame, w(ButtonState::Released));
+        assert!(fired(&mut state), "letting go of both is a change");
+    }
+
+    /// A binding part way through a hold contributes rest to the fold, and a condition on the
+    /// combined value must not read that as the player doing nothing.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_hold_in_progress_survives_a_condition_on_the_combined_value() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut state = context_declaring(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).hold(10.0);
+            controls.combined::<Jump>().press();
+        });
+        let mut frame = InputFrame::default();
+
+        press(&mut state, &mut frame, key(ButtonState::Pressed));
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Started);
     }
 }

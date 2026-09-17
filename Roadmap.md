@@ -182,6 +182,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 118c | A slot is addressed, not appended                                     |
 | 120  | A cell the player can empty, and a refusal that says so               |
 | 124  | Disasteroids reserves the way back to its own settings screen         |
+| 125  | A stage after the fold, declared once per action                      |
 
 ---
 
@@ -225,37 +226,13 @@ explicit player-facing step. `DeviceId` is the identity to key it by, and it exi
 What a binding can name, and when it counts as firing. Each of these is a gap a game runs into
 rather than a defect in what exists.
 
-### 125. A stage after the fold, declared once per action
-
-D76, the first of three: chunks 125–127 turn a composite into a way to write bindings. Modifiers run
-per binding before the fold, so nothing can shape an action's combined value, and once a composite
-is split that is the only place a diagonal can be normalized.
-
-- **It stands on its own.** `move_and_jump` binds WASD beside a stick, and a diagonal on the keys
-  reaches 1.414 because nothing clamps it. One `clamp_magnitude` declared for the action fixes that
-  for every binding at once.
-- **First question, settled before any code: modifiers only, or conditions too.** A condition on a
-  composite judges the whole vector; after chunk 127 it is copied to each part and judges each key.
-  Disasteroids' menu navigation puts `on_change` on the D-pad composite, and holding Up then
-  pressing Right is where the two could differ. Settle it by running the menu, not by reading. If
-  they differ, conditions belong here, and the stick's and the D-pad's separate `on_change` become
-  one.
-- **The declaration's shape is offered as options before it is written**, beside `hold_or_toggle`,
-  which is already declared once per action.
-- **Nothing is allocated per tick** (R23.2): the stage's scratch is sized when the plan compiles,
-  and an action that declares nothing pays one empty-slice check.
-- **Not doing: changing the fold** — chunk 126.
-- **Verified by:** unit tests on the stage, and `move_and_jump` moving diagonally at the speed it
-  moves straight.
-
 ### 126. Opposite contributions cancel
 
 D76: `Analog1` and `Directional2` fold per axis as the strongest positive contribution plus the
 strongest negative one. `Button` keeps strongest-wins, and `Delta2` still sums. This is what lets
 chunk 127 split a composite without losing the diagonal or the cancelling of opposite keys.
 
-- **Independent of chunk 125.** The fold cannot exceed its strongest contributor on an axis, so no
-  action needs a new clamp for it.
+- **No action needs a new clamp.** The fold cannot exceed its strongest contributor on an axis.
 - **Only opposite contributions from separate bindings change.** Composites are still whole, and
   within one sign the strongest still wins. In tree that is a stick against a key on Disasteroids'
   `Turn`, or A against Right, which now cancel rather than taking whichever was declared first.
