@@ -303,6 +303,24 @@ reads Bevy's own message beside the mapper, and loses the rebinding along with i
   machine and only the binding is that specific — so either the requirement is right and the case is
   rarer than it sounds, or it is a clause to revise.
 
+### 124. Disasteroids reserves the way back to its own settings screen
+
+R19.2, D42: `reserved()` is called nowhere in the example. `ToggleSettings` and `Pause` are kept
+safe only by being left out of the mappable set, which is the half a reader can see, and nothing
+stops a player binding a gameplay action over `F2` or `Escape`.
+
+- **Safe today by accident rather than by design.** `Flying` and `Shell` share a priority and no
+  Disasteroids binding calls `consume()`, so a control bound over `F2` fires the gameplay action
+  *and* opens the screen. One `consume()` on `Thrust`, which is an ordinary thing for a game to
+  want, turns the same rebind into a settings screen the player cannot reach.
+- **The comment goes with it.** "Listed and fixed: the screen that shows what the controls are is
+  not itself something the player rebinds from inside it" teaches one half and is silent on the
+  other, so a reader copying the example copies the gap.
+- **Ground rule 3 is why this is a chunk rather than a preference:** the mechanism built for this
+  has no acceptance test.
+- **Pairs with chunk 123**, which writes the advice. Either order works, and landing this one first
+  makes the prose cheaper to review, since it then describes something already in the tree.
+
 ### 33. Conditions that read other actions
 
 A chord may require another *control* but not another *action*, and `BlockedBy` does not exist. Both
@@ -491,9 +509,9 @@ the expensive part.
 
 ## The library itself
 
-Four chunks no game asks for and no published crate can do without: an extension point nothing
-outside has exercised, the reflection the documents promise, documentation that runs, and
-documentation that is true.
+Five chunks no game asks for and no published crate can do without: an extension point nothing
+outside has exercised, the reflection the documents promise, documentation that runs, documentation
+that is true, and the advice that keeps a player out of a corner.
 
 ### 112. A backend suppresses a device family at L0
 
@@ -597,6 +615,29 @@ feature (`Cargo.toml:116-123`) never re-adds it.
 
 [bevyengine/bevy#15030]: https://github.com/bevyengine/bevy/pull/15030
 
+### 123. Advice on a mapping set a player cannot break
+
+R19.2 exists — exclusion lists, "so the rebinding UI remains operable" — and `reserved()` is the
+mechanism, with a doc comment that teaches the trap properly. What is missing is anything at the
+level where a novice lays out their first context: a method's documentation reaches the reader who
+already suspects the problem and went looking for it.
+
+- **What it has to say.** That every control on the path to the rebinding screen has to survive a
+  careless rebind; that keeping it out of the mappable set is only half the job, because something
+  else can still be bound over the top of it; and that a reset to the shipped controls is the way
+  back when both fail.
+- **Where it goes is decided by length.** A few paragraphs belong in `lib.rs`'s module docs, where
+  someone laying out a context meets them. Longer than that and it is its own page under `docs/`
+  with the README linking it — which would be the first user-facing document there, so `CLAUDE.md`'s
+  table of what each document admits gains a row in the same change.
+- **A worked example that compiles**, not an `ignore` fence: the advice is a pattern rather than a
+  fragment, so it can stand on its own, and chunk 28 has one less to convert.
+- **Not doing: making Disasteroids follow it** — chunk 124. Prose teaching a pattern the flagship
+  example does not itself use is worth less, but the example is a separate change.
+- **Review surface:** whether this reads as a warning or as a recipe. A novice who has not been
+  burned skips warnings, which argues for stating the pattern positively and letting the failure
+  mode follow from it.
+
 ### 28. Docs that run
 
 - **Make the doctests execute anywhere.** `scripts/verify.sh --doc` runs them on macOS, pointing
@@ -642,6 +683,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Netcode injection and reconciliation** | a networked target. The injection point is built: chunk 111 landed `delegate` and `AuthorityValues`, so a peer's resolved action already has somewhere to go (D71). Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. Injection targets L2 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs a remote player's resolved action to inject and a later correction to reconcile against it |
 | **Consumption-aware `FocusedInput` dispatch** (R8.2a) | **a game wanting `bevy_ui_widgets`' own widgets working generically, unmodified, without a context per widget kind.** A context per kind is the path to reach for first, and Disasteroids ships that way. A design for the filter was built and set aside: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline rather than a second raw-message read — keyboard only, since every keyboard-driven widget observer at 0.20 gates on `ButtonState::Pressed` and none reacts to a release |
 | **Promoting `WidgetKind` and the per-kind context into the crate** | [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native widget-kind id. Promoting a shape this crate invented first, ahead of that conversation, risks committing to the wrong one |
+| **Deleting `acquire_focus_directional`** | [bevy#25675][] landing. `examples/common/widget_focus.rs` carries a global `AcquireFocus` observer mirroring `acquire_focus_tab_index`, with `AutoDirectionalNavigation` standing in for `TabIndex`: `bevy_input_focus`'s `click_to_focus` bubbles an `AcquireFocus` on every pointer press, a screen navigating by anything but `TabIndex` intercepts it nowhere, so it reaches the window and clears focus — and a widget whose interactive children are separate entities, like a stepper's two chevrons, blinks on every press rather than rarely. The PR separates focusability from navigation policy behind a `Focusable` component and names [bevy#25596][], click-to-focus under directional navigation, as what it fixes, so it plausibly retires the observer outright. Approved and waiting on the author with conflicts as of September 2026. What to check when it lands is whether `Focusable` reaches a navigation scheme that is neither `TabIndex` nor one of upstream's own, which is the case the workaround actually covers |
 | **A context-level exclusion from the mapping list** | a second screen needing the same filter and duplicating it. `ActionMapping::context` already carries the data, and one call site filtering on it costs one line — at two, the crate is the one paying for the repetition |
 | **An initial delay distinct from the repeat rate** (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both. Two numbers is a small change; what is missing is a case where equal is wrong, and a two-table settings screen is not it |
 | **Free-form mutually-exclusive context sets** (R7.7 remainder) | nothing in tree needs two independently-exclusive contexts to coexist rather than one dominating the other by priority |
@@ -667,6 +709,8 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087
 [bevy#19741]: https://github.com/bevyengine/bevy/issues/19741
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
+[bevy#25596]: https://github.com/bevyengine/bevy/issues/25596
+[bevy#25675]: https://github.com/bevyengine/bevy/pull/25675
 [bevy#25710]: https://github.com/bevyengine/bevy/pull/25710
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678
