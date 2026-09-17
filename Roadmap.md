@@ -181,6 +181,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 118b | A slot may be empty                                                    |
 | 118c | A slot is addressed, not appended                                     |
 | 120  | A cell the player can empty, and a refusal that says so               |
+| 124  | Disasteroids reserves the way back to its own settings screen         |
 
 ---
 
@@ -302,24 +303,6 @@ reads Bevy's own message beside the mapper, and loses the rebinding along with i
   says app-configurable, but a trackpad and a notched wheel want different numbers on the same
   machine and only the binding is that specific — so either the requirement is right and the case is
   rarer than it sounds, or it is a clause to revise.
-
-### 124. Disasteroids reserves the way back to its own settings screen
-
-R19.2, D42: `reserved()` is called nowhere in the example. `ToggleSettings` and `Pause` are kept
-safe only by being left out of the mappable set, which is the half a reader can see, and nothing
-stops a player binding a gameplay action over `F2` or `Escape`.
-
-- **Safe today by accident rather than by design.** `Flying` and `Shell` share a priority and no
-  Disasteroids binding calls `consume()`, so a control bound over `F2` fires the gameplay action
-  *and* opens the screen. One `consume()` on `Thrust`, which is an ordinary thing for a game to
-  want, turns the same rebind into a settings screen the player cannot reach.
-- **The comment goes with it.** "Listed and fixed: the screen that shows what the controls are is
-  not itself something the player rebinds from inside it" teaches one half and is silent on the
-  other, so a reader copying the example copies the gap.
-- **Ground rule 3 is why this is a chunk rather than a preference:** the mechanism built for this
-  has no acceptance test.
-- **Pairs with chunk 123**, which writes the advice. Either order works, and landing this one first
-  makes the prose cheaper to review, since it then describes something already in the tree.
 
 ### 33. Conditions that read other actions
 

@@ -250,16 +250,22 @@ pub fn plugin(app: &mut App) {
     // No condition, so this one is live from the moment its entity exists and stays that way. Pause
     // is one action bound once, and the state it toggles is what the flying context follows.
     app.add_context::<Shell>(|controls| {
-        controls.bind::<Pause>(KeyCode::Escape);
-        controls.bind::<Pause>(GamepadButton::Start);
+        // Reserved, which is fixed plus the half that matters: fixed keeps the player from moving
+        // the binding, reserved keeps every capture away from the control. Without the second, a
+        // player could bind a gameplay action over Escape and lose the way out.
+        controls.bind::<Pause>(KeyCode::Escape).reserved();
+        controls.bind::<Pause>(GamepadButton::Start).reserved();
 
         controls.bind::<ToggleOverlay>(KeyCode::F1);
         controls.bind::<ToggleOverlay>(GamepadButton::Select);
 
-        // Listed and fixed, like the two above: the screen that shows what the controls are is not
-        // itself something the player rebinds from inside it.
-        controls.bind::<ToggleSettings>(KeyCode::F2);
-        controls.bind::<ToggleSettings>(GamepadButton::North);
+        // Reserved for the same reason: the screen that shows what the controls are has to stay
+        // reachable, and a screen you can no longer open is no better than one whose key now does
+        // two things.
+        controls.bind::<ToggleSettings>(KeyCode::F2).reserved();
+        controls
+            .bind::<ToggleSettings>(GamepadButton::North)
+            .reserved();
     });
 
     // No binding here needs `.consume()`: `Menu` is `exclusive` (see its own doc comment), so
