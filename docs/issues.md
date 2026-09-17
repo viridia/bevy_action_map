@@ -162,18 +162,6 @@ legally offer, not what it must say when it says no. It is here because ground r
 examples the acceptance test, and an example that swallows a diagnostic is not demonstrating the
 thing the diagnostic was built for.
 
-### 1015 Nothing can bind to where the pointer is
-
-R13.1, R13.4, R13.6 · `frame.rs`
-
-The input frame carries mouse _motion_ and no absolute position at all, so position cannot be
-distinguished from motion because only one of the two is there. R13.1 wants both. R13.3's mouse
-wheel is deferred with a gate; these are not, and R15.10's split-screen pointer-to-viewport mapping
-is blocked behind them.
-
-_Fix:_ **chunk 98** — a Pong variant, a mouse-controlled paddle. R15.10 stays a Split Friction
-follow-on once the mechanism lands here.
-
 ### 1017 Either modifier
 
 R12.3: a chord's modifier should be able to say "either Ctrl", as one binding rather than two.
@@ -374,7 +362,12 @@ R22.4 (MUST) wants documented ordering and integration with `bevy_input::InputSy
 - **`bevy_picking` is named once, about something else.** `docs/decisions.md` mentions it flattening
   its generic `Pointer<E>`, which is a reversal note rather than an ordering. Nothing in `src/`,
   `examples/` or `Roadmap.md` mentions it at all, and no ordering constraint anywhere relates the
-  two — which is the third R22.4 asks for.
+  two — which is the third R22.4 asks for. What that clause owes is narrower than "pointer actions
+  coexist" sounds. The pipelines are parallel and neither feeds the other, so they contend over one
+  signal only: the **buttons**, where a single physical press reaches picking as a click and this
+  crate as a bound control (R13.0). Suppressing one side is the app's lever and it has several —
+  cursor grab, a barrier entity covering the screen, deactivating the context — so what is owed is
+  the ordering and which lever applies when, not a mechanism.
 - R22.11 (MUST) — focus changes must resolve before the same frame's actions are evaluated.
   `active_if` schedules `condition.pipe(apply_active::<C>)` in `PreUpdate` `.before(Evaluate)` with
   no constraint against whatever writes `InputFocus`, and `examples/common/widget_focus.rs`'s
@@ -383,7 +376,8 @@ R22.4 (MUST) wants documented ordering and integration with `bevy_input::InputSy
   rather than by an ordering — which is exactly the arrangement that stops holding for a game that
   keeps the plugin. **Reasoned, not probed.**
 
-Unrouted.
+_Fix:_ the picking half is **chunk 121**, whose captured mode is the ordering being exercised rather
+than asserted. The R22.11 half is unrouted.
 
 ### 1027 Two documentation requirements with no document
 

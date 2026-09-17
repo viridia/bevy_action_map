@@ -260,19 +260,48 @@ binding time rather than something every cross-platform game re-derives by hand.
   what it expands to does, once, when the plan is built — not on every frame the control is read.
 - **Self-contained**, and independent of 94b.
 
-### 98. Pointer position, and a mouse-controlled paddle
+### 121. A camera that takes the mouse, and gives it back
 
-R13.1, R13.4, R13.6 (`docs/issues.md` 1015): the frame carries mouse *motion* and no absolute
-position, so a binding cannot target where the pointer is at all.
+R13.4, and the suppression half of R22.4 (`docs/issues.md` 1026): nothing in tree has ever grabbed
+the cursor, so the one delta that must not be invented has never had a camera to snap, and the lever
+an app pulls to keep picking off a captured mouse has never been pulled.
 
-- **Depends on chunk 95.** The demo is a Pong variant, and the simplest one there is: a paddle whose
-  position follows the mouse's Y coordinate directly, rather than reading a delta and integrating
-  it.
-- **Not doing: split-screen viewport mapping (R15.10).** That is Split Friction's problem once this
-  mechanism exists, not this chunk's — a second pointer meaning "position within my own camera's
-  viewport" is a follow-on, not part of proving position exists at all.
-- **Review surface:** whether an absolute position needs the same dead-zone/rescale modifier chain
-  a delta does, or is exempt as a different kind of channel entirely.
+- **A 3D orbit demo, and the first 3D example in tree.** A lit object and a camera orbiting a fixed
+  focus point from mouse deltas. Bi-modal, and that is the point: cursor free, where picking is
+  alive, the UI is clickable and the camera holds still; cursor captured, where the mouse is this
+  crate's and picking receives none of it. The toggle is the demonstration — D75 drew a boundary
+  between two pipelines, and this is what standing on either side of it looks like.
+- **Frame-rate independence becomes visible** (R13.2). `move_and_jump` already binds `MouseMove`
+  beside a `per_second` stick and explains in a comment why one is multiplied by a frame time and
+  the other is not. With a camera on the end of it, multiplying the delta is a bug you can see
+  rather than a comment you can read.
+- **Not doing: the upstream pan-orbit controller.** `bevy_camera_controller`'s `PanOrbitCamera`
+  ([bevy#19741][]) ships in 0.20.0-rc.1 and is declined on design grounds rather than availability:
+  it is pointer-driven by construction, taking `PointerLocation` and `PointerInteraction`, and its
+  pixel-perfect pan is defined as the world point under the cursor staying under it. That is
+  picking's pipeline, which D75 assigned away from this crate, so driving it from here would be
+  building the thing the decision refused. Its own example calls its input plugin a placeholder for
+  "a first-party input-manager-integrated solution", which is worth watching; an orbit from deltas
+  around a fixed focus is a dozen lines and is the half a mapper can own.
+- **Not doing: zoom on the wheel** (R13.3) — chunk 122, which lands into this example.
+- **Review surface:** alt-tab while captured. Focus loss has to drop the grab and must not deliver
+  whatever the cursor accumulated while away, which is R13.4's rule arriving through R16 rather than
+  through a mode change the player asked for.
+
+### 122. The wheel as a binding source, and a zoom for the orbit
+
+R13.3: `Control` names mouse buttons and mouse motion and nothing else, so a game wanting the wheel
+reads Bevy's own message beside the mapper, and loses the rebinding along with it.
+
+- **Depends on chunk 121**, which supplies the customer. Zoom on an orbit camera is what the wheel
+  is for, and the deferred row this replaces was gated on precisely that.
+- **A channel, not a button.** `MouseScrollUnit::{Line, Pixel}` normalized through a configurable
+  factor, high-resolution trackpad scroll not quantized on the way through, a `ChannelShape` of its
+  own, and the capture, prompt and serialization surface that follows from having one.
+- **Review surface:** whether the normalization factor belongs to the app or to the binding. R13.3
+  says app-configurable, but a trackpad and a notched wheel want different numbers on the same
+  machine and only the binding is that specific — so either the requirement is right and the case is
+  rarer than it sounds, or it is a clause to revise.
 
 ### 33. Conditions that read other actions
 
@@ -624,7 +653,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **An authority backend's actions in rollback** (D22's remainder) | a snapshot to fit them into. `AuthorityValues` is a plain component and clones with the entity, but what a rewind has to reproduce is what the authority *said* on the tick being re-simulated, which is not in the frame. The available answer is recording the backend's output into the frame at sample time, at the cost of a larger frame |
 | **Sub-frame event timing** (D4's remainder) | [bevy#9087][] upstream. Gamepad stays frame-quantized regardless until gilrs polling is rewritten, so mixed fidelity across sources is permanent for now rather than an artifact |
 | **Schedule enforcement for tick domains** (D9's remainder) | Bevy giving a `SystemParam` a way to know its own schedule. A plugin-time validation pass and a debug assertion stand in |
-| **Mouse wheel as a binding source** (R13.3) | nothing in tree wants it. The wheel is a delta on its own channel, needs `Line`/`Pixel` normalization, and shares nothing with a button but the device |
+| **OS gestures as binding sources** (R13.7) | **a game that wants one, and can say what it should do.** Pinch, rotation, pan and double-tap arrive as `bevy_input::gestures` events — window-level, carrying no pointer and no entity — so they are the wheel's shape rather than picking's, which is why section 13 keeps them where it withdrew the rest of the pointer. What is missing is not a mechanism: the design questions are what a pinch's units are and whether it wants the modifier chain a stick does, and neither can be answered without a customer to ask |
 | **Suspend/resume** (R16.3; mobile, console) | a platform target that needs it. Nothing in this crate's supported platforms emits a suspend signal or has a device re-enumeration step to hook |
 | **Split Friction's monsters, spawners and missiles** | a mechanic that would exercise input this crate has not already proven. Kept as a row rather than deleted because the sprites, the dungeon's region aspects and a `Fire`-shaped action all exist, so changing our mind is cheap |
 | **Guardian migration** | porting it from Bevy 0.16.1 with `bevy_enhanced_input` 0.12 to 0.20 — four versions, and a port plus a rewrite. Doing both at once would confuse "action_map is wrong" with "0.20 moved this" |
@@ -636,6 +665,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 ---
 
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087
+[bevy#19741]: https://github.com/bevyengine/bevy/issues/19741
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
 [bevy#25710]: https://github.com/bevyengine/bevy/pull/25710
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606

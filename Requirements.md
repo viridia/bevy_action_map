@@ -792,25 +792,34 @@ is unmodeled.
 
 ---
 
-## 13. Pointer, mouse, and touch specifics
+## 13. Mouse and pointer specifics
 
-**Problem.** "Pointer input" is three unrelated signals sharing one name: an absolute position, a
-relative motion delta, and a set of buttons. They have different units, different frame-rate
-behavior, and different correct handling, and touch adds a fourth case — several simultaneous
-pointers that appear and vanish. Most bugs in this area come from treating one of them as another.
+**Problem.** The pointer reaches a game through `bevy_picking`, which raycasts it, tracks hover, and
+resolves drag and click gestures against the entities under it. That pipeline runs parallel to this
+one and neither feeds the other, so what this crate carries of the mouse is what picking does not
+claim: buttons, relative motion, and the wheel. Those three have different units and different
+frame-rate behavior, and most bugs in this area come from treating one of them as another. The two
+pipelines meet only at the buttons, where one physical press reaches picking as a click and this
+crate as a bound control; R22.4 governs that.
 
 - **R13.0 (MUST)** Mouse **buttons** are bindable controls in their own right, on the same terms as
   keyboard keys: a whole binding, a part of a composite, a member of a chord, and something capture
   will take for a mappable slot. They belong to the keyboard-and-mouse scheme (R17.4), so a mouse
   button may be captured for a mapping a key currently holds and the two never conflict with a
-  gamepad binding. This is the third of the three signals the problem statement above separates, and
-  the only one that behaves like an ordinary button.
+  gamepad binding. Of the three signals the problem statement separates, this is the only one that
+  behaves like an ordinary button.
 
   The set is whatever the platform reports: left, right and middle, the two thumb buttons, and
   indexed buttons beyond them. The thumb buttons are stored under the names the backend gives them
   and _shown_ as Mouse 4 and Mouse 5, which is what a player's other games call them (R18.3).
-- **R13.1 (MUST)** Distinguish pointer _position_ (absolute, window-relative, UI-scale-aware) from
-  pointer _motion_ (relative delta), and never let a binding accidentally use one for the other.
+- **R13.1 (WITHDRAWN)** ~~Distinguish pointer _position_ (absolute, window-relative, UI-scale-aware)
+  from pointer _motion_ (relative delta), and never let a binding accidentally use one for the
+  other.~~ _Withdrawn: position is not this crate's signal. Anything wanting the pointer's position
+  wants it in world or UI coordinates against a particular camera, which a mapper cannot supply
+  without owning the camera, and `bevy_picking` supplies it already; what a mapper adds is
+  rebinding, and no game lets a player rebind where the mouse is. With position absent from the
+  frame, nothing is left for the second clause to guard. What would revive this is a game binding an
+  action to an absolute position with no camera in the question._
 - **R13.2 (MUST)** Mouse motion for camera look must be frame-rate independent and must not be
   multiplied by `dt` (a common bug: deltas are already per-frame quantities, unlike stick
   positions). The pipeline must let a binding declare which kind it is — this is the same
@@ -831,14 +840,23 @@ pointers that appear and vanish. Most bugs in this area come from treating one o
   propagator reaches an unclaimed event's window on its own. What would revive this is an app
   choosing to route those shortcuts through bindings instead of a window observer — a second in-tree
   window whose owner wants the mapper, not `FocusedInput`, to know which one an event came from._
-- **R13.6 (MUST)** Multi-touch: multiple simultaneous pointers with stable IDs; touch must not be
-  silently emulated as mouse unless the app opts in.
+- **R13.6 (WITHDRAWN)** ~~Multi-touch: multiple simultaneous pointers with stable IDs; touch must
+  not be silently emulated as mouse unless the app opts in.~~ _Withdrawn with R13.1: a touch is a
+  position, and it reaches an app through picking, which spawns a pointer per finger keyed by
+  `PointerId::Touch` carrying winit's own touch id. The stable IDs this asks for are already there,
+  and whether touch is emulated as mouse is decided upstream of this crate. What would revive this
+  is a touch bound as a control rather than consumed as a pointer._
 - **R13.7 (SHOULD)** OS gestures (`PinchGesture`, `RotationGesture`, `PanGesture`,
   `DoubleTapGesture`) bindable as sources.
-- **R13.8 (SHOULD)** Drag semantics that a mapping layer can express: press threshold, click-vs-drag
-  disambiguation, double-click interval sourced from OS settings where available.
-- **R13.9 (SHOULD)** Pointer capture during drag so a drag continues when the pointer leaves the
-  window; this must coordinate with `bevy_picking` rather than compete with it (R22).
+- **R13.8 (WITHDRAWN)** ~~Drag semantics that a mapping layer can express: press threshold,
+  click-vs-drag disambiguation, double-click interval sourced from OS settings where available.~~
+  _Withdrawn with R13.1: a drag is a pointer gesture against the entity under it, which is what
+  picking resolves. A mapping layer deriving click-vs-drag of its own would be a second consumer
+  reaching different conclusions about the same press._
+- **R13.9 (WITHDRAWN)** ~~Pointer capture during drag so a drag continues when the pointer leaves
+  the window; this must coordinate with `bevy_picking` rather than compete with it (R22).~~
+  _Withdrawn with R13.8, whose drag this was: picking owns the capture. The coordination clause was
+  R22.4 said a second time, and R22.4 is where it stays._
 
 ---
 
@@ -1000,8 +1018,10 @@ handle "two players on one keyboard" gracefully.
   mid-sentence; and an opt-out.
 - **R15.9 (SHOULD)** Attach opaque platform-user identity (PSN/Xbox/Steam account handle) to a
   player without the crate depending on any platform SDK.
-- **R15.10 (MAY)** Split-screen: associate a player with a camera/viewport for pointer coordinate
-  mapping.
+- **R15.10 (WITHDRAWN)** ~~Split-screen: associate a player with a camera/viewport for pointer
+  coordinate mapping.~~ _Withdrawn with R13.1: no pointer coordinate reaches this crate to map. A
+  split-screen game resolves a pointer against the camera whose viewport contains it, which is
+  picking's job and needs no player association from here._
 - **R15.11 (MUST)** The devices of a family must be enumerable without knowing which backend
   supplies them, and their arrival and departure observable on the same terms.
 

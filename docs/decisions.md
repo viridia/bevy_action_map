@@ -1527,6 +1527,33 @@ the crate's. A decision that depends on what the game is — what to do about a 
 prompt speaks for, how two controls read on one row — is the app's, and the crate's job is to make
 it cheap to answer rather than to answer it.
 
+### D75 — The pointer is picking's pipeline, and the mapper carries what picking leaves
+
+**Decided.** Pointer *position* is not a signal this crate carries, and nothing binds to it. The
+mouse reaches the mapper as buttons, relative motion and the wheel; everything positional — hover,
+drag, click gestures, touch, the raycast into the world — is `bevy_picking`'s, which runs parallel
+to this pipeline with neither feeding the other. R13.1, R13.6, R13.8, R13.9 and R15.10 are withdrawn
+on this.
+
+**Rules out.** An absolute position on the input frame; a binding whose source is where the pointer
+is; click-vs-drag disambiguation derived from raw buttons; split-screen pointer-to-viewport mapping
+keyed on a player.
+
+**Reversal.** Two arguments, and the second is the one that holds. A mapper's contribution is the
+rebinding layer, and no game lets a player rebind where the mouse is — asked directly, LWIM's
+maintainer priced it at "extremely low, probably none. I don't think I've ever seen a game with that
+design." That is one maintainer's judgement and would be thin alone. What carries it is that a
+position means nothing except against a camera: a game wants the pointer in world or UI coordinates,
+and a mapper not owning the camera cannot supply them, so it would hand over a window coordinate
+that every caller converts itself. This crate's own rebinding screen is the demonstration — wholly
+pointer-driven, and it reaches none of it through the mapper.
+
+**What is left is coexistence, not a pipeline.** The two systems contend over one signal, the mouse
+buttons, which R13.0 makes bindable and picking reads as clicks. Keeping them off each other is
+suppression, and the levers are the app's: cursor grab, a barrier entity covering the screen,
+deactivating the context. R22.4 owns documenting that, so what the crate owes is an ordering rather
+than a mechanism.
+
 ---
 
 ## Late entries
