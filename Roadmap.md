@@ -199,6 +199,8 @@ What is left, in semantic groups ordered roughly by priority. The order is a gui
 schedule: any chunk may be reordered once the one before it has been read, and a chunk's number is
 its identity rather than its position.
 
+(Next: 132, 110, 73, 101)
+
 ## Defects
 
 Wrong answers from code that has already shipped. The full register is

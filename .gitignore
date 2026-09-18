@@ -7,3 +7,6 @@
 /steam_probe
 
 .DS_Store
+
+# Editor configuration is each contributor's own.
+.vscode/
