@@ -1172,6 +1172,54 @@ mod tests {
         );
     }
 
+    /// The same, from the pad: a settings screen operated from the controller captures a button the
+    /// game behind it also binds.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_capture_on_a_gamepad_button_does_not_reach_the_game() {
+        use crate::event::Fired;
+        use bevy_input::gamepad::{GamepadButton, RawGamepadButtonChangedEvent};
+
+        #[derive(InputContext)]
+        #[context(path = "capture_tests.pad", tick = Render)]
+        struct Pad;
+
+        #[derive(Resource, Default)]
+        struct Fires(usize);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.init_resource::<Heard>();
+        app.init_resource::<Fires>();
+        app.add_observer(|event: On<ControlCaptured>, mut heard: ResMut<'_, Heard>| {
+            heard.captured.push(event.control);
+        });
+        app.add_observer(|_: On<Fired<Jump>>, mut fires: ResMut<'_, Fires>| {
+            fires.0 += 1;
+        });
+        app.add_context::<Pad>(|controls| {
+            controls.bind::<Jump>(GamepadButton::South).mappable();
+        });
+
+        app.world_mut().spawn(Pad);
+        let target = &crate::mapping::mappings(app.world())[0];
+        app.world_mut()
+            .spawn(CaptureSession::for_mapping(target).expect("a button mapping"));
+        app.update();
+
+        app.world_mut()
+            .write_message(bevy_input::gamepad::RawGamepadEvent::Button(
+                RawGamepadButtonChangedEvent::new(Entity::PLACEHOLDER, GamepadButton::South, 1.0),
+            ));
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Heard>().captured,
+            [Control::GamepadButton(GamepadButton::South)]
+        );
+        assert_eq!(app.world().resource::<Fires>().0, 0);
+    }
+
     /// A capture says which slot it fills, and a slot is addressed rather than appended: a screen
     /// offers whatever cells it draws without first asking how long the row happens to be.
     #[test]

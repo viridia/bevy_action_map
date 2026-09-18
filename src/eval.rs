@@ -49,17 +49,36 @@ impl ConsumedControls {
     }
 
     /// The path of the context that claimed this control, if one did.
+    ///
+    /// A stick counts as claimed when either of its axes is.
     pub fn claimant(&self, control: Control) -> Option<&'static str> {
+        #[cfg(feature = "gamepad")]
+        if let Control::GamepadStick(stick) = control {
+            let (x, y) = stick.axes();
+            return self
+                .claimant(Control::GamepadAxis(x))
+                .or_else(|| self.claimant(Control::GamepadAxis(y)));
+        }
         self.by_schedule
             .values()
             .find_map(|claims| claims.get(&control).copied())
     }
 
     fn claim<S: bevy_ecs::schedule::ScheduleLabel>(&mut self, control: Control, by: &'static str) {
-        self.by_schedule
+        let claims = self
+            .by_schedule
             .entry(core::any::TypeId::of::<S>())
-            .or_default()
-            .insert(control, by);
+            .or_default();
+        // Stored as its two axes, which is how a context's claim on a stick already arrives and
+        // what every reader checks, so a capture's whole-stick claim is not the one they miss.
+        #[cfg(feature = "gamepad")]
+        if let Control::GamepadStick(stick) = control {
+            let (x, y) = stick.axes();
+            claims.insert(Control::GamepadAxis(x), by);
+            claims.insert(Control::GamepadAxis(y), by);
+            return;
+        }
+        claims.insert(control, by);
     }
 
     /// Takes a control on behalf of a live capture, so that what a player presses at a rebinding
@@ -684,20 +703,17 @@ impl<C: InputContext> InputContextState<C> {
 
                 let value = match binding.input {
                     #[cfg(feature = "keyboard")]
-                    BindingInput::Button(key_code) => ActionValue::Bool(
-                        !consumed.contains(Control::PhysicalKey(key_code))
-                            && held_buttons.contains(&key_code),
-                    ),
+                    BindingInput::Button(key_code) => {
+                        ActionValue::Bool(is_pressed(ButtonControl::PhysicalKey(key_code)))
+                    }
                     #[cfg(feature = "keyboard")]
-                    BindingInput::LogicalKey(character) => ActionValue::Bool(
-                        !consumed.contains(Control::LogicalKey(character))
-                            && held_characters.values().any(|&held| held == character),
-                    ),
+                    BindingInput::LogicalKey(character) => {
+                        ActionValue::Bool(is_pressed(ButtonControl::LogicalKey(character)))
+                    }
                     #[cfg(feature = "mouse")]
-                    BindingInput::MouseButton(button) => ActionValue::Bool(
-                        !consumed.contains(Control::MouseButton(button))
-                            && held_mouse_buttons.contains(&button),
-                    ),
+                    BindingInput::MouseButton(button) => {
+                        ActionValue::Bool(is_pressed(ButtonControl::MouseButton(button)))
+                    }
                     // Four keys and a D-pad reach an action through this same arm, and the fold is
                     // what turns their parts back into one direction.
                     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
@@ -714,16 +730,20 @@ impl<C: InputContext> InputContextState<C> {
                     // action gets the thresholded press — R2.10's case, and the reason a binding
                     // cannot be resolved from the input alone.
                     #[cfg(feature = "gamepad")]
-                    BindingInput::GamepadButton(button) => {
-                        let reading = held_gamepad_buttons
-                            .get(&button)
-                            .copied()
-                            .unwrap_or_default();
-                        match intent {
-                            ActionIntent::Button => ActionValue::Bool(reading.pressed),
-                            _ => ActionValue::Axis1(reading.value),
+                    BindingInput::GamepadButton(button) => match intent {
+                        ActionIntent::Button => {
+                            ActionValue::Bool(is_pressed(ButtonControl::GamepadButton(button)))
                         }
-                    }
+                        _ => ActionValue::Axis1(
+                            if consumed.contains(Control::GamepadButton(button)) {
+                                0.0
+                            } else {
+                                held_gamepad_buttons
+                                    .get(&button)
+                                    .map_or(0.0, |reading| reading.value)
+                            },
+                        ),
+                    },
                     #[cfg(feature = "gamepad")]
                     BindingInput::GamepadAxis(axis) => {
                         ActionValue::Axis1(if consumed.contains(Control::GamepadAxis(axis)) {
@@ -734,7 +754,7 @@ impl<C: InputContext> InputContextState<C> {
                     }
                     #[cfg(feature = "gamepad")]
                     BindingInput::GamepadStick(stick) => {
-                        ActionValue::Axis2(gamepad_stick_value(held_gamepad_axes, stick))
+                        ActionValue::Axis2(gamepad_stick_value(held_gamepad_axes, stick, consumed))
                     }
                 };
 
@@ -1139,12 +1159,17 @@ fn update_action_state(
 fn gamepad_stick_value(
     axes: &bevy_platform::collections::HashMap<GamepadAxis, f32>,
     stick: Stick,
+    consumed: &ConsumedControls,
 ) -> Vec2 {
+    let read = |axis| {
+        if consumed.contains(Control::GamepadAxis(axis)) {
+            0.0
+        } else {
+            axes.get(&axis).copied().unwrap_or(0.0)
+        }
+    };
     let (x_axis, y_axis) = stick.axes();
-    Vec2::new(
-        axes.get(&x_axis).copied().unwrap_or(0.0),
-        axes.get(&y_axis).copied().unwrap_or(0.0),
-    )
+    Vec2::new(read(x_axis), read(y_axis))
 }
 
 #[cfg(test)]
@@ -2323,6 +2348,102 @@ mod tests {
         assert!(!push_to(&mut state, &mut frame, 0.1));
         // ...and re-entering it keeps it let go.
         assert!(!push_to(&mut state, &mut frame, midband));
+    }
+
+    /// A menu that takes the pad's confirm button, trigger or stick takes it from the game behind
+    /// it. Each shape reads as untouched in its own terms, and a stick loses only the axis that was
+    /// taken.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_consumed_gamepad_control_reads_as_untouched() {
+        use bevy_input::gamepad::{
+            GamepadButton, RawGamepadAxisChangedEvent, RawGamepadButtonChangedEvent,
+        };
+
+        struct Throttle;
+
+        impl InputAction for Throttle {
+            type Output = f32;
+
+            const INTENT: ActionIntent = ActionIntent::Analog1;
+            const PATH: &'static str = "eval_tests.throttle";
+        }
+
+        struct Steer;
+
+        impl InputAction for Steer {
+            type Output = Vec2;
+
+            const INTENT: ActionIntent = ActionIntent::Directional2;
+            const PATH: &'static str = "eval_tests.steer";
+        }
+
+        let mut builder = InputContextBuilder::<Flying>::default();
+        builder.bind::<Jump>(GamepadButton::South);
+        builder.bind::<Throttle>(GamepadButton::RightTrigger2);
+        builder.bind::<Steer>(Stick::Left);
+        let plan = Arc::new({
+            let (bindings, class_bindings, _) = builder.finish();
+            Plan::from_bindings(bindings, class_bindings)
+        });
+        let threshold = ButtonThreshold::default();
+
+        let mut frame = InputFrame::default();
+        let button = |button, value| {
+            RawEvent::Gamepad(RawGamepadEvent::Button(RawGamepadButtonChangedEvent::new(
+                bevy_ecs::entity::Entity::PLACEHOLDER,
+                button,
+                value,
+            )))
+        };
+        let axis = |axis, value| {
+            RawEvent::Gamepad(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
+                bevy_ecs::entity::Entity::PLACEHOLDER,
+                axis,
+                value,
+            )))
+        };
+        frame.record(button(GamepadButton::South, 1.0));
+        frame.record(button(GamepadButton::RightTrigger2, 0.8));
+        frame.record(axis(GamepadAxis::LeftStickX, 0.9));
+        frame.record(axis(GamepadAxis::LeftStickY, 0.9));
+
+        let mut consumed = ConsumedControls::default();
+        consumed.claim::<bevy_app::PreUpdate>(
+            Control::GamepadButton(GamepadButton::South),
+            "tests.menu",
+        );
+        consumed.claim::<bevy_app::PreUpdate>(
+            Control::GamepadButton(GamepadButton::RightTrigger2),
+            "tests.menu",
+        );
+        consumed.claim::<bevy_app::PreUpdate>(
+            Control::GamepadAxis(GamepadAxis::LeftStickX),
+            "tests.menu",
+        );
+
+        let mut state = InputContextState::<Flying>::new(plan.clone(), None);
+        state.apply_frame(&frame, &threshold, TICK, &consumed, &mut Vec::new(), None);
+        assert!(!state.value::<Jump>(), "the button, read as a press");
+        assert_eq!(
+            state.value::<Throttle>(),
+            0.0,
+            "the trigger, read as travel"
+        );
+        let steer = state.value::<Steer>();
+        assert_eq!(steer.x, 0.0, "the axis that was taken");
+        assert!(steer.y > 0.0, "and the one that was not");
+
+        // A capture listening for a stick claims it whole, and that takes both axes.
+        let mut consumed = ConsumedControls::default();
+        consumed.claim_for_capture(Control::GamepadStick(Stick::Left));
+        let mut state = InputContextState::<Flying>::new(plan, None);
+        state.apply_frame(&frame, &threshold, TICK, &consumed, &mut Vec::new(), None);
+        assert_eq!(state.value::<Steer>(), Vec2::ZERO);
+        assert_eq!(
+            consumed.claimant(Control::GamepadAxis(GamepadAxis::LeftStickY)),
+            Some("capture")
+        );
     }
 
     struct CharacterInput;

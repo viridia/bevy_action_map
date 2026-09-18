@@ -267,7 +267,9 @@ player the other will not do.
 
 A binding declared `consume` records its controls in `ConsumedControls` while it is `Fired` or
 `Ongoing`, and contexts evaluating later see those controls as untouched.
-`ConsumedControls::claimant` names the context that took one.
+`ConsumedControls::claimant` names the context that took one. A stick is recorded as its two axes,
+whether a context's binding or a capture claimed it, so a stick binding reads zero on each axis that
+was taken and keeps the other.
 
 Consumption is recorded per schedule and cleared at two points:
 
