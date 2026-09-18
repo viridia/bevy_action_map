@@ -28,7 +28,7 @@ chunk's own commit, and `docs/design.md` or `docs/decisions.md` where anything a
 are the record. A gap in the sequence below is a retired finding, not an omission. The next
 unassigned number is stated here; keep it up to date when numbering new items.
 
-**Next: 1063.**
+**Next: 1064.**
 
 **The calibration warning, stated up front because it is fair.** Most of these entries came from
 asking a model to scan `src/`, and a model asked to find sixty problems will find sixty. Some of
@@ -601,10 +601,9 @@ is already crate-private:
   nothing does.
 - `overrides.rs`: `Overrides::is_empty` — called only by its own test; TD10 enumerates twelve
   `Overrides` methods and this is not one.
-- `action.rs`: `ActionValue::from_output` — **now has a caller**, `backend.rs`'s
-  `AuthorityValues::set`, added by chunk 111 after the scan. It still duplicates the four `From`
-  impls twenty lines above it, and `into_output` is still called only by its own tests, so "four
-  public names for two conversions" holds; "no caller" no longer does.
+- `action.rs`: `ActionValue::from_output` — called by `backend.rs`'s `AuthorityValues::set`, and a
+  second name for the four `From` impls twenty lines above it. Its counterpart `into_output` is not
+  a duplicate: no `From` goes that way, it widens, and `AuthorityValues::get` calls it.
 - `action.rs`: `ActionIntent::supports_output` — a public wrapper over `is_one_of`, which is the one
   the derive calls. Nothing else calls either.
 - `action.rs`: `ActionState::new` — a `const fn` constructor for a two-field struct with both fields
@@ -697,6 +696,22 @@ confirm is still true.
 
 Unrouted.
 
+### 1063 Two checks written twice
+
+`overrides.rs`'s `apply_with` and `apply_for_entity_with`; `eval.rs`'s `bound_character` and
+`Control::from_name` · read only
+
+- **The `NoSuchMapping` report is copied whole** between the world-wide and per-entity apply:
+  sixteen lines, identical but for a comment. The two functions differ only in which applier they
+  collect, so either one function over an `Option<Entity>` or the report as a helper removes the
+  copy. The per-entity copy is untested: `apply_overrides_for_reaches_only_its_own_entity` asserts
+  its problems are empty, and only `apply_overrides` is tested reporting one.
+- **"Exactly one character" is decided twice**, for a key event's text and for a saved `char/` name,
+  both as `(Some(single), None)` then `normalize_character`. A change to what counts as one
+  character has to be made in both. Four lines each, and not worth acting on alone.
+
+Unrouted.
+
 ### 1038 One command the Verification list does not run
 
 `cargo doc --no-deps --all-features` warned twice when the scan ran — a redundant explicit link
@@ -756,10 +771,18 @@ last tiebreak. R18.5's invalidation covers every clause but the layout one its o
 R18.8 and R18.9's origin half hold. The four control tables round-trip exhaustively, unnamed
 variants included. R22.6's migration path exists in `docs/comparison.md`. R21.1–R21.3 are met by the
 test suite's shape. Capture's arming skips the press that opened the session, and a refused press is
-claimed so it does not also play the game. `admissible` asks family before reserved before shape.
-R15.1's many-to-many holds — neither `Paired` nor `is_claimed` enforces exclusivity, which is what
-lets two players share one keyboard.
+claimed so it does not also play the game, except on a gamepad button, which is chunk 132's.
+`admissible` asks family before reserved before shape. R15.1's many-to-many holds — neither `Paired`
+nor `is_claimed` enforces exclusivity, which is what lets two players share one keyboard.
 
 **Excluded rather than missed**, both already recorded: `apply_overrides_for` discards the rewritten
 rows, which is the per-entity presentation deferred row; and `Override::NotOurs` leaves the crate's
 binding live rather than silencing it, which is R0.6 and chunk 112's.
+
+**Plausible and wrong**, from a later scan that read these as defects. `chord_claims` on
+`InputContextState` is written every fold: `fold` destructures `self`, so the name there is the
+field, and `why_not_id` reads what the last fold left. `rewrite`'s `preset_authorized` is the only
+thing that lets a preset move a `Fixed` row; no enclosing `is_rebindable` check makes it dead. The
+per-entity `NoSuchMapping` report can fire, since `MappingKey::new` names any path. And
+`ControlOrigin::Foreign` has no constructor in the crate because an outside `Prompts` implementation
+is what builds it.

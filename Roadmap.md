@@ -202,6 +202,26 @@ Wrong answers from code that has already shipped. The full register is
 [docs/issues.md](./docs/issues.md), which also holds the findings that carry no chunk and say
 so per entry.
 
+### 132. Consumption that reaches a gamepad
+
+R8.2, R3.6. A consumed gamepad button or stick still reaches every context below the one that took
+it. The per-input match in `fold` (`eval.rs`) checks `consumed` on the keyboard, mouse and
+gamepad-axis arms, and not on `GamepadButton` or `GamepadStick`. **Probed:** with `South` claimed
+through `claim_for_capture`, a context binding `South` to `Jump` still reaches `Fired`. So a menu
+consuming its confirm button does not stop the game behind it, and a capture on a gamepad button
+also plays the game, which is the case `claim_for_capture` exists for. No test covers gamepad
+consumption.
+
+- **The button arms go through `is_pressed`.** The keyboard and mouse arms restate it, consumption
+  check included, and the restatement is how the gamepad arm came to differ. `GamepadButton` cannot
+  use it outright, because an analog action reads the trigger's travel rather than the press, so
+  that case checks `consumed` itself.
+- **A stick zeroes each consumed axis**, since a stick's claim is recorded per axis.
+- **Not `class_dispatch`**, which already checks consumption per event for every family.
+- **Verified by:** tests for a consumed button against a button action, a consumed trigger against
+  an analog action, a consumed stick axis, and a gamepad capture not reaching the game. On landing,
+  the gamepad caveat on capture in `docs/issues.md`'s "Checked and correct" goes.
+
 ---
 
 ## Devices and players
