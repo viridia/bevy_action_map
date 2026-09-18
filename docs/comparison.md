@@ -92,7 +92,7 @@ LWIM reads `get_pressed()` and `get_just_released()`; BEI reads `pressed()`. Nei
 crate as two logged transitions:
 
 ```rust
-// bevy_action_map, src/context.rs — both edges written in one frame
+// bevy_action_map, src/context/state.rs — both edges written in one frame
 world.write_message(press(KeyCode::Space, ButtonState::Pressed));
 world.write_message(press(KeyCode::Space, ButtonState::Released));
 app.update();

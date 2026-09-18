@@ -1175,12 +1175,12 @@ src/
   device.rs      L0  families and handles, pairing sets, gamepad calibration and brand resolution
   frame.rs       L1  the event queue, sampling, retirement
   action.rs          identity, intent, channel shape, value, phase, scratch
-  binding.rs         re-exports the three below, which are private to it
+  binding/mod.rs     re-exports the three below, which are private to it
     control.rs       controls, inputs, composites, parts, the conversion into a binding input
     modifier.rs      dead zones, compasses, curves, toggles, and the value math they apply
     builder.rs       the declaration API, and the BindingSpec record it writes
   condition.rs       conditions and their verdicts and descriptors
-  context.rs         re-exports the two below, which are private to it
+  context/mod.rs     re-exports the two below, which are private to it
     state.rs         one instance's live state, and the params that read it
     declare.rs       the app wiring, the records declaration writes, the type-erased reads
   plan.rs            compilation, slot allocation, diagnostics
