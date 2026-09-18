@@ -188,6 +188,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 35   | Disabling an action                                                   |
 | 94b  | Either modifier                                                       |
 | 128  | A rebinding row that shows its chord                                  |
+| 129  | An override that can name a chord                                     |
 
 ---
 
@@ -231,39 +232,16 @@ explicit player-facing step. `DeviceId` is the identity to key it by, and it exi
 What a binding can name, and when it counts as firing. Each of these is a gap a game runs into
 rather than a defect in what exists.
 
-### 129. An override that can name a chord
-
-`docs/issues.md` 1059's writing half. 128 put the chord on the row, so a game can read `Ctrl+N` and
-pre-set a modifier editor from it; what it still cannot do is write the answer back. `Overrides`
-addresses a row as controls, and `rewrite` sets the control and leaves the binding's chord where it
-was — so the crate decides what a rebind does to a modifier, silently, and a game that wants the
-other answer has no way to say so.
-
-- **The saved format already has room**, and 1059 has the sketch: a saved row is one string per
-  slot, so a chord rides the string a slot already has — `"editor.save": ["ctrl+key/KeyS"]`. Every
-  real control name carries a `/`, so the modifiers are the `+`-separated tokens before the first
-  segment containing one, and `char/+` survives intact. `Control` stays atomic, so the clash pass,
-  `indexed_controls` and reverse lookup are untouched; what widens is the override layer's own slot
-  type.
-- **Reset or preserve is the decision.** A capture fills the control and leaves the chord today,
-  which is also what `clone_onto` does for a grown secondary. Blender resets. Both fail badly on a
-  screen with no editor and in opposite directions — preserve and the player can never shed the
-  `Ctrl`, reset and they can never get it back — so it is only decidable once there is a way back,
-  which is what this chunk builds.
-- **Not capture.** A chord is set, never heard: an OS eats the interesting ones before the app sees
-  them, and `Cmd+Q` quits rather than arriving. Blender captures a bare key and offers the modifiers
-  as toggles for that reason, not as a UI preference.
-- **The clash pass wants revisiting.** It compares at control granularity and knowingly over-reports
-  — "two bindings that share a control but differ in their chords are reported as an overlap"
-  (`capture.rs`). Harmless noise while chords are fixed; once a player can author the overlap it
-  reports, the trade-off is live. This chunk decides whether that is still the right error to make.
-- **Not the screen**, which is 129b. This lands the vocabulary and its round trip through the saved
-  format, unit-tested, with no caller that edits one.
-
 ### 129b. A screen that sets a modifier
 
 129's caller, and the obligation 129 lands short of. Nothing in tree can edit a chord until
-something draws the toggles.
+something draws the toggles; what they edit is `BoundSlot::with`, written back through
+`Overrides::bind` (TD9.1).
+
+- **Reset or preserve is this screen's call now.** 129 left it to whoever writes the slot, and
+  Disasteroids' capture preserves, because on a screen with no toggles a reset loses a chord the
+  player can never get back. With the toggles beside the key, Blender's reset becomes affordable;
+  this chunk picks one and says why.
 
 - **Blender's arrangement is the one to copy**, and the screenshot is the argument: the row list
   stays a list of composed labels, and only the expanded row grows a `Shift`/`Ctrl`/`Alt`/`Cmd`
@@ -510,10 +488,30 @@ the expensive part.
 
 ## The library itself
 
-Six chunks no game asks for and no published crate can do without: an extension point nothing
-outside has exercised, a rebinding surface that does one job, the reflection the documents promise,
-documentation that runs, documentation that is true, and the advice that keeps a player out of a
-corner.
+Seven chunks no game asks for and no published crate can do without: a plan that holds a slot as one
+thing, an extension point nothing outside has exercised, a rebinding surface that does one job, the
+reflection the documents promise, documentation that runs, documentation that is true, and the
+advice that keeps a player out of a corner.
+
+### 131. A plan slot as one struct
+
+`Plan<C>` holds five vectors indexed by slot — `slot_intents`, `slot_dispatch`, `slot_paths`,
+`slot_actions` and `stages` — kept aligned by convention. That is the shape D79 rejected for chords,
+and the convention already needs help: `delegate` pushes all five, `compile` pushes four and leaves
+`stages` behind, and `combine` opens with a `resize_with` to bring it level.
+
+- **One `CompiledSlot` per slot**, holding the five, so a slot is pushed once and cannot be half
+  there. The `resize_with` goes, and the next per-slot field is one line in one struct rather than a
+  sixth vector to find every push site for.
+- **`bound_paths()` and `slot_actions()` return slices today**, which `InputContextState::iter`
+  zips. They become iterators over the slots.
+- **Not `InputContextState`'s bitsets.** `dirty`, `require_reset` and `disabled` are parallel to
+  `actions` on purpose: one call clears every dirty bit, and a rollback snapshot is the two tables
+  plus those bits (TD6). Their length is fixed at spawn, so they cannot drift.
+- **Not the split between plan and instance.** A binding's modifiers live in the shared plan and
+  their scratch in each instance; that split is forced by the `Arc`, not a pair of lists to merge.
+- **Verified by:** the existing suite unchanged, and no diff in `examples/` — an internal change, so
+  any example diff means the abstraction leaked.
 
 ### 130. Capture as a sensor and nothing else
 

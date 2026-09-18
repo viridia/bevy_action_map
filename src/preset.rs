@@ -20,9 +20,8 @@
 use bevy_ecs::world::World;
 
 use crate::action::InputAction;
-use crate::binding::Control;
 use crate::device::DeviceFamily;
-use crate::mapping::{TunableValue, mappings};
+use crate::mapping::{BoundSlot, TunableValue, mappings};
 use crate::overrides::Overrides;
 
 /// A named set of mapping assignments a player selects as a unit.
@@ -66,7 +65,8 @@ pub struct PresetBuilder<'w> {
 }
 
 impl PresetBuilder<'_> {
-    /// Puts `controls` in whatever mapping `A` has in `family`.
+    /// Puts `slots` in whatever mapping `A` has in `family`: bare controls, or [`BoundSlot`]s for
+    /// any that are held with something, bound exactly as [`Overrides::bind`] binds them.
     ///
     /// # Panics
     ///
@@ -77,7 +77,7 @@ impl PresetBuilder<'_> {
     pub fn bind<A: InputAction>(
         &mut self,
         family: DeviceFamily,
-        controls: impl IntoIterator<Item = Control>,
+        slots: impl IntoIterator<Item = impl Into<BoundSlot>>,
     ) -> &mut Self {
         let mut found = mappings(self.world)
             .into_iter()
@@ -94,7 +94,11 @@ impl PresetBuilder<'_> {
              part a composite action's row belongs to instead",
             A::PATH
         );
-        self.rows.bind(family, mapping.key, controls);
+        self.rows.bind(
+            family,
+            mapping.key,
+            slots.into_iter().map(Into::<BoundSlot>::into),
+        );
         self
     }
 

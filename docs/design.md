@@ -818,13 +818,15 @@ pub struct BoundSlot {
 **A slot carries its chord**, in the same `ControlOrigin` terms `Prompt::with` uses and for the same
 reason: a modifier stands for either key of its pair, and `Control` can only name one of the two. A
 row that dropped it would list `Ctrl+N` as "N" while the caption built from the same binding went on
-reading `Ctrl+N`. `ActionMapping::controls()` is the bare-control view, which is the shape an
-override addresses.
+reading `Ctrl+N`. `ActionMapping::controls()` is the bare-control view, for reading only.
 
-**The chord is read, not written.** `Overrides` works in controls, and `rewrite` replaces a
-binding's control while leaving its chord alone — so a capture fills a slot and what is held with it
-stays where the game declared it, and a secondary grown from a chorded primary inherits the chord
-rather than arriving bare.
+**The slot is also what an override writes**, and it says everything about what is bound there. A
+screen edits the slots it read and hands them back to `Overrides::bind`; `rewrite` gives the binding
+at that position the slot's control *and* its chord. Whether a new control keeps the old modifier is
+therefore the screen's choice, made by which it writes: assigning `slot.control` keeps the chord, a
+fresh `BoundSlot::from(control)` drops it. A grown slot takes its chord from the slot too, not from
+the primary it was cloned from. A chord entry must be something a player can hold — a modifier or a
+button of ours — and anything else is refused as `NotChordable`.
 
 **Three listing states, plus a fourth for followers.** A binding is listed and fixed unless it says
 otherwise:
@@ -989,13 +991,15 @@ that its channel is wrong. Declaring a binding both `reserved` and `mappable` is
 A deliberate press is refused out loud; a continuous reading past its threshold (`DEFLECTION`,
 `MOUSE_MOTION`) is dropped quietly, and both are claimed so neither also plays the game.
 
-**Conflicts are detected, not resolved.** `conflicts(world, control, target)` is a pure query over
+**Conflicts are detected, not resolved.** `conflicts(world, candidate, target)` is a pure query over
 the mapping list, answerable before anything is committed; `conflicts_pending` asks the same of a
 working copy of overrides, which is what lets a screen with unconfirmed choices tell whether two of
 them clash. `ConflictOverlap` says whether the clash is `SameContext` or `OtherContext` — a clash
 across two contexts is *possible* rather than certain, since whether they are ever live together is
-the game's own question. Comparison is at control granularity, so two bindings differing only in
-their chords are reported as overlapping. The whole target mapping is excluded rather than the one
+the game's own question. The candidate is a `BoundSlot`, and `BoundSlot::clashes_with` is the
+comparison: the same control with the same chord, order ignored, so `S` and `Ctrl+S` do not clash.
+It misses `Ctrl+S` beside a chord naming one Control key, and two same-length chords a player
+satisfies at once by holding both sets. The whole target mapping is excluded rather than the one
 slot.
 
 ---
@@ -1007,11 +1011,14 @@ nothing about where it ends up.
 
 ```rust
 pub enum Override {
-    Controls(Vec<Option<Control>>), // in slot order; None is an emptied cell, trailing ones dropped
-    Cleared,                        // deliberately emptied — distinct from a missing row
-    NotOurs,                        // an external authority owns this mapping
+    Slots(Vec<Option<BoundSlot>>), // in slot order; None is an emptied cell, trailing ones dropped
+    Cleared,                       // deliberately emptied — distinct from a missing row
+    NotOurs,                       // an external authority owns this mapping
 }
 ```
+
+`Overrides::slots_of(row)` is the list to edit: the set's own slots where it has changed the row,
+and the row's declared ones, chords included, where it has not.
 
 Rows are keyed by `(DeviceFamily, MappingKey)` and tunables by `(DeviceFamily, key)`. Nothing in an
 `Overrides` names a device: what a player bound is a control on a device *class*, and which physical
@@ -1032,15 +1039,16 @@ apply_overrides_for_with_preset(..)                     -> Vec<OverrideProblem>
 Applying is the only path in, and startup is simply the first call. It rewrites the *authored*
 bindings rather than patching compiled ones — the `BindingSpec`s are retained beside the plan and
 cloned per apply — then compiles a variant plan and swaps it into every live instance, which cancels
-what was in flight and re-arms require-reset. Followers riding a row that changed move with it.
-`AppliedPlan<C>` keeps the variant so an instance spawned later sees it too, and
+what was in flight and re-arms require-reset. Followers riding a row that changed move with it,
+chord included. `AppliedPlan<C>` keeps the variant so an instance spawned later sees it too, and
 `InputContextPlan<C>` is left untouched, so the next patch's revised defaults still reach a player
 who never touched that row.
 
-Three slot cases: a slot the defaults fill has its binding's input rewritten; a slot they left empty
-is filled by *copying* the binding beside it, so a secondary carries the same modifiers and
-conditions as the primary; and a slot the override no longer has takes its binding away. A row that
-is one direction of a composite is no exception, since that direction is a binding of its own.
+Three slot cases: a slot the defaults fill has its binding's input and chord rewritten; a slot they
+left empty is filled by *copying* the binding beside it, so a secondary carries the same modifiers
+and conditions as the primary, with its own chord; and a slot the override no longer has takes its
+binding away. A row that is one direction of a composite is no exception, since that direction is a
+binding of its own.
 
 **Overrides do not compose.** Each apply starts from the pristine declaration, so the argument must
 be the *whole* working copy — a preset's rows and any manual captures together. A smaller second
@@ -1054,7 +1062,7 @@ apply and persist independently, with the world-wide plan untouched.
 ```rust
 pub enum OverrideProblemKind {
     NoSuchMapping, NotRebindable, WrongFamily { .. }, WrongShape { .. },
-    Reserved { .. }, TooManyControls { .. }, UnknownControl { .. },
+    Reserved { .. }, NotChordable { .. }, TooManyControls { .. }, UnknownControl { .. },
 }
 ```
 
@@ -1090,7 +1098,7 @@ pub struct SavedOverrides {
     pub tunables: BTreeMap<String, BTreeMap<String, SavedTunableValue>>,
 }
 
-pub enum SavedRow { Controls(Vec<String>), Cleared, NotOurs }
+pub enum SavedRow { Slots(Vec<String>), Cleared, NotOurs }
 pub enum SavedTunableValue { Number(f32), Bool(bool) }
 ```
 
@@ -1111,6 +1119,7 @@ action_map_version = 1
 "gameplay.jump"    = ["key/Space", "key/KeyJ"]   # primary, secondary
 "gameplay.fire"    = ["cleared", "key/KeyF"]     # primary emptied; the secondary stays second
 "gameplay.move.up" = "key/KeyI"                  # a scalar is a one-element list
+"editor.save"      = "mod/ctrl+key/KeyS"         # held first, then the control
 "ui.settings"      = "external"
 
 [tunables]
@@ -1128,6 +1137,13 @@ separator needs no escape, and a name carrying anything but one character reads 
 at all. `bindings`/`gamepad` sorts ahead of `bindings`/`keyboard_mouse` alphabetically rather than
 in `DeviceFamily`'s own declared order, and an empty `tunables` still gets a header — both accepted
 costs of a plain, structurally reflected type over a hand-rolled one.
+
+A slot's chord rides the string the slot already has: each entry under the name a catalogue looks it
+up by, a `+` after each, then the control — `mod/ctrl+key/KeyS`, or `pad/LeftTrigger+pad/South` for
+a chord of two buttons. `char/` is the one name that can hold a `+`, and since it always holds
+exactly one character it is measured rather than split, so `mod/shift+char/+` is Shift held with the
+`+` key. A slot with any name in it this build does not know is `UnknownControl`, carrying the
+slot's whole text.
 
 **`SavedOverrides` claims no field besides `action_map_version`, `bindings` and `tunables`, and none
 of those is a bare `version`** (R17.10, D59). A settings layer that lets several resources share one

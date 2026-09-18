@@ -18,7 +18,7 @@
 //! // …and the crate answers on that same entity, once.
 //! commands.entity(cell).observe(|captured: On<ControlCaptured>, world: &World| {
 //!     let name = captured.control.fallback_label();
-//!     let clashes = conflicts(world, captured.control, captured.mapping);
+//!     let clashes = conflicts(world, &captured.control.into(), captured.mapping);
 //!     // `captured.slot` comes back too, which is where the new control belongs in the row.
 //! });
 //! ```
@@ -57,7 +57,7 @@ use crate::action::ChannelShape;
 use crate::binding::{ButtonThreshold, Control};
 use crate::device::DeviceFamily;
 use crate::frame::{FrameTimestamp, InputFrame, RawEvent};
-use crate::mapping::{ActionMapping, MappingKey};
+use crate::mapping::{ActionMapping, BoundSlot, MappingKey};
 use crate::overrides::{Override, Overrides};
 
 /// How far a stick or trigger must be pushed before capture treats it as a choice.
@@ -416,7 +416,7 @@ pub enum RefusedReason {
     Reserved,
 }
 
-/// A mapping that already holds the control in question.
+/// A mapping that already answers the press in question.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MappingConflict {
     /// The mapping that holds it.
@@ -440,11 +440,12 @@ pub enum ConflictOverlap {
     OtherContext,
 }
 
-/// Which mappings already hold a control.
+/// Which mappings already answer a press.
 ///
-/// This can be answered before anything is committed to: a screen calls this with what capture
-/// just reported and decides what to say. Deciding what to *do* — reject, swap, unbind the
-/// other — needs somewhere to write the answer, which is a separate matter.
+/// This can be answered before anything is committed to: a screen calls this with the slot it is
+/// about to write, usually the control capture just reported, and decides what to say. Deciding
+/// what to *do* — reject, swap, unbind the other — needs somewhere to write the answer, which is a
+/// separate matter.
 ///
 /// `target` is the mapping being rebound, and is excluded from the result: a mapping does not
 /// conflict with itself, and rebinding a control to where it already is should report nothing. The
@@ -452,26 +453,28 @@ pub enum ConflictOverlap {
 /// while its first already holds it is not reported here — a repeat *within* one row is a question
 /// for the conflict policy that applies a rebind, not for the detection that precedes it.
 ///
-/// Conflicts are per family, so a keyboard binding never clashes with a gamepad one.
-/// Comparison is at control granularity: two bindings that share a control but differ in their
-/// chords are reported as an overlap even though arbitration would separate them. That errs toward
-/// telling a player about something harmless rather than staying quiet about something real.
+/// Conflicts are per family, so a keyboard binding never clashes with a gamepad one. A slot clashes
+/// with another holding the same control and the same chord, as [`BoundSlot::clashes_with`]
+/// decides, so `S` and `Ctrl+S` can sit on two rows without either being reported. Two cases get
+/// through: `Ctrl+S` beside a chord naming one Control key by its
+/// [`KeyCode`](bevy_input::keyboard::KeyCode), and `Ctrl+S` beside `Shift+S` for a player holding
+/// both modifiers. Both are real clashes that go unreported.
 pub fn conflicts(
     world: &World,
-    control: Control,
+    candidate: &BoundSlot,
     target: Option<MappingKey>,
 ) -> Vec<MappingConflict> {
-    conflicts_in(&crate::mapping::mappings(world), None, control, target)
+    conflicts_in(&crate::mapping::mappings(world), None, candidate, target)
 }
 
-/// Which mappings already hold a control, as a screen's own unconfirmed choices would leave things.
+/// Which mappings already answer a press, as a screen's own unconfirmed choices would leave things.
 ///
 /// Same question as [`conflicts`], against a working copy rather than what is currently applied — a
-/// settings screen holds its player's choices in a [`Overrides`] of its own until they confirm, and a
-/// choice that has not been confirmed yet still has to be able to clash with another one that hasn't
-/// either. `mappings` is the applied baseline (as `crate::mapping::mappings` returns), and `pending`
-/// is laid over it: a row `pending` names reads as that row says, and everything else reads as
-/// `mappings` already has it.
+/// settings screen holds its player's choices in a [`Overrides`] of its own until they confirm, and
+/// a choice that has not been confirmed yet still has to be able to clash with another one that
+/// hasn't either. `mappings` is the applied baseline (as `crate::mapping::mappings` returns), and
+/// `pending` is laid over it: a row `pending` names reads as that row says, and everything else
+/// reads as `mappings` already has it.
 ///
 /// A backend-owned row (`Override::NotOurs` in `pending`) reads as `mappings` already has it
 /// (unaffected, not cleared), matching how [`crate::overrides::apply_overrides`] treats it.
@@ -479,27 +482,28 @@ pub fn conflicts(
 /// Resolving a conflict this finds is the caller's decision, made with [`Overrides::bind`] and
 /// [`Overrides::get`] directly rather than through another crate API: refuse the conflict by not
 /// writing the candidate row, allow the duplicate by writing it regardless, or rewrite the
-/// conflicting row without the shared control — putting the candidate's own previous control there
-/// instead trades the two. A row that would hold one control twice never reaches this function,
-/// since a mapping never conflicts with itself, so a caller checks its own candidate list for that
-/// before writing it.
+/// conflicting row without the clashing slot — putting the candidate's own previous slot there
+/// instead trades the two. A row that would hold one slot twice never reaches this function, since
+/// a mapping never conflicts with itself, so a caller checks its own candidate list for that before
+/// writing it.
 pub fn conflicts_pending(
     mappings: &[ActionMapping],
     pending: &Overrides,
-    control: Control,
+    candidate: &BoundSlot,
     target: Option<MappingKey>,
 ) -> Vec<MappingConflict> {
-    conflicts_in(mappings, Some(pending), control, target)
+    conflicts_in(mappings, Some(pending), candidate, target)
 }
 
 /// The shared walk behind `conflicts` and `conflicts_pending`.
 ///
 /// `pending` is `None` for the world-only form; `Some` layers a working copy over `mappings` before
-/// asking the same question, which is why both forms produce identical results for identical inputs.
+/// asking the same question, which is why both forms produce identical results for identical
+/// inputs.
 fn conflicts_in(
     mappings: &[ActionMapping],
     pending: Option<&Overrides>,
-    control: Control,
+    candidate: &BoundSlot,
     target: Option<MappingKey>,
 ) -> Vec<MappingConflict> {
     let target_context = target.and_then(|key| {
@@ -511,7 +515,7 @@ fn conflicts_in(
 
     mappings
         .iter()
-        .filter(|mapping| Some(mapping.key) != target && holds(mapping, pending, control))
+        .filter(|mapping| Some(mapping.key) != target && holds(mapping, pending, candidate))
         .map(|mapping| MappingConflict {
             mapping: mapping.key,
             action_path: mapping.action_path,
@@ -525,24 +529,24 @@ fn conflicts_in(
         .collect()
 }
 
-/// Whether a mapping currently holds `control`: in `pending`'s row for it if there is one, else in
-/// its own slots.
+/// Whether a mapping currently holds a slot clashing with `candidate`: in `pending`'s row for it if
+/// there is one, else in its own slots.
 ///
 /// A row absent from `pending` means untouched, and a `NotOurs` row means the same, since something
 /// else owns it and this crate neither fills it in nor reads it as cleared.
 ///
 /// An empty slot holds nothing rather than holding "no control", so two rows with a gap apiece are
 /// not a clash.
-fn holds(mapping: &ActionMapping, pending: Option<&Overrides>, control: Control) -> bool {
-    match pending.and_then(|pending| pending.get(mapping.family, mapping.key)) {
-        Some(Override::Controls(controls)) => controls.contains(&Some(control)),
-        Some(Override::Cleared) => false,
-        Some(Override::NotOurs) | None => mapping
-            .slots
-            .iter()
-            .flatten()
-            .any(|slot| slot.control == control),
-    }
+fn holds(mapping: &ActionMapping, pending: Option<&Overrides>, candidate: &BoundSlot) -> bool {
+    let slots = match pending.and_then(|pending| pending.get(mapping.family, mapping.key)) {
+        Some(Override::Slots(slots)) => slots,
+        Some(Override::Cleared) => return false,
+        Some(Override::NotOurs) | None => &mapping.slots,
+    };
+    slots
+        .iter()
+        .flatten()
+        .any(|slot| slot.clashes_with(candidate))
 }
 
 /// One control arriving, and whether the player meant it.
@@ -1217,7 +1221,11 @@ mod tests {
         let app = app();
         let jump = mapping(&app, "capture_tests.jump").key;
 
-        let found = conflicts(app.world(), Control::PhysicalKey(KeyCode::KeyW), Some(jump));
+        let found = conflicts(
+            app.world(),
+            &Control::PhysicalKey(KeyCode::KeyW).into(),
+            Some(jump),
+        );
         assert_eq!(found.len(), 1);
         assert_eq!(
             alloc::string::ToString::to_string(&found[0].mapping),
@@ -1231,7 +1239,11 @@ mod tests {
         );
 
         // The secondary of a two-default row, which a `==` against a single control would miss.
-        let secondary = conflicts(app.world(), Control::PhysicalKey(KeyCode::KeyV), Some(jump));
+        let secondary = conflicts(
+            app.world(),
+            &Control::PhysicalKey(KeyCode::KeyV).into(),
+            Some(jump),
+        );
         assert_eq!(secondary.len(), 1);
         assert_eq!(secondary[0].action_path, "capture_tests.crouch");
 
@@ -1241,7 +1253,7 @@ mod tests {
         let confirm = mapping(&app, "capture_tests.confirm").key;
         let across = conflicts(
             app.world(),
-            Control::PhysicalKey(KeyCode::KeyC),
+            &Control::PhysicalKey(KeyCode::KeyC).into(),
             Some(confirm),
         );
         assert_eq!(across.len(), 1);
@@ -1249,14 +1261,21 @@ mod tests {
         assert_eq!(across[0].overlap, ConflictOverlap::OtherContext);
 
         // Nothing holds this one.
-        assert!(conflicts(app.world(), Control::PhysicalKey(KeyCode::KeyZ), Some(jump)).is_empty());
+        assert!(
+            conflicts(
+                app.world(),
+                &Control::PhysicalKey(KeyCode::KeyZ).into(),
+                Some(jump)
+            )
+            .is_empty()
+        );
 
         // And a mapping does not conflict with itself, so rebinding a control to where it already
         // is reports nothing rather than reporting the row the player is looking at.
         assert!(
             conflicts(
                 app.world(),
-                Control::PhysicalKey(KeyCode::Space),
+                &Control::PhysicalKey(KeyCode::Space).into(),
                 Some(jump)
             )
             .is_empty()
@@ -1281,11 +1300,18 @@ mod tests {
         );
 
         // Still on Space in the world, so the world-only query hears nothing.
-        assert!(conflicts(app.world(), Control::PhysicalKey(KeyCode::KeyW), Some(up)).is_empty());
+        assert!(
+            conflicts(
+                app.world(),
+                &Control::PhysicalKey(KeyCode::KeyW).into(),
+                Some(up)
+            )
+            .is_empty()
+        );
         let found = conflicts_pending(
             &mappings,
             &pending,
-            Control::PhysicalKey(KeyCode::KeyW),
+            &Control::PhysicalKey(KeyCode::KeyW).into(),
             Some(up),
         );
         assert_eq!(found.len(), 1);
@@ -1297,7 +1323,7 @@ mod tests {
             conflicts_pending(
                 &mappings,
                 &pending,
-                Control::PhysicalKey(KeyCode::Space),
+                &Control::PhysicalKey(KeyCode::Space).into(),
                 Some(up)
             )
             .len(),
@@ -1311,7 +1337,51 @@ mod tests {
             conflicts_pending(
                 &mappings,
                 &pending,
-                Control::PhysicalKey(KeyCode::Space),
+                &Control::PhysicalKey(KeyCode::Space).into(),
+                Some(up)
+            )
+            .is_empty()
+        );
+    }
+
+    /// `W` and `Ctrl+W` are two presses, so a row may hold one while another holds the other. The
+    /// same chord is a clash in whatever order it was written.
+    #[test]
+    fn a_different_chord_on_the_same_control_is_no_clash() {
+        use crate::binding::ModifierKey;
+        use crate::present::ControlOrigin;
+
+        let app = app();
+        let mappings = crate::mapping::mappings(app.world());
+        let jump = mapping(&app, "capture_tests.jump").key;
+        let up = mapping(&app, "capture_tests.move.up").key;
+        let chorded = |with: &[ModifierKey]| BoundSlot {
+            control: Control::PhysicalKey(KeyCode::KeyW),
+            with: with.iter().copied().map(ControlOrigin::Modifier).collect(),
+        };
+
+        // `move.up` holds a bare W.
+        assert!(conflicts(app.world(), &chorded(&[ModifierKey::Ctrl]), Some(jump)).is_empty());
+
+        let mut pending = Overrides::new();
+        pending.bind(
+            DeviceFamily::KeyboardMouse,
+            jump,
+            [chorded(&[ModifierKey::Ctrl, ModifierKey::Shift])],
+        );
+        let found = conflicts_pending(
+            &mappings,
+            &pending,
+            &chorded(&[ModifierKey::Shift, ModifierKey::Ctrl]),
+            Some(up),
+        );
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].action_path, "capture_tests.jump");
+        assert!(
+            conflicts_pending(
+                &mappings,
+                &pending,
+                &chorded(&[ModifierKey::Shift]),
                 Some(up)
             )
             .is_empty()

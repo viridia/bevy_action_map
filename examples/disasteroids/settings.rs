@@ -933,11 +933,9 @@ fn redraw_pending(world: &mut World) {
             pending
                 .slots_of(row)
                 .get(cell.2)
-                .copied()
+                .cloned()
                 .flatten()
-                .map_or_else(String::new, |control| {
-                    cell_text(control, chord_at(row, cell.2))
-                }),
+                .map_or_else(String::new, |slot| cell_text(slot.control, &slot.with)),
         );
     }
 
@@ -950,11 +948,10 @@ fn redraw_pending(world: &mut World) {
             pending
                 .slots_of(row)
                 .get(cell.2)
-                .copied()
+                .cloned()
                 .flatten()
-                .map_or_else(String::new, |control| {
-                    cell.3
-                        .fallback_format(&cell_text(control, chord_at(row, cell.2)))
+                .map_or_else(String::new, |slot| {
+                    cell.3.fallback_format(&cell_text(slot.control, &slot.with))
                 }),
         );
     }
@@ -1058,19 +1055,6 @@ fn cell_text(control: Control, with: &[ControlOrigin]) -> String {
     }
     text.push_str(&control.fallback_label());
     text
-}
-
-/// What the binding in this column requires held, or nothing where it requires nothing.
-///
-/// Taken from the row rather than from the working copy, which is what lets a redraw compose the
-/// same text: a capture fills a slot's control and leaves what is held alongside it where it was,
-/// so nothing on this screen can change it and the row stays the authority.
-fn chord_at(mapping: &ActionMapping, column: usize) -> &[ControlOrigin] {
-    mapping
-        .slots
-        .get(column)
-        .and_then(Option::as_ref)
-        .map_or(&[], |slot| &slot.with)
 }
 
 /// One row: what it is called, then a cell per column.
@@ -1373,43 +1357,56 @@ fn resolve_capture(
     // Conflicts are read against the merged copy, so a control a preset moved onto a row still
     // counts as taken; the steal itself is written into the captures, since the player made it.
     let working = pending_copy(world);
-    let mut pending = world.resource_mut::<PendingOverrides>();
 
-    for clash in conflicts_pending(&all, &working, control, Some(key)) {
+    // The cell the player pressed is the cell that gets it, so the row grows to reach that column
+    // if it has to. This is what lets the second cell be filled on a row whose first one is empty —
+    // the state a steal leaves behind.
+    let mut slots = working.slots_of(&target);
+    if slot >= slots.len() {
+        slots.resize(slot + 1, None);
+    }
+    // The new control keeps whatever the cell was held with, and that whole press is what is stolen
+    // from elsewhere.
+    let candidate = BoundSlot {
+        control,
+        with: slots[slot]
+            .as_ref()
+            .map_or_else(Vec::new, |filled| filled.with.clone()),
+    };
+
+    let mut pending = world.resource_mut::<PendingOverrides>();
+    for clash in conflicts_pending(&all, &working, &candidate, Some(key)) {
         let Some(other) = all
             .iter()
             .find(|row| row.family == family && row.key == clash.mapping)
         else {
             continue;
         };
-        let mut controls = working.slots_of(other);
-        take_from(&mut controls, control);
-        pending.0.captures.bind(other.family, other.key, controls);
+        let mut others = working.slots_of(other);
+        take_from(&mut others, &candidate);
+        pending.0.captures.bind(other.family, other.key, others);
     }
 
-    // The cell the player pressed is the cell that gets it, so the row grows to reach that column
-    // if it has to. This is what lets the second cell be filled on a row whose first one is empty —
-    // the state a steal leaves behind.
-    let mut controls = working.slots_of(&target);
-    if slot >= controls.len() {
-        controls.resize(slot + 1, None);
-    }
-    // The row steals from itself too. `conflicts_pending` answers about *other* rows, so a control
+    // The row steals from itself too. `conflicts_pending` answers about *other* rows, so a press
     // this row already holds in another column is invisible to the loop above, and without this the
-    // player gets one control in two cells of one row.
-    take_from(&mut controls, control);
-    controls[slot] = Some(control);
-    pending.0.captures.bind(target.family, target.key, controls);
+    // player gets one press in two cells of one row.
+    take_from(&mut slots, &candidate);
+    slots[slot] = Some(candidate);
+    pending.0.captures.bind(target.family, target.key, slots);
 }
 
-/// Empties whichever cells of a row hold `control`, leaving the gap where it was.
+/// Empties whichever cells of a row answer the same press as `candidate`, leaving the gap where it
+/// was.
 ///
 /// Emptied in place rather than removed: taking a control out of a row must not promote that row's
 /// secondary into the column the player was looking at. `bind` drops the empty again if it was the
 /// last thing the row held.
-fn take_from(controls: &mut [Option<Control>], control: Control) {
-    for held in controls {
-        if *held == Some(control) {
+fn take_from(slots: &mut [Option<BoundSlot>], candidate: &BoundSlot) {
+    for held in slots {
+        if held
+            .as_ref()
+            .is_some_and(|slot| slot.clashes_with(candidate))
+        {
             *held = None;
         }
     }

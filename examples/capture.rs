@@ -286,7 +286,7 @@ fn took(captured: On<ControlCaptured>, mut commands: Commands) {
         // Asked afterwards rather than carried on the event. Answering it means reading every
         // declared context, which capture cannot do from the middle of the input pipeline — and it
         // is the caller's question anyway, since what to *do* about a clash is a policy.
-        for clash in conflicts(world, control, mapping) {
+        for clash in conflicts(world, &control.into(), mapping) {
             let certainty = match clash.overlap {
                 ConflictOverlap::SameContext => {
                     "in this same context, so they are certainly in each other's way"
@@ -317,15 +317,19 @@ fn rebind(world: &mut World, control: Control) {
     // screen's. Assignment rather than appending: the cell the player pressed is the cell that gets
     // the control, whether or not the row reaches that far yet. A row that does not is grown, and
     // the slots skipped on the way stay empty — writing to the third cell of a one-control row
-    // gives a row of three with a blank in the middle, not a row of two.
-    let mut controls = row.controls();
-    if slot >= controls.len() {
-        controls.resize(slot + 1, None);
+    // gives a row of three with a blank in the middle, not a row of two. A cell already holding
+    // something keeps whatever it was held with; an empty one takes the control on its own.
+    let mut slots = row.slots.clone();
+    if slot >= slots.len() {
+        slots.resize(slot + 1, None);
     }
-    controls[slot] = Some(control);
+    match &mut slots[slot] {
+        Some(filled) => filled.control = control,
+        empty => *empty = Some(control.into()),
+    }
 
     let mut chosen = world.remove_resource::<Chosen>().unwrap_or_default();
-    chosen.0.bind(row.family, row.key, controls);
+    chosen.0.bind(row.family, row.key, slots);
     let problems = apply_overrides(world, &chosen.0);
     world.insert_resource(chosen);
 

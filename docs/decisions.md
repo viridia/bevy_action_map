@@ -66,7 +66,7 @@ here, so there is one `D`-numbering in the project.
 | **D42** | Reserved before shape, and excluded is a silent guard                         | TD9.3     |
 | **D43** | Conflicts are detected, never resolved                                        | TD9.3     |
 | **D44** | Two general combinators, not a navigation path                                | TD8.3     |
-| **D45** | An override is a diff keyed by mapping and family, holding controls only      | TD10      |
+| **D45** | An override is a diff keyed by mapping and family, holding slots              | TD10      |
 | **D46** | Three row states, not two                                                     | TD10      |
 | **D47** | Applying is the only path in, and overrides do not compose                    | TD10.1    |
 | **D48** | Applying rewrites the authored bindings; a variant keeps the declared slots   | TD10.1    |
@@ -461,8 +461,9 @@ two keys are one thing they press either of.
 **Decided.** `ActionMapping::slots` holds `Option<BoundSlot>`, and a `BoundSlot` is a control plus
 the `ControlOrigin` list held with it. `ControlOrigin` rather than a control list for D78's reason —
 a modifier stands for either key of its pair — which also makes a row and a caption composable from
-the same values. `ActionMapping::controls()` is the bare-control view an override addresses, so
-`Overrides` stays in controls and its vocabulary did not widen. Chunk 128 built it.
+the same values. Chunk 128 built it, with `Overrides` still in controls; chunk 129 made the same
+type what an override writes (D81), and `ActionMapping::controls()` is left as a bare view for
+reading.
 
 **Rules out.** A parallel `chords` list beside `slots`, index-aligned. Chords are per slot rather
 than per row, so the two would have to stay aligned by convention, and "this slot is empty" would
@@ -471,16 +472,16 @@ rejects for the same reason.
 
 **Reversal.** The parallel list leaves every `.slots` call site alone, which is most of what the
 change cost. What it buys back is the alignment invariant, and the point at which that bites is an
-override: `rewrite` rebuilds a row from the controls the player accepted, and a chord read off the
-column it now occupies rather than off the control it arrived with lands on the wrong slot as soon
-as the row has a gap in it.
+override: a row with a gap in it needs its chord list gapped identically, and a list that drifts by
+one puts a chord on the wrong slot. With the chord inside the slot, an override has one list to
+write.
 
 ### D80 — A chord is set, never captured
 
 **Decided.** Capture listens for one control. It never accumulates whatever modifiers were down
 alongside it, and a screen that wants a player-editable `Ctrl+S` sets the modifiers explicitly
 rather than pressing them. So `admissible` has no chord case, `ControlCaptured` carries one control,
-and a chord reaches a binding from the declaration or, once chunk 129 lands, from an override.
+and a chord reaches a binding from the declaration or from an override.
 
 **Rules out.** A capture that reports what was held with the press, and with it the conflict
 question that follows — whether `Ctrl+S` captured over `S` is a rebind, a clash, or a new row.
@@ -490,9 +491,36 @@ text field's shortcut editor behaves. What stops it is that the interesting chor
 `Cmd+Q` quits the application before the key reaches it, and a window manager takes others first, so
 a capture that listened would work for the combinations nobody needs and fail silently for the ones
 they do. Blender's keymap editor captures a bare key and offers the modifiers as toggles for this
-reason, and resets those toggles on each capture. That last part is not settled here — whether a
-rebind clears an existing chord or preserves it is chunk 129's, because it is only answerable once
-there is a way to put one back.
+reason, and resets those toggles on each capture. Whether a rebind clears an existing chord or
+preserves it is the screen's to decide, by what it writes (D81).
+
+### D81 — An override slot states its chord
+
+**Decided.** `Override::Slots` holds `BoundSlot`, the type a row reads, and a slot is the whole of
+what is bound at its position. `rewrite` writes its chord onto the binding along with its control: a
+bare control binds with no chord, a grown slot takes its own chord rather than the primary's, and a
+follower takes its leader's. The saved string carries the chord ahead of the control under catalogue
+names, `mod/ctrl+key/KeyS`. Conflict detection compares slots — the same control with the same
+chord, order ignored. Chunk 129 built it.
+
+**Rules out.** An inherited chord — `with: Option<..>`, where absence keeps the declared one — and
+with it the crate choosing between Blender's reset and preserve on a game's behalf. A write type
+holding `ChordEntry` beside the read type, which would make an unholdable entry unrepresentable at
+the price of a fallible conversion at every edit and a `cfg` split for the no-devices build. The
+bare modifier words of the first sketch, `ctrl+key/KeyS`, which cannot spell a chord of two buttons
+without a second vocabulary.
+
+**Reversal.** Explicit is what makes a saved row mean one thing. Under inheritance, `"key/KeyD"` on
+a row declared `Ctrl+S` means `Ctrl+D` today and whatever the next patch declares tomorrow, and
+"deliberately no chord" needs a spelling of its own. The cost is the same fact seen from the other
+side: a preset or a save naming a bare control on a chorded row drops the chord, and a patch that
+revises a declared chord does not reach a row the player rebound — as a revised control already does
+not. Every saved row is also read differently, so reversing this after a release is a format
+version.
+
+**Accepted price.** `ControlOrigin` admits entries nothing can hold, a `Foreign` control or a stick,
+so `NotChordable` exists where a narrower type would have made it impossible. The clash rule misses
+two real clashes, stated in D43.
 
 ### D16 — Nothing user-defined runs inside the evaluator
 
@@ -598,8 +626,8 @@ trait objects throughout moves that cost into the per-tick path.
 
 **How the framing changed.** This was posed as a trade of ergonomics against _serializability_ —
 trait objects versus a reflected registry. That trade turned out not to apply. An override stores
-controls and tunable values only; modifiers, conditions and chord structure are developer data and
-never reach a save file. So `Modifier` and `Condition` carry no `Reflect` bound and custom
+controls, what is held with them, and tunable values; modifiers and conditions are developer data
+and never reach a save file. So `Modifier` and `Condition` carry no `Reflect` bound and custom
 extensions are not serialized, because nothing asks them to be. The `Arc` rather than a `Box` is for
 an unrelated reason: applying an override clones the authored bindings and rewrites their inputs,
 and the originals have to survive that intact.
@@ -826,8 +854,10 @@ a crate of its own.
 ### D27 — The presentation model is separate from the binding model
 
 **Decided.** Players get a smaller model than developers: named *mappings*, typed *tunables* and
-*presets*. Modifiers, composites, conditions and chord structure stay developer-only and never reach
-a screen.
+*presets*. Modifiers, composites and conditions stay developer-only and never reach a screen. A
+slot's chord — which keys are held with its control — was on the same list until D81 gave it to the
+player; it is named controls rather than adapters, so it reads as a player's choice where the rest
+would not.
 
 **Rules out.** Showing the binding model to players. It has no player-comprehensible reading —
 nobody rebinding "move forward" should meet a swizzle.
@@ -1162,13 +1192,15 @@ reject is not writing, allow-the-duplicate is writing anyway, and swap and unbin
 app reading the conflicting row's current list and writing it back with one control removed or
 traded. The four policies are worked examples in a doc comment instead of an enum.
 
-**Three limits, stated rather than hidden.** Comparison is at control granularity, so two bindings
-differing only in their chords are reported as overlapping — a false positive rather than a false
-negative. A clash across two contexts is *possible* rather than certain, because whether two
-contexts are ever live together is a question about the game's activation rules. And the whole
-target mapping is excluded rather than the one slot, so a control repeated across two slots of one
-row is invisible here; a caller about to write a row already holds that list and needs no help
-spotting a duplicate in it.
+**Three limits, stated rather than hidden.** Comparison is of whole slots: the same control with the
+same chord, order ignored (D81). It used to be at control granularity, which over-reported `S`
+beside `Ctrl+S` — harmless while chords were fixed, and a false steal once a player could author
+both. Two real clashes now go unreported instead: `Ctrl+S` beside a chord naming one Control key by
+`KeyCode`, and two same-length chords a player holding both sets satisfies at once. A clash across
+two contexts is *possible* rather than certain, because whether two contexts are ever live together
+is a question about the game's activation rules. And the whole target mapping is excluded rather
+than the one slot, so a control repeated across two slots of one row is invisible here; a caller
+about to write a row already holds that list and needs no help spotting a duplicate in it.
 
 ---
 
@@ -1205,18 +1237,18 @@ special to navigation, this is just where the gap was first found.
 
 ## Overrides and persistence
 
-### D45 — An override is a diff keyed by mapping and family, holding controls only
+### D45 — An override is a diff keyed by mapping and family, holding slots
 
-**Decided.** Rows are keyed by `(family, mapping)` and hold controls. Not by action, not by binding.
-Nothing in an override names a device.
+**Decided.** Rows are keyed by `(family, mapping)` and hold slots: a control, and what is held with
+it (D81). Not by action, not by binding. Nothing in an override names a device.
 
 **Rules out.** One row per action, and any device identity in the file.
 
 **Reversal.** An action has several bindings, so `Jump` is Space *and* South; the unit of rebinding
 is the mapping, since the player rebinds "move forward" and never `Move`; and only the source
-belongs to the player, because modifiers, conditions and chord structure are developer data (D27)
-and the knobs a player does get are tunables (D32). Per-family separation is what keeps a keyboard
-remap from disturbing the gamepad layout.
+belongs to the player, because modifiers and conditions are developer data (D27) and the knobs a
+player does get are tunables (D32). Per-family separation is what keeps a keyboard remap from
+disturbing the gamepad layout.
 
 **No device identity.** A row names a control on a device *class*. Which physical unit drives which
 player is pairing state and which stick rests where is calibration state, both keyed by persistent

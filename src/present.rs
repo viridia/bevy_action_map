@@ -729,6 +729,21 @@ const fn modifier_name(modifier: crate::binding::ModifierKey) -> &'static str {
     }
 }
 
+/// Reads back a name written by `modifier_name`.
+#[cfg(all(feature = "keyboard", feature = "serialize"))]
+pub(crate) fn modifier_from_name(name: &str) -> Option<crate::binding::ModifierKey> {
+    use crate::binding::ModifierKey;
+
+    [
+        ModifierKey::Ctrl,
+        ModifierKey::Shift,
+        ModifierKey::Alt,
+        ModifierKey::Super,
+    ]
+    .into_iter()
+    .find(|&modifier| modifier_name(modifier) == name)
+}
+
 /// What a modifier reads as with no catalogue: the bare name, naming no side, because either key of
 /// the pair does.
 #[cfg(feature = "keyboard")]

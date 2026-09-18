@@ -212,14 +212,11 @@ pub struct ActionMapping {
 }
 
 impl ActionMapping {
-    /// The bare controls this row holds, gaps kept.
+    /// The bare controls this row holds, gaps kept, without what each is held with.
     ///
-    /// What an override addresses. [`Overrides`](crate::overrides::Overrides) works in controls
-    /// rather than slots, so this is the shape to edit and hand back to
-    /// [`bind`](crate::overrides::Overrides::bind) — clear a cell, put a captured control in
-    /// another, pass the result on.
-    ///
-    /// Whatever a slot held alongside its control stays with the binding and is not part of this.
+    /// To edit a row, start from [`slots`](Self::slots) instead, or from
+    /// [`Overrides::slots_of`](crate::overrides::Overrides::slots_of) for a working copy: a row
+    /// written back from this would drop every chord in it.
     pub fn controls(&self) -> Vec<Option<Control>> {
         self.slots
             .iter()
@@ -234,16 +231,60 @@ impl ActionMapping {
 /// alongside a modifier is the exception — `Ctrl+N` for a new game, both triggers together for a
 /// smart bomb — and it is why a slot is not simply a [`Control`]: a row that dropped the modifier
 /// would list "N" for a shortcut the game captions as "Ctrl+N".
+///
+/// It is also what an override writes. A screen edits the slots it read and hands them back to
+/// [`Overrides::bind`](crate::overrides::Overrides::bind), and what the slot says is what gets
+/// bound, chord included:
+///
+/// ```ignore
+/// let mut slots = working.slots_of(&row);
+/// if let Some(slot) = &mut slots[0] {
+///     slot.control = captured;              // a new key, still with Ctrl
+/// }
+/// slots[1] = Some(captured.into());          // a new key on its own
+/// working.bind(row.family, row.key, slots);
+/// ```
+///
+/// Whether a new key keeps the modifier the old one had is the screen's decision, made by which of
+/// those two it writes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BoundSlot {
     /// The control that fires it.
     pub control: Control,
     /// What has to be held for that control to count, in the order it was declared.
     ///
-    /// A capture fills [`control`](Self::control) and leaves this alone, so a screen with no way to
-    /// edit it is offering a row the player can change only in part. Draw it either way, or the row
-    /// reads as a bare control that will not work on its own.
+    /// Draw it, or the row reads as a bare control that will not work on its own. An entry written
+    /// here has to be something a player can hold: a modifier, or a button of this crate's own.
     pub with: Vec<crate::present::ControlOrigin>,
+}
+
+impl BoundSlot {
+    /// Whether the two slots answer the same press: the same control, held with the same things.
+    ///
+    /// The order of the chord does not matter, so `Ctrl+Shift+S` clashes with `Shift+Ctrl+S`. A
+    /// different chord on the same control does not clash, because `S` and `Ctrl+S` are two
+    /// presses: holding `Ctrl` fires the one that asks for it, and the bare key fires the other.
+    pub fn clashes_with(&self, other: &BoundSlot) -> bool {
+        self.control == other.control
+            && self.with.len() == other.with.len()
+            && self.with.iter().all(|entry| other.with.contains(entry))
+    }
+}
+
+impl From<Control> for BoundSlot {
+    fn from(control: Control) -> Self {
+        Self {
+            control,
+            with: Vec::new(),
+        }
+    }
+}
+
+// So a row of bare controls, the common case, can be written with no wrapping at all.
+impl From<Control> for Option<BoundSlot> {
+    fn from(control: Control) -> Self {
+        Some(control.into())
+    }
 }
 
 /// One other action riding a mapping's row, contributing no controls of its own.

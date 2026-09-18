@@ -51,8 +51,9 @@ use crate::action::ChannelShape;
 use crate::binding::{BindingSpec, Control};
 use crate::capture::{ControlClass, RefusedReason, admissible};
 use crate::device::DeviceFamily;
-use crate::mapping::{ActionMapping, MappingKey, Tunable, TunableValue};
+use crate::mapping::{ActionMapping, BoundSlot, MappingKey, Tunable, TunableValue};
 use crate::mapping::{apply_tunable_value, mapped_parts};
+use crate::present::ControlOrigin;
 
 /// What a player did to one mapping.
 ///
@@ -61,17 +62,21 @@ use crate::mapping::{apply_tunable_value, mapped_parts};
 /// left to say with unless emptying has a value of its own.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Override {
-    /// The controls the player put in the mapping, in slot order.
+    /// What the player put in the mapping, in slot order.
     ///
     /// Position is which slot, so this is written and read in order: the first is the primary. It
     /// replaces the mapping's whole list rather than one position in it — a screen that edits a
     /// single cell edits the list and then writes the row.
     ///
+    /// Each slot says everything about what is bound there, including what is held with it. A slot
+    /// with an empty [`with`](BoundSlot::with) binds its control on its own, whatever chord the
+    /// game declared for that position.
+    ///
     /// `None` is a slot the player emptied while a later one still holds something. That is what
     /// keeps the secondary of a cleared primary where it is instead of promoting it, and it is the
     /// only way a gap arises: a game cannot declare one. A row with nothing left is
     /// [`Cleared`](Self::Cleared) rather than a list of empties.
-    Controls(Vec<Option<Control>>),
+    Slots(Vec<Option<BoundSlot>>),
     /// The player deliberately emptied the mapping.
     ///
     /// The action stays declared and stays readable; nothing fires it. Distinct from a missing row,
@@ -113,14 +118,25 @@ impl Overrides {
 
     /// Puts controls in a mapping.
     ///
-    /// The whole list, in slot order. Takes controls or `Option<Control>`s, so a screen editing one
-    /// cell of a row writes the row back as it stands — `None` for a cell the player emptied whose
-    /// position still matters:
+    /// The whole list, in slot order. Takes bare controls, or the [`BoundSlot`]s a row is made of
+    /// where a slot is held with something, so a screen editing one cell of a row writes the row
+    /// back as it stands — `None` for a cell the player emptied whose position still matters:
     ///
     /// ```ignore
     /// overrides.bind(family, jump, [Control::PhysicalKey(KeyCode::Space)]);
-    /// overrides.bind(family, jump, [None, Some(Control::PhysicalKey(KeyCode::KeyJ))]);
+    /// let j = BoundSlot::from(Control::PhysicalKey(KeyCode::KeyJ));
+    /// overrides.bind(family, jump, [None, Some(j)]);
+    ///
+    /// let ctrl_s = BoundSlot {
+    ///     control: Control::PhysicalKey(KeyCode::KeyS),
+    ///     with: vec![ControlOrigin::Modifier(ModifierKey::Ctrl)],
+    /// };
+    /// overrides.bind(family, save, [ctrl_s]);
     /// ```
+    ///
+    /// A bare control is bound on its own: where the game declared `Ctrl+S`, binding `D` gives `D`,
+    /// not `Ctrl+D`. To carry the chord across, edit the slot's [`control`](BoundSlot::control)
+    /// rather than replacing the slot.
     ///
     /// Trailing empties are dropped: a row is as long as its last filled slot, and how many cells
     /// to draw beside it is the screen's business rather than something a saved row should carry. A
@@ -135,23 +151,23 @@ impl Overrides {
     /// overrides.bind(family, key, row);                        // a table: keep the gaps
     /// overrides.bind(family, key, row.into_iter().flatten());  // a list: close them
     /// ```
-    pub fn bind<C: Into<Option<Control>>>(
+    pub fn bind<S: Into<Option<BoundSlot>>>(
         &mut self,
         family: DeviceFamily,
         mapping: MappingKey,
-        controls: impl IntoIterator<Item = C>,
+        slots: impl IntoIterator<Item = S>,
     ) {
-        let mut controls: Vec<Option<Control>> = controls.into_iter().map(Into::into).collect();
-        while controls.last().is_some_and(Option::is_none) {
-            controls.pop();
+        let mut slots: Vec<Option<BoundSlot>> = slots.into_iter().map(Into::into).collect();
+        while slots.last().is_some_and(Option::is_none) {
+            slots.pop();
         }
         self.set(
             family,
             mapping,
-            if controls.is_empty() {
+            if slots.is_empty() {
                 Override::Cleared
             } else {
-                Override::Controls(controls)
+                Override::Slots(slots)
             },
         );
     }
@@ -172,15 +188,15 @@ impl Overrides {
     /// filled slot shortens the row, and clearing the only one leaves
     /// [`Override::Cleared`](Override::Cleared).
     pub fn unbind(&mut self, mapping: &ActionMapping, slot: usize) {
-        let mut controls = self.slots_of(mapping);
-        if slot >= controls.len() {
+        let mut slots = self.slots_of(mapping);
+        if slot >= slots.len() {
             return;
         }
-        controls[slot] = None;
-        self.bind(mapping.family, mapping.key, controls);
+        slots[slot] = None;
+        self.bind(mapping.family, mapping.key, slots);
     }
 
-    /// What this set makes of one row: its own controls where it has changed the row, and the
+    /// What this set makes of one row: its own slots where it has changed the row, and the
     /// declared ones where it has not.
     ///
     /// The three states read the way applying reads them, so a screen showing an unconfirmed
@@ -188,14 +204,14 @@ impl Overrides {
     /// untouched, since something else owns that row and this set neither fills it in nor treats it
     /// as emptied.
     ///
-    /// Controls only. Whatever a slot requires held alongside it stays with the binding and is not
-    /// something this set can change, so a screen drawing an unconfirmed row takes the control from
-    /// here and [`with`](crate::mapping::BoundSlot::with) from the row itself.
-    pub fn slots_of(&self, mapping: &ActionMapping) -> Vec<Option<Control>> {
+    /// This is the list to edit and hand back to [`bind`](Self::bind). An untouched row comes back
+    /// exactly as [`slots`](ActionMapping::slots) holds it, chords and all, so writing it back after
+    /// changing one cell changes only that cell.
+    pub fn slots_of(&self, mapping: &ActionMapping) -> Vec<Option<BoundSlot>> {
         match self.get(mapping.family, mapping.key) {
-            Some(Override::Controls(controls)) => controls.clone(),
+            Some(Override::Slots(slots)) => slots.clone(),
             Some(Override::Cleared) => Vec::new(),
-            Some(Override::NotOurs) | None => mapping.controls(),
+            Some(Override::NotOurs) | None => mapping.slots.clone(),
         }
     }
 
@@ -357,6 +373,14 @@ pub enum OverrideProblemKind {
         /// The reserved control.
         control: Control,
     },
+    /// A slot asks for something to be held that a player cannot hold.
+    ///
+    /// A chord is made of modifiers and buttons. A stick, a mouse's motion, or a control only an
+    /// external backend knows has no pressed state for a chord to wait on.
+    NotChordable {
+        /// The entry that cannot be held.
+        entry: ControlOrigin,
+    },
     /// A row reaching further than [`MaxSlots`] allows.
     TooManyControls {
         /// The ceiling the game set.
@@ -365,7 +389,8 @@ pub enum OverrideProblemKind {
         /// the ceiling is about how far a row reaches rather than how full it is.
         given: usize,
     },
-    /// A saved control name this build does not recognize.
+    /// A saved slot naming a control, or something held with one, that this build does not
+    /// recognize.
     ///
     /// What a control renamed or removed since the file was written looks like. Distinct from
     /// [`WrongFamily`](Self::WrongFamily) and [`WrongShape`](Self::WrongShape), which both name an
@@ -373,7 +398,7 @@ pub enum OverrideProblemKind {
     /// to one at all.
     #[cfg(feature = "serialize")]
     UnknownControl {
-        /// The text the file held, exactly as saved.
+        /// The text the file held for the slot, exactly as saved.
         name: String,
     },
 }
@@ -413,17 +438,78 @@ fn family_from_name(name: &str) -> Option<DeviceFamily> {
     }
 }
 
+/// How a saved file writes one slot: what is held first, then the control, joined by `+`.
+///
+/// Entries are written under the same names a catalogue looks them up by, so a modifier is
+/// `mod/ctrl` and `Ctrl+S` is `mod/ctrl+key/KeyS`.
+#[cfg(feature = "serialize")]
+fn slot_name(slot: &BoundSlot) -> String {
+    let mut name = String::new();
+    for entry in &slot.with {
+        name.push_str(&entry.name());
+        name.push('+');
+    }
+    name.push_str(&slot.control.name());
+    name
+}
+
+/// Reads back a slot written by [`slot_name`], or `None` where any part of it names nothing this
+/// build knows.
+#[cfg(feature = "serialize")]
+fn slot_from_name(text: &str) -> Option<BoundSlot> {
+    let mut names = Vec::new();
+    let mut rest = text;
+    loop {
+        // `char/` is the one name that can hold a `+`, and it is always one character long, so it
+        // is measured rather than split.
+        let end = match rest
+            .strip_prefix("char/")
+            .and_then(|tail| tail.chars().next())
+        {
+            Some(character) => "char/".len() + character.len_utf8(),
+            None => rest.find('+').unwrap_or(rest.len()),
+        };
+        let (name, tail) = rest.split_at(end);
+        names.push(name);
+        match tail.strip_prefix('+') {
+            Some(tail) => rest = tail,
+            None if tail.is_empty() => break,
+            None => return None,
+        }
+    }
+    let control = Control::from_name(names.pop()?)?;
+    let with = names
+        .into_iter()
+        .map(origin_from_name)
+        .collect::<Option<Vec<_>>>()?;
+    Some(BoundSlot { control, with })
+}
+
+/// One chord entry's name, read back. Whether it is something a player can hold is for applying to
+/// decide, as it is for a slot built in code.
+#[cfg(feature = "serialize")]
+fn origin_from_name(name: &str) -> Option<ControlOrigin> {
+    #[cfg(feature = "keyboard")]
+    if let Some(modifier) = crate::present::modifier_from_name(name) {
+        return Some(ControlOrigin::Modifier(modifier));
+    }
+    Control::from_name(name).map(ControlOrigin::Ours)
+}
+
 /// A row's saved value: the portable counterpart to [`Override`].
 ///
 /// Written only as a value inside [`SavedOverrides::bindings`]'s nested map, never as a document's
 /// own top level. That placement is what keeps the wire form the three compact shapes below rather
-/// than bevy_reflect's generic enum representation, `{"Controls": [...]}` and the like.
+/// than bevy_reflect's generic enum representation, `{"Slots": [...]}` and the like.
 #[cfg(feature = "serialize")]
 #[derive(Reflect, Clone, Debug, PartialEq)]
 #[reflect(Serialize, Deserialize)]
 pub enum SavedRow {
-    /// The controls the player put in the mapping, in slot order. See [`Override::Controls`].
-    Controls(Vec<String>),
+    /// What the player put in the mapping, in slot order. See [`Override::Slots`].
+    ///
+    /// One string per slot: the control's name, after whatever is held with it and a `+` apiece, so
+    /// `Ctrl+S` is `"mod/ctrl+key/KeyS"`.
+    Slots(Vec<String>),
     /// The player deliberately emptied the mapping. Written and read as `"cleared"`.
     Cleared,
     /// Something outside this crate owns this mapping. Written and read as `"external"`.
@@ -440,8 +526,8 @@ impl serde::Serialize for SavedRow {
             SavedRow::NotOurs => serializer.serialize_str(EXTERNAL),
             // A scalar is the same thing as a one-element list, and most rows hold one — a player
             // editing this by hand should not have to type brackets to say so (TD10.3).
-            SavedRow::Controls(names) if names.len() == 1 => serializer.serialize_str(&names[0]),
-            SavedRow::Controls(names) => names.serialize(serializer),
+            SavedRow::Slots(names) if names.len() == 1 => serializer.serialize_str(&names[0]),
+            SavedRow::Slots(names) => names.serialize(serializer),
         }
     }
 }
@@ -462,7 +548,7 @@ impl<'de> serde::Deserialize<'de> for SavedRow {
                 Ok(match v {
                     CLEARED => SavedRow::Cleared,
                     EXTERNAL => SavedRow::NotOurs,
-                    other => SavedRow::Controls(alloc::vec![String::from(other)]),
+                    other => SavedRow::Slots(alloc::vec![String::from(other)]),
                 })
             }
 
@@ -474,7 +560,7 @@ impl<'de> serde::Deserialize<'de> for SavedRow {
                 while let Some(name) = seq.next_element::<String>()? {
                     controls.push(name);
                 }
-                Ok(SavedRow::Controls(controls))
+                Ok(SavedRow::Slots(controls))
             }
         }
 
@@ -585,14 +671,12 @@ pub fn save_overrides(overrides: &Overrides) -> SavedOverrides {
         let row = match value {
             // An empty slot is the same word a whole emptied row uses. `bind` has already dropped
             // any trailing ones, so the word only ever appears where a filled slot follows it.
-            Override::Controls(controls) => SavedRow::Controls(
-                controls
+            Override::Slots(slots) => SavedRow::Slots(
+                slots
                     .iter()
                     .map(|slot| {
-                        slot.map_or_else(
-                            || String::from(CLEARED),
-                            |control| control.name().into_owned(),
-                        )
+                        slot.as_ref()
+                            .map_or_else(|| String::from(CLEARED), slot_name)
                     })
                     .collect(),
             ),
@@ -739,20 +823,20 @@ pub fn resolve_saved(
                     overrides.set(family, mapping.key, Override::NotOurs);
                     continue;
                 }
-                SavedRow::Controls(names) => names,
+                SavedRow::Slots(names) => names,
             };
 
-            let mut controls = Vec::with_capacity(names.len());
+            let mut slots = Vec::with_capacity(names.len());
             let mut all_known = true;
             for name in &names {
                 // The word inside a list is a slot the player emptied, and a short list read back
                 // means the rest are empty too — the trailing ones are not written.
                 if name == CLEARED {
-                    controls.push(None);
+                    slots.push(None);
                     continue;
                 }
-                match Control::from_name(name) {
-                    Some(control) => controls.push(Some(control)),
+                match slot_from_name(name) {
+                    Some(slot) => slots.push(Some(slot)),
                     None => {
                         all_known = false;
                         problems.push(OverrideProblem {
@@ -766,7 +850,7 @@ pub fn resolve_saved(
             if all_known {
                 // `bind` folds a list with nothing left in it into `Cleared`, so a hand-edited `[]`
                 // or `["cleared"]` reads exactly like the bare word does.
-                overrides.bind(family, mapping.key, controls);
+                overrides.bind(family, mapping.key, slots);
             }
         }
     }
@@ -997,7 +1081,7 @@ pub(crate) fn rewrite(
     let mut grown: Vec<BindingSpec> = Vec::new();
     // What each row was actually given, for the rows that took it — `current_rows` needs this to
     // put the holes back, since nothing in a binding list records which column a control sits in.
-    let mut accepted: Vec<Option<Vec<Option<Control>>>> = alloc::vec![None; rows.len()];
+    let mut accepted: Vec<Option<Vec<Option<BoundSlot>>>> = alloc::vec![None; rows.len()];
 
     // Both computed against the *declared* bindings and never re-derived as we go: `leader_of`
     // matches a follower to its leader by the controls the two read, so once an input has been
@@ -1011,12 +1095,12 @@ pub(crate) fn rewrite(
         let Some(over) = overrides.get(row.family, row.key) else {
             continue;
         };
-        let wanted: &[Option<Control>] = match over {
+        let wanted: &[Option<BoundSlot>] = match over {
             // The defaults stand, and deliberately are not read as an empty row: nobody cleared
             // this, somebody else owns it.
             Override::NotOurs => continue,
             Override::Cleared => &[],
-            Override::Controls(controls) => controls,
+            Override::Slots(slots) => slots,
         };
 
         let contributors: Vec<_> = parts
@@ -1040,12 +1124,12 @@ pub(crate) fn rewrite(
         }
         accepted[index] = Some(wanted.to_vec());
 
-        for (slot, &control) in wanted.iter().enumerate() {
-            match (contributors.get(slot), control) {
+        for (position, slot) in wanted.iter().enumerate() {
+            match (contributors.get(position), slot) {
                 // A slot the defaults already fill: the binding stays where it is and reads
-                // something else.
-                (Some(part), Some(control)) => {
-                    variant[part.binding].input.set_part(part.part, control);
+                // something else, held with whatever the slot says.
+                (Some(part), Some(slot)) => {
+                    place(&mut variant[part.binding], part.part, slot);
                     rewrite_followers(declared, &leaders, &mut variant, part.binding);
                 }
                 // A slot the defaults fill that the player emptied, with something still bound
@@ -1058,18 +1142,18 @@ pub(crate) fn rewrite(
                     );
                 }
                 // A slot the game shipped nothing for — the empty secondary a screen drew beside
-                // the primary. The last binding feeding the row is cloned onto the new control, so
-                // the secondary behaves like the primary rather than like a bare input with no
-                // modifiers or conditions on it.
-                (None, Some(control)) => {
+                // the primary. The last binding feeding the row is cloned onto the new slot, so the
+                // secondary behaves like the primary rather than like a bare input with no
+                // modifiers or conditions on it. Its chord is the slot's own, not the primary's.
+                (None, Some(slot)) => {
                     let Some(last) = contributors.last() else {
                         continue;
                     };
-                    grown.push(clone_onto(&variant[last.binding], last.part, control));
+                    grown.push(clone_onto(&variant[last.binding], last.part, slot));
                     for (follower, _) in
                         followers_of(declared, &leaders, last.binding).collect::<Vec<_>>()
                     {
-                        grown.push(clone_onto(&variant[follower], last.part, control));
+                        grown.push(clone_onto(&variant[follower], last.part, slot));
                     }
                 }
                 // An empty slot the defaults never filled either, so the row already agrees. `bind`
@@ -1128,7 +1212,7 @@ pub(crate) fn rewrite(
 /// rule below it: a preset moves a `Fixed` row on purpose, which is the whole point of one.
 fn refusal(
     row: &ActionMapping,
-    wanted: &[Option<Control>],
+    wanted: &[Option<BoundSlot>],
     limits: &Limits<'_>,
     preset_authorized: bool,
 ) -> Option<OverrideProblemKind> {
@@ -1146,7 +1230,8 @@ fn refusal(
         });
     }
     let accepts = ControlClass::of(row.accepts);
-    for &control in wanted.iter().flatten() {
+    for slot in wanted.iter().flatten() {
+        let control = slot.control;
         // Shared with capture, which is what stops one control getting two different reasons
         // depending on whether it arrived from a press or from a file.
         match admissible(
@@ -1167,8 +1252,44 @@ fn refusal(
                 });
             }
         }
+        // Neither family nor reservation is asked of a chord entry, as neither is asked of one a
+        // game declares.
+        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+        let unchordable = slot.with.iter().find(|entry| chord_entry(entry).is_none());
+        #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
+        let unchordable = slot.with.first();
+        if let Some(entry) = unchordable {
+            return Some(OverrideProblemKind::NotChordable {
+                entry: entry.clone(),
+            });
+        }
     }
     None
+}
+
+/// What a binding's chord holds for one entry of a slot's, if a player can hold it.
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+fn chord_entry(entry: &ControlOrigin) -> Option<crate::binding::ChordEntry> {
+    match entry {
+        ControlOrigin::Ours(control) => crate::binding::ButtonControl::try_from(*control)
+            .ok()
+            .map(crate::binding::ChordEntry::Control),
+        #[cfg(feature = "keyboard")]
+        ControlOrigin::Modifier(modifier) => Some(crate::binding::ChordEntry::Modifier(*modifier)),
+        ControlOrigin::Foreign { .. } => None,
+    }
+}
+
+/// Makes `binding` read `slot`: its control at `part`, held with its chord.
+///
+/// The chord is replaced rather than kept, since a slot says everything about what is bound there.
+/// `refusal` has already turned down a slot with an entry that cannot be held.
+fn place(binding: &mut BindingSpec, part: crate::binding::BindingPart, slot: &BoundSlot) {
+    binding.input.set_part(part, slot.control);
+    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+    {
+        binding.chord = slot.with.iter().filter_map(chord_entry).collect();
+    }
 }
 
 /// Every binding riding `leader`'s mapping, and the slot of the leader list it was found at.
@@ -1184,7 +1305,7 @@ fn followers_of<'a>(
         .map(|(index, _)| (index, &declared[index]))
 }
 
-/// Moves every rider of `leader` onto the control the leader just took.
+/// Moves every rider of `leader` onto the control the leader just took, and the chord with it.
 ///
 /// Without it a rebind separates two actions that were declared to share a control: the throttle
 /// moves and the afterburner stays on the old key, where whatever the player binds next quietly
@@ -1202,17 +1323,21 @@ fn rewrite_followers(
     // first place.
     for rider in riders {
         variant[rider].input = variant[leader].input;
+        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+        {
+            variant[rider].chord = variant[leader].chord.clone();
+        }
     }
 }
 
-/// A copy of `binding` reading `control` in place of the control at `part`.
+/// A copy of `binding` reading `slot` in place of whatever it read at `part`.
 fn clone_onto(
     binding: &BindingSpec,
     part: crate::binding::BindingPart,
-    control: Control,
+    slot: &BoundSlot,
 ) -> BindingSpec {
     let mut grown = binding.clone();
-    grown.input.set_part(part, control);
+    place(&mut grown, part, slot);
     grown
 }
 
@@ -1227,12 +1352,12 @@ fn clone_onto(
 /// And **a gap has no binding to derive from.** A binding list says what is bound, never in which
 /// column, so an emptied primary and a row that only ever held a secondary compile to the same one
 /// binding. `accepted` is what the player asked for on each row that was not refused, and it is the
-/// authority on shape for exactly those rows: it and the derivation always agree about *which*
-/// controls, and only it knows where the holes are.
+/// authority on the slots of exactly those rows: every slot in it was written into a binding, so it
+/// and the derivation always agree about what is bound, and only it knows where the holes are.
 fn current_rows(
     variant: &[BindingSpec],
     declared: &[ActionMapping],
-    accepted: &[Option<Vec<Option<Control>>>],
+    accepted: &[Option<Vec<Option<BoundSlot>>>],
     context: &'static str,
 ) -> Vec<ActionMapping> {
     let derived = crate::mapping::mappings_of(variant, context);
@@ -1249,23 +1374,11 @@ fn current_rows(
                 })
                 .cloned()
                 .map(
-                    |mut current| match accepted.get(index).and_then(Option::as_ref) {
-                        // `accepted` is the authority on which controls and where the holes are;
-                        // the derivation is the authority on what each surviving binding still
-                        // requires held alongside its control. The derived slots are `accepted`'s
-                        // filled ones with the holes taken out — an emptied slot drops its binding
-                        // and a grown one lands past the end of the contributors, so neither
-                        // reorders what is left — and pairing them in order puts each chord back on
-                        // the control it arrived with.
-                        Some(wanted) => {
-                            let mut derived =
-                                core::mem::take(&mut current.slots).into_iter().flatten();
-                            current.slots = wanted
-                                .iter()
-                                .map(|filled| filled.and_then(|_| derived.next()))
-                                .collect();
-                            current
-                        }
+                    |current| match accepted.get(index).and_then(Option::as_ref) {
+                        Some(wanted) => ActionMapping {
+                            slots: wanted.clone(),
+                            ..current
+                        },
                         None => current,
                     },
                 )
@@ -1476,12 +1589,14 @@ mod tests {
         );
     }
 
-    /// A chord belongs to the binding, not to the slot the player edits, so moving the control
-    /// leaves it where it was — and the secondary a row grows is cloned from the primary, chord
-    /// included, so it behaves like the primary rather than like a bare key.
+    /// A slot says everything about what is bound there. Editing its control keeps what it is held
+    /// with, a bare control drops it, and a slot can ask for a chord the game never declared.
     #[cfg(feature = "keyboard")]
     #[test]
-    fn a_rebound_row_keeps_what_is_held_with_it() {
+    fn a_slot_binds_the_chord_it_holds() {
+        use crate::binding::ModifierKey;
+        use crate::present::ControlOrigin;
+
         #[derive(InputContext)]
         #[context(path = "override_tests.editor", tick = Render)]
         struct Editor;
@@ -1491,24 +1606,26 @@ mod tests {
         app.add_context::<Editor>(|controls| {
             controls
                 .bind::<Jump>(KeyCode::KeyS)
-                .with(crate::binding::ModifierKey::Ctrl)
+                .with(ModifierKey::Ctrl)
                 .mappable();
         });
-        let ctrl = [crate::present::ControlOrigin::Modifier(
-            crate::binding::ModifierKey::Ctrl,
-        )];
+        let entity = app.world_mut().spawn(Editor).id();
+        let ctrl = [ControlOrigin::Modifier(ModifierKey::Ctrl)];
         assert_eq!(chord(&app, "override_tests.jump", 0), ctrl);
 
-        // Moved to Y, and given the secondary the game shipped nothing for.
-        let overrides = bind(
-            &app,
-            "override_tests.jump",
-            &[
-                Control::PhysicalKey(KeyCode::KeyY),
-                Control::PhysicalKey(KeyCode::KeyU),
-            ],
-        );
-        apply_overrides(app.world_mut(), &overrides);
+        // What a screen does when the player captures Y into the first cell, keeping the Ctrl, and
+        // fills the second with U held with Shift.
+        let jump = row(&app, "override_tests.jump");
+        let mut overrides = Overrides::new();
+        let mut edited = overrides.slots_of(&jump);
+        edited[0].as_mut().expect("the declared primary").control =
+            Control::PhysicalKey(KeyCode::KeyY);
+        edited.push(Some(BoundSlot {
+            control: Control::PhysicalKey(KeyCode::KeyU),
+            with: alloc::vec![ControlOrigin::Modifier(ModifierKey::Shift)],
+        }));
+        overrides.bind(jump.family, jump.key, edited);
+        assert!(apply_overrides(app.world_mut(), &overrides).is_empty());
 
         assert_eq!(
             slots(&app, "override_tests.jump"),
@@ -1518,12 +1635,39 @@ mod tests {
             ])
         );
         assert_eq!(chord(&app, "override_tests.jump", 0), ctrl);
-        assert_eq!(chord(&app, "override_tests.jump", 1), ctrl);
+        assert_eq!(
+            chord(&app, "override_tests.jump", 1),
+            [ControlOrigin::Modifier(ModifierKey::Shift)],
+            "the grown slot's own chord, not the primary's"
+        );
+
+        // The plan agrees with the row: the new key alone does nothing, and with Ctrl it fires.
+        hold(&mut app, &[KeyCode::KeyY]);
+        let state = app
+            .world()
+            .get::<InputContextState<Editor>>(entity)
+            .unwrap();
+        assert!(!state.value::<Jump>());
+        hold(&mut app, &[KeyCode::ControlRight]);
+        let state = app
+            .world()
+            .get::<InputContextState<Editor>>(entity)
+            .unwrap();
+        assert!(state.value::<Jump>());
+
+        // A bare control is bound on its own.
+        let overrides = bind(
+            &app,
+            "override_tests.jump",
+            &[Control::PhysicalKey(KeyCode::KeyY)],
+        );
+        assert!(apply_overrides(app.world_mut(), &overrides).is_empty());
+        assert!(chord(&app, "override_tests.jump", 0).is_empty());
     }
 
-    /// A row whose two bindings require different things held, with the first emptied: the chords
-    /// have to travel with their own controls rather than with their column, or the survivor
-    /// inherits the chord of the slot the player cleared.
+    /// A row whose two bindings require different things held, with the first emptied through
+    /// `unbind`, as a screen's clear button does: the survivor keeps its own chord rather than
+    /// taking the one from the slot the player cleared.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_gap_leaves_each_chord_on_its_own_control() {
@@ -1547,12 +1691,8 @@ mod tests {
         // The primary emptied, the secondary left in the column the player can see it in.
         let target = row(&app, "override_tests.jump");
         let mut overrides = Overrides::new();
-        overrides.bind(
-            target.family,
-            target.key,
-            [None, Some(Control::PhysicalKey(KeyCode::KeyS))],
-        );
-        apply_overrides(app.world_mut(), &overrides);
+        overrides.unbind(&target, 0);
+        assert!(apply_overrides(app.world_mut(), &overrides).is_empty());
 
         assert_eq!(
             slots(&app, "override_tests.jump"),
@@ -1905,6 +2045,72 @@ mod tests {
         );
     }
 
+    /// A chord waits on something being held, so an entry with no pressed state has nothing to wait
+    /// on — and a control only a backend knows cannot be read here at all.
+    #[test]
+    fn a_chord_entry_a_player_cannot_hold_is_refused() {
+        use crate::present::ControlOrigin;
+
+        let mut app = app();
+        let jump = row(&app, "override_tests.jump");
+        let foreign = ControlOrigin::Foreign {
+            name: "steam/left_grip".to_string(),
+            label: "Left Grip".to_string(),
+            family: None,
+            class: None,
+        };
+
+        for entry in [ControlOrigin::Ours(Control::MouseMotion), foreign] {
+            let mut overrides = Overrides::new();
+            overrides.bind(
+                jump.family,
+                jump.key,
+                [BoundSlot {
+                    control: Control::PhysicalKey(KeyCode::KeyK),
+                    with: alloc::vec![entry.clone()],
+                }],
+            );
+            let problems = apply_overrides(app.world_mut(), &overrides);
+
+            assert_eq!(
+                problems
+                    .iter()
+                    .map(|problem| problem.kind.clone())
+                    .collect::<Vec<_>>(),
+                [OverrideProblemKind::NotChordable { entry }]
+            );
+            assert_eq!(
+                slots(&app, "override_tests.jump"),
+                filled([Control::PhysicalKey(KeyCode::Space)]),
+                "refused whole"
+            );
+        }
+    }
+
+    /// A rider reads what its leader reads, and that now includes what the leader is held with:
+    /// otherwise `Lunge` would fire on a bare K while `Jump` waited for Ctrl.
+    #[test]
+    fn a_follower_takes_the_chord_its_row_was_given() {
+        use crate::binding::ModifierKey;
+        use crate::present::ControlOrigin;
+
+        let mut app = app();
+        app.world_mut().spawn(Playing);
+        let jump = row(&app, "override_tests.jump");
+        let ctrl_k = BoundSlot {
+            control: Control::PhysicalKey(KeyCode::KeyK),
+            with: alloc::vec![ControlOrigin::Modifier(ModifierKey::Ctrl)],
+        };
+        let mut overrides = Overrides::new();
+        overrides.bind(jump.family, jump.key, [ctrl_k.clone()]);
+        assert!(apply_overrides(app.world_mut(), &overrides).is_empty());
+
+        let prompts = BindingTable::new(app.world()).prompts(Lunge::id(), PromptScope::ANY);
+        assert_eq!(prompts.len(), 1);
+        assert_eq!(prompts[0].origin, ControlOrigin::Ours(ctrl_k.control));
+        assert_eq!(prompts[0].with, ctrl_k.with);
+    }
+
     /// A southpaw preset swaps the two sticks, the canonical thing a preset is for.
     #[cfg(feature = "gamepad")]
     #[test]
@@ -2083,7 +2289,10 @@ mod tests {
         overrides.bind(
             jump.family,
             jump.key,
-            [None, Some(Control::PhysicalKey(KeyCode::KeyJ))],
+            [
+                None,
+                Some(BoundSlot::from(Control::PhysicalKey(KeyCode::KeyJ))),
+            ],
         );
         let problems = apply_overrides(app.world_mut(), &overrides);
         assert!(problems.is_empty(), "{problems:?}");
@@ -2152,7 +2361,7 @@ mod tests {
         overrides.unbind(&jump, 0);
         assert_eq!(
             overrides.get(jump.family, jump.key),
-            Some(&Override::Controls(alloc::vec![None, Some(j)]))
+            Some(&Override::Slots(alloc::vec![None, Some(j.into())]))
         );
 
         // And the secondary of that same row, which leaves nothing at all.
@@ -2199,9 +2408,9 @@ mod tests {
             jump.family,
             jump.key,
             [
-                Some(Control::PhysicalKey(KeyCode::Space)),
+                Some(BoundSlot::from(Control::PhysicalKey(KeyCode::Space))),
                 None,
-                Some(Control::PhysicalKey(KeyCode::KeyL)),
+                Some(BoundSlot::from(Control::PhysicalKey(KeyCode::KeyL))),
             ],
         );
         let problems = apply_overrides(app.world_mut(), &overrides);
@@ -2224,21 +2433,24 @@ mod tests {
     fn a_row_can_be_written_back_with_its_gaps_closed() {
         let app = app();
         let jump = row(&app, "override_tests.jump");
-        let row_with_a_hole = alloc::vec![None, Some(Control::PhysicalKey(KeyCode::KeyJ))];
+        let row_with_a_hole = alloc::vec![
+            None,
+            Some(BoundSlot::from(Control::PhysicalKey(KeyCode::KeyJ)))
+        ];
 
         let mut overrides = Overrides::new();
         overrides.bind(jump.family, jump.key, row_with_a_hole.clone());
         assert_eq!(
             overrides.get(jump.family, jump.key),
-            Some(&Override::Controls(row_with_a_hole.clone())),
+            Some(&Override::Slots(row_with_a_hole.clone())),
             "a table means something by which column a control is in"
         );
 
         overrides.bind(jump.family, jump.key, row_with_a_hole.into_iter().flatten());
         assert_eq!(
             overrides.get(jump.family, jump.key),
-            Some(&Override::Controls(alloc::vec![Some(
-                Control::PhysicalKey(KeyCode::KeyJ)
+            Some(&Override::Slots(alloc::vec![Some(
+                Control::PhysicalKey(KeyCode::KeyJ).into()
             )])),
             "a list does not, and closes the gap on the way in"
         );
@@ -2250,13 +2462,13 @@ mod tests {
     fn a_row_normalizes_to_its_last_filled_slot() {
         let app = app();
         let jump = row(&app, "override_tests.jump");
-        let space = Control::PhysicalKey(KeyCode::Space);
+        let space = BoundSlot::from(Control::PhysicalKey(KeyCode::Space));
 
         let mut overrides = Overrides::new();
-        overrides.bind(jump.family, jump.key, [Some(space), None]);
+        overrides.bind(jump.family, jump.key, [Some(space.clone()), None]);
         assert_eq!(
             overrides.get(jump.family, jump.key),
-            Some(&Override::Controls(alloc::vec![Some(space)])),
+            Some(&Override::Slots(alloc::vec![Some(space)])),
             "a blank second cell is not something to write down"
         );
 
@@ -2546,9 +2758,9 @@ mod tests {
             jump.family,
             jump.key,
             [
-                Some(Control::PhysicalKey(KeyCode::Space)),
+                Some(BoundSlot::from(Control::PhysicalKey(KeyCode::Space))),
                 None,
-                Some(Control::PhysicalKey(KeyCode::KeyL)),
+                Some(BoundSlot::from(Control::PhysicalKey(KeyCode::KeyL))),
             ],
         );
         let problems = apply_overrides(app.world_mut(), &overrides);
@@ -2776,7 +2988,10 @@ mod tests {
             overrides.bind(
                 DeviceFamily::KeyboardMouse,
                 jump,
-                [None, Some(Control::PhysicalKey(KeyCode::KeyJ))],
+                [
+                    None,
+                    Some(BoundSlot::from(Control::PhysicalKey(KeyCode::KeyJ))),
+                ],
             );
 
             let saved = save_overrides(&overrides);
@@ -2801,6 +3016,109 @@ mod tests {
             assert_eq!(loaded, overrides, "the gap came back where it was");
         }
 
+        /// A chord rides the string its slot already has, under the names a catalogue uses, and
+        /// comes back as the same slot — a modifier, a button held as part of the chord, and a
+        /// logical key whose character is the separator itself.
+        #[test]
+        fn a_chord_round_trips_inside_its_slot() {
+            use crate::binding::ModifierKey;
+            use crate::present::ControlOrigin;
+
+            const GOLDEN_WITH_CHORDS: &str = "action_map_version = 1\n\
+                \n\
+                [bindings.gamepad]\n\
+                \"persist_tests.jump\" = \"pad/LeftTrigger+pad/South\"\n\
+                \n\
+                [bindings.keyboard_mouse]\n\
+                \"persist_tests.jump\" = [\"mod/ctrl+key/KeyS\", \"mod/shift+char/+\"]\n\
+                \n\
+                [tunables]\n";
+
+            let declared = declared();
+            let registry = types();
+            let types = registry.read();
+
+            let mut overrides = Overrides::new();
+            overrides.bind(
+                DeviceFamily::KeyboardMouse,
+                mapping_key(&declared, DeviceFamily::KeyboardMouse, "persist_tests.jump"),
+                [
+                    BoundSlot {
+                        control: Control::PhysicalKey(KeyCode::KeyS),
+                        with: alloc::vec![ControlOrigin::Modifier(ModifierKey::Ctrl)],
+                    },
+                    BoundSlot {
+                        control: Control::LogicalKey('+'),
+                        with: alloc::vec![ControlOrigin::Modifier(ModifierKey::Shift)],
+                    },
+                ],
+            );
+            overrides.bind(
+                DeviceFamily::Gamepad,
+                mapping_key(&declared, DeviceFamily::Gamepad, "persist_tests.jump"),
+                [BoundSlot {
+                    control: Control::GamepadButton(GamepadButton::South),
+                    with: alloc::vec![ControlOrigin::Ours(Control::GamepadButton(
+                        GamepadButton::LeftTrigger
+                    ))],
+                }],
+            );
+
+            let saved = save_overrides(&overrides);
+            let serializer = TypedReflectSerializer::new(&saved, &types);
+            let text = toml::to_string(&serializer).expect("serializes");
+            assert_eq!(text, GOLDEN_WITH_CHORDS);
+
+            let registration = types
+                .get(core::any::TypeId::of::<SavedOverrides>())
+                .unwrap();
+            let value: toml::Value = toml::from_str(&text).expect("parses");
+            let reflected = TypedReflectDeserializer::new(registration, &types)
+                .deserialize(value)
+                .expect("deserializes");
+            let loaded_saved =
+                <SavedOverrides as FromReflect>::from_reflect(&*reflected).expect("round-trips");
+
+            let (loaded, problems, unresolved) =
+                resolve_saved(&loaded_saved, &declared, &[]).expect("a version this build wrote");
+            assert!(problems.is_empty(), "{problems:?}");
+            assert!(unresolved.is_empty(), "{unresolved:?}");
+            assert_eq!(loaded, overrides);
+        }
+
+        /// Only `char/` can hold a `+`, and only as its one character, so a slot splits the same
+        /// way wherever that key sits in it. Anything that does not come apart into known names is
+        /// no slot at all.
+        #[test]
+        fn a_slot_reads_back_only_when_every_name_in_it_does() {
+            use crate::binding::ModifierKey;
+            use crate::present::ControlOrigin;
+
+            assert_eq!(
+                slot_from_name("char/++key/KeyS"),
+                Some(BoundSlot {
+                    control: Control::PhysicalKey(KeyCode::KeyS),
+                    with: alloc::vec![ControlOrigin::Ours(Control::LogicalKey('+'))],
+                }),
+                "the separator as a held key"
+            );
+            assert_eq!(
+                slot_from_name("mod/alt+mod/super+key/KeyQ"),
+                Some(BoundSlot {
+                    control: Control::PhysicalKey(KeyCode::KeyQ),
+                    with: alloc::vec![
+                        ControlOrigin::Modifier(ModifierKey::Alt),
+                        ControlOrigin::Modifier(ModifierKey::Super),
+                    ],
+                })
+            );
+            assert_eq!(slot_from_name("mod/ctrl+"), None, "a chord with no control");
+            assert_eq!(slot_from_name("mod/ctrl"), None, "a modifier fires nothing");
+            assert_eq!(slot_from_name("mod/hyper+key/KeyS"), None);
+            assert_eq!(slot_from_name("char/ab"), None);
+            assert_eq!(slot_from_name("+key/KeyS"), None);
+        }
+
         /// A hand-written row of nothing but the word is the state that already means that, so a
         /// person editing the file cannot produce a row of empties the crate would have to explain.
         #[test]
@@ -2812,10 +3130,7 @@ mod tests {
                     "keyboard_mouse".to_string(),
                     BTreeMap::from([(
                         "persist_tests.jump".to_string(),
-                        SavedRow::Controls(alloc::vec![
-                            "cleared".to_string(),
-                            "cleared".to_string()
-                        ]),
+                        SavedRow::Slots(alloc::vec!["cleared".to_string(), "cleared".to_string()]),
                     )]),
                 )]),
                 tunables: BTreeMap::new(),
@@ -2844,7 +3159,7 @@ mod tests {
                     "keyboard_mouse".to_string(),
                     BTreeMap::from([(
                         "persist_tests.jump".to_string(),
-                        SavedRow::Controls(alloc::vec!["key/KeyZ".to_string()]),
+                        SavedRow::Slots(alloc::vec!["key/KeyZ".to_string()]),
                     )]),
                 )]),
                 tunables: BTreeMap::new(),
@@ -2874,11 +3189,11 @@ mod tests {
                     BTreeMap::from([
                         (
                             "persist_tests.move.up".to_string(),
-                            SavedRow::Controls(alloc::vec!["key/DoesNotExist".to_string()]),
+                            SavedRow::Slots(alloc::vec!["key/DoesNotExist".to_string()]),
                         ),
                         (
                             "persist_tests.jump".to_string(),
-                            SavedRow::Controls(alloc::vec!["key/Space".to_string()]),
+                            SavedRow::Slots(alloc::vec!["key/Space".to_string()]),
                         ),
                     ]),
                 )]),
@@ -2916,8 +3231,8 @@ mod tests {
                     DeviceFamily::KeyboardMouse,
                     mapping_key(&declared, DeviceFamily::KeyboardMouse, "persist_tests.jump")
                 ),
-                Some(&Override::Controls(alloc::vec![Some(
-                    Control::PhysicalKey(KeyCode::Space)
+                Some(&Override::Slots(alloc::vec![Some(
+                    Control::PhysicalKey(KeyCode::Space).into()
                 )]))
             );
         }
@@ -2933,7 +3248,7 @@ mod tests {
                     "keyboard_mouse".to_string(),
                     BTreeMap::from([(
                         "persist_tests.no_such_action".to_string(),
-                        SavedRow::Controls(alloc::vec!["key/KeyZ".to_string()]),
+                        SavedRow::Slots(alloc::vec!["key/KeyZ".to_string()]),
                     )]),
                 )]),
                 tunables: BTreeMap::new(),

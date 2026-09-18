@@ -182,29 +182,6 @@ winit — [winit#4606][] and [winit#2678][] — and are the deferred table's row
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678
 
-### 1059 An app cannot edit a chord, because an override rewrites slots only
-
-Drawing and editing a chord is the app's business, not this crate's. What is wrong is that the crate
-blocks the second: an override addresses a mapping's `slots`, a chord is not a slot, and no public
-type names one. So a game offering a player-editable `Ctrl+S` has nowhere to put the result.
-
-Reading one is not blocked, and was never as blocked as this entry first said. A chord reaches
-`Prompt::with` as `ControlOrigin`, which is public and exists for exactly this, and chunk 128 put it
-on the rebinding row as well — so a game can read `Ctrl+S` and pre-set an editor from it.
-
-What is still blocked is the write. `Overrides` addresses a row as controls, and `rewrite` sets the
-control and leaves the binding's chord where it was, so the crate answers "what does a rebind do to
-a modifier" on the game's behalf and offers no way to answer it differently.
-
-Confirmed by reading `mapping.rs`, `overrides.rs` and `present.rs`.
-
-No requirement is violated. R12.2 governs layout labels rather than chords, and nothing in R18 or
-R19 says a row must name what is held alongside it. R19's rebinding surface is written in terms of
-slots throughout, so the omission is consistent rather than an oversight.
-
-_Fix:_ **chunk 129** for the vocabulary and **chunk 129b** for the screen that sets one. A game
-needing this today re-declares the context with the chord it wants.
-
 ### 1060 A chord spanning two device families escapes conflict detection
 
 `binding_family` (`mapping.rs`) derives a row's family from the binding's primary input alone; the
@@ -218,12 +195,15 @@ chord inside either is ordinary: `Shift + Right Mouse` is one family, and so is 
 that wants both triggers held, or a shoulder button standing in as a modifier. Only a chord with a
 foot in each family has no family to file under, and it is also the combination nobody wants —
 `Shift + Left Trigger` asks a player to reach for two devices at once. Nothing in tree writes either
-kind today, so this is latent rather than live.
+kind today, so this is latent rather than live. Since chunk 129 an override can write one too: a
+keyboard row's slot saved as `pad/LeftTrigger+key/KeyS` applies, because `refusal` asks nothing of a
+chord entry's family. Confirmed by reading `overrides.rs`, not by applying one.
 
 _Fix:_ **unrouted**. A plan-build diagnostic refusing a chord entry whose family differs from the
 primary's, which chunk 17b's machinery already supports, and which leaves every same-family chord
-alone. Cheap, but it is a new refusal, so it wants a deliberate yes rather than being folded into
-whichever chunk next touches chords.
+alone; and its twin in `refusal`, a `WrongFamily` for an entry, so a save file cannot write what a
+declaration may not. Cheap, but it is a new refusal, so it wants a deliberate yes rather than being
+folded into whichever chunk next touches chords.
 
 ### 1061 An icon prompt drops what the chord requires
 
