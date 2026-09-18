@@ -275,6 +275,25 @@ something draws the toggles; what they edit is `BoundSlot::with`, written back t
   row precisely because no screen could edit it; with an editor, a chorded row can be `mappable` and
   mean it.
 
+### 135. A chord across two device families
+
+`docs/issues.md` 1060. `binding_family` files a row under its primary control's family without
+consulting the chord, and conflicts are per family, so a key in a gamepad binding's chord is
+invisible to keyboard conflict detection. Nothing in tree declares one, but since 129 a save can
+write one: `refusal` asks nothing of a chord entry's family, so `pad/LeftTrigger+key/KeyS` on a
+keyboard row applies.
+
+- **Refuse or detect is the decision.** 1060 sketched a refusal: a plan-build diagnostic on a chord
+  entry whose family differs from its primary's, with a twin in `refusal` beside 129's
+  `NotChordable`. The case against is the player it would stop — a foot pedal that enumerates as a
+  gamepad, a one-handed layout split across a pad and a keyboard — for whom a cross-family chord is
+  the point. The alternative leaves the row filed where it is and makes conflict detection consult
+  each chord entry's family, so the overlap is reported rather than the input forbidden.
+- **The save path answers as the declaration does.** Whatever a declaration may not write, a file
+  may not either, and the reverse.
+- **Verified by** tests on both paths — a declaration mixing families, and a saved row naming a
+  gamepad entry on a keyboard row.
+
 ### 94c. A platform modifier
 
 R12.4: `Cmd` on macOS should be usable as `Ctrl` everywhere else, as a named modifier resolved at
@@ -459,6 +478,70 @@ prompt and the generic tier's art, below.
 - **Not doing: the generic tier's stamped art.** Kenney's generic set is blank, unlabeled buttons,
   so a generic-tier icon needs a short text stamp authored onto it by hand. That is a content task
   with a known answer, and until it is done the generic tier resolves to text.
+
+### 136. A gallery of prompts
+
+Every prompt permutation the crate can produce, on one screen: a key, a mouse button, a face button,
+a bumper and a trigger, a stick, a composite, a keyboard chord and a pad chord, a hold and a
+double-tap, each drawn as text and as icons side by side, and an action nothing binds. No example
+shows more than a few of these today, and none shows two brands.
+
+- **Keys switch the brand**, one number per brand — Xbox, PlayStation, Nintendo, Generic — so a
+  single brand is on screen at a time. `prompt_ui` takes its brand from the connected pad, so it
+  grows an override the gallery sets; pad rows carry `PromptFamily(Gamepad)`, so nothing needs a pad
+  plugged in. Generic is the useful one to land on: it has no face-button art, so the text fallback
+  shows itself.
+- **A key cycles presets**, so every span re-resolves under a changed binding set.
+- **A reference sheet, not a game**, beside `capture` and `text_field` rather than the flagship
+  examples, and it stays one file.
+- **Lands before 133 and 134**, so it shows their gaps as they stand — a chord drawn as one icon, a
+  shadowed binding drawn as a dash — and each of them shows its fix here.
+- **Not doing: `IconPrompt`**, 110's block half, which the gallery would show once it exists.
+
+### 133. An icon prompt for a chord
+
+`docs/issues.md` 1061. The icon path resolves a glyph for `prompt.origin` alone, so a chord drawn as
+icons shows one bumper where two are wanted; `prompt.with` reaches only the text caption.
+
+- **One span, several children.** A text span need not be a leaf, so an `IconPromptSpan` becomes an
+  empty span parenting glyph, `+`, glyph, and the chord stays one inline run that moves with its
+  sentence. `Resolved::Icon` holds a sequence rather than one path.
+- **Modifiers get art.** Kenney ships `keyboard_ctrl`, `keyboard_shift` and `keyboard_alt`; the
+  curated list left them out because nothing had asked for a modifier glyph.
+  `scripts/import_input_prompts.py` gains `mod/ctrl`, `mod/shift`, `mod/alt` and `mod/super`.
+- **So not example-only after all.** `Glyph::Own` holds a `Control` and `resolve_glyph` takes one,
+  and a modifier is not a `Control` (D78). Glyph resolution has to accept one — a `Glyph` variant or
+  a resolver over `ControlOrigin` is this chunk's decision.
+- **`Super` is two pictures**, Command on macOS and the Windows key elsewhere: 94c's platform
+  question, arriving for art. The script already gets the neighbouring case wrong, choosing by side
+  where the difference is platform — `SuperLeft` draws Command, `SuperRight` the Windows key, and
+  `AltRight` Option.
+- **An entry with no art** either drops the whole chord to its text caption or draws a mixed run.
+  Once the modifiers have art this is rare, and which reads better is this chunk's call.
+- **Verified by** `SmartBomb` getting an `IconPromptSpan` beside its charge meter, naming both
+  bumpers — the caller 1061 said nothing in tree had — and by 136's chord rows under every brand.
+
+### 134. A legend, as well as a prompt
+
+`docs/issues.md` 1062. `prompts` answers what would fire an action *now*, and R18.1 and R18.2
+require it to. A legend asks something else: "Ctrl+N — new game" is true whether or not `Shell` is
+live this frame, and nothing answers it. Disasteroids' corner hint is the case in tree — with the
+controls screen open, `Menu` shadows `Shell` and two of its three entries fall back to a dash.
+
+- **A requirement first.** R18 makes prompts present-tense and says nothing about a legend. This
+  adds one beside R18.1 rather than loosening R18.2, which is right for what it covers.
+- **The API shape is the decision.** A scope flag, a second method on `Prompts`, or a `Prompt` that
+  says whether it is live with `prompts` no longer filtering. The last lets a legend draw a shadowed
+  binding dimmed rather than hide it, and costs every present-tense caller a filter.
+- **Three kinds of empty.** Nothing carries the context; it is carried but inactive; a stronger
+  context has taken the control. A legend wants the second read as live, and not the first.
+- **Not `mappings`**, which answers per family and per composite part, carries rebind policy, and
+  omits `private` bindings.
+- **The dash itself** is `—`, which Bevy's default font draws as a box — in `prompt_ui`'s unbound
+  fallback and in the controls screen's own footer. A legend stops the hint reaching the fallback;
+  the footer still needs a character the font has.
+- **Verified by** the corner hint naming `F1` and `Ctrl+N` with the controls screen open, and a
+  legend row in 136 beside the prompt row for the same shadowed action.
 
 ---
 

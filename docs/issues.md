@@ -165,9 +165,8 @@ three different reasons for an empty answer — nothing carries the context, the
 but inactive, and a stronger context has taken the control — and a legend wants the second to read
 like the third, possibly drawn dimmed rather than hidden.
 
-_Fix:_ **unrouted.** Not a font problem, though one is sitting on top of it: the fallback is `"—"`
-and Bevy's default font has no glyph for U+2014, so it draws as a box — visible in the same
-screenshot on `settings.rs`'s own footer sentence.
+_Fix:_ **chunk 134**, which also takes the fallback's `—`, a character Bevy's default font draws as
+a box.
 
 ### 1018 A platform modifier
 
@@ -199,35 +198,21 @@ kind today, so this is latent rather than live. Since chunk 129 an override can 
 keyboard row's slot saved as `pad/LeftTrigger+key/KeyS` applies, because `refusal` asks nothing of a
 chord entry's family. Confirmed by reading `overrides.rs`, not by applying one.
 
-_Fix:_ **unrouted**. A plan-build diagnostic refusing a chord entry whose family differs from the
-primary's, which chunk 17b's machinery already supports, and which leaves every same-family chord
-alone; and its twin in `refusal`, a `WrongFamily` for an entry, so a save file cannot write what a
-declaration may not. Cheap, but it is a new refusal, so it wants a deliberate yes rather than being
-folded into whichever chunk next touches chords.
+_Fix:_ **chunk 135**, which decides between refusing such a chord and detecting across it.
 
 ### 1061 An icon prompt drops what the chord requires
 
 `examples/common/prompt_ui.rs` resolves a glyph for `prompt.origin` and returns `Resolved::Icon`,
 which holds one icon; `prompt.with` is read only on the text path, by `caption`. So an action bound
 to a chord and shown as an icon draws the primary control alone — a player told to press one bumper
-when two are wanted. The text path is correct, and the crate hands over everything needed: this is
-the example's shared prompt code, not `Prompt` or `Glyph`.
+when two are wanted. The text path is correct.
 
 Latent, and reachable rather than hypothetical: no chorded binding in tree carries an icon prompt
 today — `SmartBomb` has no prompt span at all — but chunk 128 puts `SmartBomb` on two bumpers, and
 adding an `IconPromptSpan` for it afterwards is the obvious next step. Confirmed by reading
 `prompt_ui.rs`.
 
-_Fix:_ **unrouted**, and the mechanism wants checking before the shape is decided. `bevy_text` has
-an `inline_box` module, which is the name for putting a non-text box inside a text run and would
-make a chord one mixed span — glyph, `+`, glyph — rather than a row of siblings. **Not read**; noted
-because it would beat the obvious alternative, `Resolved::Icon` holding a sequence of paths with the
-text caption as the fallback whenever any entry lacks a glyph. `GhostNode` is the wrong tool either
-way: it is `ghost_nodes`-gated and experimental, and it hoists children through *layout* rather than
-through the text-span hierarchy, which is what would have to traverse it.
-
-Either shape is the example's to build — arranging glyphs is a layout question `prompt_ui.rs` owns,
-which is why this is not a crate change.
+_Fix:_ **chunk 133**.
 
 ### 1019 The types a scene would author carry no `Reflect`, and auto-registration is switched off
 
