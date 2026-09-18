@@ -1120,6 +1120,36 @@ query is [rust-windowing/winit#4606](https://github.com/rust-windowing/winit/iss
 broader tracking issue, [#2678](https://github.com/rust-windowing/winit/issues/2678), has been open
 since February 2023, assigned, and unimplemented. Not a gap to plan around closing soon.
 
+### D82 — A prompt names the control, and the condition belongs to the prose
+
+**Decided.** A prompt, as text or as an icon, draws the control that fires the action and whatever
+must be held with it, and nothing about how it has to be pressed. "Hold ⟨X⟩ to reload" is a sentence
+the game writes around a prompt that reads "X". Chunk 136's gallery found the two paths disagreeing;
+chunk 133 makes the text path agree with the icon one.
+
+**Rules out.** Captioning a hold or a multi-tap in the prompt itself, as `fallback_format` did for
+`PromptSpan`, and giving an icon prompt a condition to draw.
+
+**Reversal.** Four things break.
+
+- **A custom condition cannot be rendered.** `ConditionDescriptor` knows a hold and a multi-tap, and
+  a `Custom` condition describes as nothing, so a prompt that captions conditions is right for two
+  and silently wrong for the rest.
+- **How a condition is described is a choice, and the prose writer's.** "Hold", "press and hold",
+  "long-press", or a charge meter beside the prompt instead of any word at all. A button glyph
+  depicts what the player sees; a condition has no depiction, only a wording, and a prompt that
+  supplies one takes it from the game.
+- **A condition does not move, so its wording never goes stale.** A prompt exists to follow what can
+  change under it: a rebind, a preset, a brand, a context switching. Capture, overrides and presets
+  all move the control and leave the condition as declared, so the words describing it can be static
+  text. The one player-facing switch that does change how a control is pressed, `hold_or_toggle`,
+  was never in `ConditionDescriptor` either, and prose around it reads the tunable.
+- **A game may not want the condition shown at all.** A prompt that always captions it gives that
+  game no way to leave it out short of rewriting the prompt.
+
+**What stays.** `Prompt::condition` still says which condition a binding has, and a rebinding screen
+still formats one: a row describes the binding, where a prompt only names what to press.
+
 ---
 
 ## Capture

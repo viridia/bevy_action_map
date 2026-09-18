@@ -189,6 +189,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 94b  | Either modifier                                                       |
 | 128  | A rebinding row that shows its chord                                  |
 | 129  | An override that can name a chord                                     |
+| 136  | A gallery of prompts                                                  |
 
 ---
 
@@ -452,7 +453,8 @@ prompt and the generic tier's art, below.
   two are not merged for the same reason a span and a block element are never one type generally —
   their layout knobs differ, `InlineImage`'s are not all built yet, and a block prompt has to align
   like any other block element on its screen, which a component built around the inline case cannot
-  promise. `IconPromptSpan` has landed; `IconPrompt` has not.
+  promise. `IconPromptSpan` has landed; `IconPrompt` has not. When it does, `prompt_gallery` gets a
+  block column beside its inline one.
 - **`InlineImage` sizes itself from the loaded image's own pixels, with no resize hook** — measured
   against a real window, not read off the PR: a 64px face-button icon inline with 15px text towers
   over the line rather than sitting in it, and nothing on the component overrides that once the
@@ -479,29 +481,10 @@ prompt and the generic tier's art, below.
   so a generic-tier icon needs a short text stamp authored onto it by hand. That is a content task
   with a known answer, and until it is done the generic tier resolves to text.
 
-### 136. A gallery of prompts
-
-Every prompt permutation the crate can produce, on one screen: a key, a mouse button, a face button,
-a bumper and a trigger, a stick, a composite, a keyboard chord and a pad chord, a hold and a
-double-tap, each drawn as text and as icons side by side, and an action nothing binds. No example
-shows more than a few of these today, and none shows two brands.
-
-- **Keys switch the brand**, one number per brand — Xbox, PlayStation, Nintendo, Generic — so a
-  single brand is on screen at a time. `prompt_ui` takes its brand from the connected pad, so it
-  grows an override the gallery sets; pad rows carry `PromptFamily(Gamepad)`, so nothing needs a pad
-  plugged in. Generic is the useful one to land on: it has no face-button art, so the text fallback
-  shows itself.
-- **A key cycles presets**, so every span re-resolves under a changed binding set.
-- **A reference sheet, not a game**, beside `capture` and `text_field` rather than the flagship
-  examples, and it stays one file.
-- **Lands before 133 and 134**, so it shows their gaps as they stand — a chord drawn as one icon, a
-  shadowed binding drawn as a dash — and each of them shows its fix here.
-- **Not doing: `IconPrompt`**, 110's block half, which the gallery would show once it exists.
-
 ### 133. An icon prompt for a chord
 
-`docs/issues.md` 1061. The icon path resolves a glyph for `prompt.origin` alone, so a chord drawn as
-icons shows one bumper where two are wanted; `prompt.with` reaches only the text caption.
+`docs/issues.md` 1061 and 1064. The icon path resolves a glyph for `prompt.origin` alone, so a chord
+drawn as icons shows one bumper where two are wanted; `prompt.with` reaches only the text caption.
 
 - **One span, several children.** A text span need not be a leaf, so an `IconPromptSpan` becomes an
   empty span parenting glyph, `+`, glyph, and the chord stays one inline run that moves with its
@@ -509,6 +492,11 @@ icons shows one bumper where two are wanted; `prompt.with` reaches only the text
 - **Modifiers get art.** Kenney ships `keyboard_ctrl`, `keyboard_shift` and `keyboard_alt`; the
   curated list left them out because nothing had asked for a modifier glyph.
   `scripts/import_input_prompts.py` gains `mod/ctrl`, `mod/shift`, `mod/alt` and `mod/super`.
+- **The re-run fixes the inline art too** (1064). `make_inline` lets ImageMagick choose the PNG
+  type, which gives 8-bit grey+alpha for monochrome art and a palette for the rest. Bevy 0.20.0-rc.1
+  draws the first as an opaque yellow box ([bevy#25538][] is the upstream fix), and the second bands
+  the edge. `PNG32:` on the output path forces the full RGBA the script's comment already claims,
+  and the re-run this chunk makes anyway rewrites all 164 files.
 - **So not example-only after all.** `Glyph::Own` holds a `Control` and `resolve_glyph` takes one,
   and a modifier is not a `Control` (D78). Glyph resolution has to accept one — a `Glyph` variant or
   a resolver over `ControlOrigin` is this chunk's decision.
@@ -518,15 +506,21 @@ icons shows one bumper where two are wanted; `prompt.with` reaches only the text
   `AltRight` Option.
 - **An entry with no art** either drops the whole chord to its text caption or draws a mixed run.
   Once the modifiers have art this is rare, and which reads better is this chunk's call.
+- **`caption` stops formatting the condition.** D82: a prompt names the control, and "Hold" is the
+  surrounding prose's word. The text path calls `fallback_format` and the icon path does not, so the
+  gallery's hold and double-tap rows read "Hold X" beside a bare X; after this both read X.
 - **Verified by** `SmartBomb` getting an `IconPromptSpan` beside its charge meter, naming both
   bumpers — the caller 1061 said nothing in tree had — and by 136's chord rows under every brand.
+  The keyboard, bumper, trigger and stick rows have to draw on a transparent ground rather than a
+  black square.
 
 ### 134. A legend, as well as a prompt
 
-`docs/issues.md` 1062. `prompts` answers what would fire an action *now*, and R18.1 and R18.2
-require it to. A legend asks something else: "Ctrl+N — new game" is true whether or not `Shell` is
-live this frame, and nothing answers it. Disasteroids' corner hint is the case in tree — with the
-controls screen open, `Menu` shadows `Shell` and two of its three entries fall back to a dash.
+`docs/issues.md` 1062 and 1065. `prompts` answers what would fire an action *now*, and R18.1 and
+R18.2 require it to. A legend asks something else: "Ctrl+N — new game" is true whether or not
+`Shell` is live this frame, and nothing answers it. Disasteroids' corner hint is the case in tree —
+with the controls screen open, `Menu` shadows `Shell` and two of its three entries fall back to a
+dash.
 
 - **A requirement first.** R18 makes prompts present-tense and says nothing about a legend. This
   adds one beside R18.1 rather than loosening R18.2, which is right for what it covers.
@@ -537,11 +531,21 @@ controls screen open, `Menu` shadows `Shell` and two of its three entries fall b
   context has taken the control. A legend wants the second read as live, and not the first.
 - **Not `mappings`**, which answers per family and per composite part, carries rebind policy, and
   omits `private` bindings.
-- **The dash itself** is `—`, which Bevy's default font draws as a box — in `prompt_ui`'s unbound
-  fallback and in the controls screen's own footer. A legend stops the hint reaching the fallback;
-  the footer still needs a character the font has.
-- **Verified by** the corner hint naming `F1` and `Ctrl+N` with the controls screen open, and a
-  legend row in 136 beside the prompt row for the same shadowed action.
+- **The dash itself** is `—`, which Bevy's default font draws as a box: `FiraMono-subset.ttf` is
+  printable ASCII and nothing else. A legend stops the hint reaching the fallback, but the `—` also
+  appears in `debug_overlay`'s empty slot and in the controls screen's help text, and a
+  `LogicalKey('é')` label is non-ASCII by nature.
+- **So the examples get a real font.** FiraSans-Regular, the face `bevy_feathers` ships (OFL, 441
+  KB, with `—`, `×` and Latin accents), copied with its licence into `assets/fonts/`. A plugin in
+  `examples/common` inserts it at `AssetId::default()` in `Assets<Font>` after `DefaultPlugins`,
+  which replaces the font every span with an unset `font` draws in, so no span changes. Every
+  example with a window adds the plugin.
+- **The crate's own fallback goes ASCII** (1065). `fallback_format` writes a multi-tap as `W ×2`,
+  and a game on Bevy's default font gets a box from `src/` whatever the examples do; `W x2` has no
+  such problem.
+- **Verified by** the corner hint naming `F1` and `Ctrl+N` with the controls screen open, a legend
+  row in 136 beside the prompt row for the same shadowed action, and the gallery's unbound row
+  drawing a dash rather than a box.
 
 ---
 
@@ -833,6 +837,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
 [bevy#25596]: https://github.com/bevyengine/bevy/issues/25596
 [bevy#25675]: https://github.com/bevyengine/bevy/pull/25675
+[bevy#25538]: https://github.com/bevyengine/bevy/pull/25538
 [bevy#25710]: https://github.com/bevyengine/bevy/pull/25710
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678

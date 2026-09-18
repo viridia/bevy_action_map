@@ -315,6 +315,7 @@ need `--features serialize` as well, marked below.
 | `move_and_jump`   | Two device classes, two tick domains, dead zones, a rate conversion        |
 | `capture`         | Interactive rebind capture on its own, without a game around it            |
 | `text_field`      | A focused text field claiming every character key beside live gameplay     |
+| `prompt_gallery`  | Every kind of prompt as text and as icons, under each pad brand and preset |
 | `diagnostics`     | What a bad binding declaration reports, and when — no window, no `App`     |
 | `ime_diagnostic`  | What a keypress really carries while an IME is composing                   |
 

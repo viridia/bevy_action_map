@@ -89,6 +89,15 @@ pub enum PromptPick {
 #[derive(Component, Clone)]
 pub struct PromptUnbound(pub String);
 
+/// Which brand pad prompts speak in, whatever pad is connected.
+///
+/// Without it, prompts follow the first connected pad. Set it where the pad is not the answer: a
+/// screen showing every brand's art, or a player who would rather read the buttons of a pad other
+/// than the one the game detected. Changing it is yours to announce, with
+/// [`PromptGeneration::invalidate`], exactly as changing [`PromptDevice`] is.
+#[derive(Resource, Clone, Copy)]
+pub struct PromptBrand(pub GamepadBrand);
+
 /// Draws prompts, and keeps them true.
 pub fn plugin(app: &mut App) {
     app.init_resource::<IconManifest>();
@@ -128,11 +137,15 @@ fn active_family(world: &World) -> Option<DeviceFamily> {
     )
 }
 
-/// Whichever connected pad's brand a prompt should speak in, `Generic` if none says.
+/// The brand a prompt should speak in: [`PromptBrand`] where the game set one, and otherwise the
+/// first connected pad's, `Generic` if none says.
 ///
 /// The first one found: a game with two pads of different brands on one line has no answer that is
 /// right for both, and picking one beats naming none.
 fn connected_brand(world: &mut World) -> GamepadBrand {
+    if let Some(brand) = world.get_resource::<PromptBrand>() {
+        return brand.0;
+    }
     let mut brands = world.query::<&Brand>();
     brands
         .iter(world)
@@ -321,7 +334,8 @@ enum Resolved {
 /// answering the same lookup, but choosing between an icon and text rather than only ever text.
 ///
 /// Which gamepad's brand a control's icon draws in is read the way [`split_screen`]'s device label
-/// already does: the first connected pad's `Brand`, since nothing here plays more than one at once.
+/// already does: the first connected pad's `Brand`, since nothing here plays more than one at once,
+/// unless [`PromptBrand`] overrides it.
 ///
 /// [`split_screen`]: ../split_friction/split_screen/index.html
 fn refresh_icon_prompts(world: &mut World) {

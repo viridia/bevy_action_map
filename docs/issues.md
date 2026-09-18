@@ -28,7 +28,7 @@ chunk's own commit, and `docs/design.md` or `docs/decisions.md` where anything a
 are the record. A gap in the sequence below is a retired finding, not an omission. The next
 unassigned number is stated here; keep it up to date when numbering new items.
 
-**Next: 1064.**
+**Next: 1066.**
 
 **The calibration warning, stated up front because it is fair.** Most of these entries came from
 asking a model to scan `src/`, and a model asked to find sixty problems will find sixty. Some of
@@ -75,6 +75,52 @@ every game meets it once, by surprise, and has to work out what happened.
 _Fix:_ the generic form is the **consumption-aware `FocusedInput` dispatch** deferred row, gated on
 a game wanting `bevy_ui_widgets`' own widgets working unmodified. What has no home is the smaller
 half — saying so somewhere a game reads before it hits this.
+
+### 1064 Most inline icons draw as an opaque yellow-and-black box
+
+`scripts/import_input_prompts.py` · `assets/input_prompts_inline/` · **observed** in
+`prompt_gallery`: every keyboard and mouse icon, and the bumpers, triggers and sticks
+
+`make_inline` writes its last step to a bare `dst`, and ImageMagick picks the smallest PNG color
+type that holds the pixels. For monochrome art that is 8-bit gray+alpha, which is 139 of the 164
+inline files. Bevy 0.20.0-rc.1 loads a `LumaA8` image as `Rg8Unorm`, so gray lands in red, alpha in
+green, and the icon draws opaque: yellow where the art is, black where it is transparent, and red on
+the edge, where un-premultiplying left white under partial alpha. The other 25, the colored face
+buttons, came out as 8-bit palette files, the banded edge the script's own comment says full RGBA
+output exists to avoid.
+
+The loading half is a Bevy regression, not a choice. 0.19.1 expanded 8-bit grey to RGBA; two 0.20
+PRs ([bevy#24223][], [bevy#25020][]) changed it to one and two channels without meaning to, and
+[bevy#25538][], open and unmilestoned, restores the old behaviour. The palette half is this script's
+alone.
+
+Nothing in Disasteroids is bitten, because its two icon sites are face buttons. The full-size
+`assets/input_prompts/` copies are Kenney's own palette files and are not affected. Forcing the
+output type (`PNG32:` on `dst`) and re-running the script against the pack fixes both halves,
+whether or not the regression is fixed before 0.20 ships.
+
+_Fix:_ **chunk 133**, which re-runs the script for its modifier art anyway.
+
+[bevy#24223]: https://github.com/bevyengine/bevy/pull/24223
+[bevy#25020]: https://github.com/bevyengine/bevy/pull/25020
+[bevy#25538]: https://github.com/bevyengine/bevy/pull/25538
+
+### 1065 A multi-tap caption uses a character the default font lacks
+
+`condition.rs` · `ConditionDescriptor::fallback_format` · **observed** in `prompt_gallery`: the
+double-tap row reads "Space ▯2"
+
+`fallback_format` writes a multi-tap as `W ×2`, with U+00D7, and Bevy's default font draws that as a
+box. It is the same trap as the `—` chunk 134 takes, but in `src/` rather than in an example: a game
+with no catalogue gets this string from the crate and draws it with the default font.
+
+Chunk 133 takes the gallery's instance away, since a prompt stops formatting its condition (D82).
+After that nothing in tree reaches it: the rebinding screens that still call `fallback_format`,
+Disasteroids' and `capture`'s, do so only for follower rows, and both followers are holds. So it
+becomes latent, reachable by any game that writes a multi-tap follower.
+
+_Fix:_ **chunk 134**, with the `—`: the examples get a font that has both, and `fallback_format`
+writes `x2`.
 
 ---
 
