@@ -69,6 +69,11 @@ const SELECTED: Color = Color::srgb(0.25, 0.55, 0.35);
 /// The width of the column holding what a row is called, and of each control column after it.
 const NAME_WIDTH: f32 = 210.0;
 const CONTROL_WIDTH: f32 = 155.0;
+/// The same, for the pad table, whose one column has room the keyboard's two do not.
+///
+/// Wide enough for a chord: "Left Bumper+Right Bumper" is half again as long as anything a single
+/// control is called, and wrapping it would push every row under it down half a line.
+const GAMEPAD_CONTROL_WIDTH: f32 = 230.0;
 
 /// How many control cells each table draws per row.
 ///
@@ -469,11 +474,11 @@ fn screen(world: &World) -> impl Scene {
             --
             Node { column_gap: Val::Px(48.0), align_items: AlignItems::Start }
             Children [
-                @{table("Keyboard & Mouse", rows(DeviceFamily::KeyboardMouse), KEYBOARD_COLUMNS)}
+                @{table("Keyboard & Mouse", rows(DeviceFamily::KeyboardMouse), KEYBOARD_COLUMNS, CONTROL_WIDTH)}
                 --
                 Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0) }
                 Children [
-                    @{table("Gamepad", rows(DeviceFamily::Gamepad), GAMEPAD_COLUMNS)}
+                    @{table("Gamepad", rows(DeviceFamily::Gamepad), GAMEPAD_COLUMNS, GAMEPAD_CONTROL_WIDTH)}
                     --
                     @{preset_row(&presets, selected)}
                     --
@@ -930,8 +935,9 @@ fn redraw_pending(world: &mut World) {
                 .get(cell.2)
                 .copied()
                 .flatten()
-                .map(|control| control.fallback_label().into_owned())
-                .unwrap_or_default(),
+                .map_or_else(String::new, |control| {
+                    cell_text(control, chord_at(row, cell.2))
+                }),
         );
     }
 
@@ -947,7 +953,8 @@ fn redraw_pending(world: &mut World) {
                 .copied()
                 .flatten()
                 .map_or_else(String::new, |control| {
-                    cell.3.fallback_format(&control.fallback_label())
+                    cell.3
+                        .fallback_format(&cell_text(control, chord_at(row, cell.2)))
                 }),
         );
     }
@@ -984,7 +991,12 @@ fn redraw_pending(world: &mut World) {
 
 /// One device's worth of rows, under a heading and grouped by category, `columns` control cells
 /// wide.
-fn table(title: &'static str, mut rows: Vec<ActionMapping>, columns: usize) -> impl Scene {
+fn table(
+    title: &'static str,
+    mut rows: Vec<ActionMapping>,
+    columns: usize,
+    control_width: f32,
+) -> impl Scene {
     // Stable, so rows keep the order the game declared them in within each category.
     rows.sort_by_key(|mapping| (mapping.category.is_none(), mapping.category));
 
@@ -1008,13 +1020,13 @@ fn table(title: &'static str, mut rows: Vec<ActionMapping>, columns: usize) -> i
                 0.0,
             ));
         }
-        lines.push(line(cells(&mapping, columns), 0.0));
+        lines.push(line(cells(&mapping, columns, control_width), 0.0));
         // A follower is drawn under the row it rides: indented and dimmed rather than a row of its
         // own, and not activatable — a follower is not separately rebindable, and a button that did
         // nothing would say otherwise.
         for follower in &mapping.followers {
             lines.push(line(
-                follower_cells(&mapping, follower, columns),
+                follower_cells(&mapping, follower, columns, control_width),
                 FOLLOWER_INDENT,
             ));
         }
@@ -1033,8 +1045,36 @@ fn table(title: &'static str, mut rows: Vec<ActionMapping>, columns: usize) -> i
     }
 }
 
+/// One control as a cell reads it, with whatever has to be held in front of it.
+///
+/// The same composition the shortcut captions use, and that agreement is the point: a binding the
+/// game captions `Ctrl+N` has to list as `Ctrl+N` here too, or one binding is described two ways in
+/// one game.
+fn cell_text(control: Control, with: &[ControlOrigin]) -> String {
+    let mut text = String::new();
+    for held in with {
+        text.push_str(&held.fallback_label());
+        text.push('+');
+    }
+    text.push_str(&control.fallback_label());
+    text
+}
+
+/// What the binding in this column requires held, or nothing where it requires nothing.
+///
+/// Taken from the row rather than from the working copy, which is what lets a redraw compose the
+/// same text: a capture fills a slot's control and leaves what is held alongside it where it was,
+/// so nothing on this screen can change it and the row stays the authority.
+fn chord_at(mapping: &ActionMapping, column: usize) -> &[ControlOrigin] {
+    mapping
+        .slots
+        .get(column)
+        .and_then(Option::as_ref)
+        .map_or(&[], |slot| &slot.with)
+}
+
 /// One row: what it is called, then a cell per column.
-fn cells(mapping: &ActionMapping, columns: usize) -> Vec<Cell> {
+fn cells(mapping: &ActionMapping, columns: usize, control_width: f32) -> Vec<Cell> {
     let changeable = mapping.rebind_policy.is_rebindable();
     let color = if changeable { CHANGEABLE } else { FIXED };
     let mut cells = vec![Cell {
@@ -1051,13 +1091,11 @@ fn cells(mapping: &ActionMapping, columns: usize) -> Vec<Cell> {
         // it holds and stops: no capture will ever reach the cell after it, so a box there would be
         // a promise this screen cannot keep. Past the end of the row and emptied by the player draw
         // the same: a blank cell. Which one it is matters to the crate, not to the table.
-        let held = mapping.slots.get(column).copied().flatten();
+        let held = mapping.slots.get(column).and_then(Option::as_ref);
         let filled = held.is_some();
         cells.push(Cell {
-            text: held
-                .map(|control| control.fallback_label().into_owned())
-                .unwrap_or_default(),
-            width: CONTROL_WIDTH,
+            text: held.map_or_else(String::new, |slot| cell_text(slot.control, &slot.with)),
+            width: control_width,
             color,
             border: if changeable {
                 CHANGEABLE.with_alpha(0.35)
@@ -1083,7 +1121,12 @@ fn cells(mapping: &ActionMapping, columns: usize) -> Vec<Cell> {
 /// One follower's line: its own name, then the principal's controls with the follower's own
 /// condition formatted in — "Hold W" under "W", not the bare word "hold". A follower has no slots
 /// of its own to draw; a blank column here is the row above not having filled that slot either.
-fn follower_cells(mapping: &ActionMapping, follower: &Follower, columns: usize) -> Vec<Cell> {
+fn follower_cells(
+    mapping: &ActionMapping,
+    follower: &Follower,
+    columns: usize,
+    control_width: f32,
+) -> Vec<Cell> {
     let mut cells = vec![Cell {
         text: follower.fallback_label(),
         width: NAME_WIDTH,
@@ -1093,20 +1136,18 @@ fn follower_cells(mapping: &ActionMapping, follower: &Follower, columns: usize) 
     }];
 
     for column in 0..columns {
-        let text =
-            mapping
-                .slots
-                .get(column)
-                .copied()
-                .flatten()
-                .map_or_else(String::new, |control| {
-                    follower
-                        .condition
-                        .fallback_format(&control.fallback_label())
-                });
+        let text = mapping
+            .slots
+            .get(column)
+            .and_then(Option::as_ref)
+            .map_or_else(String::new, |slot| {
+                follower
+                    .condition
+                    .fallback_format(&cell_text(slot.control, &slot.with))
+            });
         cells.push(Cell {
             text,
-            width: CONTROL_WIDTH,
+            width: control_width,
             color: SUBORDINATE,
             border: Color::NONE,
             role: CellRole::Follower(mapping.family, mapping.key, column, follower.condition),

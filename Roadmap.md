@@ -187,6 +187,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 127  | A composite expands into one binding per part                         |
 | 35   | Disabling an action                                                   |
 | 94b  | Either modifier                                                       |
+| 128  | A rebinding row that shows its chord                                  |
 
 ---
 
@@ -230,33 +231,51 @@ explicit player-facing step. `DeviceId` is the identity to key it by, and it exi
 What a binding can name, and when it counts as firing. Each of these is a gap a game runs into
 rather than a defect in what exists.
 
-### 128. A rebinding row that shows its chord
+### 129. An override that can name a chord
 
-`docs/issues.md` 1059's reading half, and the Disasteroids shortcut that makes it visible. 94b put
-chords on the prompt path, so a caption already reads `Ctrl+N` — but `mappings_of` fills a row's
-slots from the binding's primary input and drops the chord, so a settings screen listing the same
-binding reads "N". One example would then describe one binding two ways.
+`docs/issues.md` 1059's writing half. 128 put the chord on the row, so a game can read `Ctrl+N` and
+pre-set a modifier editor from it; what it still cannot do is write the answer back. `Overrides`
+addresses a row as controls, and `rewrite` sets the control and leaves the binding's chord where it
+was — so the crate decides what a rebind does to a modifier, silently, and a game that wants the
+other answer has no way to say so.
 
-- **Disasteroids gets a `NewGame` shortcut on `Ctrl+N`**, in `Shell` beside `Pause` and
-  `ToggleSettings`, and it is the acceptance test: the caption and the settings row have to agree.
-  `text_field` exercises chords with no rebinding screen at all, which is why it could not catch
-  this.
-- **`SmartBomb` moves to both upper triggers**, `RightTrigger` chorded with `LeftTrigger`, replacing
-  the plain `West` binding while keeping `hold_once(BOMB_CHARGE)` and the keyboard `B`. It is the
-  gamepad half of the same test — the pad rows are listed-but-fixed, so the row has to name both
-  bumpers or name neither — and it is the first same-family chord in tree that is not keyboard.
-  Deliberately not attempted before this chunk: the row would have read as one bumper.
-- **The `slots` shape is this chunk's decision, and it is the real work.** A parallel
-  `chords: Vec<Vec<ChordEntry>>` leaves the 31 `.slots` call sites alone but is the index-aligned
-  shape 1059 argues against for the saved format; carrying the chord inside the slot is consistent
-  with 1059 and touches all 31. Deciding that is what this chunk is for, and doing it inside 94b
-  would have been deciding it in passing.
-- **Not the writing half.** Editing a chord stays unrouted in 1059: what the row *shows* is
-  separable from what an override may rewrite, and only the first has a caller.
-- **Watch for a row a player can see and cannot change.** A chorded binding declared `mappable`
-  draws a `Ctrl` the capture cell will never fill, since capture takes a key and a chord is not a
-  slot. That is Blender's behaviour too, but Blender draws its modifiers as toggles and so never
-  implies otherwise; a row that shows one and offers no way to edit it may need to say so.
+- **The saved format already has room**, and 1059 has the sketch: a saved row is one string per
+  slot, so a chord rides the string a slot already has — `"editor.save": ["ctrl+key/KeyS"]`. Every
+  real control name carries a `/`, so the modifiers are the `+`-separated tokens before the first
+  segment containing one, and `char/+` survives intact. `Control` stays atomic, so the clash pass,
+  `indexed_controls` and reverse lookup are untouched; what widens is the override layer's own slot
+  type.
+- **Reset or preserve is the decision.** A capture fills the control and leaves the chord today,
+  which is also what `clone_onto` does for a grown secondary. Blender resets. Both fail badly on a
+  screen with no editor and in opposite directions — preserve and the player can never shed the
+  `Ctrl`, reset and they can never get it back — so it is only decidable once there is a way back,
+  which is what this chunk builds.
+- **Not capture.** A chord is set, never heard: an OS eats the interesting ones before the app sees
+  them, and `Cmd+Q` quits rather than arriving. Blender captures a bare key and offers the modifiers
+  as toggles for that reason, not as a UI preference.
+- **The clash pass wants revisiting.** It compares at control granularity and knowingly over-reports
+  — "two bindings that share a control but differ in their chords are reported as an overlap"
+  (`capture.rs`). Harmless noise while chords are fixed; once a player can author the overlap it
+  reports, the trade-off is live. This chunk decides whether that is still the right error to make.
+- **Not the screen**, which is 129b. This lands the vocabulary and its round trip through the saved
+  format, unit-tested, with no caller that edits one.
+
+### 129b. A screen that sets a modifier
+
+129's caller, and the obligation 129 lands short of. Nothing in tree can edit a chord until
+something draws the toggles.
+
+- **Blender's arrangement is the one to copy**, and the screenshot is the argument: the row list
+  stays a list of composed labels, and only the expanded row grows a `Shift`/`Ctrl`/`Alt`/`Cmd`
+  strip. That is what makes it fit — the widgets are per *edit*, not per row, so a one-page table
+  stays one page.
+- **Where it lands is this chunk's decision.** Disasteroids' capture is in-cell — the cell flips its
+  background and listens — with no detail panel to grow, so this is new UI wherever it goes. A
+  second example risks being a feature vehicle rather than a game, which is the friction worth
+  weighing against complicating the one settings screen in tree.
+- **A row the player can change only in part stops being a thing.** 128 shipped `Ctrl+N` as a fixed
+  row precisely because no screen could edit it; with an editor, a chorded row can be `mappable` and
+  mean it.
 
 ### 94c. A platform modifier
 
@@ -491,9 +510,29 @@ the expensive part.
 
 ## The library itself
 
-Five chunks no game asks for and no published crate can do without: an extension point nothing
-outside has exercised, the reflection the documents promise, documentation that runs, documentation
-that is true, and the advice that keeps a player out of a corner.
+Six chunks no game asks for and no published crate can do without: an extension point nothing
+outside has exercised, a rebinding surface that does one job, the reflection the documents promise,
+documentation that runs, documentation that is true, and the advice that keeps a player out of a
+corner.
+
+### 130. Capture as a sensor and nothing else
+
+`CaptureSession` already installs nothing — `ControlCaptured` reports, and writing the answer into
+`Overrides` is the caller's, which is what both examples do. What it still carries is a *target*,
+and with it a write-time policy decided at listen time.
+
+- **`for_slot` takes a slot it never writes to** and returns `None` for a row the player may not
+  change. That check is duplicated: `refusal` (`overrides.rs`) re-asks `rebind_policy` and then
+  calls the same `admissible`, so the apply-time check is a strict superset of both earlier ones.
+  Three validation points for one question, of which one is authoritative.
+- **What is left after the collapse** is a class, a family and an exclusion list. A caller
+  correlates the answer through the entity it fired on, which both callers already have something on
+  — Disasteroids has `RebindCell` there.
+- **The two earlier checks buy UX, not correctness**, and that is the argument to weigh: not
+  starting a doomed capture, and telling a player why a press did not take, are both worth
+  something. Deciding whether an app should have to ask `admissible` itself is the chunk.
+- **Breaking, on the most user-facing surface this crate has.** Cheap now, expensive after
+  publication, which is what puts it before the crates.io gate rather than after it.
 
 ### 112. A backend suppresses a device family at L0
 

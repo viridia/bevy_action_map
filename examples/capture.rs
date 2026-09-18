@@ -243,13 +243,24 @@ fn bound(mapping: &mapping::ActionMapping) -> String {
         .map(|slot| {
             // A slot the player emptied, with something still bound after it. Printed rather than
             // skipped, so "the row holds —, J" says which column the J is in.
-            slot.map_or_else(
-                || String::from("—"),
-                |control| control.fallback_label().into_owned(),
-            )
+            slot.as_ref().map_or_else(|| String::from("—"), held)
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// One slot: whatever has to be held alongside the control, then the control.
+///
+/// A row that printed only the control would call `Ctrl+N` "N", which is worse than terse — the
+/// walk would be telling the player a key that does nothing on its own.
+fn held(slot: &mapping::BoundSlot) -> String {
+    let mut text = String::new();
+    for entry in &slot.with {
+        text.push_str(&entry.fallback_label());
+        text.push('+');
+    }
+    text.push_str(&slot.control.fallback_label());
+    text
 }
 
 /// Which column of the row this slot is, in the words a table would put at the top of it.
@@ -307,7 +318,7 @@ fn rebind(world: &mut World, control: Control) {
     // the control, whether or not the row reaches that far yet. A row that does not is grown, and
     // the slots skipped on the way stay empty — writing to the third cell of a one-control row
     // gives a row of three with a blank in the middle, not a row of two.
-    let mut controls = row.slots.clone();
+    let mut controls = row.controls();
     if slot >= controls.len() {
         controls.resize(slot + 1, None);
     }
@@ -336,7 +347,7 @@ fn rebind(world: &mut World, control: Control) {
             now.slots
                 .iter()
                 .flatten()
-                .map(|held| follower.condition.fallback_format(&held.fallback_label()))
+                .map(|slot| follower.condition.fallback_format(&held(slot)))
                 .collect::<Vec<_>>()
                 .join(", "),
         );

@@ -1,6 +1,6 @@
 //! Disasteroids — an asteroids-like game, playable on the keyboard or a gamepad.
 //!
-//! The point of the example is [`actions`], which holds the entire input layer: twelve actions,
+//! The point of the example is [`actions`], which holds the entire input layer: fourteen actions,
 //! three contexts, and the bindings that drive them from either device. Nothing else in the game
 //! mentions a key or a button.
 //!
@@ -34,7 +34,7 @@ mod ship;
 #[path = "../common/mod.rs"]
 mod common;
 
-use common::prompt_ui::{self, PromptSpan};
+use common::prompt_ui::{self, PromptFamily, PromptSpan};
 use common::widget_focus;
 
 fn main() {
@@ -134,7 +134,23 @@ fn hint() -> impl Scene {
             TextFont { font_size: 13.0_f32 }
             TextColor(KEY)
             --
-            TextSpan::new(" controls")
+            TextSpan::new(" controls   ")
+            TextFont { font_size: 13.0_f32 }
+            TextColor(LABEL)
+            --
+            // Pinned to the keyboard, unlike the two above: this is the one shortcut with no pad
+            // binding, and a player holding a pad is still better told what the key is than shown
+            // the dash that stands for "nothing on this device".
+            //
+            // It captions `Ctrl+N`, because a prompt carries what has to be held alongside the
+            // control. The controls screen lists the same binding from the same declaration, and
+            // the two reading the same thing is the point of having both.
+            PromptSpan({actions::NewGame::id()})
+            ~{PromptFamily(DeviceFamily::KeyboardMouse)}
+            TextFont { font_size: 13.0_f32 }
+            TextColor(KEY)
+            --
+            TextSpan::new(" new game")
             TextFont { font_size: 13.0_f32 }
             TextColor(LABEL)
         ]

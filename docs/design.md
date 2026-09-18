@@ -792,22 +792,39 @@ that ships no catalogue.
 ### 9.1 Mappings
 
 A **mapping** is the named thing a player rebinds; a **slot** is one position in it, holding one
-control. A screen draws one cell per slot.
+control and whatever that control's binding requires held alongside it. A screen draws one cell per
+slot.
 
 ```rust
 pub struct ActionMapping {
-    pub key: MappingKey,             // "gameplay.move.up" — a localization key
+    pub key: MappingKey,               // "gameplay.move.up" — a localization key
     pub action: ActionId,
     pub action_path: &'static str,
     pub category: Option<&'static str>,
-    pub family: DeviceFamily,        // KeyboardMouse | Gamepad
+    pub family: DeviceFamily,          // KeyboardMouse | Gamepad
     pub accepts: ChannelShape,
-    pub slots: Vec<Option<Control>>, // ordered; slot 0 is the primary, None is an emptied cell
-    pub rebind_policy: RebindPolicy, // Here | Fixed
+    pub slots: Vec<Option<BoundSlot>>, // ordered; slot 0 is the primary, None is an emptied cell
+    pub rebind_policy: RebindPolicy,   // Here | Fixed
     pub context: &'static str,
     pub followers: Vec<Follower>,
 }
+
+pub struct BoundSlot {
+    pub control: Control,
+    pub with: Vec<ControlOrigin>,      // empty for almost every slot
+}
 ```
+
+**A slot carries its chord**, in the same `ControlOrigin` terms `Prompt::with` uses and for the same
+reason: a modifier stands for either key of its pair, and `Control` can only name one of the two. A
+row that dropped it would list `Ctrl+N` as "N" while the caption built from the same binding went on
+reading `Ctrl+N`. `ActionMapping::controls()` is the bare-control view, which is the shape an
+override addresses.
+
+**The chord is read, not written.** `Overrides` works in controls, and `rewrite` replaces a
+binding's control while leaving its chord alone — so a capture fills a slot and what is held with it
+stays where the game declared it, and a secondary grown from a chorded primary inherits the chord
+rather than arriving bare.
 
 **Three listing states, plus a fourth for followers.** A binding is listed and fixed unless it says
 otherwise:

@@ -28,7 +28,7 @@ chunk's own commit, and `docs/design.md` or `docs/decisions.md` where anything a
 are the record. A gap in the sequence below is a retired finding, not an omission. The next
 unassigned number is stated here; keep it up to date when numbering new items.
 
-**Next: 1062.**
+**Next: 1063.**
 
 **The calibration warning, stated up front because it is fair.** Most of these entries came from
 asking a model to scan `src/`, and a model asked to find sixty problems will find sixty. Some of
@@ -139,6 +139,36 @@ legally offer, not what it must say when it says no. It is here because ground r
 examples the acceptance test, and an example that swallows a diagnostic is not demonstrating the
 thing the diagnostic was built for.
 
+### 1062 There is no way to ask what an action is bound to, only what would fire it now
+
+R18.1 · `present.rs` · **observed** in Disasteroids: the corner hint reads "— new game" whenever the
+controls screen is up
+
+`prompts` filters on `bound.active` (`present.rs:935`) and R18.1 says it must — "the bindings that
+would *currently* fire it". That is right for a prompt drawn over the game: naming a control that
+does nothing when pressed is the thing R18.2 forbids.
+
+It is wrong for the other sentence a caption can be in. "Press Ctrl+N to start a new game" is a
+legend rather than a prompt — tense-neutral, and true whether or not the context is live this frame.
+Disasteroids' corner hint is one, and `Menu` being `exclusive` shadows `Shell`, so the line goes to
+the unbound fallback while the controls screen is open. A manual page, a loading-screen tip and a
+tutorial step are all the same shape.
+
+`mappings` is not the substitute. It is per-family rows carrying slots, rebind policies and one row
+per composite part, built for a rebinding table, and it omits `private` bindings entirely — so
+"which key is this action on" means finding a row by family and reading slot 0, which is the wrong
+question asked sideways.
+
+The absence is in the requirements as much as in the API: R18 governs prompts and says they are
+present-tense, and nothing governs the legend. Worth deciding as part of it: `prompts` collapses
+three different reasons for an empty answer — nothing carries the context, the context is carried
+but inactive, and a stronger context has taken the control — and a legend wants the second to read
+like the third, possibly drawn dimmed rather than hidden.
+
+_Fix:_ **unrouted.** Not a font problem, though one is sitting on top of it: the fallback is `"—"`
+and Bevy's default font has no glyph for U+2014, so it draws as a box — visible in the same
+screenshot on `settings.rs`'s own footer sentence.
+
 ### 1018 A platform modifier
 
 R12.4: `Cmd` on macOS should be usable as `Ctrl` everywhere else, as a named modifier resolved at
@@ -159,10 +189,12 @@ blocks the second: an override addresses a mapping's `slots`, a chord is not a s
 type names one. So a game offering a player-editable `Ctrl+S` has nowhere to put the result.
 
 Reading one is not blocked, and was never as blocked as this entry first said. A chord reaches
-`Prompt::with` as `ControlOrigin`, which is public and exists for exactly this — so a caption reads
-`Ctrl+S` today. What it does not reach is a rebinding *row*: `mappings_of` fills slots from the
-binding's primary input and drops the chord, so the same binding captions as `Ctrl+N` and lists as
-"N". That half is **chunk 128**.
+`Prompt::with` as `ControlOrigin`, which is public and exists for exactly this, and chunk 128 put it
+on the rebinding row as well — so a game can read `Ctrl+S` and pre-set an editor from it.
+
+What is still blocked is the write. `Overrides` addresses a row as controls, and `rewrite` sets the
+control and leaves the binding's chord where it was, so the crate answers "what does a rebind do to
+a modifier" on the game's behalf and offers no way to answer it differently.
 
 Confirmed by reading `mapping.rs`, `overrides.rs` and `present.rs`.
 
@@ -170,31 +202,8 @@ No requirement is violated. R12.2 governs layout labels rather than chords, and 
 R19 says a row must name what is held alongside it. R19's rebinding surface is written in terms of
 slots throughout, so the omission is consistent rather than an oversight.
 
-_Fix:_ **unrouted**, but cheaper than it looks, and the sketch is worth keeping so nobody re-prices
-it. A saved row is already `Vec<String>`, one string per slot, parsed into `Option<Control>` on load
-(`SavedRow::Controls`), so a chord rides in the string a slot already has:
-
-```json
-"editor.save": ["ctrl+key/KeyS", "alt+key/KeyW"]
-```
-
-That leaves `Control` atomic, so the clash pass, `indexed_controls`, capture and reverse lookup are
-untouched; what widens is the override layer's own slot type. The parse stays decidable on the
-invariant the format already states — every real control name carries a `/`, so modifiers are the
-`+`-separated tokens before the first segment containing one, and `char/+` survives intact. Applying
-it is free: an override already recompiles a variant plan, and a chord is compiled from the same
-spec as the slots.
-
-Two parallel arrays — controls beside modifiers — is the shape to avoid. Chords are per slot rather
-than per row, so the arrays must stay index-aligned, and `cleared` would then have a place to be
-said in each of them and a way to disagree.
-
-What is left is the genuine cost: the clash pass compares at control granularity and knowingly
-over-reports, "two bindings that share a control but differ in their chords are reported as an
-overlap" (`capture.rs`). That errs toward harmless noise while chords are fixed. Once a player can
-edit one, they can author the overlap it reports, and the trade-off wants revisiting.
-
-A game needing this today re-declares the context with the chord it wants.
+_Fix:_ **chunk 129** for the vocabulary and **chunk 129b** for the screen that sets one. A game
+needing this today re-declares the context with the chord it wants.
 
 ### 1060 A chord spanning two device families escapes conflict detection
 

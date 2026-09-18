@@ -511,12 +511,7 @@ fn conflicts_in(
 
     mappings
         .iter()
-        .filter(|mapping| {
-            // `Some(control)` rather than a scan over filled slots: an empty slot is `None` and
-            // never equals a control, so two rows with a gap apiece are not a clash.
-            Some(mapping.key) != target
-                && effective_slots(mapping, pending).contains(&Some(control))
-        })
+        .filter(|mapping| Some(mapping.key) != target && holds(mapping, pending, control))
         .map(|mapping| MappingConflict {
             mapping: mapping.key,
             action_path: mapping.action_path,
@@ -530,19 +525,23 @@ fn conflicts_in(
         .collect()
 }
 
-/// What a mapping currently holds: `pending`'s row for it if there is one, else its own slots.
+/// Whether a mapping currently holds `control`: in `pending`'s row for it if there is one, else in
+/// its own slots.
 ///
-/// A row absent from `pending` means untouched (the common case, so borrowed rather than cloned); a
-/// `NotOurs` row means the same, since something else owns it and this crate neither fills it in nor
-/// reads it as cleared.
-fn effective_slots<'a>(
-    mapping: &'a ActionMapping,
-    pending: Option<&'a Overrides>,
-) -> &'a [Option<Control>] {
+/// A row absent from `pending` means untouched, and a `NotOurs` row means the same, since something
+/// else owns it and this crate neither fills it in nor reads it as cleared.
+///
+/// An empty slot holds nothing rather than holding "no control", so two rows with a gap apiece are
+/// not a clash.
+fn holds(mapping: &ActionMapping, pending: Option<&Overrides>, control: Control) -> bool {
     match pending.and_then(|pending| pending.get(mapping.family, mapping.key)) {
-        Some(Override::Controls(controls)) => controls,
-        Some(Override::Cleared) => &[],
-        Some(Override::NotOurs) | None => &mapping.slots,
+        Some(Override::Controls(controls)) => controls.contains(&Some(control)),
+        Some(Override::Cleared) => false,
+        Some(Override::NotOurs) | None => mapping
+            .slots
+            .iter()
+            .flatten()
+            .any(|slot| slot.control == control),
     }
 }
 

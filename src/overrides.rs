@@ -187,11 +187,15 @@ impl Overrides {
     /// working copy shows what confirming it would produce. [`NotOurs`](Override::NotOurs) reads as
     /// untouched, since something else owns that row and this set neither fills it in nor treats it
     /// as emptied.
+    ///
+    /// Controls only. Whatever a slot requires held alongside it stays with the binding and is not
+    /// something this set can change, so a screen drawing an unconfirmed row takes the control from
+    /// here and [`with`](crate::mapping::BoundSlot::with) from the row itself.
     pub fn slots_of(&self, mapping: &ActionMapping) -> Vec<Option<Control>> {
         match self.get(mapping.family, mapping.key) {
             Some(Override::Controls(controls)) => controls.clone(),
             Some(Override::Cleared) => Vec::new(),
-            Some(Override::NotOurs) | None => mapping.slots.clone(),
+            Some(Override::NotOurs) | None => mapping.controls(),
         }
     }
 
@@ -1245,11 +1249,23 @@ fn current_rows(
                 })
                 .cloned()
                 .map(
-                    |current| match accepted.get(index).and_then(Option::as_ref) {
-                        Some(slots) => ActionMapping {
-                            slots: slots.clone(),
-                            ..current
-                        },
+                    |mut current| match accepted.get(index).and_then(Option::as_ref) {
+                        // `accepted` is the authority on which controls and where the holes are;
+                        // the derivation is the authority on what each surviving binding still
+                        // requires held alongside its control. The derived slots are `accepted`'s
+                        // filled ones with the holes taken out — an emptied slot drops its binding
+                        // and a grown one lands past the end of the contributors, so neither
+                        // reorders what is left — and pairing them in order puts each chord back on
+                        // the control it arrived with.
+                        Some(wanted) => {
+                            let mut derived =
+                                core::mem::take(&mut current.slots).into_iter().flatten();
+                            current.slots = wanted
+                                .iter()
+                                .map(|filled| filled.and_then(|_| derived.next()))
+                                .collect();
+                            current
+                        }
                         None => current,
                     },
                 )
@@ -1325,7 +1341,16 @@ mod tests {
     }
 
     fn slots(app: &App, name: &str) -> Vec<Option<Control>> {
-        row(app, name).slots
+        row(app, name).controls()
+    }
+
+    /// What one slot of a row requires held alongside its control.
+    fn chord(app: &App, name: &str, slot: usize) -> Vec<crate::present::ControlOrigin> {
+        row(app, name).slots[slot]
+            .as_ref()
+            .unwrap_or_else(|| panic!("slot {slot} of {name} is empty"))
+            .with
+            .clone()
     }
 
     /// A row with every slot filled, which is what most of these expect. A row with a gap is
@@ -1403,7 +1428,7 @@ mod tests {
             .find(|mapping| mapping.key.to_string() == "override_tests.move.up")
             .expect("the row is still declared");
         assert_eq!(
-            declared.slots,
+            declared.controls(),
             filled([Control::PhysicalKey(KeyCode::KeyW)]),
             "still W"
         );
@@ -1433,7 +1458,10 @@ mod tests {
         apply_overrides(app.world_mut(), &overrides);
 
         let jump = row(&app, "override_tests.jump");
-        assert_eq!(jump.slots, filled([Control::PhysicalKey(KeyCode::KeyK)]));
+        assert_eq!(
+            jump.controls(),
+            filled([Control::PhysicalKey(KeyCode::KeyK)])
+        );
         // The follower is still on the row rather than orphaned onto a row of its own...
         assert_eq!(jump.followers.len(), 1);
         assert_eq!(jump.followers[0].action, Lunge::id());
@@ -1445,6 +1473,96 @@ mod tests {
         assert_eq!(
             prompts[0].origin.control(),
             Some(Control::PhysicalKey(KeyCode::KeyK))
+        );
+    }
+
+    /// A chord belongs to the binding, not to the slot the player edits, so moving the control
+    /// leaves it where it was — and the secondary a row grows is cloned from the primary, chord
+    /// included, so it behaves like the primary rather than like a bare key.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_rebound_row_keeps_what_is_held_with_it() {
+        #[derive(InputContext)]
+        #[context(path = "override_tests.editor", tick = Render)]
+        struct Editor;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<Editor>(|controls| {
+            controls
+                .bind::<Jump>(KeyCode::KeyS)
+                .with(crate::binding::ModifierKey::Ctrl)
+                .mappable();
+        });
+        let ctrl = [crate::present::ControlOrigin::Modifier(
+            crate::binding::ModifierKey::Ctrl,
+        )];
+        assert_eq!(chord(&app, "override_tests.jump", 0), ctrl);
+
+        // Moved to Y, and given the secondary the game shipped nothing for.
+        let overrides = bind(
+            &app,
+            "override_tests.jump",
+            &[
+                Control::PhysicalKey(KeyCode::KeyY),
+                Control::PhysicalKey(KeyCode::KeyU),
+            ],
+        );
+        apply_overrides(app.world_mut(), &overrides);
+
+        assert_eq!(
+            slots(&app, "override_tests.jump"),
+            filled([
+                Control::PhysicalKey(KeyCode::KeyY),
+                Control::PhysicalKey(KeyCode::KeyU),
+            ])
+        );
+        assert_eq!(chord(&app, "override_tests.jump", 0), ctrl);
+        assert_eq!(chord(&app, "override_tests.jump", 1), ctrl);
+    }
+
+    /// A row whose two bindings require different things held, with the first emptied: the chords
+    /// have to travel with their own controls rather than with their column, or the survivor
+    /// inherits the chord of the slot the player cleared.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_gap_leaves_each_chord_on_its_own_control() {
+        #[derive(InputContext)]
+        #[context(path = "override_tests.shell", tick = Render)]
+        struct ShellKeys;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        // The chord is on the *secondary*, which is what makes this worth asserting: once the
+        // primary is gone the row derives one binding, and a chord read off the column it now
+        // occupies would come back empty.
+        app.add_context::<ShellKeys>(|controls| {
+            controls.bind::<Jump>(KeyCode::F2).mappable();
+            controls
+                .bind::<Jump>(KeyCode::KeyS)
+                .with(crate::binding::ModifierKey::Ctrl)
+                .mappable();
+        });
+
+        // The primary emptied, the secondary left in the column the player can see it in.
+        let target = row(&app, "override_tests.jump");
+        let mut overrides = Overrides::new();
+        overrides.bind(
+            target.family,
+            target.key,
+            [None, Some(Control::PhysicalKey(KeyCode::KeyS))],
+        );
+        apply_overrides(app.world_mut(), &overrides);
+
+        assert_eq!(
+            slots(&app, "override_tests.jump"),
+            [None, Some(Control::PhysicalKey(KeyCode::KeyS))]
+        );
+        assert_eq!(
+            chord(&app, "override_tests.jump", 1),
+            [crate::present::ControlOrigin::Modifier(
+                crate::binding::ModifierKey::Ctrl
+            )]
         );
     }
 
@@ -2175,7 +2293,7 @@ mod tests {
 
         let left = row(&app, "override_tests.turn.negative");
         assert_eq!(
-            left.slots,
+            left.controls(),
             filled([
                 Control::PhysicalKey(KeyCode::KeyA),
                 Control::PhysicalKey(KeyCode::ArrowLeft)

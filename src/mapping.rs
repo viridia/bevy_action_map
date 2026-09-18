@@ -183,7 +183,7 @@ pub struct ActionMapping {
     pub family: DeviceFamily,
     /// The kind of control it can hold, which is what a capture may accept for it.
     pub accepts: ChannelShape,
-    /// The controls bound to it now, one per slot, in the order they were declared.
+    /// What is bound to it now, one per slot, in the order they were declared.
     ///
     /// Usually one. Two mappable bindings of the same action in the same family arrive here as one
     /// row with two slots filled rather than as two rows.
@@ -195,7 +195,7 @@ pub struct ActionMapping {
     ///
     /// How many cells to draw is the screen's decision, not this list's: a table offering a spare
     /// column draws one more cell than the row holds, and a capture fills it.
-    pub slots: Vec<Option<Control>>,
+    pub slots: Vec<Option<BoundSlot>>,
     /// Whether the player may change what is in those slots.
     ///
     /// A screen draws a row of buttons for [`Here`](RebindPolicy::Here) and a row of labels for
@@ -209,6 +209,41 @@ pub struct ActionMapping {
     /// Empty for almost every mapping. Two actions sharing one control read as one thing to rebind,
     /// so a screen draws these as subordinate lines under the row rather than as rows of their own.
     pub followers: Vec<Follower>,
+}
+
+impl ActionMapping {
+    /// The bare controls this row holds, gaps kept.
+    ///
+    /// What an override addresses. [`Overrides`](crate::overrides::Overrides) works in controls
+    /// rather than slots, so this is the shape to edit and hand back to
+    /// [`bind`](crate::overrides::Overrides::bind) — clear a cell, put a captured control in
+    /// another, pass the result on.
+    ///
+    /// Whatever a slot held alongside its control stays with the binding and is not part of this.
+    pub fn controls(&self) -> Vec<Option<Control>> {
+        self.slots
+            .iter()
+            .map(|slot| slot.as_ref().map(|slot| slot.control))
+            .collect()
+    }
+}
+
+/// One filled slot of a rebinding row: the control bound there, and what is held with it.
+///
+/// Almost every slot is a bare control, and [`with`](Self::with) is empty. A binding declared
+/// alongside a modifier is the exception — `Ctrl+N` for a new game, both triggers together for a
+/// smart bomb — and it is why a slot is not simply a [`Control`]: a row that dropped the modifier
+/// would list "N" for a shortcut the game captions as "Ctrl+N".
+#[derive(Clone, Debug, PartialEq)]
+pub struct BoundSlot {
+    /// The control that fires it.
+    pub control: Control,
+    /// What has to be held for that control to count, in the order it was declared.
+    ///
+    /// A capture fills [`control`](Self::control) and leaves this alone, so a screen with no way to
+    /// edit it is offering a row the player can change only in part. Draw it either way, or the row
+    /// reads as a bare control that will not work on its own.
+    pub with: Vec<crate::present::ControlOrigin>,
 }
 
 /// One other action riding a mapping's row, contributing no controls of its own.
@@ -421,6 +456,22 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
     parts
 }
 
+/// A binding's chord, in the terms a screen draws it in.
+///
+/// [`ControlOrigin`](crate::present::ControlOrigin) rather than a control list because a modifier
+/// stands for either key of its pair and `Control` cannot say so — the same shape, and the same
+/// reason, as the chord a prompt carries.
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+fn chord_of(binding: &BindingSpec) -> Vec<crate::present::ControlOrigin> {
+    binding.chord.iter().copied().map(Into::into).collect()
+}
+
+/// No device feature is on, so nothing can be chorded.
+#[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
+fn chord_of(_binding: &BindingSpec) -> Vec<crate::present::ControlOrigin> {
+    Vec::new()
+}
+
 /// The `ActionMapping` list for one binding list: one row per mappable part.
 ///
 /// Called on the bindings a context declares (from `mappings`) and again, unchanged, on the
@@ -451,7 +502,10 @@ pub(crate) fn mappings_of(
                 && mapping.family == entry.family
                 && mapping.action == binding.action
         }) {
-            mapping.slots.push(Some(entry.control));
+            mapping.slots.push(Some(crate::mapping::BoundSlot {
+                control: entry.control,
+                with: chord_of(binding),
+            }));
             // Bindings that disagree about whether the player may change the row are a plan-build
             // error, so the first one's `rebind_policy` wins here only so that the value is
             // deterministic while the context is being refused.
@@ -471,7 +525,10 @@ pub(crate) fn mappings_of(
             },
             family: entry.family,
             // An author cannot declare a gap, so a derived row is dense; only an override makes one.
-            slots: alloc::vec![Some(entry.control)],
+            slots: alloc::vec![Some(crate::mapping::BoundSlot {
+                control: entry.control,
+                with: chord_of(binding),
+            })],
             rebind_policy: declaration.rebind_policy,
             context,
             followers: Vec::new(),
@@ -697,11 +754,11 @@ mod tests {
         // Each part carries the controls it currently holds, which is what a read-only screen
         // shows. One apiece here: nothing declared a second mappable binding.
         assert_eq!(
-            mappings[0].slots,
+            mappings[0].controls(),
             [Some(Control::PhysicalKey(KeyCode::KeyW))]
         );
         assert_eq!(
-            mappings[4].slots,
+            mappings[4].controls(),
             [Some(Control::PhysicalKey(KeyCode::Space))]
         );
 
@@ -797,11 +854,47 @@ mod tests {
         let mappings = mappings(app.world());
         assert_eq!(mappings.len(), 1);
         assert_eq!(
-            mappings[0].slots,
+            mappings[0].controls(),
             [Some(Control::PhysicalKey(KeyCode::Space))]
         );
         assert_eq!(mappings[0].rebind_policy, RebindPolicy::Fixed);
         assert!(!mappings[0].rebind_policy.is_rebindable());
+    }
+
+    /// A row that dropped the modifier would list `Ctrl+S` as "S", and the caption beside it —
+    /// built from the same binding through a different path — would go on reading `Ctrl+S`.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_chorded_binding_lists_what_is_held_with_it() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.editor", tick = Fixed)]
+        struct Editor;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<Editor>(|controls| {
+            controls
+                .bind::<Jump>(KeyCode::Space)
+                .with(crate::binding::ModifierKey::Ctrl);
+            controls.bind::<ToggleOverlay>(KeyCode::F1);
+        });
+
+        let mappings = mappings(app.world());
+        let chorded = mappings[0].slots[0].as_ref().expect("one slot, filled");
+        assert_eq!(chorded.control, Control::PhysicalKey(KeyCode::Space));
+        // A modifier rather than a control, because either Control key satisfies it and a `Control`
+        // could only have named one of the two.
+        assert_eq!(
+            chorded.with,
+            [crate::present::ControlOrigin::Modifier(
+                crate::binding::ModifierKey::Ctrl
+            )]
+        );
+
+        // The overwhelming majority of rows. Empty rather than absent, so a screen composing a
+        // label walks the same field either way.
+        let plain = mappings[1].slots[0].as_ref().expect("one slot, filled");
+        assert!(plain.with.is_empty());
     }
 
     /// `private` is the way out of the list, and the only way: a game with an internal binding it
@@ -909,7 +1002,7 @@ mod tests {
         let mappings = mappings(app.world());
         assert_eq!(mappings.len(), 1, "one row, not two");
         assert_eq!(
-            mappings[0].slots,
+            mappings[0].controls(),
             [
                 Some(Control::PhysicalKey(KeyCode::Space)),
                 Some(Control::PhysicalKey(KeyCode::Enter))
@@ -1069,7 +1162,7 @@ mod tests {
         assert_eq!(mappings.len(), 1);
         assert_eq!(mappings[0].key.to_string(), "mapping_tests.jump");
         assert_eq!(
-            mappings[0].slots,
+            mappings[0].controls(),
             [Some(Control::PhysicalKey(KeyCode::Space))],
             "a follower contributes no control of its own to the row it rides"
         );

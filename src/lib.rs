@@ -399,7 +399,7 @@ pub mod prelude {
     pub use crate::frame::{FrameTimestamp, InputFrame, RawEvent, TimedRawEvent};
     pub use crate::join::is_claimed;
     pub use crate::mapping::{
-        ActionMapping, Follower, MappingKey, RebindPolicy, Tunable, TunableValue,
+        ActionMapping, BoundSlot, Follower, MappingKey, RebindPolicy, Tunable, TunableValue,
         declared_mappings, declared_tunables, mappings, tunables,
     };
     pub use crate::present::{

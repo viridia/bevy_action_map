@@ -70,6 +70,14 @@ pub struct ToggleOverlay;
 #[action(path = "disasteroids.toggle_settings", output = bool, intent = Button, category = "disasteroids.system")]
 pub struct ToggleSettings;
 
+/// Clear the field and lay out a fresh spread of rocks.
+///
+/// It throws away whatever the player had going, which is why it is chorded rather than sitting on
+/// a bare key one slip from a lost game.
+#[derive(InputAction)]
+#[action(path = "disasteroids.new_game", output = bool, intent = Button, category = "disasteroids.system")]
+pub struct NewGame;
+
 /// Which way the selection moves on a screen.
 ///
 /// A direction rather than four buttons, so that a stick and a D-pad reach it through the same
@@ -217,8 +225,13 @@ pub fn plugin(app: &mut App) {
         // again every tick the button stays down the way `Thrust` or a `pulse`d `Fire` would.
         // Fixed, like the other pad rows above, for the same reason: the pad is Steam/console
         // remapping's territory, not this screen's.
+        //
+        // Both bumpers together, which is how a pad says "and you have to mean it" — the same job
+        // the `Ctrl` on `NewGame` does. A chord is not a keyboard thing: `with` takes any button,
+        // and arbitration is the same either way.
         controls
-            .bind::<SmartBomb>(GamepadButton::West)
+            .bind::<SmartBomb>(GamepadButton::RightTrigger)
+            .with(GamepadButton::LeftTrigger)
             .hold_once(BOMB_CHARGE);
         controls
             .bind::<SmartBomb>(KeyCode::KeyB)
@@ -266,6 +279,18 @@ pub fn plugin(app: &mut App) {
         controls
             .bind::<ToggleSettings>(GamepadButton::North)
             .reserved();
+
+        // The chord is the whole point of the binding: `N` on its own is a key a player might well
+        // want for something, and this throws their game away. Not reserved, because the two can
+        // coexist — a longer chord outranks a shorter one, so binding a gameplay action to a bare
+        // `N` leaves both working.
+        //
+        // The row this produces is listed and fixed, like the pad rows: the settings screen has no
+        // way to edit a modifier, so offering a button that changed only half of `Ctrl+N` would be
+        // worse than offering none.
+        controls
+            .bind::<NewGame>(KeyCode::KeyN)
+            .with(ModifierKey::Ctrl);
     });
 
     // No binding here needs `.consume()`: `Menu` is `exclusive` (see its own doc comment), so
@@ -334,5 +359,6 @@ fn shell() -> impl Scene {
         on(pause::toggle)
         on(crate::overlay::toggle)
         on(crate::settings::toggle)
+        on(crate::asteroids::new_game)
     }
 }

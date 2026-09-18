@@ -19,6 +19,21 @@ use bevy_action_map::mapping::mappings;
 use bevy_action_map::prelude::*;
 use core::fmt::Write;
 
+/// One slot of a row as text: whatever has to be held, then the control itself.
+///
+/// The same composition the prompt captions use, and for the same reason — a row that dropped the
+/// modifier would print `Ctrl+N` as "N", so the panel and the caption would disagree about one
+/// binding.
+fn slot_label(slot: &BoundSlot) -> String {
+    let mut text = String::new();
+    for held in &slot.with {
+        text.push_str(&held.fallback_label());
+        text.push('+');
+    }
+    text.push_str(&slot.control.fallback_label());
+    text
+}
+
 /// The panel's own root entity. `pub` so a game with more than one camera can find it and attach
 /// its own `UiTargetCamera` — this module spawns onto whatever Bevy treats as the default UI
 /// camera, which is the right answer for a single-camera game and the wrong one for a game like
@@ -143,7 +158,7 @@ fn redraw(world: &mut World) {
         let bound = mapping
             .slots
             .iter()
-            .map(|slot| slot.map_or_else(|| "—".into(), |control| control.fallback_label()))
+            .map(|slot| slot.as_ref().map_or_else(|| "—".to_string(), slot_label))
             .collect::<Vec<_>>()
             .join(", ");
         let _ = writeln!(

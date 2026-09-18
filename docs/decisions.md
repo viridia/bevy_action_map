@@ -456,6 +456,44 @@ player is free to ignore. This is the same question D76 answered the other way, 
 differ because a composite's parts are alternatives the player rebinds separately while a modifier's
 two keys are one thing they press either of.
 
+### D79 — A rebinding row's chord rides inside the slot
+
+**Decided.** `ActionMapping::slots` holds `Option<BoundSlot>`, and a `BoundSlot` is a control plus
+the `ControlOrigin` list held with it. `ControlOrigin` rather than a control list for D78's reason —
+a modifier stands for either key of its pair — which also makes a row and a caption composable from
+the same values. `ActionMapping::controls()` is the bare-control view an override addresses, so
+`Overrides` stays in controls and its vocabulary did not widen. Chunk 128 built it.
+
+**Rules out.** A parallel `chords` list beside `slots`, index-aligned. Chords are per slot rather
+than per row, so the two would have to stay aligned by convention, and "this slot is empty" would
+have a place to be said in each of them and a way to disagree — the same shape the saved format
+rejects for the same reason.
+
+**Reversal.** The parallel list leaves every `.slots` call site alone, which is most of what the
+change cost. What it buys back is the alignment invariant, and the point at which that bites is an
+override: `rewrite` rebuilds a row from the controls the player accepted, and a chord read off the
+column it now occupies rather than off the control it arrived with lands on the wrong slot as soon
+as the row has a gap in it.
+
+### D80 — A chord is set, never captured
+
+**Decided.** Capture listens for one control. It never accumulates whatever modifiers were down
+alongside it, and a screen that wants a player-editable `Ctrl+S` sets the modifiers explicitly
+rather than pressing them. So `admissible` has no chord case, `ControlCaptured` carries one control,
+and a chord reaches a binding from the declaration or, once chunk 129 lands, from an override.
+
+**Rules out.** A capture that reports what was held with the press, and with it the conflict
+question that follows — whether `Ctrl+S` captured over `S` is a rebind, a clash, or a new row.
+
+**Reversal.** Hearing the chord is what a player would guess the screen does, and it is how every
+text field's shortcut editor behaves. What stops it is that the interesting chords never arrive:
+`Cmd+Q` quits the application before the key reaches it, and a window manager takes others first, so
+a capture that listened would work for the combinations nobody needs and fail silently for the ones
+they do. Blender's keymap editor captures a bare key and offers the modifiers as toggles for this
+reason, and resets those toggles on each capture. That last part is not settled here — whether a
+rebind clears an existing chord or preserves it is chunk 129's, because it is only answerable once
+there is a way to put one back.
+
 ### D16 — Nothing user-defined runs inside the evaluator
 
 **Decided.** Evaluation writes state and appends to a transition log. A separate system drains that

@@ -3,9 +3,12 @@
 use bevy::prelude::*;
 use std::f32::consts::TAU;
 
+use bevy_action_map::prelude::*;
+
+use crate::actions::NewGame;
 use crate::field::{HALF_EXTENT, Velocity, Wraps};
 use crate::pause::Simulating;
-use crate::ship::{Bullet, rand_unit};
+use crate::ship::{Bullet, Ship, rand_unit};
 
 /// How many times a rock has already been broken.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +50,31 @@ pub struct Doomed(pub Timer);
 pub fn plugin(app: &mut App) {
     app.add_systems(Startup, starting_rocks.spawn());
     app.add_systems(FixedUpdate, (shatter_on_hit, detonate).in_set(Simulating));
+}
+
+/// Clears the field and lays out a fresh spread of rocks.
+///
+/// Attached to the shell context's entity, so it hears the action wherever that lives.
+///
+/// The ship is put back in the middle at rest rather than despawned and respawned: it carries the
+/// exhaust and the shock ring as children, and rebuilding those to move it would be work for
+/// nothing.
+pub(crate) fn new_game(
+    _: On<Fired<NewGame>>,
+    mut commands: Commands,
+    rocks: Query<Entity, With<Asteroid>>,
+    bullets: Query<Entity, With<Bullet>>,
+    ships: Query<(&mut Transform, &mut Velocity), With<Ship>>,
+) {
+    for entity in rocks.iter().chain(bullets.iter()) {
+        commands.entity(entity).try_despawn();
+    }
+    commands.spawn_scene_list(starting_rocks());
+    for (mut at, mut velocity) in ships {
+        at.translation = Vec3::ZERO;
+        at.rotation = Quat::IDENTITY;
+        velocity.0 = Vec2::ZERO;
+    }
 }
 
 /// The opening spread of rocks: a `SceneList` rather than a `Scene`, because these are six sibling
