@@ -36,6 +36,7 @@ fn main() {
                 }),
                 ..default()
             }),
+            common::font::plugin,
             bevy_action_map::ActionMapPlugin,
         ))
         .add_plugins(pong::plugin)

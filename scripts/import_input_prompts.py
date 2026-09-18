@@ -11,7 +11,8 @@ only for the eight face buttons, so "colored, not outlined" means: prefer `_colo
 one, take the plain form otherwise, never the `_outline`.
 
 The destination path is the control's own stored name under a tier directory, so an app resolves
-art with `format!("input_prompts/{tier}/{}.png", control.name())` and no lookup table.
+art with `format!("input_prompts/{tier}/{}.png", origin.name())` and no lookup table. A modifier
+has a name like any control (`mod/ctrl`), and `macos/` holds the few keys a Mac labels differently.
 
 Every entry also gets a second, downscaled copy under `input_prompts_inline/` at `INLINE_SIZE`
 pixels. Bevy's `InlineImage` (as of bevyengine/bevy#25710) sizes itself from the loaded image's
@@ -41,6 +42,7 @@ PACK = {
     "nintendo": "Nintendo Switch",
     "generic": "Generic",
     "keyboard_mouse": "Keyboard & Mouse",
+    "macos": "Keyboard & Mouse",
 }
 
 # Face buttons are by POSITION, not letter. Bevy's South is the bottom button:
@@ -113,8 +115,8 @@ KEY.update({
     "ArrowLeft": "keyboard_arrow_left", "ArrowRight": "keyboard_arrow_right",
     "ShiftLeft": "keyboard_shift", "ShiftRight": "keyboard_shift",
     "ControlLeft": "keyboard_ctrl", "ControlRight": "keyboard_ctrl",
-    "AltLeft": "keyboard_alt", "AltRight": "keyboard_option",
-    "SuperLeft": "keyboard_command", "SuperRight": "keyboard_win",
+    "AltLeft": "keyboard_alt", "AltRight": "keyboard_alt",
+    "SuperLeft": "keyboard_win", "SuperRight": "keyboard_win",
     "Minus": "keyboard_minus", "Equal": "keyboard_equals",
     "BracketLeft": "keyboard_bracket_open", "BracketRight": "keyboard_bracket_close",
     "Backslash": "keyboard_slash_back", "Slash": "keyboard_slash_forward",
@@ -125,6 +127,19 @@ KEY.update({
 
 MOUSE = {"Left": "mouse_left", "Right": "mouse_right", "Middle": "mouse_scroll",
          "Back": "mouse_side_back", "Forward": "mouse_side_forward", "motion": "mouse_move"}
+
+# A modifier stands for either key of its pair, and Kenney draws neither side anyway.
+MOD = {"ctrl": "keyboard_ctrl", "shift": "keyboard_shift", "alt": "keyboard_alt",
+       "super": "keyboard_win"}
+
+# Where the key differs by platform rather than by side: Alt is Option on a Mac, and Super is
+# Command. Filed under a `macos` directory holding only these, which a Mac consults before
+# `keyboard_mouse`; the tier's own copies above are what everywhere else draws.
+MACOS = {
+    "key/AltLeft": "keyboard_option", "key/AltRight": "keyboard_option",
+    "key/SuperLeft": "keyboard_command", "key/SuperRight": "keyboard_command",
+    "mod/alt": "keyboard_option", "mod/super": "keyboard_command",
+}
 
 def plan():
     jobs = []
@@ -141,6 +156,10 @@ def plan():
         jobs.append(("keyboard_mouse", "key/%s" % name, f))
     for name, f in MOUSE.items():
         jobs.append(("keyboard_mouse", "mouse/%s" % name, f))
+    for name, f in MOD.items():
+        jobs.append(("keyboard_mouse", "mod/%s" % name, f))
+    for control, f in MACOS.items():
+        jobs.append(("macos", control, f))
     return jobs
 
 def make_inline(src, dst):
@@ -164,11 +183,14 @@ def make_inline(src, dst):
         # alpha PNG consumer (Bevy included) expects color alone, dividing by alpha itself.
         # Full RGBA output, not PNG8: a palette this small quantizes a circle's antialiased edge
         # down to a handful of alpha bands, and a 25px circle drawn in bands reads as an octagon.
-        # File size was never the constraint an icon this size needed one for.
+        # File size was never the constraint an icon this size needed one for. `PNG32:` because
+        # left to itself ImageMagick writes the smallest type that holds the pixels: a palette for
+        # colored art, and grey+alpha for monochrome, which Bevy 0.20.0-rc.1 loads as two channels
+        # and draws as an opaque yellow box (bevyengine/bevy#25538).
         subprocess.run(
             [
                 "magick", tmp["comp"], "-channel", "RGB", "-fx", "u.a>0?u/u.a:0", "+channel",
-                "-define", "png:compression-level=9", dst,
+                "-define", "png:compression-level=9", "PNG32:" + dst,
             ],
             check=True,
         )

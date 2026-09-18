@@ -37,6 +37,7 @@ fn main() {
                 }),
                 ..default()
             }),
+            common::font::plugin,
             bevy_action_map::ActionMapPlugin,
         ))
         // Every part of Pong except `paddle` and `ball`, which `rally` replaces.

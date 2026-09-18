@@ -45,6 +45,9 @@ use bevy::ui_widgets::TextInput;
 use bevy_action_map::prelude::*;
 use bevy_input::keyboard::{KeyCode, KeyboardInput};
 
+#[path = "common/mod.rs"]
+mod common;
+
 struct TypedCharacter;
 
 impl ClassBinding for TypedCharacter {
@@ -158,6 +161,7 @@ fn main() {
             })
             .build()
             .disable::<InputDispatchPlugin>(),
+        common::font::plugin,
         ActionMapPlugin,
     ));
     // Every binding here consumes: a chord that fires has to take its key from whatever reads it

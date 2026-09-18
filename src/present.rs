@@ -628,55 +628,63 @@ pub enum GlyphTier {
 #[non_exhaustive]
 pub enum Glyph {
     /// This crate's own identifier: the tier that resolved, and the control it draws.
-    Own(GlyphTier, Control),
+    ///
+    /// Never a [`ControlOrigin::Foreign`] one, whose art is whatever reported it to supply.
+    Own(GlyphTier, ControlOrigin),
 }
 
 /// Resolves a control to a glyph identifier, trying a brand's own art before falling back to a
 /// generic tier.
 ///
-/// `has_art` answers whether a tier has art for a control at all — an app's own atlas decides
-/// that, not this crate. `None` means no tier answered yes, which is the caller's cue to fall back
-/// to text.
+/// `has_art` answers whether a tier has art for a control at all — an app's own atlas decides that,
+/// not this crate. [`ControlOrigin::name`] is a natural key for it, and covers a modifier
+/// (`mod/ctrl`) the same way it covers a key. `None` means no tier answered yes, which is the
+/// caller's cue to fall back to text.
 ///
 /// A gamepad control tries `brand` first and
 /// [`GamepadBrand::Generic`](crate::device::GamepadBrand::Generic) next, unless `brand` is already
-/// `Generic`. A keyboard or mouse control has only the one tier to try.
+/// `Generic`. A keyboard or mouse control, modifiers included, has only the one tier to try. A
+/// foreign control always answers `None`: this crate has no art of its own for it.
+///
+/// A chord is drawn one entry at a time, so resolve [`Prompt::with`] as well as [`Prompt::origin`].
 #[cfg(feature = "gamepad")]
 pub fn resolve_glyph(
-    control: Control,
+    origin: &ControlOrigin,
     brand: crate::device::GamepadBrand,
-    has_art: impl Fn(GlyphTier, Control) -> bool,
+    has_art: impl Fn(GlyphTier, &ControlOrigin) -> bool,
 ) -> Option<Glyph> {
     use crate::device::GamepadBrand::Generic;
 
-    let is_gamepad = matches!(
-        control,
-        Control::GamepadButton(_) | Control::GamepadAxis(_) | Control::GamepadStick(_)
-    );
-    if !is_gamepad {
-        return has_art(GlyphTier::KeyboardMouse, control)
-            .then_some(Glyph::Own(GlyphTier::KeyboardMouse, control));
+    if matches!(origin, ControlOrigin::Foreign { .. }) {
+        return None;
     }
-    if has_art(GlyphTier::Gamepad(brand), control) {
-        return Some(Glyph::Own(GlyphTier::Gamepad(brand), control));
+    let own = |tier| has_art(tier, origin).then(|| Glyph::Own(tier, origin.clone()));
+    if origin.family() != Some(DeviceFamily::Gamepad) {
+        return own(GlyphTier::KeyboardMouse);
     }
-    if brand != Generic && has_art(GlyphTier::Gamepad(Generic), control) {
-        return Some(Glyph::Own(GlyphTier::Gamepad(Generic), control));
+    if let Some(glyph) = own(GlyphTier::Gamepad(brand)) {
+        return Some(glyph);
+    }
+    if brand != Generic {
+        return own(GlyphTier::Gamepad(Generic));
     }
     None
 }
 
 /// Resolves a control to a glyph identifier.
 ///
-/// Without gamepad support there is only ever one tier to try, since every control left is
-/// keyboard or mouse.
+/// Without gamepad support there is only ever one tier to try, since every control left is keyboard
+/// or mouse. A foreign control always answers `None`: this crate has no art of its own for it.
 #[cfg(not(feature = "gamepad"))]
 pub fn resolve_glyph(
-    control: Control,
-    has_art: impl Fn(GlyphTier, Control) -> bool,
+    origin: &ControlOrigin,
+    has_art: impl Fn(GlyphTier, &ControlOrigin) -> bool,
 ) -> Option<Glyph> {
-    has_art(GlyphTier::KeyboardMouse, control)
-        .then_some(Glyph::Own(GlyphTier::KeyboardMouse, control))
+    if matches!(origin, ControlOrigin::Foreign { .. }) {
+        return None;
+    }
+    has_art(GlyphTier::KeyboardMouse, origin)
+        .then(|| Glyph::Own(GlyphTier::KeyboardMouse, origin.clone()))
 }
 
 /// One physical control a prompt can name.
@@ -1326,10 +1334,10 @@ mod tests {
     fn resolve_glyph_prefers_the_brands_own_art() {
         use crate::device::GamepadBrand;
 
-        let control = Control::GamepadButton(GamepadButton::South);
-        let glyph = resolve_glyph(control, GamepadBrand::PlayStation, |tier, seen| {
+        let origin = ControlOrigin::Ours(Control::GamepadButton(GamepadButton::South));
+        let glyph = resolve_glyph(&origin, GamepadBrand::PlayStation, |tier, seen| {
             assert_eq!(
-                seen, control,
+                seen, &origin,
                 "asked about a different control than it was given"
             );
             tier == GlyphTier::Gamepad(GamepadBrand::PlayStation)
@@ -1338,7 +1346,7 @@ mod tests {
             glyph,
             Some(Glyph::Own(
                 GlyphTier::Gamepad(GamepadBrand::PlayStation),
-                control
+                origin
             ))
         );
     }
@@ -1349,15 +1357,15 @@ mod tests {
     fn resolve_glyph_falls_back_to_generic() {
         use crate::device::GamepadBrand;
 
-        let control = Control::GamepadButton(GamepadButton::South);
-        let glyph = resolve_glyph(control, GamepadBrand::PlayStation, |tier, _| {
+        let origin = ControlOrigin::Ours(Control::GamepadButton(GamepadButton::South));
+        let glyph = resolve_glyph(&origin, GamepadBrand::PlayStation, |tier, _| {
             tier == GlyphTier::Gamepad(GamepadBrand::Generic)
         });
         assert_eq!(
             glyph,
             Some(Glyph::Own(
                 GlyphTier::Gamepad(GamepadBrand::Generic),
-                control
+                origin
             ))
         );
     }
@@ -1368,14 +1376,14 @@ mod tests {
     fn resolve_glyph_gives_up_when_nothing_has_art() {
         use crate::device::GamepadBrand;
 
-        let control = Control::GamepadButton(GamepadButton::South);
+        let origin = ControlOrigin::Ours(Control::GamepadButton(GamepadButton::South));
         assert_eq!(
-            resolve_glyph(control, GamepadBrand::Xbox, |_, _| false),
+            resolve_glyph(&origin, GamepadBrand::Xbox, |_, _| false),
             None
         );
         // Already generic, so there is no second tier to fall back to.
         assert_eq!(
-            resolve_glyph(control, GamepadBrand::Generic, |_, _| false),
+            resolve_glyph(&origin, GamepadBrand::Generic, |_, _| false),
             None
         );
     }
@@ -1387,11 +1395,45 @@ mod tests {
     fn resolve_glyph_ignores_brand_for_keyboard_and_mouse() {
         use crate::device::GamepadBrand;
 
-        let control = Control::PhysicalKey(KeyCode::Enter);
-        let glyph = resolve_glyph(control, GamepadBrand::PlayStation, |tier, _| {
+        let origin = ControlOrigin::Ours(Control::PhysicalKey(KeyCode::Enter));
+        let glyph = resolve_glyph(&origin, GamepadBrand::PlayStation, |tier, _| {
             tier == GlyphTier::KeyboardMouse
         });
-        assert_eq!(glyph, Some(Glyph::Own(GlyphTier::KeyboardMouse, control)));
+        assert_eq!(glyph, Some(Glyph::Own(GlyphTier::KeyboardMouse, origin)));
+    }
+
+    /// A modifier is not a `Control`, but it is keyboard art like any key, asked for by its own
+    /// name rather than by either key of its pair.
+    #[cfg(all(feature = "gamepad", feature = "keyboard"))]
+    #[test]
+    fn resolve_glyph_draws_a_modifier() {
+        use crate::binding::ModifierKey;
+        use crate::device::GamepadBrand;
+
+        let origin = ControlOrigin::Modifier(ModifierKey::Ctrl);
+        let glyph = resolve_glyph(&origin, GamepadBrand::Xbox, |tier, seen| {
+            tier == GlyphTier::KeyboardMouse && seen.name() == "mod/ctrl"
+        });
+        assert_eq!(glyph, Some(Glyph::Own(GlyphTier::KeyboardMouse, origin)));
+    }
+
+    /// A foreign control's art is whatever reported it to supply, so this crate never claims to
+    /// have any, whatever `has_art` would say.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn resolve_glyph_leaves_a_foreign_control_alone() {
+        use crate::device::GamepadBrand;
+
+        let origin = ControlOrigin::Foreign {
+            name: "steam/trackpad".into(),
+            label: "Trackpad".into(),
+            family: Some(DeviceFamily::Gamepad),
+            class: None,
+        };
+        assert_eq!(
+            resolve_glyph(&origin, GamepadBrand::Xbox, |_, _| true),
+            None
+        );
     }
 
     /// Every control has something to show. A label nobody wrote would surface as a blank row.

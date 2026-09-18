@@ -7,5 +7,6 @@
 #![allow(dead_code)]
 
 pub mod debug_overlay;
+pub mod font;
 pub mod prompt_ui;
 pub mod widget_focus;

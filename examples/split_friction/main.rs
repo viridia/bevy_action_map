@@ -58,6 +58,7 @@ fn main() {
                 .set(ImagePlugin::default_nearest())
                 .build()
                 .disable::<bevy::input_focus::InputDispatchPlugin>(),
+            common::font::plugin,
             bevy_action_map::ActionMapPlugin,
             // Not in `DefaultPlugins`. The popup's automatic navigator consults its graph before
             // falling back to on-screen position, so it has to exist even though nothing here ever

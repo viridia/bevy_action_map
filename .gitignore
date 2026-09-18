@@ -5,3 +5,5 @@
 # The Steam Input validation probe. Temporary, and moves to its own repo once it has
 # answered the questions it exists for.
 /steam_probe
+
+.DS_Store

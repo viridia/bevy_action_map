@@ -30,7 +30,6 @@ use std::borrow::Cow;
 
 use bevy::ecs::schedule::SystemCondition;
 use bevy::prelude::*;
-use bevy::text::InlineBox;
 use bevy::ui::UiSystems;
 use bevy_action_map::device::{Brand, GamepadBrand};
 use bevy_action_map::prelude::*;
@@ -46,14 +45,20 @@ pub struct PromptSpan(pub ActionId);
 
 /// Renders the control that would currently fire an action as an icon, inline in a line of text.
 ///
+/// A chord draws every control in it as children of this span, joined by `+`, so the whole chord
+/// stays one run that moves with its sentence. The `+` takes the span's own `TextFont` and
+/// `TextColor`.
+///
+/// A new answer waits for its art: the span goes on drawing the old one until every icon in the new
+/// one has loaded, so the line never reflows around an icon that is still loading.
+///
 /// Falls back to the same text [`PromptSpan`] would show, bracketed, wherever nothing has art for
-/// the control — an unrecognized pad brand, or a control the atlas simply does not cover — so a
-/// caption never goes blank for want of an icon. The brackets are only there for that fallback: an
-/// icon reads as a control on its own and does not need them, so a caller wraps neither in its own
-/// punctuation. No `#[require]`: which of `InlineImage` or `TextSpan` the entity carries is the
-/// fallback decision itself, so [`refresh_icon_prompts`] sets whichever applies rather than always
-/// carrying both.
+/// the control, such as an unrecognized pad brand or a control the atlas simply does not cover, so
+/// a caption never goes blank for want of an icon. A chord falls back whole if any control in it
+/// has no art. The brackets are only there for that fallback: an icon reads as a control on its own
+/// and does not need them, so a caller wraps neither in its own punctuation.
 #[derive(Component, Clone, Copy, Default)]
+#[require(TextSpan)]
 pub struct IconPromptSpan(pub ActionId);
 
 /// Which device family one span speaks for, overriding [`PromptDevice`].
@@ -113,6 +118,9 @@ pub fn plugin(app: &mut App) {
                 resource_changed::<PromptGeneration>
                     .or_else(any_match_filter::<Added<IconPromptSpan>>),
             ),
+            swap_in_icons
+                .after(refresh_icon_prompts)
+                .run_if(any_with_component::<PendingIcons>),
         )
             .before(UiSystems::Prepare),
     );
@@ -237,13 +245,11 @@ fn refresh_prompts(world: &mut World) {
     }
 }
 
-/// One prompt as a string, whatever must be held alongside it and whatever timing it wants first.
+/// One prompt as a string, with whatever must be held alongside it.
 ///
 /// A binding that needs a modifier says so, because a prompt that dropped it would caption `Ctrl+S`
-/// as "S" — wrong rather than merely terse. A binding that only fires held says so too:
-/// `prompt.condition` is `ConditionDescriptor::None` for almost everything, and where it is not,
-/// its fallback renderer is what turns "W" into "Hold W" rather than a bare, uninterpretable
-/// "Hold".
+/// as "S", which is wrong rather than merely terse. How the control is pressed is not said: "Hold
+/// ⟨X⟩ to reload" is the sentence around a prompt that reads "X", and the game writes it.
 fn caption(prompt: &Prompt, brand: GamepadBrand) -> String {
     let mut control = String::new();
     for held in &prompt.with {
@@ -251,7 +257,7 @@ fn caption(prompt: &Prompt, brand: GamepadBrand) -> String {
         control.push('+');
     }
     control.push_str(&branded(&prompt.origin, brand));
-    prompt.condition.fallback_format(&control)
+    control
 }
 
 /// One control's name, in the pad's own words where it has any.
@@ -303,15 +309,24 @@ fn tier_str(tier: GlyphTier) -> &'static str {
 /// `input_prompts_inline/`, not `input_prompts/`: Bevy's `InlineImage` sizes itself from the
 /// loaded image's own pixel dimensions with no resize hook (bevyengine/bevy#25710), so an inline
 /// glyph needs art pre-scaled to sit inline with a line of text rather than towering over it.
-fn inline_icon_path(glyph: Glyph) -> String {
-    let Glyph::Own(tier, control) = glyph else {
+///
+/// A Mac takes `macos/` first where it has an entry, for the keys it labels differently: Option
+/// for Alt, and Command for Super.
+fn inline_icon_path(glyph: &Glyph, manifest: &IconManifest) -> String {
+    let Glyph::Own(tier, origin) = glyph else {
         unreachable!("`Glyph` has one variant today");
     };
-    format!(
-        "input_prompts_inline/{}/{}.png",
-        tier_str(tier),
-        control.name()
-    )
+    let name = origin.name();
+    let mac = format!("macos/{name}");
+    let key = if cfg!(target_os = "macos")
+        && *tier == GlyphTier::KeyboardMouse
+        && manifest.0.contains(&mac)
+    {
+        mac
+    } else {
+        format!("{}/{name}", tier_str(*tier))
+    };
+    format!("input_prompts_inline/{key}.png")
 }
 
 /// Everything one icon span needs in order to ask its question — mirrors [`PromptQuery`].
@@ -324,9 +339,10 @@ type IconPromptQuery = (
     Option<&'static PromptUnbound>,
 );
 
-/// What one icon span resolved to: an image to load, or text to fall back to.
+/// What one icon span resolved to: an image to load per control in the chord, in the order they
+/// are drawn, or text to fall back to.
 enum Resolved {
-    Icon(String),
+    Icons(Vec<String>),
     Text(String),
 }
 
@@ -352,7 +368,12 @@ fn refresh_icon_prompts(world: &mut World) {
     // back to from what `refresh_prompts` would call the button — see `labelling_brand`.
     let brand = connected_brand(world);
     let labelled = labelling_brand(world);
-    let manifest = &world.resource::<IconManifest>().0;
+    let manifest = world.resource::<IconManifest>();
+    let has_art = |tier, origin: &ControlOrigin| {
+        manifest
+            .0
+            .contains(&format!("{}/{}", tier_str(tier), origin.name()))
+    };
     let resolved: Vec<(Entity, Resolved)> = spans
         .iter(world)
         .map(|(entity, span, scheme, class, pick, unbound)| {
@@ -362,22 +383,21 @@ fn refresh_icon_prompts(world: &mut World) {
                 None => {
                     Resolved::Text(unbound.map_or_else(|| "—".to_string(), |text| text.0.clone()))
                 }
-                Some(prompt) => match prompt.origin {
-                    ControlOrigin::Ours(control) => {
-                        resolve_glyph(control, brand, |tier, control| {
-                            manifest.contains(&format!("{}/{}", tier_str(tier), control.name()))
-                        })
-                        .map_or_else(
-                            || Resolved::Text(caption(prompt, labelled)),
-                            |glyph| Resolved::Icon(inline_icon_path(glyph)),
-                        )
-                    }
-                    // A modifier is only ever a chord entry, never what fires a binding, so this
-                    // arm is here for exhaustiveness; the caption is the right answer regardless.
-                    ControlOrigin::Modifier(_) | ControlOrigin::Foreign { .. } => {
-                        Resolved::Text(caption(prompt, labelled))
-                    }
-                },
+                // All or none: a chord drawn half as art and half as bracketed words reads as two
+                // separate answers.
+                Some(prompt) => prompt
+                    .with
+                    .iter()
+                    .chain([&prompt.origin])
+                    .map(|origin| {
+                        resolve_glyph(origin, brand, has_art)
+                            .map(|glyph| inline_icon_path(&glyph, manifest))
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .map_or_else(
+                        || Resolved::Text(caption(prompt, labelled)),
+                        Resolved::Icons,
+                    ),
             };
             (entity, resolved)
         })
@@ -387,18 +407,62 @@ fn refresh_icon_prompts(world: &mut World) {
     for (entity, resolved) in resolved {
         let mut entity = world.entity_mut(entity);
         match resolved {
-            Resolved::Icon(path) => {
-                entity.remove::<TextSpan>();
-                entity.insert(InlineImage {
-                    image: asset_server.load(path),
-                    ..default()
-                });
+            Resolved::Icons(paths) => {
+                let icons = paths.into_iter().map(|path| asset_server.load(path));
+                entity.insert(PendingIcons(icons.collect()));
             }
             Resolved::Text(text) => {
-                entity.remove::<(InlineImage, InlineBox)>();
+                // A chord still waiting on its art is no longer the answer.
+                entity.remove::<PendingIcons>();
+                entity.despawn_children();
                 // The brackets belong to the fallback, not to a prompt — see `IconPromptSpan`.
                 entity.insert(TextSpan::new(format!("[{text}]")));
             }
         }
+    }
+}
+
+/// A chord of icons waiting on its art, while the span goes on drawing whatever it drew before.
+///
+/// Swapping the children as soon as the answer changes would lay the line out around icons still
+/// loading, which take no space, and then reflow it when the art lands. A newer answer replaces
+/// this one, so a span never swaps in a chord that has gone stale.
+#[derive(Component)]
+struct PendingIcons(Vec<Handle<Image>>);
+
+/// Replaces a span's children with its pending chord once every icon in it has loaded.
+///
+/// Before UI layout, so each icon's box is sized from an image already in memory in the frame it
+/// first appears. A chord whose art is already loaded, such as one a rebind left unchanged, swaps
+/// in the same frame [`refresh_icon_prompts`] resolved it.
+///
+/// An icon that fails to load leaves its chord pending, with the previous one still drawn: the
+/// manifest has already said the file exists, so a failure is a broken install, and Bevy logs it.
+fn swap_in_icons(
+    mut commands: Commands,
+    spans: Query<(Entity, &PendingIcons, &TextFont, &TextColor)>,
+    images: Res<Assets<Image>>,
+) {
+    for (entity, pending, font, color) in &spans {
+        if !pending.0.iter().all(|icon| images.contains(icon)) {
+            continue;
+        }
+        let mut span = commands.entity(entity);
+        span.remove::<PendingIcons>()
+            .despawn_related::<Children>()
+            .insert(TextSpan::default());
+        let icons = pending.0.clone();
+        let (font, color) = (font.clone(), *color);
+        span.with_children(|chord| {
+            for (n, icon) in icons.into_iter().enumerate() {
+                if n > 0 {
+                    chord.spawn((TextSpan::new("+"), font.clone(), color));
+                }
+                chord.spawn(InlineImage {
+                    image: icon,
+                    ..default()
+                });
+            }
+        });
     }
 }

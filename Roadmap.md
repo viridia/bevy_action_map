@@ -190,6 +190,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 128  | A rebinding row that shows its chord                                  |
 | 129  | An override that can name a chord                                     |
 | 136  | A gallery of prompts                                                  |
+| 133  | An icon prompt for a chord                                            |
 
 ---
 
@@ -435,9 +436,9 @@ identifier keyed by (brand, control), the app supplies the atlas, and a fallback
 brand → generic → text is required.
 
 **The inline half has landed** — `Glyph`, `GlyphTier`, the fallback chain and `IconPromptSpan` all
-exist, and the art resolves against them: every one of the 164 entries in `assets/input_prompts/`
-answers to `format!("input_prompts/{tier}/{}.png", control.name())`. What is left is the block
-prompt and the generic tier's art, below.
+exist, and the art resolves against them: every one of the 174 entries in `assets/input_prompts/`
+answers to `format!("input_prompts/{tier}/{}.png", origin.name())`. What is left is the block prompt
+and the generic tier's art, below.
 
 - **The identifier is one variant of a sum, not the whole type.** R18.9 requires it: a backend
   answers with an opaque handle, raw bytes, or a filesystem path instead, and Steam actually does
@@ -481,39 +482,6 @@ prompt and the generic tier's art, below.
   so a generic-tier icon needs a short text stamp authored onto it by hand. That is a content task
   with a known answer, and until it is done the generic tier resolves to text.
 
-### 133. An icon prompt for a chord
-
-`docs/issues.md` 1061 and 1064. The icon path resolves a glyph for `prompt.origin` alone, so a chord
-drawn as icons shows one bumper where two are wanted; `prompt.with` reaches only the text caption.
-
-- **One span, several children.** A text span need not be a leaf, so an `IconPromptSpan` becomes an
-  empty span parenting glyph, `+`, glyph, and the chord stays one inline run that moves with its
-  sentence. `Resolved::Icon` holds a sequence rather than one path.
-- **Modifiers get art.** Kenney ships `keyboard_ctrl`, `keyboard_shift` and `keyboard_alt`; the
-  curated list left them out because nothing had asked for a modifier glyph.
-  `scripts/import_input_prompts.py` gains `mod/ctrl`, `mod/shift`, `mod/alt` and `mod/super`.
-- **The re-run fixes the inline art too** (1064). `make_inline` lets ImageMagick choose the PNG
-  type, which gives 8-bit grey+alpha for monochrome art and a palette for the rest. Bevy 0.20.0-rc.1
-  draws the first as an opaque yellow box ([bevy#25538][] is the upstream fix), and the second bands
-  the edge. `PNG32:` on the output path forces the full RGBA the script's comment already claims,
-  and the re-run this chunk makes anyway rewrites all 164 files.
-- **So not example-only after all.** `Glyph::Own` holds a `Control` and `resolve_glyph` takes one,
-  and a modifier is not a `Control` (D78). Glyph resolution has to accept one — a `Glyph` variant or
-  a resolver over `ControlOrigin` is this chunk's decision.
-- **`Super` is two pictures**, Command on macOS and the Windows key elsewhere: 94c's platform
-  question, arriving for art. The script already gets the neighbouring case wrong, choosing by side
-  where the difference is platform — `SuperLeft` draws Command, `SuperRight` the Windows key, and
-  `AltRight` Option.
-- **An entry with no art** either drops the whole chord to its text caption or draws a mixed run.
-  Once the modifiers have art this is rare, and which reads better is this chunk's call.
-- **`caption` stops formatting the condition.** D82: a prompt names the control, and "Hold" is the
-  surrounding prose's word. The text path calls `fallback_format` and the icon path does not, so the
-  gallery's hold and double-tap rows read "Hold X" beside a bare X; after this both read X.
-- **Verified by** `SmartBomb` getting an `IconPromptSpan` beside its charge meter, naming both
-  bumpers — the caller 1061 said nothing in tree had — and by 136's chord rows under every brand.
-  The keyboard, bumper, trigger and stick rows have to draw on a transparent ground rather than a
-  black square.
-
 ### 134. A legend, as well as a prompt
 
 `docs/issues.md` 1062 and 1065. `prompts` answers what would fire an action *now*, and R18.1 and
@@ -531,21 +499,11 @@ dash.
   context has taken the control. A legend wants the second read as live, and not the first.
 - **Not `mappings`**, which answers per family and per composite part, carries rebind policy, and
   omits `private` bindings.
-- **The dash itself** is `—`, which Bevy's default font draws as a box: `FiraMono-subset.ttf` is
-  printable ASCII and nothing else. A legend stops the hint reaching the fallback, but the `—` also
-  appears in `debug_overlay`'s empty slot and in the controls screen's help text, and a
-  `LogicalKey('é')` label is non-ASCII by nature.
-- **So the examples get a real font.** FiraSans-Regular, the face `bevy_feathers` ships (OFL, 441
-  KB, with `—`, `×` and Latin accents), copied with its licence into `assets/fonts/`. A plugin in
-  `examples/common` inserts it at `AssetId::default()` in `Assets<Font>` after `DefaultPlugins`,
-  which replaces the font every span with an unset `font` draws in, so no span changes. Every
-  example with a window adds the plugin.
 - **The crate's own fallback goes ASCII** (1065). `fallback_format` writes a multi-tap as `W ×2`,
-  and a game on Bevy's default font gets a box from `src/` whatever the examples do; `W x2` has no
-  such problem.
+  and Bevy's default font is printable ASCII and nothing else, so a game on it gets a box from
+  `src/`. The examples have had a real font since 133; `W x2` needs none.
 - **Verified by** the corner hint naming `F1` and `Ctrl+N` with the controls screen open, a legend
-  row in 136 beside the prompt row for the same shadowed action, and the gallery's unbound row
-  drawing a dash rather than a box.
+  row in 136 beside the prompt row for the same shadowed action.
 
 ---
 
@@ -809,6 +767,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Consumption-aware `FocusedInput` dispatch** (R8.2a) | **a game wanting `bevy_ui_widgets`' own widgets working generically, unmodified, without a context per widget kind.** A context per kind is the path to reach for first, and Disasteroids ships that way. A design for the filter was built and set aside: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline rather than a second raw-message read — keyboard only, since every keyboard-driven widget observer at 0.20 gates on `ButtonState::Pressed` and none reacts to a release |
 | **Promoting `WidgetKind` and the per-kind context into the crate** | [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native widget-kind id. Promoting a shape this crate invented first, ahead of that conversation, risks committing to the wrong one |
 | **Deleting `acquire_focus_directional`** | [bevy#25675][] landing. `examples/common/widget_focus.rs` carries a global `AcquireFocus` observer mirroring `acquire_focus_tab_index`, with `AutoDirectionalNavigation` standing in for `TabIndex`: `bevy_input_focus`'s `click_to_focus` bubbles an `AcquireFocus` on every pointer press, a screen navigating by anything but `TabIndex` intercepts it nowhere, so it reaches the window and clears focus — and a widget whose interactive children are separate entities, like a stepper's two chevrons, blinks on every press rather than rarely. The PR separates focusability from navigation policy behind a `Focusable` component and names [bevy#25596][], click-to-focus under directional navigation, as what it fixes, so it plausibly retires the observer outright. Approved and waiting on the author with conflicts as of September 2026. What to check when it lands is whether `Focusable` reaches a navigation scheme that is neither `TabIndex` nor one of upstream's own, which is the case the workaround actually covers |
+| **Deleting `examples/common/font.rs`** | [bevy#25842][] answered: a supported way to set an app-wide default font. Until then the plugin overwrites the `default_font` feature's slot at `AssetId::default()` during plugin build, which depends on that slot's location and on text layout registering a font id once. What to check when it lands is whether the answer still has to be set before the first text layout, or reacts to a change |
 | **Asking whether a row would be refused, before Confirm** | **a refusal a screen's working copy can reach that capture does not already turn down.** Chunk 127 removed the last one: a wrong family, a wrong shape and a reserved control are refused at capture, and a `Fixed` row has no cell to capture into. The screen writes gestures into `PendingOverrides` and only Confirm asks whether they are legal, so a new refusal of that kind is shown taking and then silently lost. `refusal` is private and wants the declared bindings, so the general answer is a dry run of the apply, which is public API. The cheaper answers are for the row to say what would be refused so a screen can decline the gesture, or for the screen to apply eagerly and keep Confirm for persistence |
 | **A context-level exclusion from the mapping list** | a second screen needing the same filter and duplicating it. `ActionMapping::context` already carries the data, and one call site filtering on it costs one line — at two, the crate is the one paying for the repetition |
 | **An initial delay distinct from the repeat rate** (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both. Two numbers is a small change; what is missing is a case where equal is wrong, and a two-table settings screen is not it |
@@ -837,7 +796,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
 [bevy#25596]: https://github.com/bevyengine/bevy/issues/25596
 [bevy#25675]: https://github.com/bevyengine/bevy/pull/25675
-[bevy#25538]: https://github.com/bevyengine/bevy/pull/25538
 [bevy#25710]: https://github.com/bevyengine/bevy/pull/25710
+[bevy#25842]: https://github.com/bevyengine/bevy/issues/25842
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678

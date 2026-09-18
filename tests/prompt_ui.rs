@@ -25,15 +25,22 @@ struct Flying;
 
 /// Headless: nothing here draws, and a `TextSpan` is a component whether or not anything renders
 /// it. What is being tested is the string, which is the whole of what this layer decides.
+///
+/// Icons do load, since an icon chord is not drawn until its art has. The renderer is what usually
+/// registers the PNG loader, so it is registered here by hand.
 fn app() -> App {
+    use bevy::image::{CompressedImageFormats, ImageLoader};
+
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
         bevy::asset::AssetPlugin::default(),
+        bevy::image::ImagePlugin::default(),
         bevy::input::InputPlugin,
         ActionMapPlugin,
         prompt_ui::plugin,
-    ));
+    ))
+    .register_asset_loader(ImageLoader::new(CompressedImageFormats::empty()));
     app
 }
 
@@ -166,11 +173,10 @@ fn an_action_nothing_fires_renders_a_placeholder() {
     assert_eq!(caption(&mut app, told), "unbound");
 }
 
-/// A binding that only fires held says so in the caption, and as the whole formula rather than a
-/// bare qualifier — "Hold Space" tells a player what to do; "Hold" alone tells them nothing they
-/// could act on.
+/// A prompt names the control and not how it is pressed: "Hold ⟨X⟩ to reload" is the sentence the
+/// game writes around a prompt that reads "X".
 #[test]
-fn a_held_binding_says_so_in_the_caption() {
+fn a_held_binding_is_named_by_its_control_alone() {
     let mut app = app();
     app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
     app.add_context::<Flying>(|controls| {
@@ -179,7 +185,7 @@ fn a_held_binding_says_so_in_the_caption() {
     app.world_mut().spawn(Flying);
 
     let span = app.world_mut().spawn(PromptSpan(Jump::id())).id();
-    assert_eq!(caption(&mut app, span), "Hold Space");
+    assert_eq!(caption(&mut app, span), "Space");
 }
 
 /// The whole reason the crate raises a staleness signal: a prompt that was right when it was
@@ -217,4 +223,202 @@ fn an_icon_prompt_falls_back_to_bracketed_text_when_nothing_fires_the_action() {
 
     let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
     assert_eq!(caption(&mut app, span), "[—]");
+}
+
+/// What one icon span draws, child by child: the path of each icon's art, and the text between.
+///
+/// A chord's icons appear only once their art has loaded, which happens off the main thread, so
+/// this updates until the span draws something: children, or a caption of its own.
+fn icons(app: &mut App, span: Entity) -> Vec<String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        app.update();
+        let world = app.world();
+        let drawn = world
+            .get::<Children>(span)
+            .is_some_and(|children| !children.is_empty())
+            || world
+                .get::<TextSpan>(span)
+                .is_some_and(|text| !text.0.is_empty());
+        if drawn {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the span's art never loaded"
+        );
+        std::thread::yield_now();
+    }
+    drawn(app, span)
+}
+
+/// What one icon span draws right now, without waiting on any art.
+fn drawn(app: &App, span: Entity) -> Vec<String> {
+    let world = app.world();
+    let Some(children) = world.get::<Children>(span) else {
+        return Vec::new();
+    };
+    children
+        .iter()
+        .map(|child| match world.get::<InlineImage>(child) {
+            Some(icon) => icon
+                .image
+                .path()
+                .expect("art is asked for by path")
+                .to_string(),
+            None => world
+                .get::<TextSpan>(child)
+                .expect("a child is an icon or the text between two")
+                .0
+                .clone(),
+        })
+        .collect()
+}
+
+/// A chord drawn as icons names everything that has to be held, and draws it in the order it is
+/// pressed: a player told to press S alone would save nothing.
+#[test]
+fn an_icon_prompt_draws_every_control_in_a_chord() {
+    let mut app = app();
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
+    app.add_context::<Flying>(|controls| {
+        controls.bind::<Jump>(KeyCode::KeyS).with(ModifierKey::Ctrl);
+    });
+    app.world_mut().spawn(Flying);
+
+    let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
+    let chord = [
+        "input_prompts_inline/keyboard_mouse/mod/ctrl.png",
+        "+",
+        "input_prompts_inline/keyboard_mouse/key/KeyS.png",
+    ];
+    assert_eq!(icons(&mut app, span), chord);
+    assert_eq!(caption(&mut app, span), "");
+
+    // Redrawn in place rather than added to.
+    app.world_mut()
+        .resource_mut::<PromptGeneration>()
+        .set_changed();
+    assert_eq!(icons(&mut app, span), chord);
+}
+
+/// A chord is not a keyboard thing, and a pad chord draws in the pad's own art.
+#[test]
+fn an_icon_prompt_draws_a_pad_chord_in_the_pads_art() {
+    use bevy_action_map::device::GamepadBrand;
+    use prompt_ui::PromptBrand;
+
+    let mut app = app();
+    app.insert_resource(PromptDevice(Some(DeviceFamily::Gamepad)));
+    app.insert_resource(PromptBrand(GamepadBrand::PlayStation));
+    app.add_context::<Flying>(|controls| {
+        controls
+            .bind::<Jump>(GamepadButton::RightTrigger)
+            .with(GamepadButton::LeftTrigger);
+    });
+    app.world_mut().spawn(Flying);
+
+    let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
+    assert_eq!(
+        icons(&mut app, span),
+        [
+            "input_prompts_inline/playstation/pad/LeftTrigger.png",
+            "+",
+            "input_prompts_inline/playstation/pad/RightTrigger.png",
+        ]
+    );
+}
+
+/// One control without art sends the whole chord to text: half a chord in pictures and half in
+/// bracketed words reads as two answers.
+#[test]
+fn an_icon_prompt_falls_back_whole_when_one_control_has_no_art() {
+    let mut app = app();
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
+    app.add_context::<Flying>(|controls| {
+        controls
+            .bind::<Jump>(KeyCode::NumpadMultiply)
+            .with(ModifierKey::Ctrl);
+    });
+    app.world_mut().spawn(Flying);
+
+    let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
+    assert_eq!(icons(&mut app, span), Vec::<String>::new());
+    assert_eq!(caption(&mut app, span), "[Ctrl+Numpad *]");
+}
+
+/// A Mac labels Alt as Option and Super as Command, so its art does too.
+#[test]
+fn an_icon_prompt_draws_a_macs_own_modifier_keys_on_a_mac() {
+    let mut app = app();
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
+    app.add_context::<Flying>(|controls| {
+        controls.bind::<Jump>(KeyCode::KeyQ).with(ModifierKey::Alt);
+    });
+    app.world_mut().spawn(Flying);
+
+    let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
+    let alt = if cfg!(target_os = "macos") {
+        "input_prompts_inline/macos/mod/alt.png"
+    } else {
+        "input_prompts_inline/keyboard_mouse/mod/alt.png"
+    };
+    assert_eq!(
+        icons(&mut app, span),
+        [alt, "+", "input_prompts_inline/keyboard_mouse/key/KeyQ.png"]
+    );
+}
+
+/// A new chord waits for its art with the old one still drawn, so the line is never laid out around
+/// icons still loading. Loaded art reaches `Assets<Image>` no sooner than the next frame, so the
+/// update that changes the answer cannot be the one that shows it.
+#[test]
+fn an_icon_prompt_keeps_its_old_chord_until_the_new_art_loads() {
+    use bevy_action_map::device::GamepadBrand;
+    use prompt_ui::PromptBrand;
+
+    let mut app = app();
+    app.insert_resource(PromptDevice(Some(DeviceFamily::Gamepad)));
+    app.insert_resource(PromptBrand(GamepadBrand::Xbox));
+    app.add_context::<Flying>(|controls| {
+        controls
+            .bind::<Jump>(GamepadButton::RightTrigger)
+            .with(GamepadButton::LeftTrigger);
+    });
+    app.world_mut().spawn(Flying);
+
+    let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
+    let xbox = [
+        "input_prompts_inline/xbox/pad/LeftTrigger.png",
+        "+",
+        "input_prompts_inline/xbox/pad/RightTrigger.png",
+    ];
+    assert_eq!(icons(&mut app, span), xbox);
+
+    app.insert_resource(PromptBrand(GamepadBrand::Nintendo));
+    app.world_mut()
+        .resource_mut::<PromptGeneration>()
+        .set_changed();
+    app.update();
+    assert_eq!(drawn(&app, span), xbox);
+
+    // Once the new art is in, `icons` stops waiting as soon as anything is drawn, which the old
+    // chord already is, so wait on the new one by name.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while drawn(&app, span) == xbox {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the new art never loaded"
+        );
+        std::thread::yield_now();
+        app.update();
+    }
+    assert_eq!(
+        drawn(&app, span),
+        [
+            "input_prompts_inline/nintendo/pad/LeftTrigger.png",
+            "+",
+            "input_prompts_inline/nintendo/pad/RightTrigger.png",
+        ]
+    );
 }

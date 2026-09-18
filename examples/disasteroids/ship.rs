@@ -6,6 +6,7 @@ use std::f32::consts::TAU;
 
 use crate::actions::{Afterburner, Fire, Flying, Hyperspace, SmartBomb, Thrust, Turn};
 use crate::asteroids::{Asteroid, Doomed};
+use crate::common::prompt_ui::{IconPromptSpan, PromptFamily};
 use crate::field::{HALF_EXTENT, Lifetime, Velocity, Wraps};
 use crate::pause::Simulating;
 
@@ -249,7 +250,8 @@ fn animate_shock_ring(
     }
 }
 
-/// The charge meter, as a scene: a track and the fill [`redraw_bomb_meter`] resizes.
+/// The charge meter, as a scene: a track, the fill [`redraw_bomb_meter`] resizes, and the pad
+/// chord that charges it.
 ///
 /// Centred at the bottom of the screen rather than tucked in a corner — this is the one control
 /// with something to show while it is happening, so it gets the reading's own line.
@@ -260,8 +262,20 @@ fn bomb_meter() -> impl Scene {
             bottom: Val::Px(24.0),
             width: Val::Percent(100.0),
             justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(12.0),
         }
         Children [
+            // The pad's binding, because it is the one worth a picture: both bumpers, drawn as one
+            // chord.
+            Text
+            Children [
+                IconPromptSpan({SmartBomb::id()})
+                ~{PromptFamily(DeviceFamily::Gamepad)}
+                TextFont { font_size: 15.0_f32 }
+                TextColor(Color::srgb(0.5, 0.6, 0.6))
+            ]
+            --
             Node {
                 width: Val::Px(200.0),
                 height: Val::Px(8.0),

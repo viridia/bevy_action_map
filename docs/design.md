@@ -908,6 +908,7 @@ pub struct Prompt {
 
 pub enum ControlOrigin {
     Ours(Control),
+    Modifier(ModifierKey),              // a chord entry only, either key of the pair
     Foreign {
         name: String, label: String, family: Option<DeviceFamily>, class: Option<ControlClass>,
     },
@@ -923,6 +924,15 @@ plans.
 except a gamepad's face buttons, bumpers, triggers, Select/Start and Mode read in that brand's own
 words — "Cross" rather than "South Button" on a PlayStation pad. Sticks and the D-pad read the same
 either way, and `GamepadBrand::Generic` falls through to the positional answer.
+
+**Glyphs.** `resolve_glyph(&ControlOrigin, GamepadBrand, has_art)` names the art for one control and
+ships none: `has_art` is the app's atlas, answering whether a `GlyphTier` covers a control. A
+gamepad control tries its brand's tier and then `Generic`'s; a keyboard or mouse control, a modifier
+included, has the one `KeyboardMouse` tier; a foreign control answers `None`, its art being its
+reporter's. `Glyph` is `#[non_exhaustive]` with one variant, `Own(GlyphTier, ControlOrigin)`, so a
+backend's own image can arrive as another (R18.9). A chord resolves an entry at a time. Everything
+that draws — the atlas, inline layout, the art a Mac labels differently — is
+`examples/common/prompt_ui.rs`, outside the crate.
 
 **A prompt is not a row of the settings screen.** `mappings` is what the game declared and is
 static; a prompt is what would fire now, so it is empty for a context nobody is carrying or that is

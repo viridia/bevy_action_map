@@ -154,6 +154,7 @@ fn main() {
             }),
             ..default()
         }),
+        common::font::plugin,
         ActionMapPlugin,
         prompt_ui::plugin,
     ))
@@ -228,8 +229,6 @@ fn gallery() -> impl Scene {
         row("Stick", Look::id(), Gamepad, 1),
         // One prompt per direction, so four spans rather than one.
         row("Composite", Walk::id(), KeyboardMouse, 4),
-        // As icons, both chords draw the control that fires them and drop what is held with it:
-        // chunk 133.
         row("Keyboard chord", QuickSave::id(), KeyboardMouse, 1),
         row("Pad chord", Ultimate::id(), Gamepad, 1),
         row("Hold", Reload::id(), Gamepad, 1),

@@ -1150,6 +1150,22 @@ chunk 133 makes the text path agree with the icon one.
 **What stays.** `Prompt::condition` still says which condition a binding has, and a rebinding screen
 still formats one: a row describes the binding, where a prompt only names what to press.
 
+### D83 — Glyph resolution takes a `ControlOrigin`, and a platform is not a tier
+
+**Decided.** `resolve_glyph` resolves one `ControlOrigin`, and `Glyph::Own` carries it, so a
+modifier resolves like a key and an atlas keys art by `name()`. A foreign origin answers `None`.
+Which picture a Mac draws for Alt or Super is decided by what draws, from its own art, and
+`GlyphTier` does not name a platform. Chunk 133 built it, for icon chords.
+
+**Rules out.** A `Glyph::Modifier` variant beside `Own`, a second resolver for modifiers, and a
+`GlyphTier` per platform.
+
+**Reversal.** Back to `Control`, and every caller matches on the origin before it can resolve, with
+a separate path for the one entry kind a chord has that is not a control (D78). A platform tier puts
+platform detection in a crate that otherwise has none, and multiplies the keyboard tier for the
+handful of keys a platform labels differently. `Glyph::Own` can hold a foreign origin it is never
+given; that is the accepted price.
+
 ---
 
 ## Capture

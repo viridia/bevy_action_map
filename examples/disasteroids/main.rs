@@ -58,6 +58,7 @@ fn main() {
                 })
                 .build()
                 .disable::<bevy::input_focus::InputDispatchPlugin>(),
+            common::font::plugin,
             bevy_action_map::ActionMapPlugin,
             // Not in `DefaultPlugins`, unlike the focus and widget plugins beside it. It holds the
             // navigation graph, which this game never writes an edge to — but the automatic
