@@ -286,9 +286,9 @@ and is written against whatever surface was there, that surface is load-bearing.
 
 **The cheap hedge, and it is genuinely cheap.** Two things, neither of which requires building a UI:
 
-1. A **reverse lookup behind a trait** — action → the controls that would fire it now — so an
-   external authority can answer it instead. This crate's version returns an origin that need not be
-   one of its own control types, which is the whole cost of making Steam Input possible later.
+1. A **reverse lookup behind a trait** — action → the controls it is bound to — so an external
+   authority can answer it instead. This crate's version returns an origin that need not be one of
+   its own control types, which is the whole cost of making Steam Input possible later.
 2. A **structured name for a control**, separable into a localization key plus a fallback string,
    rather than only a `Display` impl.
 

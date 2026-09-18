@@ -318,8 +318,8 @@ and loadable as an asset. Same story: a workable basis, rendering left to you.
   that still reach a player who never touched that row. In BEI and LWIM the live bindings *are* the
   source of truth, so a saved input map is a full replacement and revised defaults reach nobody who
   has ever saved.
-- **Prompts that stay true.** A reverse lookup from an action to the controls that would fire it
-  right now, exposed as a text span a template can write, which is told when the answer moves.
+- **Prompts that stay true.** A reverse lookup from an action to the controls it is bound to,
+  exposed as a text span a template can write, which is told when the answer moves.
 - **Shared controls declared as shared** — tap to dodge, hold to sprint, on one control: rebinding
   moves both, and the second is drawn as a subordinate line rather than a row of its own.
 - **Tunables** — a named, typed, player-adjustable value that overwrites one field of one modifier,

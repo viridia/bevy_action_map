@@ -80,22 +80,6 @@ half — saying so somewhere a game reads before it hits this.
 
 ## 2. Latent — the code is wrong and nothing in tree takes the path
 
-### 1065 A multi-tap caption uses a character the default font lacks
-
-`condition.rs` · `ConditionDescriptor::fallback_format` · **observed** in `prompt_gallery` before
-D82: the double-tap row read "Space ▯2"
-
-`fallback_format` writes a multi-tap as `W ×2`, with U+00D7, and Bevy's default font draws that as a
-box. The examples replace that font; a game that does not, and has no catalogue, gets this string
-from `src/` and draws it as a box.
-
-Latent since a prompt stopped formatting its condition (D82), which took the gallery's instance
-away. Nothing in tree reaches it now: the rebinding screens that still call `fallback_format`,
-Disasteroids' and `capture`'s, do so only for follower rows, and both followers are holds. Any game
-that writes a multi-tap follower does.
-
-_Fix:_ **chunk 134**: `fallback_format` writes `x2`.
-
 ### 1046 A class binding on an analog source has no dead zone
 
 `binding.rs`'s own doc for `bind_class` — "it skips modifiers, conditions and the presentation
@@ -154,34 +138,6 @@ to render a reason it is handed. No requirement asks for it; R19 says what a reb
 legally offer, not what it must say when it says no. It is here because ground rule 3 makes the
 examples the acceptance test, and an example that swallows a diagnostic is not demonstrating the
 thing the diagnostic was built for.
-
-### 1062 There is no way to ask what an action is bound to, only what would fire it now
-
-R18.1 · `present.rs` · **observed** in Disasteroids: the corner hint reads "— new game" whenever the
-controls screen is up
-
-`prompts` filters on `bound.active` (`present.rs:935`) and R18.1 says it must — "the bindings that
-would *currently* fire it". That is right for a prompt drawn over the game: naming a control that
-does nothing when pressed is the thing R18.2 forbids.
-
-It is wrong for the other sentence a caption can be in. "Press Ctrl+N to start a new game" is a
-legend rather than a prompt — tense-neutral, and true whether or not the context is live this frame.
-Disasteroids' corner hint is one, and `Menu` being `exclusive` shadows `Shell`, so the line goes to
-the unbound fallback while the controls screen is open. A manual page, a loading-screen tip and a
-tutorial step are all the same shape.
-
-`mappings` is not the substitute. It is per-family rows carrying slots, rebind policies and one row
-per composite part, built for a rebinding table, and it omits `private` bindings entirely — so
-"which key is this action on" means finding a row by family and reading slot 0, which is the wrong
-question asked sideways.
-
-The absence is in the requirements as much as in the API: R18 governs prompts and says they are
-present-tense, and nothing governs the legend. Worth deciding as part of it: `prompts` collapses
-three different reasons for an empty answer — nothing carries the context, the context is carried
-but inactive, and a stronger context has taken the control — and a legend wants the second to read
-like the third, possibly drawn dimmed rather than hidden.
-
-_Fix:_ **chunk 134**.
 
 ### 1018 A platform modifier
 
@@ -751,15 +707,15 @@ honoured at both panics.
 round-trip and the two bare words cannot collide with a control name. R17.8 holds by construction.
 R17.2's tolerance holds on both axes. R19.4's four resets exist. R19.16 holds in both directions.
 R19.9 holds at declaration — it is only the rewrite that lowers it, and that finding has landed. The
-tunable pass runs after the control rewrite and matches family as well as key. R18.2's consumption
-filter reads only earlier contexts' claims; the sort is stable, so declaration order survives as the
-last tiebreak. R18.5's invalidation covers every clause but the layout one its own aside withdraws.
-R18.8 and R18.9's origin half hold. The four control tables round-trip exhaustively, unnamed
-variants included. R22.6's migration path exists in `docs/comparison.md`. R21.1–R21.3 are met by the
-test suite's shape. Capture's arming skips the press that opened the session, and a refused press is
-claimed so it does not also play the game, except on a gamepad button, which is chunk 132's.
-`admissible` asks family before reserved before shape. R15.1's many-to-many holds — neither `Paired`
-nor `is_claimed` enforces exclusivity, which is what lets two players share one keyboard.
+tunable pass runs after the control rewrite and matches family as well as key. R18.1's context sort
+is stable, so declaration order survives as the last tiebreak. R18.5's invalidation covers every
+clause but the layout one its own aside withdraws. R18.8 and R18.9's origin half hold. The four
+control tables round-trip exhaustively, unnamed variants included. R22.6's migration path exists in
+`docs/comparison.md`. R21.1–R21.3 are met by the test suite's shape. Capture's arming skips the
+press that opened the session, and a refused press is claimed so it does not also play the game,
+except on a gamepad button, which is chunk 132's. `admissible` asks family before reserved before
+shape. R15.1's many-to-many holds — neither `Paired` nor `is_claimed` enforces exclusivity, which is
+what lets two players share one keyboard.
 
 **Excluded rather than missed**, both already recorded: `apply_overrides_for` discards the rewritten
 rows, which is the per-entity presentation deferred row; and `Override::NotOurs` leaves the crate's

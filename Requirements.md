@@ -1128,24 +1128,32 @@ the prompt show". The flow is [`GetDigitalActionOrigins`][steam-isteaminput] →
 the game. Unity `ToDisplayString` + `InputBinding.MaskByGroup`. Unreal's
 `PlayerMappableKeySettings`.
 
-- **R18.1 (MUST)** Reverse lookup: given an action (and optionally a context and device class),
-  return the bindings that would currently fire it, in a stable, ranked order.
-- **R18.2 (MUST)** The result must reflect active contexts and consumption (R8) — showing a prompt
-  for an action that a higher-priority context is currently consuming is wrong.
+- **R18.1 (MUST)** _(D84)_ Reverse lookup: given an action (and optionally a context and device
+  class), return the controls it is bound to in every context something carries, whether or not that
+  context is active and whether or not a stronger context consumes the control, in a stable, ranked
+  order.
+- **R18.2 (WITHDRAWN)** ~~The result must reflect active contexts and consumption (R8) — showing a
+  prompt for an action that a higher-priority context is currently consuming is wrong.~~ _Superseded
+  by D84: a prompt is always shown inside a sentence or a table row, and only the app knows when to
+  hide that. Filtering the prompt removes the control and leaves the sentence ("— new game"), and
+  players read a binding as what a control does in its mode, not as a claim about this frame. One
+  binding of several being consumed by another context is a clash between bindings, which R19.3
+  reports. What would revive this is a live predicate an app's hint can follow, which is deferred in
+  the Roadmap rather than a filter on this lookup._
 - **R18.3 (MUST)** Display strings must be produced without hard-coding English: return a structured
   descriptor (control identity + composite structure, e.g. "hold", "chord of A and B") that a
   localization layer renders, with a reasonable built-in fallback renderer.
 - **R18.4 (MUST)** Glyph resolution returns an _identifier_ keyed by (device brand, control), not an
   asset handle; the app supplies the atlas. A fallback chain (brand → generic → text) is required.
-- **R18.5 (MUST)** Live invalidation: prompts must update when bindings change, the active context
-  changes, the player's active device changes, or the keyboard layout changes. Change detection or
-  events must make this cheap — polling every prompt every frame is not acceptable. _Met by chunk 47
-  for every clause but the last: a counter the crate raises, read either by a run condition or by an
-  observer, with nothing consulted on a frame where it did not move (R10.7). The **keyboard layout**
-  clause is unmet and not schedulable — nothing in Bevy reports a layout change, or the current
-  layout at all, which is the same gap R10.3 records for `fallback_label`. It is a limitation of
-  what can be observed rather than work left undone, and it becomes schedulable if winit surfaces
-  the layout._
+- **R18.5 (MUST)** Live invalidation: prompts must update when bindings change, a context starts or
+  stops being carried, the player's active device changes, or the keyboard layout changes. Change
+  detection or events must make this cheap — polling every prompt every frame is not acceptable.
+  _Met by chunk 47 for every clause but the last: a counter the crate raises, read either by a run
+  condition or by an observer, with nothing consulted on a frame where it did not move (R10.7). The
+  **keyboard layout** clause is unmet and not schedulable — nothing in Bevy reports a layout change,
+  or the current layout at all, which is the same gap R10.3 records for `fallback_label`. It is a
+  limitation of what can be observed rather than work left undone, and it becomes schedulable if
+  winit surfaces the layout._
 - **R18.6 (WITHDRAWN)** ~~Track a per-player "most recently used device" for prompt selection,
   subject to R15.8 hysteresis.~~ _Superseded: which device a prompt speaks for is the app's call,
   supplied to the lookup rather than inferred by it. R18.1 already takes a device class, and an app

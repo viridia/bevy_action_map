@@ -153,7 +153,7 @@ pub enum ConditionDescriptor {
 }
 
 impl ConditionDescriptor {
-    /// English fallback text combining this with a control's own label — "Hold W", "W ×2" — for a
+    /// English fallback text combining this with a control's own label — "Hold W", "W x2" — for a
     /// game with no catalogue to ask instead.
     ///
     /// Returns the whole formula rather than a diff against the control, because a bare "Hold"
@@ -162,7 +162,7 @@ impl ConditionDescriptor {
         match self {
             Self::None => alloc::string::String::from(control),
             Self::Hold { .. } => alloc::format!("Hold {control}"),
-            Self::MultiTap { count } => alloc::format!("{control} \u{d7}{count}"),
+            Self::MultiTap { count } => alloc::format!("{control} x{count}"),
         }
     }
 }
@@ -769,7 +769,7 @@ mod tests {
         );
         assert_eq!(
             ConditionDescriptor::MultiTap { count: 2 }.fallback_format("Space"),
-            "Space \u{d7}2"
+            "Space x2"
         );
     }
 }

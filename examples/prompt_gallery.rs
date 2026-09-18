@@ -11,8 +11,9 @@
 //!   text.
 //! - `P` steps through the presets, and every row answers again under the bindings it moved to.
 //!
-//! Two rows are empty on purpose. Map is bound, but in a context the gallery itself shadows, so
-//! nothing would fire it now; Emote is bound to nothing at all.
+//! Map is bound in a context the gallery itself shadows, and is named anyway: a prompt says what a
+//! control does, not whether it does it this frame. Emote is bound to nothing at all, and its row
+//! is empty on purpose.
 
 #![allow(missing_docs)]
 
@@ -124,7 +125,7 @@ struct Sheet;
 #[context(path = "prompt_gallery.browse", tick = Render, priority = 10, exclusive)]
 struct Browse;
 
-/// A game under the gallery, holding the one binding its row cannot show.
+/// A game under the gallery, shadowed for as long as the gallery is up.
 #[derive(InputContext)]
 #[context(path = "prompt_gallery.underneath", tick = Render)]
 struct Underneath;
@@ -233,8 +234,7 @@ fn gallery() -> impl Scene {
         row("Pad chord", Ultimate::id(), Gamepad, 1),
         row("Hold", Reload::id(), Gamepad, 1),
         row("Double-tap", Dodge::id(), KeyboardMouse, 1),
-        // Shadowed by `Browse`, so the answer is the unbound dash: chunk 134's legend is the row
-        // that belongs beside this one.
+        // Shadowed by `Browse`, and named all the same, as a hint over a paused game would be.
         row("Shadowed", Map::id(), KeyboardMouse, 1),
         row("Unbound", Emote::id(), KeyboardMouse, 1),
     ];

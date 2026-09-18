@@ -14,9 +14,9 @@
 //!
 //! [`PromptSpan`] names an action and fills in its own string. The companions beside it narrow the
 //! answer — which device, which kind of control, which of several — and each is a separate
-//! component rather than a field, so that a template says which question it is asking and so that
-//! a new narrowing is additive. A span with no companions renders the strongest control that would
-//! fire the action on the device the game speaks for.
+//! component rather than a field, so that a template says which question it is asking and so that a
+//! new narrowing is additive. A span with no companions renders the strongest control bound to the
+//! action on the device the game speaks for.
 //!
 //! # Why one control
 //!
@@ -34,16 +34,17 @@ use bevy::ui::UiSystems;
 use bevy_action_map::device::{Brand, GamepadBrand};
 use bevy_action_map::prelude::*;
 
-/// Renders the control that would currently fire an action.
+/// Renders the control an action is bound to.
 ///
 /// The string is filled in for you, and rewritten when it stops being true — when a binding
-/// changes, when the context holding it switches on or off, or when nothing carries that context
-/// any more.
+/// changes, or when a context holding one starts or stops being carried. A context that is switched
+/// off, or shadowed by a menu over it, still answers, so hiding a hint while it does not apply is
+/// the game's call.
 #[derive(Component, Clone, Copy, Default)]
 #[require(TextSpan)]
 pub struct PromptSpan(pub ActionId);
 
-/// Renders the control that would currently fire an action as an icon, inline in a line of text.
+/// Renders the control an action is bound to as an icon, inline in a line of text.
 ///
 /// A chord draws every control in it as children of this span, joined by `+`, so the whole chord
 /// stays one run that moves with its sentence. The `+` takes the span's own `TextFont` and
@@ -63,8 +64,8 @@ pub struct IconPromptSpan(pub ActionId);
 
 /// Which device family one span speaks for, overriding [`PromptDevice`].
 ///
-/// What a settings screen's gamepad column wants: those rows name pad controls whatever the rest
-/// of the game's prompts speak for.
+/// What a settings screen's gamepad column wants: those rows name pad controls whatever the rest of
+/// the game's prompts speak for.
 #[derive(Component, Clone, Copy)]
 pub struct PromptFamily(pub DeviceFamily);
 
@@ -74,10 +75,10 @@ pub struct PromptClass(pub ControlClass);
 
 /// Which one, where several controls fire the action.
 ///
-/// **Not the settings screen's primary and secondary.** This indexes what would fire the action
-/// *now*: consumption has already removed whatever a stronger context took, and a composite
-/// answers once per direction, so the second entry here is as likely to be "the key that turns the
-/// other way" as it is to be a second binding. The declared columns are [`mappings`]' business.
+/// **Not the settings screen's primary and secondary.** This indexes the prompt lookup's answer,
+/// which runs across every context something carries and answers a composite once per direction, so
+/// the second entry here is as likely to be "the key that turns the other way" as it is to be a
+/// second binding. The declared columns are [`mappings`]' business.
 #[derive(Component, Clone, Copy, Default)]
 pub enum PromptPick {
     /// The strongest control that fires it, which is what a hint wants.
@@ -87,7 +88,7 @@ pub enum PromptPick {
     Nth(u8),
 }
 
-/// What to render when nothing fires the action.
+/// What to render for an unbound action.
 ///
 /// Defaults to an em dash. A blank is worse: "Press  to thrust" reads as a bug in the game rather
 /// than as an unbound control, which is what it is.

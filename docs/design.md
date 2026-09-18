@@ -891,7 +891,7 @@ written against them works for a game it was not compiled with. Grouping is the 
 
 ### 9.2 Prompts
 
-The lookup that runs the other way: given an action, which control would fire it now.
+The lookup that runs the other way: given an action, which controls it is bound to.
 
 ```rust
 pub trait Prompts {
@@ -935,9 +935,13 @@ that draws — the atlas, inline layout, the art a Mac labels differently — is
 `examples/common/prompt_ui.rs`, outside the crate.
 
 **A prompt is not a row of the settings screen.** `mappings` is what the game declared and is
-static; a prompt is what would fire now, so it is empty for a context nobody is carrying or that is
-switched off, and it *includes* a `private` binding. The lookup reads the compiled plan rather than
+static; a prompt answers from the contexts something carries, so it is empty for a context nobody is
+carrying, and it *includes* a `private` binding. The lookup reads the compiled plan rather than
 filtering the mapping list.
+
+**Not present-tense.** A carried context answers whether or not it is active or shadowed by an
+exclusive one, and a control a stronger context consumes is still named. Whether a hint belongs on
+screen is the app's to decide (D84).
 
 **Ranking.** Contexts come back in the order they get to claim a control — render tick before fixed
 tick, then by priority, then declaration order — and within a context, in declaration order.
@@ -945,15 +949,11 @@ Nothing ranks one device above another; the device is a scope the caller supplie
 `PromptScope`, which narrows by context path, family and control class. `PromptDevice` is the
 game-wide setting for which device a bare prompt speaks for, and the crate never defaults it.
 
-**Consumption is read from the declarations, not from the frame** — the standing fact that a control
-bound with `consume` in a stronger active context does not reach a weaker one. It moves only when a
-context activates or deactivates.
-
-**Staleness** is signalled by `PromptGeneration`, a counter bumped when a context activates or
-deactivates and when an instance of a context arrives or goes away. It is written as an insert
-rather than a mutable deref, so it can be read either by a `resource_changed` run condition or by an
-observer. `activate`, `deactivate` and `PromptDevice` are public, so a game changing any of those by
-hand bumps the counter itself.
+**Staleness** is signalled by `PromptGeneration`, a counter bumped when bindings are applied and
+when an instance of a context arrives or goes away. Activation does not bump it, since it does not
+change the answer. It is written as an insert rather than a mutable deref, so it can be read either
+by a `resource_changed` run condition or by an observer. `PromptDevice` is public, so a game
+changing it by hand bumps the counter itself.
 
 ### 9.3 Capture
 

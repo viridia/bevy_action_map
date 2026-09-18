@@ -1714,7 +1714,7 @@ mod tests {
     /// A context whose condition keeps saying yes stays quiet the whole time it is shadowed.
     ///
     /// Comparing that answer against `is_active()`, which folds in shadowing, rather than against
-    /// `active` marks the instance changed and invalidates its prompt every frame the shadow lasts.
+    /// `active` marks the instance changed every frame the shadow lasts.
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_shadowed_context_whose_condition_stays_satisfied_is_quiet() {

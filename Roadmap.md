@@ -191,6 +191,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 129  | An override that can name a chord                                     |
 | 136  | A gallery of prompts                                                  |
 | 133  | An icon prompt for a chord                                            |
+| 134  | A prompt names what an action is bound to                             |
 
 ---
 
@@ -482,29 +483,6 @@ and the generic tier's art, below.
   so a generic-tier icon needs a short text stamp authored onto it by hand. That is a content task
   with a known answer, and until it is done the generic tier resolves to text.
 
-### 134. A legend, as well as a prompt
-
-`docs/issues.md` 1062 and 1065. `prompts` answers what would fire an action *now*, and R18.1 and
-R18.2 require it to. A legend asks something else: "Ctrl+N — new game" is true whether or not
-`Shell` is live this frame, and nothing answers it. Disasteroids' corner hint is the case in tree —
-with the controls screen open, `Menu` shadows `Shell` and two of its three entries fall back to a
-dash.
-
-- **A requirement first.** R18 makes prompts present-tense and says nothing about a legend. This
-  adds one beside R18.1 rather than loosening R18.2, which is right for what it covers.
-- **The API shape is the decision.** A scope flag, a second method on `Prompts`, or a `Prompt` that
-  says whether it is live with `prompts` no longer filtering. The last lets a legend draw a shadowed
-  binding dimmed rather than hide it, and costs every present-tense caller a filter.
-- **Three kinds of empty.** Nothing carries the context; it is carried but inactive; a stronger
-  context has taken the control. A legend wants the second read as live, and not the first.
-- **Not `mappings`**, which answers per family and per composite part, carries rebind policy, and
-  omits `private` bindings.
-- **The crate's own fallback goes ASCII** (1065). `fallback_format` writes a multi-tap as `W ×2`,
-  and Bevy's default font is printable ASCII and nothing else, so a game on it gets a box from
-  `src/`. The examples have had a real font since 133; `W x2` needs none.
-- **Verified by** the corner hint naming `F1` and `Ctrl+N` with the controls screen open, a legend
-  row in 136 beside the prompt row for the same shadowed action.
-
 ---
 
 ## Snapshots
@@ -768,6 +746,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Promoting `WidgetKind` and the per-kind context into the crate** | [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native widget-kind id. Promoting a shape this crate invented first, ahead of that conversation, risks committing to the wrong one |
 | **Deleting `acquire_focus_directional`** | [bevy#25675][] landing. `examples/common/widget_focus.rs` carries a global `AcquireFocus` observer mirroring `acquire_focus_tab_index`, with `AutoDirectionalNavigation` standing in for `TabIndex`: `bevy_input_focus`'s `click_to_focus` bubbles an `AcquireFocus` on every pointer press, a screen navigating by anything but `TabIndex` intercepts it nowhere, so it reaches the window and clears focus — and a widget whose interactive children are separate entities, like a stepper's two chevrons, blinks on every press rather than rarely. The PR separates focusability from navigation policy behind a `Focusable` component and names [bevy#25596][], click-to-focus under directional navigation, as what it fixes, so it plausibly retires the observer outright. Approved and waiting on the author with conflicts as of September 2026. What to check when it lands is whether `Focusable` reaches a navigation scheme that is neither `TabIndex` nor one of upstream's own, which is the case the workaround actually covers |
 | **Deleting `examples/common/font.rs`** | [bevy#25842][] answered: a supported way to set an app-wide default font. Until then the plugin overwrites the `default_font` feature's slot at `AssetId::default()` during plugin build, which depends on that slot's location and on text layout registering a font id once. What to check when it lands is whether the answer still has to be set before the first text layout, or reacts to a change |
+| **Whether an action is live, as something a hint can follow** (R18.2's withdrawal) | reactive UI in Bevy, so a hint's visibility can be bound to a predicate rather than set by a system the game writes. Until then a game hides a hint from its own state, which it knows better than the crate does: which menu is open, whether play is paused. The predicate would be whether a carried, active context binds the action to a control nothing stronger consumes; D84 is why it is not a filter on the prompt lookup |
 | **Asking whether a row would be refused, before Confirm** | **a refusal a screen's working copy can reach that capture does not already turn down.** Chunk 127 removed the last one: a wrong family, a wrong shape and a reserved control are refused at capture, and a `Fixed` row has no cell to capture into. The screen writes gestures into `PendingOverrides` and only Confirm asks whether they are legal, so a new refusal of that kind is shown taking and then silently lost. `refusal` is private and wants the declared bindings, so the general answer is a dry run of the apply, which is public API. The cheaper answers are for the row to say what would be refused so a screen can decline the gesture, or for the screen to apply eagerly and keep Confirm for persistence |
 | **A context-level exclusion from the mapping list** | a second screen needing the same filter and duplicating it. `ActionMapping::context` already carries the data, and one call site filtering on it costs one line — at two, the crate is the one paying for the repetition |
 | **An initial delay distinct from the repeat rate** (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both. Two numbers is a small change; what is missing is a case where equal is wrong, and a two-table settings screen is not it |

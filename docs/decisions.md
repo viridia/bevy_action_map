@@ -1030,16 +1030,16 @@ one without first asking where it came from.
 ### D35 — A prompt is not a row of the settings screen
 
 **Decided.** Two lists, two type-erased doors. `mappings` is what the game *declared* and is static:
-a screen must draw a row whether or not anything is carrying its context. A prompt is what would
-fire *now* — empty for a context nobody is carrying or that is switched off, and inclusive of a
-`private` binding.
+a screen must draw a row whether or not anything is carrying its context. A prompt is what the
+action is bound to in the contexts something carries (D84): empty for a context nobody is carrying,
+and inclusive of a `private` binding.
 
 **Rules out.** Deriving prompts by filtering the mapping list.
 
 **Reversal.** The lookup reads the compiled plan for exactly this reason. `private` is a statement
 about the list, not about whether the control works, so a filtered mapping list would drop a binding
 that really does fire. The same distinction returns in the span components: picking the *n*th answer
-indexes what would fire now, after consumption and after a composite has expanded, which is
+indexes the lookup's answer across contexts and after a composite has expanded, which is
 emphatically not the settings screen's primary and secondary column.
 
 ### D36 — The device is a scope the caller supplies; ranking devices is refused
@@ -1165,6 +1165,31 @@ a separate path for the one entry kind a chord has that is not a control (D78). 
 platform detection in a crate that otherwise has none, and multiplies the keyboard tier for the
 handful of keys a platform labels differently. `Glyph::Own` can hold a foreign origin it is never
 given; that is the accepted price.
+
+### D84 — A prompt names what an action is bound to, not what would fire it now
+
+**Decided.** `prompts` answers from every context something carries, whether or not it is active,
+shadowed by an exclusive context, or has a control consumed by a stronger one. A context nobody
+carries is still left out. Activation no longer raises `PromptGeneration`; arriving and leaving
+does. Chunk 134 built it, and withdrew R18.2 to do so.
+
+**Rules out.** A present-tense lookup in any form: a scope flag either way round, a second trait
+method, and a liveness field on `Prompt`.
+
+**Reversal.** The filtered answer was never usable on its own, for three reasons.
+
+- **A prompt never stands alone.** It is inside a sentence or a table row that only the app knows
+  when to show, so emptying the prompt leaves "— new game" on screen. The crate cannot remove the
+  prose, and an app hiding the hint from its own state has no use for a lookup that also hides it.
+- **Players read a binding as what a control does in its mode.** A dialog over the game does not
+  make "Ctrl+N: new game" false, and the rebinding screen already lists every gameplay binding while
+  none of them can fire.
+- **Consumption only mattered for one binding of several.** Space consumed by an always-on context
+  and J beside it made the filtered answer "J". That is two actions on one control, which is a clash
+  for the bindings to resolve and `conflicts` to report (R19.3), not for a prompt to hide.
+
+A liveness predicate a hint can follow, for an app that wants one, is a deferred row gated on
+reactive UI, rather than a filter on this lookup.
 
 ---
 
@@ -1732,8 +1757,8 @@ would be *plausible*, so an app that wanted something else would have to work ar
 simply not use it.
 
 **The test that separates the two halves.** A fact the crate is uniquely placed to know — which
-mappings hold a control, which control would fire an action now, whether a row is rebindable — is
-the crate's. A decision that depends on what the game is — what to do about a clash, which device a
+mappings hold a control, which control an action is bound to, whether a row is rebindable — is the
+crate's. A decision that depends on what the game is — what to do about a clash, which device a
 prompt speaks for, how two controls read on one row — is the app's, and the crate's job is to make
 it cheap to answer rather than to answer it.
 

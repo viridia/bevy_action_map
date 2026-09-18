@@ -508,17 +508,16 @@ fn screen(world: &World) -> impl Scene {
                 @{confirm_button()}
             ]
             --
-            // The one thing on this screen that has to know an action. A span rather than a
-            // lookup formatted into the sentence: the question is what would fire it *now*, so
-            // the answer skips a context that is switched off and a control something else has
-            // taken — and it changes while the screen is up, as the player rebinds.
+            // The one thing on this screen that has to know an action. A span rather than a lookup
+            // formatted into the sentence, because the answer changes while the screen is up, as
+            // the player rebinds.
             Text::new(
                 "Boxed cells are the ones this game offers for rebinding — press one, then \
                  press what you want bound there; everything else is listed so you can see \
                  what it does.\nPress "
             )
-            // Three spans rather than one sentence with the controls written into it: each is what
-            // would fire *now*, so they follow the player's own rebinding while the screen is up.
+            // Three spans rather than one sentence with the controls written into it, so they
+            // follow the player's own rebinding while the screen is up.
             Node {
                 margin: UiRect::axes(percent(10), px(0))
             }

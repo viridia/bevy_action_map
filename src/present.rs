@@ -46,13 +46,16 @@
 //! }
 //! ```
 //!
-//! This is a **runtime** question rather than a question about what the game declared. A control
-//! only answers for an action if something is carrying the context the binding lives in, if that
-//! context is active, and if nothing evaluated earlier in the frame takes the control away — so the
-//! answer changes as the game runs, and a caller that asks before its contexts exist is told
-//! nothing rather than told what they will say. [`mapping::mappings`](crate::mapping::mappings) is
-//! the other list, and the one a controls screen wants: everything the game declared, whether or
-//! not it is live.
+//! The answer is what the action is bound to, not whether pressing the control would fire it this
+//! frame. "Ctrl+N: new game" stays true while a dialog has the keyboard, and players read it that
+//! way: they know a mode that is up now will close. Whether a hint belongs on screen at all is the
+//! game's call, since a prompt never appears without the sentence or the table row around it, and
+//! only the game knows when that should go.
+//!
+//! It is still a **runtime** question. A binding answers only if something is carrying the context
+//! it lives in, so a caller that asks before its contexts exist is told nothing rather than told
+//! what they will say. [`mapping::mappings`](crate::mapping::mappings) is the other list, and the
+//! one a controls screen wants: everything the game declared, whether or not anything carries it.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -882,7 +885,7 @@ pub struct PromptScope {
 }
 
 impl PromptScope {
-    /// Everything currently bound, on any device, in any context.
+    /// Everything bound, on any device, in any context something is carrying.
     pub const ANY: Self = Self {
         context: None,
         family: None,
@@ -915,10 +918,11 @@ impl PromptScope {
 /// backend's own controls back, and renders them through the same [`ControlOrigin`]. The trait is about
 /// *who is asked*; [`BindingTable`] is the answer when the asking stops here.
 pub trait Prompts {
-    /// The controls that would currently fire `action`, strongest first.
+    /// The controls `action` is bound to, strongest first.
     ///
-    /// Empty is a real answer, and the common way to get one is an action whose context nothing is
-    /// carrying or nothing has activated.
+    /// Including those in a context that is switched off, or shadowed by a menu above it: the
+    /// answer is what the control does, not whether it does it this frame. Empty is a real answer,
+    /// and the common way to get one is an action whose context nothing is carrying.
     fn prompts(&self, action: ActionId, scope: PromptScope) -> Vec<Prompt>;
 }
 
@@ -949,17 +953,18 @@ impl Prompts for BindingTable<'_> {
             return Vec::new();
         };
 
-        // Every live context, not only the ones in scope: what removes a control from the answer is
-        // some *other* context claiming it, and narrowing the scope must not hide that.
-        let mut live: Vec<_> = declared
+        // Carried rather than active, and nothing another context consumes is removed: a prompt
+        // names what the control does, not whether it does it this frame (D84).
+        let mut carried: Vec<_> = declared
             .0
             .iter()
+            .filter(|context| scope.context.is_none_or(|path| path == context.path))
             .map(|context| (context, (context.bindings)(self.0)))
-            .filter(|(_, bound)| bound.active)
+            .filter(|(_, bound)| bound.carried)
             .collect();
-        // Consumption flows forward in schedule order, and priority orders within a schedule. The
-        // sort is stable, which leaves declaration order as the last tiebreak.
-        live.sort_by_key(|(context, _)| {
+        // The order contexts claim a control in: schedule first, then priority within a schedule.
+        // The sort is stable, which leaves declaration order as the last tiebreak.
+        carried.sort_by_key(|(context, _)| {
             (
                 match context.tick {
                     crate::action::TickDomain::Render => 0,
@@ -970,10 +975,7 @@ impl Prompts for BindingTable<'_> {
         });
 
         let mut prompts: Vec<Prompt> = Vec::new();
-        for (index, (context, bound)) in live.iter().enumerate() {
-            if scope.context.is_some_and(|path| path != context.path) {
-                continue;
-            }
+        for (context, bound) in &carried {
             for entry in &bound.prompts {
                 if entry.action != action {
                     continue;
@@ -988,16 +990,6 @@ impl Prompts for BindingTable<'_> {
                     .class
                     .is_some_and(|class| !class.contains(entry.control))
                 {
-                    continue;
-                }
-                // Taken by something stronger, for something else: pressing it does that instead,
-                // and a prompt saying otherwise is telling the player a lie they can check.
-                if live[..index].iter().any(|(_, earlier)| {
-                    earlier
-                        .claims
-                        .iter()
-                        .any(|&(control, by)| control == entry.control && by != action)
-                }) {
                     continue;
                 }
                 let prompt = Prompt {
@@ -1045,7 +1037,7 @@ pub struct PromptDevice(pub Option<DeviceFamily>);
 
 /// Counts the times the answer to a prompt lookup may have changed.
 ///
-/// A prompt on screen goes stale when a binding changes, when a context activates or stops being
+/// A prompt on screen goes stale when a binding changes, when a context starts or stops being
 /// carried, or when the game changes which device it speaks for. Recomputing every prompt every
 /// frame in case one of those happened is what this exists to avoid: whatever draws prompts runs
 /// when this changes and is skipped when it does not.
@@ -1061,11 +1053,8 @@ pub struct PromptDevice(pub Option<DeviceFamily>);
 ///
 /// # Writing it
 ///
-/// The crate raises it for everything it can see. Two things it cannot see are yours to raise:
-/// calling [`activate`](crate::context::InputContextState::activate) or
-/// [`deactivate`](crate::context::InputContextState::deactivate) by hand, and changing
-/// [`PromptDevice`]. A backend that owns the bindings elsewhere raises it when the player edits
-/// them there.
+/// The crate raises it for everything it can see. Changing [`PromptDevice`] is yours to raise, and
+/// a backend that owns the bindings elsewhere raises it when the player edits them there.
 #[derive(bevy_ecs::resource::Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PromptGeneration(pub u64);
 
@@ -1088,17 +1077,12 @@ impl PromptGeneration {
 }
 
 /// One context's bindings, flattened once its type is no longer known.
-///
-/// Read whole rather than filtered by action, because deciding whether a control still answers for
-/// one action means knowing what every *other* action in the frame does with it.
 #[derive(Default)]
 pub(crate) struct ContextBindings {
-    /// Whether anything is carrying this context and has it switched on.
-    pub(crate) active: bool,
+    /// Whether anything is carrying this context.
+    pub(crate) carried: bool,
     /// One entry per control per binding, in declaration order.
     pub(crate) prompts: Vec<BoundControl>,
-    /// The controls this context takes for itself when they fire, and what it takes them for.
-    pub(crate) claims: Vec<(Control, ActionId)>,
 }
 
 /// One control of one binding, with what the binding requires alongside it.
@@ -1564,9 +1548,8 @@ mod prompt_tests {
         );
     }
 
-    /// A prompt is a runtime question. A context nobody is carrying fires nothing, so naming its
-    /// controls would tell the player to press a key that does nothing — which is the failure this
-    /// answers, not a hole in it.
+    /// A prompt is a runtime question: a context nobody is carrying is not part of the game yet,
+    /// and its bindings are not in the answer.
     #[test]
     fn a_context_nobody_carries_answers_nothing() {
         let mut app = app();
@@ -1581,31 +1564,55 @@ mod prompt_tests {
         );
     }
 
-    /// And the same for one that is carried and switched off, which is the ordinary state of a
-    /// context gated on a game state the player is not in.
+    /// One that is carried and switched off still answers: the key is still what jumps, once the
+    /// game state that gates the context comes round.
     #[test]
-    fn a_context_that_is_switched_off_answers_nothing() {
+    fn a_context_that_is_switched_off_still_answers() {
         let mut app = app();
         app.add_context::<Shell>(|controls| {
             controls.bind::<Jump>(KeyCode::Space);
         });
         let entity = app.world_mut().spawn(Shell).id();
 
-        assert_eq!(
-            BindingTable::new(app.world())
-                .prompts(Jump::id(), PromptScope::ANY)
-                .len(),
-            1
-        );
-
         app.world_mut()
             .get_mut::<InputContextState<Shell>>(entity)
             .unwrap()
             .deactivate();
+        assert_eq!(
+            labels(&BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY)),
+            ["Space"]
+        );
+    }
+
+    /// The case a legend exists for: a menu over the game shadows everything below it, and "Space:
+    /// jump" in the corner is as true as it was before the menu opened.
+    #[test]
+    fn a_context_an_exclusive_one_shadows_still_answers() {
+        #[derive(InputContext)]
+        #[context(path = "prompt_tests.menu", tick = Render, priority = 10, exclusive)]
+        struct Menu;
+
+        let mut app = app();
+        app.add_context::<Shell>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space);
+        });
+        app.add_context::<Menu>(|controls| {
+            controls.bind::<Save>(KeyCode::KeyS);
+        });
+        let shell = app.world_mut().spawn(Shell).id();
+        app.world_mut().spawn(Menu);
+        app.update();
+
         assert!(
-            BindingTable::new(app.world())
-                .prompts(Jump::id(), PromptScope::ANY)
-                .is_empty()
+            !app.world()
+                .get::<InputContextState<Shell>>(shell)
+                .unwrap()
+                .is_active(),
+            "the menu is not shadowing the shell, so this test shows nothing"
+        );
+        assert_eq!(
+            labels(&BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY)),
+            ["Space"]
         );
     }
 
@@ -1752,10 +1759,11 @@ mod prompt_tests {
         );
     }
 
-    /// A control a stronger context takes for something else does not fire this action, whatever
-    /// the binding says.
+    /// A control a stronger context consumes for something else is still in the answer. Two
+    /// actions on one control is a conflict for the bindings to resolve, and a prompt quietly
+    /// naming the other key would hide it rather than resolve it.
     #[test]
-    fn a_stronger_context_taking_a_control_takes_it_out_of_the_prompt() {
+    fn a_control_a_stronger_context_consumes_still_answers() {
         let mut app = app();
         // Render tick, so it claims first whatever the priorities say.
         app.add_context::<Shell>(|controls| {
@@ -1765,17 +1773,8 @@ mod prompt_tests {
             controls.bind::<Jump>(KeyCode::Space);
             controls.bind::<Jump>(KeyCode::KeyJ);
         });
-        let entity = app.world_mut().spawn((Shell, Flying)).id();
+        app.world_mut().spawn((Shell, Flying));
 
-        let prompts = BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY);
-        assert_eq!(labels(&prompts), ["J"], "space belongs to the shell");
-
-        // Stand the claimant down and the control comes back, which is what makes this a live
-        // answer rather than a fact about the binding tables.
-        app.world_mut()
-            .get_mut::<InputContextState<Shell>>(entity)
-            .unwrap()
-            .deactivate();
         let prompts = BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY);
         assert_eq!(labels(&prompts), ["Space", "J"]);
     }
@@ -1915,35 +1914,6 @@ mod prompt_tests {
             generation(&app) > after_spawn,
             "despawning the last instance said nothing"
         );
-    }
-
-    /// A context switching off empties every prompt that named its controls, so the edge has to be
-    /// raised — once for the edge rather than once per instance.
-    #[test]
-    fn a_context_going_quiet_says_prompts_may_have_changed() {
-        use bevy_ecs::prelude::{Component, resource_exists};
-
-        #[derive(Component)]
-        struct Flies;
-
-        let mut app = app();
-        app.add_context::<Flying>(|controls| {
-            controls.bind::<Jump>(KeyCode::Space);
-            controls.active_if(resource_exists::<Landed>);
-        });
-        app.world_mut().spawn((Flying, Flies));
-
-        #[derive(bevy_ecs::resource::Resource)]
-        struct Landed;
-
-        app.update();
-        app.insert_resource(Landed);
-        app.update();
-        let active = generation(&app);
-
-        app.world_mut().remove_resource::<Landed>();
-        app.update();
-        assert!(generation(&app) > active, "deactivation said nothing");
     }
 
     // What keeps `bump`'s insert honest: an observer is half of how this resource is read, and a

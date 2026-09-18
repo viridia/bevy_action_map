@@ -192,25 +192,20 @@ fn a_held_binding_is_named_by_its_control_alone() {
 /// spawned has to stop being wrong on its own.
 #[test]
 fn a_span_catches_up_when_the_answer_moves() {
-    #[derive(Resource)]
-    struct Flies;
-
     let mut app = app();
     app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
     app.add_context::<Flying>(|controls| {
         controls.bind::<Jump>(KeyCode::Space);
-        controls.active_if(resource_exists::<Flies>);
     });
-    app.world_mut().spawn(Flying);
 
     let span = app.world_mut().spawn(PromptSpan(Jump::id())).id();
-    // A context switched off fires nothing, so there is nothing to press and the span says so.
+    // Nothing carries the context yet, so there is nothing to name and the span says so.
     assert_eq!(caption(&mut app, span), "—");
 
-    app.insert_resource(Flies);
+    let flying = app.world_mut().spawn(Flying).id();
     assert_eq!(caption(&mut app, span), "Space");
 
-    app.world_mut().remove_resource::<Flies>();
+    app.world_mut().despawn(flying);
     assert_eq!(caption(&mut app, span), "—");
 }
 

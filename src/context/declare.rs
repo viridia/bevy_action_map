@@ -133,9 +133,8 @@ pub fn warn_if_undeclared<C: InputContext + Component>(
 ///
 /// Registered on the *state* rather than on `C`, because it is the state that says whether the
 /// context is being carried at all: a prompt depends on whether any instance exists, so it
-/// changes when the first one appears and when the last one goes away, with nothing calling
-/// `activate` in either case. Not generic — the hook is the same code for every context, and one
-/// copy of it is enough.
+/// changes when the first one appears and when the last one goes away. Not generic — the hook is
+/// the same code for every context, and one copy of it is enough.
 fn invalidate_prompts(mut world: DeferredWorld<'_>, _context: HookContext) {
     crate::present::PromptGeneration::invalidate(&mut world.commands());
 }
@@ -155,7 +154,6 @@ pub(crate) type Activation = alloc::boxed::Box<dyn FnOnce(&mut App)>;
 fn apply_active<C: InputContext + Component>(
     bevy_ecs::system::In(live): bevy_ecs::system::In<bool>,
     contexts: Query<'_, '_, &mut InputContextState<C>>,
-    mut commands: bevy_ecs::system::Commands<'_, '_>,
     mut was_empty: bevy_ecs::system::Local<'_, bool>,
 ) {
     // Something said this context should be live and there is nothing to make live, which is the
@@ -172,7 +170,6 @@ fn apply_active<C: InputContext + Component>(
     }
     *was_empty = empty;
 
-    let mut changed = false;
     for mut context in contexts {
         // Against `active`, not `is_active()`: `activate`/`deactivate` only ever move `active`, and
         // under an exclusive context `is_active()` is pinned to `false` by `shadowed` regardless of
@@ -191,13 +188,6 @@ fn apply_active<C: InputContext + Component>(
         } else {
             context.deactivate();
         }
-        changed = true;
-    }
-
-    // Once for the edge, not once per instance: a prompt is the same answer however many entities
-    // carry the context.
-    if changed {
-        crate::present::PromptGeneration::invalidate(&mut commands);
     }
 }
 
@@ -617,8 +607,8 @@ fn apply_to_entity<C: InputContext + Component>(
 
 /// Reads one context's bindings back out for a reverse lookup, once its type is no longer known.
 ///
-/// Registered beside `read_mappings`, and answering a different question: this one is about what
-/// would fire now, so it reads the compiled plan rather than the presentation rows, and it asks
+/// Registered beside `read_mappings`, and answering a different question: this one reads the
+/// compiled plan rather than the presentation rows, so a `private` binding is in it, and it asks
 /// whether anything is carrying the context at all.
 fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::ContextBindings {
     use crate::present::{BoundControl, ContextBindings};
@@ -633,15 +623,13 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
         },
     };
 
-    // A context nobody carries, or one that is switched off, fires nothing — and a prompt naming
-    // its controls would be telling the player to press a key that does nothing. Read-only, which
-    // is what keeps a lookup callable from an ordinary system rather than an exclusive one.
-    let active = world
+    // Carried rather than active (D84). Read-only, which is what keeps a lookup callable from an
+    // ordinary system rather than an exclusive one.
+    let carried = world
         .try_query::<&InputContextState<C>>()
-        .is_some_and(|mut instances| instances.iter(world).any(InputContextState::is_active));
+        .is_some_and(|mut instances| instances.iter(world).next().is_some());
 
     let mut prompts = alloc::vec::Vec::new();
-    let mut claims = alloc::vec::Vec::new();
     for binding in plan.bindings() {
         let action = plan.slot_actions()[binding.slot];
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
@@ -662,19 +650,9 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
                 condition,
             });
         });
-        // Claims are by control, because taking a stick takes both of its axes.
-        if binding.consume {
-            binding
-                .input
-                .for_each_control(|control| claims.push((control, action)));
-        }
     }
 
-    ContextBindings {
-        active,
-        prompts,
-        claims,
-    }
+    ContextBindings { carried, prompts }
 }
 
 fn read_instances<C: InputContext + Component>(
