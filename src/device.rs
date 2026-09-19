@@ -978,7 +978,7 @@ pub fn mark_gamepad_disconnected(disconnected: On<Remove<Gamepad>>, mut commands
 /// someone underneath already applied. A game that configures `GamepadSettings` and expects it to
 /// reach a binding would otherwise get silence, so this says so once.
 #[cfg(feature = "gamepad")]
-pub fn warn_on_unread_gamepad_settings(
+pub(crate) fn warn_on_unread_gamepad_settings(
     settings: Query<&GamepadSettings, Changed<GamepadSettings>>,
 ) {
     if settings.iter().any(is_customized) {

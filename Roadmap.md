@@ -203,7 +203,7 @@ What is left, in semantic groups ordered roughly by priority. The order is a gui
 schedule: any chunk may be reordered once the one before it has been read, and a chunk's number is
 its identity rather than its position.
 
-(Next: 94c, 130, 122, 1036, 28, 131, 33, 115)
+(Next: 94c, 130, 122, 28, 131, 33, 115)
 
 ## Defects
 

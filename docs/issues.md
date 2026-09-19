@@ -451,58 +451,6 @@ it: the field was renamed to `input`, not removed. Which is the finding. Violati
 by reading, and then a reading finds them absent with equal confidence — "a rule with no tooling
 behind it," as the register puts it, does not only fail to prevent them. Unrouted.
 
-### 1036 Public items with no caller and no document
-
-Splitting by why they are here, because the answer differs:
-
-**Should probably be `pub(crate)`** — used only inside the crate, while a sibling doing the same job
-is already crate-private:
-
-- `eval.rs`: `release_consumed_controls`, `release_consumed_in`, `dispatch_transitions`,
-  `dispatch_class_fires` — `pub` with `ActionMapPlugin` and `declare_context` as their only
-  registrars, beside `reset_exclusion_ceiling` and `evaluate_context`, which are `pub(crate)` and do
-  the same job in the same file.
-- `device.rs`: `warn_on_unread_gamepad_settings`, and `frame.rs`: `retire_read_events` — same shape,
-  only `InputFramePlugin` names them.
-- `capture.rs`: `ReservedControls::claimant` and `iter` — every caller is inside the crate.
-  `claimant` is the one with a plausible unwritten caller, since a screen refusing a reserved
-  control wants to say what reserved it.
-
-**No caller anywhere, and no document asks for them:**
-
-- `capture.rs`: `CaptureSession::mapping`, `slot`, `accepts`, `family`, `excluded`, `is_listening` —
-  six readers, named by no document. `is_listening`'s own doc says it "exists for tests."
-  `ControlCaptured` carries the mapping and the slot back, which is the path a screen actually
-  takes.
-- `device.rs`: `GamepadCalibration::clear_device`, `is_empty`.
-- `mapping.rs`: `MappingKey::part` — plausible for a screen grouping a composite's four rows, and
-  nothing does.
-- `overrides.rs`: `Overrides::is_empty` — called only by its own test; TD10 enumerates twelve
-  `Overrides` methods and this is not one.
-- `action.rs`: `ActionValue::from_output` — called by `backend.rs`'s `AuthorityValues::set`, and a
-  second name for the four `From` impls twenty lines above it. Its counterpart `into_output` is not
-  a duplicate: no `From` goes that way, it widens, and `AuthorityValues::get` calls it.
-- `action.rs`: `ActionIntent::supports_output` — a public wrapper over `is_one_of`, which is the one
-  the derive calls. Nothing else calls either.
-- `action.rs`: `ActionState::new` — a `const fn` constructor for a two-field struct with both fields
-  public and a `Default` impl.
-- `plan.rs`: `Plan` is `pub` with **nothing public on it** — no field, no method, no constructor,
-  and it appears in no public signature, every wrapper holding one being `pub(crate)`. It is on
-  docs.rs as a struct a reader can name and do nothing with. TD4 names `Plan<C>` in prose, which is
-  architecture rather than a request for it to be public.
-
-**Reviewed and left alone**: `GamepadCalibration::clear_device`/`is_empty`, `MappingKey::part`,
-`Overrides::is_empty` and `ActionState::new` are ordinary API completeness on small types. "No
-caller in tree" is not a defect for a library; it is only worth acting on for items that are _also_
-misleading, and none of these is.
-
-Worth stating for calibration: TD7.3, TD8.2, TD9.1 and TD10 _enumerate_ their public surface rather
-than describing it, so the sweep over those was a diff and came back nearly empty — eleven
-conditions, ten modifiers, six presentation methods, eleven `ActionMapping` fields, eight problem
-kinds, all matching one for one. The list above is concentrated where no document enumerates.
-
-Unrouted.
-
 ### 1053 The release itself has no destination
 
 `Roadmap.md` · `Cargo.toml`

@@ -106,7 +106,9 @@ impl ConsumedControls {
 }
 
 /// Starts a frame with nothing claimed.
-pub fn release_consumed_controls(mut consumed: bevy_ecs::prelude::ResMut<'_, ConsumedControls>) {
+pub(crate) fn release_consumed_controls(
+    mut consumed: bevy_ecs::prelude::ResMut<'_, ConsumedControls>,
+) {
     consumed.release_all();
 }
 
@@ -147,7 +149,7 @@ pub(crate) fn reset_exclusion_ceiling(
 }
 
 /// Starts one run of a schedule with nothing claimed *by that schedule*.
-pub fn release_consumed_in<S: bevy_ecs::schedule::ScheduleLabel>(
+pub(crate) fn release_consumed_in<S: bevy_ecs::schedule::ScheduleLabel>(
     mut consumed: bevy_ecs::prelude::ResMut<'_, ConsumedControls>,
 ) {
     consumed.release::<S>();
@@ -168,7 +170,7 @@ pub(crate) struct Transition {
 ///
 /// Separate from evaluation because observers run arbitrary code with `&mut World`, and the
 /// evaluator has to stay a pure function of its inputs.
-pub fn dispatch_transitions<C: InputContext + Component>(
+pub(crate) fn dispatch_transitions<C: InputContext + Component>(
     mut commands: Commands<'_, '_>,
     mut states: Query<'_, '_, (Entity, &mut InputContextState<C>)>,
 ) {
@@ -176,8 +178,9 @@ pub fn dispatch_transitions<C: InputContext + Component>(
         if state.transitions.is_empty() {
             continue;
         }
-        // Draining the log is not the action changing — the evaluation that filled it already said
-        // so, and saying it twice would move the change tick a system later than the fact.
+        // Bypass change detection: draining the log is bookkeeping, not a meaningful state change.
+        // The evaluation that populated the log already triggered change detection at the right
+        // time; re-triggering it here would advance the change tick one system past the actual event.
         let state = state.bypass_change_detection();
 
         // Handed back afterwards so the allocation survives to the next tick.
@@ -198,7 +201,7 @@ pub(crate) struct ClassFire {
 }
 
 /// `ClassFire`'s counterpart to [`dispatch_transitions`], and separate for the same reason.
-pub fn dispatch_class_fires<C: InputContext + Component>(
+pub(crate) fn dispatch_class_fires<C: InputContext + Component>(
     mut commands: Commands<'_, '_>,
     mut states: Query<'_, '_, (Entity, &mut InputContextState<C>)>,
 ) {
