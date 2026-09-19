@@ -57,24 +57,7 @@ unrouted can be read off the entries that stay silent.
 ## 1. Live — an ordinary build gets a wrong answer
 
 Every entry the `src/` scan filed here has landed (chunks 81, 84, 85, 86, 88, 89, 90, 91) and is
-retired. What follows was found another way.
-
-### 1056 `InputDispatchPlugin`, left enabled, bypasses consumption
-
-R8.2a · `bevy_ui_widgets` · carried from `Roadmap.md`, **not re-probed** — that Disasteroids
-disables the plugin outright is the strongest evidence here, and it is circumstantial
-
-`bevy_ui_widgets::Button` activates on `Space` from a `FocusedInput<KeyboardInput>` that asks the
-mapper nothing, so a focused button answers a control a context has already claimed.
-
-What is wrong is the *default*, not the capability. A context per widget kind answers it, and
-Disasteroids ships that way by disabling the plugin outright — so nothing in tree is bitten. What
-bites is that `DefaultPlugins` brings the collision and nothing tells a game to opt out, which means
-every game meets it once, by surprise, and has to work out what happened.
-
-_Fix:_ the generic form is the **consumption-aware `FocusedInput` dispatch** deferred row, gated on
-a game wanting `bevy_ui_widgets`' own widgets working unmodified. What has no home is the smaller
-half — saying so somewhere a game reads before it hits this.
+retired, as is everything since found another way. The tier is empty.
 
 ---
 
