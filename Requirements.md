@@ -415,10 +415,9 @@ Unreal maps context→key→(triggers, modifiers). Steam moves the whole binding
   chord (all-of), and "button with modifier(s)".
 - **R4.3 (MUST)** Bindings must be expressible against a _device class_ (any gamepad) as well as a
   _specific device instance_ (player 2's pad) — see R14.
-- **R4.4 (SHOULD)** Semantic control aliases (`Submit`, `Cancel`, `MenuLeft`) that resolve per
-  device class, so UI code binds once. This is Unity's "usages" and Steam's action-set convention;
-  it is also what makes console confirm-button region swaps (R18.7) tractable. An alias resolves to
-  _one_ control per device class; R4.9 is the same idea where the answer is a set.
+- **R4.4 (WITHDRAWN)** ~~Semantic control aliases that resolve to _one_ control per device class, so
+  UI code binds once — at minimum `Submit` and `Cancel`, which R18.7's confirm-button swap depends
+  on.~~ _Withdrawn with R18.7, the only case that made an alias more than two binding lines saved._
 - **R4.5 (MUST)** Per-binding modifiers and conditions (R5, R6), not only per-action — the same
   action needs different deadzones for stick vs. mouse.
 - **R4.6 (MUST)** Bindings are data: constructible at runtime, serializable, diffable against
@@ -1168,11 +1167,17 @@ the game. Unity `ToDisplayString` + `InputBinding.MaskByGroup`. Unreal's
   this is R15.8's auto-switching, which is a R15 question about the player model rather than a
   presentation one: if that lands, a prompt reads the player's paired device rather than tracking
   one of its own._
-- **R18.7 (SHOULD)** Support a confirm/cancel button-convention policy as one setting rather than
-  scattered `if cfg!` checks. The case that forces this: on PlayStation in Japan, ○ (East) has
+- **R18.7 (WITHDRAWN)** ~~Support a confirm/cancel button-convention policy as one setting rather
+  than scattered `if cfg!` checks. The case that forces this: on PlayStation in Japan, ○ (East) has
   historically meant confirm and ✕ (South) cancel, while the rest of the world uses the opposite —
   so the same semantic action maps to a different physical button by region, and both the binding
-  and the prompt must follow. Handling it per call site guarantees somewhere gets missed.
+  and the prompt must follow. Handling it per call site guarantees somewhere gets missed.~~
+  _Withdrawn: the regional split is PlayStation's and historical. PS5 made ✕ confirm worldwide,
+  Japan included, and Xbox and Nintendo never varied by region. A game that still wants East to
+  confirm ships a gamepad preset that swaps the two, which already moves fixed pad rows and redraws
+  the prompts. Nintendo's A-on-East is a question about the device rather than the region, and is
+  deferred on its own. What would revive this is a platform whose system setting still chooses the
+  confirm button._
 - **R18.8 (MUST)** _(D22)_ An external binding backend may be the source of truth for origins and
   glyphs; presentation must not assume our own binding tables are authoritative. Reverse lookup
   (R18.1) is therefore a trait method with our binding table as one implementation, not a concrete

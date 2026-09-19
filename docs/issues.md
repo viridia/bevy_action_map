@@ -279,14 +279,6 @@ consulting its own working copy.
 
 _Fix:_ **chunk 42** — its binding panel is where this distinction has to render anyway.
 
-### 1040 No semantic control aliases
-
-R4.4 (SHOULD) — semantic control aliases (`Submit`, `Cancel`, `MenuLeft`) resolving per device
-class. Nothing in tree. It is load-bearing rather than convenient: R4.4 names it as what makes
-R18.7's console confirm-button swap tractable.
-
-_Fix:_ **chunk 101**.
-
 ### 1041 No way to stop the frame sampling itself
 
 R9.9 — a pumped sampling mode. `sample_input`, `begin_sample` and `record` are all public, so the

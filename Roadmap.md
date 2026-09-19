@@ -201,7 +201,7 @@ What is left, in semantic groups ordered roughly by priority. The order is a gui
 schedule: any chunk may be reordered once the one before it has been read, and a chunk's number is
 its identity rather than its position.
 
-(Next: 73, 101)
+(Next: 73)
 
 ## Defects
 
@@ -401,18 +401,6 @@ going through a catalogue. The crate's half of R19.14 is done, but the claim tha
   thing it would genuinely test is whether our key syntax collides with its identifier grammar, and
   that is a reading of the spec rather than a dependency.
 - **Review surface:** whether the key is the one an author would actually want to type.
-
-### 101. Semantic control aliases for a console confirm swap
-
-R4.4 (SHOULD) (`docs/issues.md` 1040): semantic aliases (`Submit`, `Cancel`, `MenuLeft`) resolving
-per device family, load-bearing for R18.7's console confirm-button swap rather than merely
-convenient.
-
-- **Disasteroids' settings screen**, which already does directional navigation (29): the same screen
-  reads `Cancel` rather than a hard-coded key, so its on-screen prompt says the right thing on
-  keyboard and on a pad without the app hand-rolling the swap itself.
-- **Not doing:** a general aliasing mechanism beyond the three names R4.4 asks for — this proves the
-  concept the requirement names, not a configurable alias table.
 
 ---
 
@@ -686,6 +674,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Owner-scoped `ConsumedControls`/exclusion ceiling** (R15.3 remainder, and D13's own remainder) | a real in-tree case with a per-player exclusive context, or a binding consumed across two players' devices. Design if built: a claim visible only if made globally or by the viewer's own paired device; an exclusive context's shadow implicit in its own pairing rather than a separate flag |
 | **A game-wide "more forgiving timings" control** (R20.4's withdrawal) | a game with enough timings that setting them one at a time is the complaint. One player-facing control across a whole game needs the crate to know which way forgiveness runs per threshold — down for `Hold` and `HoldAndRelease`'s floors, up for `Tap` and `MultiTap`'s ceilings and `Pulse`'s interval — which is the one part of this a game cannot get right without hand-checking five signs, and the reason the row exists rather than the idea being dropped with the requirement. Chunk 115's per-timing tunables come first regardless: they are what a game would expose the control *through*, and they may turn out to be all anyone wants |
 | **Auto-switching which device a player is paired to** (R15.8) | **a single-player game in tree that wants it**, which is where the value is: asked directly, LWIM's maintainer put pad-to-keyboard switching at mattering a bit, and much more in single player or networked multiplayer than in local co-op. One person pressing things makes "which device are they on now" a question with one right answer; two make it the wrong question, which is why Split Friction joins once and a player who wants the keyboard takes it the same way they took the pad. The gate stays untripped for a reason rather than for want of demand: Disasteroids is the single-player game, and it pins `PromptDevice` to the keyboard on purpose, being a desktop game whose prompts name keys with a pad plugged in. Deferred rather than withdrawn alongside R15.7, because unlike R15.7 an app cannot write it: telling a deliberate grab from a drifting stick means reading raw samples under a deadzone floor before any action fires, which an app watching `Fired` never sees. If it lands, a prompt reads the player's paired device rather than tracking one of its own, and R18.6 revives with it |
+| **Nintendo's confirm button** (what R18.7's withdrawal left) | **a game that wants confirm to follow the pad in hand**, checked first on a Nintendo pad reporting through gilrs. A Nintendo pad confirms with A, in the East position, where every other brand confirms with South. Only the gilrs path sees this, since a Steam Input backend hands over actions already mapped. Read, not run: gilrs takes SDL's `a`/`b` as `South`/`East`, and SDL_GameControllerDB maps a Nintendo pad by position (its `mapping_guide.png`), so A arrives as `East` and a game confirming on South confirms on a Nintendo player's B. A preset swapping South and East fixes that for a game that knows its player. Following the pad instead is per device rather than per family, since two brands can share one game, and `Brand` is already on the gamepad entity to read |
 | **Opaque platform-user identity** (R15.9) | a real platform SDK. Floated for Split Friction, but there is nothing to show without one, and not worth a faked stub the way chunk 42 fakes a backend |
 | **Naming which authority produced a value** (R0.5's queryable half) | a build with two authorities in it. That a delegated action is indistinguishable from a bound one at the call site is the requirement's point; what has no reader is *which* authority supplied it. Chunk 111 left `AuthorityValues` unnamed rather than adding a field nothing consults, and one authority cannot motivate a name — `pong_robot`'s robot has nothing to be told apart from |
 | **An authority backend's actions in rollback** (D22's remainder) | a snapshot to fit them into. `AuthorityValues` is a plain component and clones with the entity, but what a rewind has to reproduce is what the authority *said* on the tick being re-simulated, which is not in the frame. The available answer is recording the backend's output into the frame at sample time, at the cost of a larger frame |
