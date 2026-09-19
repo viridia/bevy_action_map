@@ -159,6 +159,14 @@
 //! arrangement of mappings at once, for a game that ships alternate control families (`Southpaw`,
 //! `Classic`) rather than leaving a player to rebind every row by hand.
 //!
+//! The controls a player uses to reach that screen, and to find their way around it, have to
+//! survive whatever they rebind. Mark them [`reserved`](binding::BindingBuilder::reserved), which
+//! stops the player moving them and stops capture handing them to any other mapping. Leaving a
+//! binding out of the rebindable set does only the first, and a key that opens the screen but also
+//! fires the gun is as much a trap as one that opens nothing. Give the screen a way back to the
+//! shipped controls too, with [`reset_all`](overrides::Overrides::reset_all), for whatever
+//! reserving did not cover.
+//!
 //! An on-screen [prompt](present) ("Press W") stays correct across a rebind because it is derived
 //! from the same data the settings screen edits, not typed out separately. The control half of
 //! that prompt is also a stable, storage-safe string, so a save file and a localization catalogue

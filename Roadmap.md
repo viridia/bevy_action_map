@@ -194,6 +194,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 134  | A prompt names what an action is bound to                             |
 | 132  | Consumption that reaches a gamepad                                    |
 | 110  | A glyph for a control, and an icon prompt                             |
+| 123  | Advice on a mapping set a player cannot break                         |
 
 ---
 
@@ -595,29 +596,6 @@ feature (`Cargo.toml:116-123`) never re-adds it.
   `docs/decisions.md:430` keeps those two deliberately Reflect-free; this chunk doesn't reopen that.
 
 [bevyengine/bevy#15030]: https://github.com/bevyengine/bevy/pull/15030
-
-### 123. Advice on a mapping set a player cannot break
-
-R19.2 exists — exclusion lists, "so the rebinding UI remains operable" — and `reserved()` is the
-mechanism, with a doc comment that teaches the trap properly. What is missing is anything at the
-level where a novice lays out their first context: a method's documentation reaches the reader who
-already suspects the problem and went looking for it.
-
-- **What it has to say.** That every control on the path to the rebinding screen has to survive a
-  careless rebind; that keeping it out of the mappable set is only half the job, because something
-  else can still be bound over the top of it; and that a reset to the shipped controls is the way
-  back when both fail.
-- **Where it goes is decided by length.** A few paragraphs belong in `lib.rs`'s module docs, where
-  someone laying out a context meets them. Longer than that and it is its own page under `docs/`
-  with the README linking it — which would be the first user-facing document there, so `CLAUDE.md`'s
-  table of what each document admits gains a row in the same change.
-- **A worked example that compiles**, not an `ignore` fence: the advice is a pattern rather than a
-  fragment, so it can stand on its own, and chunk 28 has one less to convert.
-- **Not doing: making Disasteroids follow it** — chunk 124. Prose teaching a pattern the flagship
-  example does not itself use is worth less, but the example is a separate change.
-- **Review surface:** whether this reads as a warning or as a recipe. A novice who has not been
-  burned skips warnings, which argues for stating the pattern positively and letting the failure
-  mode follow from it.
 
 ### 28. Docs that run
 
