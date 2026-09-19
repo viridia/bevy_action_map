@@ -87,6 +87,7 @@ pub const MOUSE_MOTION: f32 = 8.0;
 /// A directional composite is still not a member of any class here: it is four buttons, and a
 /// player rebinds one of them at a time. A stick is the one two-dimensional reading a single
 /// control produces, on the same terms as the mouse's [`AnyDelta`](Self::AnyDelta).
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ControlClass {
     /// Anything with a pressed sense: keyboard keys, gamepad buttons, and analog triggers, which

@@ -136,6 +136,7 @@ pub enum BindingCondition {
 /// This is handed to a localization layer as structure rather than as rendered text, so a
 /// translator chooses its own word order; [`fallback_format`](Self::fallback_format) is the
 /// built-in renderer for a game that ships no catalogue.
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ConditionDescriptor {
     /// Nothing to add: the control's own name is the whole answer.

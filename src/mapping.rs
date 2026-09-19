@@ -67,6 +67,7 @@ use crate::inspect::OverrideStage;
 /// It is derived rather than declared: the action's path plus the part's name, both of which
 /// already exist and are already stable. `gameplay.move` plus `up` is `gameplay.move.up`, and
 /// nothing has to be kept in step with anything.
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MappingKey {
     prefix: &'static str,
@@ -145,6 +146,7 @@ impl core::fmt::Display for MappingKey {
 /// A screen reads this to decide whether a row is a button or a label. It is never a security
 /// boundary: a game that does not want a control changed does not offer it. It says nothing about
 /// whether the binding *works*.
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RebindPolicy {
     /// The player may change it, in this game's own screen.
@@ -169,6 +171,7 @@ impl RebindPolicy {
 ///
 /// Everything a screen needs to draw a row and file it under a heading, and nothing about how the
 /// binding it came from is put together.
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActionMapping {
     /// What this mapping is called, as a key to look up.
@@ -247,6 +250,7 @@ impl ActionMapping {
 ///
 /// Whether a new key keeps the modifier the old one had is the screen's decision, made by which of
 /// those two it writes.
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct BoundSlot {
     /// The control that fires it.
@@ -292,6 +296,7 @@ impl From<Control> for Option<BoundSlot> {
 /// What [`follow`](crate::binding::InputContextBuilder::follow) declares. The follower reads
 /// exactly the controls its principal's row lists, so nothing here repeats them: its
 /// [`condition`](Self::condition) is usually the whole of what a screen has to add.
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Follower {
     /// The action riding this row.

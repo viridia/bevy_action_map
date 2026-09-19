@@ -8,6 +8,9 @@ use core::ops::Deref;
 
 use crate::device::{DeviceHandle, DeviceHandleSet};
 
+#[cfg(feature = "bevy_reflect")]
+use bevy_ecs::reflect::ReflectComponent;
+
 #[cfg(feature = "gamepad")]
 use bevy_ecs::entity::Entity;
 #[cfg(feature = "gamepad")]
@@ -21,6 +24,11 @@ use bevy_ecs::prelude::{Commands, EntityEvent, Event, Query, Res};
 /// ask "is this device claimed by anything" without knowing every context a game has declared.
 ///
 /// A context entity with no `Paired` reads every device, so a single-player game needs no opt-in.
+#[cfg_attr(
+    feature = "bevy_reflect",
+    derive(bevy_reflect::Reflect),
+    reflect(Component)
+)]
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Paired(DeviceHandleSet);
 

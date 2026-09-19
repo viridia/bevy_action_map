@@ -171,45 +171,6 @@ chord entry's family. Confirmed by reading `overrides.rs`, not by applying one.
 
 _Fix:_ **chunk 135**, which decides between refusing such a chord and detecting across it.
 
-### 1019 The types a scene would author carry no `Reflect`, and auto-registration is switched off
-
-R24.3 (MUST) · `action.rs`, `frame.rs`, `Cargo.toml`'s `bevy_reflect` dependency and feature ·
-reasoned from `bevy_reflect 0.20.0-rc.1`'s own `Cargo.toml` feature graph, **not probed**
-
-Deriving `Reflect` reads like a gap only manual `register_type` calls can close, but since
-[bevyengine/bevy#15030][] a non-generic `#[derive(Reflect)]` type is registered automatically at app
-startup — no call needed — unless it opts out with `#[reflect(no_auto_register)]`. A generic type is
-the one case that still needs a manual call, per type parameter, because there is no single `TypeId`
-to register on its behalf.
-
-That mechanism is inert here, which is the finding. It lives behind `bevy_reflect`'s own
-`auto_register_inventory` (or, on platforms `inventory` doesn't support, `auto_register_static`)
-feature, bundled into `bevy_reflect`'s `default` set upstream — but this crate's `bevy_reflect`
-dependency is declared `default-features = false` and its own forwarded `bevy_reflect` feature never
-re-adds either. So today, deriving `Reflect` on `Prompt` or `ActionMapping` would still leave it out
-of the registry — not because the crate has to hand-register everything, but because it never turned
-on the feature that would do it for free.
-
-`Control`, `DeviceFamily`, `ActionMapping`, `RebindPolicy`, `Prompt`, `ControlOrigin`,
-`DeviceHandle`, `ActionObstacle` and `Paired` still carry no `Reflect` at all, which
-auto-registration doesn't touch — deriving it is a separate step from registering what's derived.
-`Paired` is a component a scene would author, and the five resources `ActionMapPlugin` initializes
-are unregistered. `Identity` belongs on that list too: chunk 72 gave it to a device's entity and
-left it, like `Paired` beside it, underived.
-
-Two of the scan's supporting observations have since expired, and neither was what the finding
-rested on. `overrides.rs` and `device.rs` both derive `Reflect` now, so `action.rs` and `frame.rs`
-are no longer the only sites; and `register_type` has callers — `lib.rs`, `device.rs`, and three in
-`examples/` — where the scan found none.
-
-Chunk 17c owns R5.6 and R17.5 — `Modifier` and `Condition` — and `docs/decisions.md:430`
-deliberately keeps those two bound-free. Neither is R24.3.
-
-_Fix:_ **chunk 109** — derive `Reflect` on the missing types and turn on auto-registration, checking
-the `no_std` interaction first rather than assuming it.
-
-[bevyengine/bevy#15030]: https://github.com/bevyengine/bevy/pull/15030
-
 ### 1043 No auto-switching which device a player is paired to
 
 R15.8 (SHOULD, split from 1020) — auto-switching on input from another device, with hysteresis.

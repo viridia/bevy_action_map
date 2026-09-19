@@ -649,6 +649,7 @@ pub struct ActionReading<'a> {
 ///
 /// Meant for a debug overlay, a log line, or a breakpoint condition — not for game logic. What it
 /// reports is the *first* obstacle found, so clearing one may reveal another.
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ActionObstacle {

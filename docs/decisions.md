@@ -1802,6 +1802,23 @@ suppression, and the levers are the app's: cursor grab, a barrier entity coverin
 deactivating the context. R22.4 owns documenting that, so what the crate owes is an ordering rather
 than a mechanism.
 
+### D86 — Registering a reflected type is the app's decision
+
+**Decided.** A type derives `Reflect` when something reaches it through the registry: a scene
+authors it, a tool reads or tunes it without being compiled against it, or reflection-based
+persistence stores it. Evaluator state and transient handles do not qualify, and a marginal case is
+left out, since adding a derive later breaks nothing and removing one does. The crate turns on no
+`auto_register*` feature and keeps no `register_type` list; derived types reach the registry through
+the app's `reflect_auto_register`, as Bevy's own library crates' do.
+
+**Rules out.** `bevy_reflect/auto_register_inventory` in this crate's features; a list of
+`register_type` calls in `ActionMapPlugin`.
+
+**Reversal.** The feature alone registers nothing, because `App` builds its registry from derived
+types only under `bevy_app/reflect_auto_register`, and enabling it from a library forces `inventory`
+onto a `no_std` build and onto an app that chose `auto_register_static`. A hand-kept list is one
+every new type silently skips.
+
 ---
 
 ## Late entries

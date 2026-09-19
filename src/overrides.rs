@@ -43,6 +43,8 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use bevy_ecs::entity::Entity;
+#[cfg(feature = "bevy_reflect")]
+use bevy_ecs::reflect::ReflectResource;
 use bevy_ecs::world::World;
 #[cfg(feature = "serialize")]
 use bevy_reflect::{Reflect, ReflectDeserialize, ReflectSerialize};
@@ -324,6 +326,11 @@ impl Overrides {
 /// give it, whatever this says — the limit is about what an override set may *do* to a row, not how
 /// long one is allowed to be. So a fixed row listing a dozen controls is yours to ship, and a
 /// preset moving a row is held to the limit like anything else applied.
+#[cfg_attr(
+    feature = "bevy_reflect",
+    derive(bevy_reflect::Reflect),
+    reflect(Resource)
+)]
 #[derive(bevy_ecs::resource::Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MaxSlots(pub usize);
 

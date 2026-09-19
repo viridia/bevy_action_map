@@ -20,6 +20,8 @@ use alloc::vec::Vec;
 use bevy_math::Vec2;
 
 #[cfg(feature = "bevy_reflect")]
+use bevy_ecs::reflect::ReflectResource;
+#[cfg(feature = "bevy_reflect")]
 use bevy_reflect::Reflect;
 
 #[cfg(feature = "serialize")]
@@ -197,7 +199,7 @@ pub struct TimedRawEvent {
 // Reading outside PreUpdate or FixedPreUpdate is a trap: by Update the queue has been retired if
 // the simulation stepped this frame and is intact if it did not, so a reader there sees content
 // that depends on the frame rate.
-#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
+#[cfg_attr(feature = "bevy_reflect", derive(Reflect), reflect(Resource))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, Default, PartialEq, Resource)]
 pub struct InputFrame {

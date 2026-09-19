@@ -68,6 +68,9 @@ use crate::capture::ControlClass;
 use crate::condition::ConditionDescriptor;
 use crate::device::DeviceFamily;
 
+#[cfg(feature = "bevy_reflect")]
+use bevy_ecs::reflect::ReflectResource;
+
 #[cfg(feature = "gamepad")]
 use crate::binding::Stick;
 #[cfg(feature = "gamepad")]
@@ -698,6 +701,7 @@ pub fn resolve_glyph(
 /// variants answer [`name`](ControlOrigin::name) and
 /// [`fallback_label`](ControlOrigin::fallback_label), so a screen renders one without first asking
 /// which it was handed.
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ControlOrigin {
     /// A control this crate knows.
@@ -840,6 +844,7 @@ impl ControlOrigin {
 }
 
 /// One way to fire an action, as a prompt would show it.
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Prompt {
     /// The control that fires it.
@@ -1032,6 +1037,11 @@ impl Prompts for BindingTable<'_> {
 /// A game that *does* change it while running — prompts that follow the device just used — has to
 /// say so with [`PromptGeneration::invalidate`], since a resource being written is not something
 /// this crate watches for.
+#[cfg_attr(
+    feature = "bevy_reflect",
+    derive(bevy_reflect::Reflect),
+    reflect(Resource)
+)]
 #[derive(bevy_ecs::resource::Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PromptDevice(pub Option<DeviceFamily>);
 

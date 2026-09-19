@@ -115,6 +115,8 @@ touch = ["bevy_input/touch"]
 # Runtime reflection. Required to serialize custom modifiers/conditions (R5.6, R17.5).
 bevy_reflect = [
   "dep:bevy_reflect",
+  # `Paired` holds its devices in a `SmallVec`.
+  "bevy_reflect/smallvec",
   "bevy_app/bevy_reflect",
   "bevy_ecs/bevy_reflect",
   "bevy_input/bevy_reflect",

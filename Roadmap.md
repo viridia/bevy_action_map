@@ -195,6 +195,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 132  | Consumption that reaches a gamepad                                    |
 | 110  | A glyph for a control, and an icon prompt                             |
 | 123  | Advice on a mapping set a player cannot break                         |
+| 109  | Reflect where a scene, a tool or a save file reaches the type         |
 
 ---
 
@@ -202,7 +203,7 @@ What is left, in semantic groups ordered roughly by priority. The order is a gui
 schedule: any chunk may be reordered once the one before it has been read, and a chunk's number is
 its identity rather than its position.
 
-(Next: 73)
+(Next: 94c, 130, 122, 1036, 28, 131, 33, 115)
 
 ## Defects
 
@@ -560,42 +561,6 @@ Nothing here is faked — `examples/pong_robot` is already an authority resolvin
   knowing its backend, which is the presentation-crate row.
 - **Not doing: naming which authority produced a value** (R0.5's queryable half). One authority in a
   build cannot motivate a name; the deferred table carries it.
-
-### 109. Derive `Reflect`, and turn on auto-registration instead of hand-writing it
-
-R24.3 (`docs/issues.md` 1019): `Control`, `DeviceFamily`, `ActionMapping`, `RebindPolicy`, `Prompt`,
-`ControlOrigin`, `DeviceHandle`, `ActionObstacle` and `Paired` carry no `Reflect`, and nothing calls
-`register_type` for the two types that do (`action.rs`, `frame.rs`). The second half looked like it
-needed a call per type, written once and kept in sync forever after — but [bevyengine/bevy#15030][]
-means it doesn't: a non-generic `#[derive(Reflect)]` type registers itself at startup once
-`bevy_reflect`'s `auto_register_inventory` feature is on, which it isn't here — this crate's
-`bevy_reflect` dependency is `default-features = false` (`Cargo.toml:43`) and its own forwarded
-feature (`Cargo.toml:116-123`) never re-adds it.
-
-- **Derive `Reflect`** on the nine types named in 1019, same as `action.rs` and `frame.rs` already
-  do it. Add `Identity` to that list: chunk 72 gave it to a device's entity and left it, like
-  `Paired` beside it, without `Reflect`.
-- **`register_device_identity` is the one `register_type` call in tree now**, added by chunk 72
-  because a stored identity's domain has to resolve back to a concrete type at load. It stays
-  either way — it registers type data, not just the type — but it is no longer true that nothing
-  calls `register_type`.
-- **Add `bevy_reflect/auto_register_inventory`** to this crate's own `bevy_reflect` feature, so
-  every type above — and every one derived after this chunk — registers itself, rather than adding a
-  `register_type` call this chunk would immediately have to write nine of and the next new type
-  would silently skip.
-- **Check the `no_std` interaction before assuming it holds.** `inventory` lists Linux, macOS, iOS,
-  FreeBSD, Android, Windows and WebAssembly as supported, which says nothing about a `no_std` +
-  `libm` build. Run the `libm` shape through `scripts/verify.sh --full`'s combination sweep with
-  the feature on; if it fails there, `auto_register_static` is the documented fallback, but it
-  "requires additional setup" per `bevy_reflect`'s own docs — scope that setup before promising it
-  rather than after.
-- **Verification:** a headless `App` that builds `ActionMapPlugin` and asserts `AppTypeRegistry`
-  contains `Control`, `ActionMapping` and `Paired` with no `register_type` call anywhere in the
-  test — the probe 1019 never got.
-- **Not doing: `Modifier` or `Condition`.** Chunk 17c owns R5.6 and R17.5, and
-  `docs/decisions.md:430` keeps those two deliberately Reflect-free; this chunk doesn't reopen that.
-
-[bevyengine/bevy#15030]: https://github.com/bevyengine/bevy/pull/15030
 
 ### 28. Docs that run
 

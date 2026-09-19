@@ -9,6 +9,9 @@ use bevy_input::mouse::MouseButton;
 
 use crate::action::ChannelShape;
 
+#[cfg(feature = "bevy_reflect")]
+use bevy_ecs::reflect::ReflectResource;
+
 /// A control that reports on a button channel.
 ///
 /// This is what the parts of a [`DirectionalButtons`] composite are made of. A keyboard key and a
@@ -75,6 +78,7 @@ impl From<GamepadButton> for ButtonControl {
 /// context.bind::<Lean>(KeyCode::KeyQ).with(KeyCode::AltLeft);
 /// ```
 #[cfg(feature = "keyboard")]
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModifierKey {
     /// Either Control key.
@@ -377,6 +381,7 @@ pub struct MouseMove;
 ///
 /// This is what a rebinding screen addresses. A player rebinds "move forward", which is one part of
 /// a movement binding — never the movement binding itself, which has no single control to show.
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum BindingPart {
     /// The binding reads one control, and this is it.
@@ -424,6 +429,7 @@ impl BindingPart {
 /// binds or rebinds one of them on its own, so it is named here whole, the same way
 /// [`MouseMotion`](Self::MouseMotion) already is. It still decomposes to those two axes for
 /// consumption — see [`BindingInput::for_each_control`].
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Control {
     /// A keyboard key, by physical position rather than by the character the layout prints on
@@ -738,6 +744,7 @@ impl BindingInput {
 
 /// The left or right stick on a gamepad.
 #[cfg(feature = "gamepad")]
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Stick {
     /// The left stick.
@@ -891,6 +898,11 @@ impl IntoBindingInput for Stick {
 ///
 /// This is one setting for the whole app rather than one per binding, so that a trigger bound to
 /// two actions can never be pressed for one and released for the other.
+#[cfg_attr(
+    feature = "bevy_reflect",
+    derive(bevy_reflect::Reflect),
+    reflect(Resource)
+)]
 #[derive(bevy_ecs::resource::Resource, Clone, Copy, Debug, PartialEq)]
 pub struct ButtonThreshold {
     /// The value at or above which a control becomes pressed.

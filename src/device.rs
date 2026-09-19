@@ -14,6 +14,7 @@ use bevy_reflect::serde::{ReflectDeserializeWithRegistry, ReflectSerializeWithRe
 /// Keyboard bindings and gamepad bindings are alternatives rather than competitors: a player is
 /// using one or the other at any moment, so the two never conflict with each other and are remapped
 /// independently. A rebinding screen shows one family at a time for the same reason.
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DeviceFamily {
     /// Keyboard and mouse.
@@ -30,6 +31,7 @@ pub enum DeviceFamily {
 ///
 /// The keyboard and mouse are modeled as one device, `KeyboardMouse`, since this crate has never
 /// treated them as separable.
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DeviceHandle {
     // Unconditional even with both device features off: `RawEvent::MouseMotion` is always part of
@@ -61,6 +63,7 @@ impl DeviceHandle {
 /// Backed by a small inline array rather than a hard cap: a handful of devices per occupant is the
 /// common case (a keyboard and mouse plus a pad or two), and a fifth device spills to the heap
 /// instead of being silently dropped.
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DeviceHandleSet(smallvec::SmallVec<[DeviceHandle; 4]>);
 
@@ -526,6 +529,10 @@ impl<'de> serde::de::Visitor<'de> for SavedDeviceIdVisitor<'_> {
 // `Identity` is not gamepad-only: any backend's device can carry one.
 #[cfg(any(feature = "gamepad", feature = "bevy_reflect"))]
 use bevy_ecs::prelude::Component;
+#[cfg(feature = "bevy_reflect")]
+use bevy_ecs::reflect::ReflectComponent;
+#[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
+use bevy_ecs::reflect::ReflectResource;
 #[cfg(any(feature = "gamepad", feature = "bevy_reflect"))]
 use core::ops::Deref;
 
@@ -557,6 +564,7 @@ use bevy_platform::collections::HashMap;
 /// The default is the identity: centred at zero, wandering not at all, which is what an
 /// uncalibrated pad is taken to do.
 #[cfg(feature = "gamepad")]
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AxisCalibration {
     /// What this axis reads when nothing is touching it.
@@ -591,6 +599,11 @@ impl AxisCalibration {
 ///
 /// Keyed by the backend's entity for the pad, so nothing here survives a reconnect.
 #[cfg(feature = "gamepad")]
+#[cfg_attr(
+    feature = "bevy_reflect",
+    derive(bevy_reflect::Reflect),
+    reflect(Resource)
+)]
 #[derive(Resource, Default, Debug)]
 pub struct GamepadCalibration {
     axes: HashMap<(Entity, GamepadAxis), AxisCalibration>,
@@ -709,6 +722,7 @@ impl CalibrationSampling {
 /// `vendor_id` is `Option` and often absent — wasm, some Linux setups — so `Generic` is the
 /// ordinary answer for an unrecognized or unreported pad, not an error.
 #[cfg(feature = "gamepad")]
+#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GamepadBrand {
     /// An Xbox controller.
@@ -739,6 +753,11 @@ impl core::fmt::Display for GamepadBrand {
 /// SDL_GameControllerDB's full device list. [`insert`](Self::insert) extends the table for
 /// hardware this crate does not ship pre-resolved.
 #[cfg(feature = "gamepad")]
+#[cfg_attr(
+    feature = "bevy_reflect",
+    derive(bevy_reflect::Reflect),
+    reflect(Resource)
+)]
 #[derive(Resource, Debug)]
 pub struct GamepadBrands {
     by_vendor: HashMap<u16, GamepadBrand>,
@@ -870,7 +889,8 @@ impl GamepadModelId {
 /// A device that cannot report an identity has no `Identity` at all, which is why this is a
 /// component rather than a field.
 #[cfg(feature = "bevy_reflect")]
-#[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Component, bevy_reflect::Reflect, Clone, Debug, PartialEq, Eq, Hash)]
+#[reflect(Component)]
 pub struct Identity(pub DeviceId);
 
 #[cfg(feature = "bevy_reflect")]

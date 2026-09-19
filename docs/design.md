@@ -1225,10 +1225,17 @@ screen rendering actions it was never compiled against.
 | `touch` | reserved | no |
 | `std` | `no_std` + `alloc` otherwise | yes |
 | `libm` | glam's math backend for a `no_std` build | no |
-| `bevy_reflect` | reflection, and with it serialization of custom modifiers | yes |
+| `bevy_reflect` | `Reflect` on the crate's data, components and resources | yes |
 | `serialize` | persistence of overrides and input frames; pulls in `bevy_reflect` | no |
 | `state` | a context's activation following a `bevy_state` state | yes |
 | `focus` | the `bevy_input_focus` dependency | no |
+
+Under `bevy_reflect`, what a scene authors, a tool reads or tunes, or a save file stores derives
+`Reflect`, with `ReflectComponent` or `ReflectResource` where it is one; evaluator state does not
+(D86). Nothing is registered by hand: derived types reach `AppTypeRegistry` through the app's
+`reflect_auto_register`. `register_device_identity` and `SavedOverrides` are the exceptions, the
+first because it inserts type data auto-registration cannot, the second so that a settings layer
+loading it in an app with auto-registration off does not drop it silently.
 
 There is no `scene`/BSN feature. Transitions are plain `EntityEvent`s, so `bsn!` attaches observers
 with no adapter and no dependency in either direction.
