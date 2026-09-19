@@ -109,6 +109,10 @@ fn camera() -> impl Scene {
 /// different answer depending on which `Startup` system ran first; a span asks after the fact and
 /// asks again whenever the answer moves, so the ordering stops mattering.
 fn hint() -> impl Scene {
+    // Named bare: `bsn!` reads a path such as `actions::NewGame` as a patch rather than a value,
+    // which leaves the span on the default id.
+    use actions::{NewGame, ToggleOverlay, ToggleSettings};
+
     const LABEL: Color = Color::srgb(0.35, 0.4, 0.42);
     const KEY: Color = Color::srgb(0.62, 0.7, 0.72);
 
@@ -123,7 +127,7 @@ fn hint() -> impl Scene {
         // inherited from the `Text` above and a span that omits them is drawn at Bevy's default
         // size in white.
         Children [
-            PromptSpan({actions::ToggleOverlay::id()})
+            PromptSpan(ToggleOverlay)
             TextFont { font_size: 13.0_f32 }
             TextColor(KEY)
             --
@@ -131,7 +135,7 @@ fn hint() -> impl Scene {
             TextFont { font_size: 13.0_f32 }
             TextColor(LABEL)
             --
-            PromptSpan({actions::ToggleSettings::id()})
+            PromptSpan(ToggleSettings)
             TextFont { font_size: 13.0_f32 }
             TextColor(KEY)
             --
@@ -146,7 +150,7 @@ fn hint() -> impl Scene {
             // It captions `Ctrl+N`, because a prompt carries what has to be held alongside the
             // control. The controls screen lists the same binding from the same declaration, and
             // the two reading the same thing is the point of having both.
-            PromptSpan({actions::NewGame::id()})
+            PromptSpan(NewGame)
             ~{PromptFamily(DeviceFamily::KeyboardMouse)}
             TextFont { font_size: 13.0_f32 }
             TextColor(KEY)

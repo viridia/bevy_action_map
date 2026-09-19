@@ -117,6 +117,20 @@ pub fn registered_actions() -> alloc::vec::Vec<ActionInfo> {
     with_registry(|registry| registry.entries.iter().map(|(info, _)| *info).collect())
 }
 
+/// An action's value stands for its id.
+///
+/// Actions are unit structs, so this lets anything that takes an `ActionId` take the action
+/// itself. In a `bsn!` block, where field values are converted with `into`, a component holding an
+/// `ActionId` can be written `Hint(Jump)` rather than `Hint({Jump::id()})`.
+///
+/// Name the action bare there, with a `use` if need be. `bsn!` reads a path such as `actions::Jump`
+/// as a nested patch rather than a value, which compiles and leaves the id at its default.
+impl<A: InputAction> From<A> for ActionId {
+    fn from(_: A) -> Self {
+        A::id()
+    }
+}
+
 impl fmt::Debug for ActionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ActionId").field(&self.0).finish()
@@ -792,6 +806,12 @@ mod tests {
         assert_eq!(Jump::id(), Jump::id());
         assert_ne!(Jump::id(), Look::id());
         assert_eq!(Jump::id().index(), Jump::id().index());
+    }
+
+    #[test]
+    fn an_action_converts_to_its_own_id() {
+        assert_eq!(ActionId::from(Jump), Jump::id());
+        assert_ne!(ActionId::from(Look), Jump::id());
     }
 
     #[test]

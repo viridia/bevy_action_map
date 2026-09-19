@@ -164,7 +164,9 @@ not have to match the Rust type name and should not be updated to follow one.
 
 Separator is `.`; case is `snake_case`; at least two segments, a namespace and a name. For a library
 the namespace is its crate name. `ActionId` is a dense `u32` interned at registration, stable within
-a process run; `ActionId::from_path` resolves one back, and `registered_actions()` lists them.
+a process run; `ActionId::from_path` resolves one back, and `registered_actions()` lists them. An
+action's own value converts into its id, so a `bsn!` field holding an `ActionId` can name the action
+bare.
 
 ---
 
@@ -933,7 +935,7 @@ gamepad control tries its brand's tier and then `Generic`'s; a keyboard or mouse
 included, has the one `KeyboardMouse` tier; a foreign control answers `None`, its art being its
 reporter's. `Glyph` is `#[non_exhaustive]` with one variant, `Own(GlyphTier, ControlOrigin)`, so a
 backend's own image can arrive as another (R18.9). A chord resolves an entry at a time. Everything
-that draws — the atlas, inline layout, the art a Mac labels differently — is
+that draws — the atlas, inline and block layout, the art a Mac labels differently — is
 `examples/common/prompt_ui.rs`, outside the crate.
 
 **A prompt is not a row of the settings screen.** `mappings` is what the game declared and is

@@ -580,8 +580,8 @@ That makes the finding sharper rather than smaller. The thing that was guarantee
 by accident is gone, and `Roadmap.md` still has no release chunk, no deferred row gated on the 0.20
 release, and no checklist of what must be true before the first publish — which by ground rule 5 is
 an item that will be dropped. The work that is release-shaped is scattered through chunks whose
-descriptions do not mention it: 110's sum type and 42's backend trait are both "cheap now, breaking
-later" and neither says that is a publishing deadline rather than a preference.
+descriptions do not mention it: 42's backend trait is "cheap now, breaking later" and does not say
+that is a publishing deadline rather than a preference.
 
 _Fix:_ a deferred row gated on the Bevy 0.20 release would be the smallest thing that stops this
 being forgotten. What belongs in it is the ordering question rather than the date. Unrouted.

@@ -1191,6 +1191,19 @@ method, and a liveness field on `Prompt`.
 A liveness predicate a hint can follow, for an app that wants one, is a deferred row gated on
 reactive UI, rather than a filter on this lookup.
 
+### D85 — An inline icon prompt and a block one are two components
+
+**Decided.** `IconPromptSpan` is a span in a line of text, drawing `InlineImage`s from art
+pre-scaled to sit in that line. `IconPrompt` is a node of its own, drawing image nodes scaled from
+the full-size art to whatever height its `Node` is given. Each falls back to text in its own layout
+kind. They share resolution, the wait for art, and the manifest. Chunk 110 built the block one.
+
+**Rules out.** One component that is a span or a node depending on where it is spawned.
+
+**Reversal.** Their layout knobs differ, and a block prompt has to align like any other node on its
+screen, which a component shaped around the inline case cannot promise while `InlineImage` has no
+size of its own. A merged component would change layout kind underneath its caller.
+
 ---
 
 ## Capture

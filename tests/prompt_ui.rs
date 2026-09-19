@@ -9,7 +9,9 @@ use bevy_action_map::prelude::*;
 #[path = "../examples/common/prompt_ui.rs"]
 mod prompt_ui;
 
-use prompt_ui::{IconPromptSpan, PromptClass, PromptFamily, PromptPick, PromptSpan, PromptUnbound};
+use prompt_ui::{
+    IconPrompt, IconPromptSpan, PromptClass, PromptFamily, PromptPick, PromptSpan, PromptUnbound,
+};
 
 #[derive(InputAction)]
 #[action(path = "prompt_ui_tests.jump", output = bool, intent = Button)]
@@ -247,25 +249,31 @@ fn icons(app: &mut App, span: Entity) -> Vec<String> {
     drawn(app, span)
 }
 
-/// What one icon span draws right now, without waiting on any art.
+/// What one icon prompt draws right now, without waiting on any art. An inline one's children are
+/// inline images and spans, and a block one's are image and text nodes.
 fn drawn(app: &App, span: Entity) -> Vec<String> {
     let world = app.world();
     let Some(children) = world.get::<Children>(span) else {
         return Vec::new();
     };
+    let path = |image: &Handle<Image>| image.path().expect("art is asked for by path").to_string();
     children
         .iter()
-        .map(|child| match world.get::<InlineImage>(child) {
-            Some(icon) => icon
-                .image
-                .path()
-                .expect("art is asked for by path")
-                .to_string(),
-            None => world
-                .get::<TextSpan>(child)
-                .expect("a child is an icon or the text between two")
-                .0
-                .clone(),
+        .map(|child| {
+            let child = world.entity(child);
+            if let Some(icon) = child.get::<InlineImage>() {
+                path(&icon.image)
+            } else if let Some(icon) = child.get::<ImageNode>() {
+                path(&icon.image)
+            } else if let Some(text) = child.get::<TextSpan>() {
+                text.0.clone()
+            } else {
+                child
+                    .get::<Text>()
+                    .expect("a child is an icon or the text between two")
+                    .0
+                    .clone()
+            }
         })
         .collect()
 }
@@ -416,4 +424,59 @@ fn an_icon_prompt_keeps_its_old_chord_until_the_new_art_loads() {
             "input_prompts_inline/nintendo/pad/RightTrigger.png",
         ]
     );
+}
+
+/// A block prompt draws the same chord from the full-size art, which it scales to its own height.
+#[test]
+fn a_block_icon_prompt_draws_a_chord_from_the_full_size_art() {
+    let mut app = app();
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
+    app.add_context::<Flying>(|controls| {
+        controls.bind::<Jump>(KeyCode::KeyS).with(ModifierKey::Ctrl);
+    });
+    app.world_mut().spawn(Flying);
+
+    let prompt = app.world_mut().spawn(IconPrompt(Jump::id())).id();
+    assert_eq!(
+        icons(&mut app, prompt),
+        [
+            "input_prompts/keyboard_mouse/mod/ctrl.png",
+            "+",
+            "input_prompts/keyboard_mouse/key/KeyS.png",
+        ]
+    );
+}
+
+/// A block prompt falls back to a text node of its own, rather than to a span it has no line for.
+#[test]
+fn a_block_icon_prompt_falls_back_to_a_text_node() {
+    let mut app = app();
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
+
+    let prompt = app.world_mut().spawn(IconPrompt(Jump::id())).id();
+    assert_eq!(icons(&mut app, prompt), ["[—]"]);
+    assert!(app.world().get::<TextSpan>(prompt).is_none());
+}
+
+/// A scene names the action itself, and each span ends up with that action's id. Two actions,
+/// because a conversion that silently left the default would still match whichever one was interned
+/// first.
+#[test]
+fn a_scene_names_a_prompt_by_its_action() {
+    let mut app = app();
+    app.add_plugins(bevy::scene::ScenePlugin);
+
+    let jump = app
+        .world_mut()
+        .spawn_scene(bsn! { PromptSpan(Jump) })
+        .unwrap()
+        .id();
+    let turn = app
+        .world_mut()
+        .spawn_scene(bsn! { IconPrompt(Turn) })
+        .unwrap()
+        .id();
+
+    assert_eq!(app.world().get::<PromptSpan>(jump).unwrap().0, Jump::id());
+    assert_eq!(app.world().get::<IconPrompt>(turn).unwrap().0, Turn::id());
 }

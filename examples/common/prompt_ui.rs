@@ -62,6 +62,24 @@ pub struct PromptSpan(pub ActionId);
 #[require(TextSpan)]
 pub struct IconPromptSpan(pub ActionId);
 
+/// Renders the control an action is bound to as an icon, in a UI node of its own.
+///
+/// What a button's caption or a row of hints wants, where [`IconPromptSpan`] is for a prompt in the
+/// middle of a sentence. It lays out like any other node: in a row with `align_items:
+/// AlignItems::Center`, it lines up with the label beside it.
+///
+/// The icons fill the node's height, so size them by giving its `Node` one. The art is scaled down
+/// from a large original, which keeps it sharp on a high-density display. Without a height, the art
+/// is drawn at its own size.
+///
+/// A chord is a row of icons joined by `+`, and the `+` takes this node's `TextFont` and
+/// `TextColor`, as does the text it falls back to. Otherwise it behaves as [`IconPromptSpan`] does:
+/// it keeps drawing the old answer until the new one's art has loaded, and falls back to bracketed
+/// text where there is no art.
+#[derive(Component, Clone, Copy, Default)]
+#[require(Node, TextFont, TextColor)]
+pub struct IconPrompt(pub ActionId);
+
 /// Which device family one span speaks for, overriding [`PromptDevice`].
 ///
 /// What a settings screen's gamepad column wants: those rows name pad controls whatever the rest of
@@ -117,7 +135,7 @@ pub fn plugin(app: &mut App) {
             ),
             refresh_icon_prompts.run_if(
                 resource_changed::<PromptGeneration>
-                    .or_else(any_match_filter::<Added<IconPromptSpan>>),
+                    .or_else(any_match_filter::<Or<(Added<IconPromptSpan>, Added<IconPrompt>)>>),
             ),
             swap_in_icons
                 .after(refresh_icon_prompts)
@@ -305,15 +323,16 @@ fn tier_str(tier: GlyphTier) -> &'static str {
     }
 }
 
-/// Where a resolved glyph's inline-sized art lives, for `AssetServer::load`.
+/// Where a resolved glyph's art lives, for `AssetServer::load`: full size for a block prompt, which
+/// scales it to the height it is given, and pre-scaled for an inline one.
 ///
-/// `input_prompts_inline/`, not `input_prompts/`: Bevy's `InlineImage` sizes itself from the
-/// loaded image's own pixel dimensions with no resize hook (bevyengine/bevy#25710), so an inline
-/// glyph needs art pre-scaled to sit inline with a line of text rather than towering over it.
+/// Bevy's `InlineImage` sizes itself from the loaded image's own pixel dimensions with no resize
+/// hook (bevyengine/bevy#25710), so an inline glyph needs art already small enough to sit in a line
+/// of text rather than tower over it.
 ///
 /// A Mac takes `macos/` first where it has an entry, for the keys it labels differently: Option
 /// for Alt, and Command for Super.
-fn inline_icon_path(glyph: &Glyph, manifest: &IconManifest) -> String {
+fn icon_path(glyph: &Glyph, manifest: &IconManifest, block: bool) -> String {
     let Glyph::Own(tier, origin) = glyph else {
         unreachable!("`Glyph` has one variant today");
     };
@@ -327,20 +346,25 @@ fn inline_icon_path(glyph: &Glyph, manifest: &IconManifest) -> String {
     } else {
         format!("{}/{name}", tier_str(*tier))
     };
-    format!("input_prompts_inline/{key}.png")
+    let dir = if block {
+        "input_prompts"
+    } else {
+        "input_prompts_inline"
+    };
+    format!("{dir}/{key}.png")
 }
 
-/// Everything one icon span needs in order to ask its question — mirrors [`PromptQuery`].
+/// Everything one icon prompt needs in order to ask its question — mirrors [`PromptQuery`].
 type IconPromptQuery = (
     Entity,
-    &'static IconPromptSpan,
+    AnyOf<(&'static IconPromptSpan, &'static IconPrompt)>,
     Option<&'static PromptFamily>,
     Option<&'static PromptClass>,
     Option<&'static PromptPick>,
     Option<&'static PromptUnbound>,
 );
 
-/// What one icon span resolved to: an image to load per control in the chord, in the order they
+/// What one icon prompt resolved to: an image to load per control in the chord, in the order they
 /// are drawn, or text to fall back to.
 enum Resolved {
     Icons(Vec<String>),
@@ -358,7 +382,7 @@ enum Resolved {
 fn refresh_icon_prompts(world: &mut World) {
     let mut spans = world.query::<IconPromptQuery>();
     // Nothing to draw, so nothing to ask `AssetServer` or `Brand` for either — a game that never
-    // spawns an `IconPromptSpan` should not have to carry either just because this system shares
+    // spawns an icon prompt should not have to carry either just because this system shares
     // `PromptSpan`'s own staleness signal.
     if spans.iter(world).next().is_none() {
         return;
@@ -375,11 +399,16 @@ fn refresh_icon_prompts(world: &mut World) {
             .0
             .contains(&format!("{}/{}", tier_str(tier), origin.name()))
     };
-    let resolved: Vec<(Entity, Resolved)> = spans
+    let resolved: Vec<(Entity, bool, Resolved)> = spans
         .iter(world)
-        .map(|(entity, span, scheme, class, pick, unbound)| {
+        .map(|(entity, kind, scheme, class, pick, unbound)| {
+            let (action, block) = match kind {
+                (_, Some(block)) => (block.0, true),
+                (Some(span), None) => (span.0, false),
+                (None, None) => unreachable!("`AnyOf` matched neither"),
+            };
             let (scope, index) = scope_and_index(device, scheme, class, pick);
-            let prompts = BindingTable::new(world).prompts(span.0, scope);
+            let prompts = BindingTable::new(world).prompts(action, scope);
             let resolved = match prompts.get(index) {
                 None => {
                     Resolved::Text(unbound.map_or_else(|| "—".to_string(), |text| text.0.clone()))
@@ -392,7 +421,7 @@ fn refresh_icon_prompts(world: &mut World) {
                     .chain([&prompt.origin])
                     .map(|origin| {
                         resolve_glyph(origin, brand, has_art)
-                            .map(|glyph| inline_icon_path(&glyph, manifest))
+                            .map(|glyph| icon_path(&glyph, manifest, block))
                     })
                     .collect::<Option<Vec<_>>>()
                     .map_or_else(
@@ -400,12 +429,12 @@ fn refresh_icon_prompts(world: &mut World) {
                         Resolved::Icons,
                     ),
             };
-            (entity, resolved)
+            (entity, block, resolved)
         })
         .collect();
 
     let asset_server = world.resource::<AssetServer>().clone();
-    for (entity, resolved) in resolved {
+    for (entity, block, resolved) in resolved {
         let mut entity = world.entity_mut(entity);
         match resolved {
             Resolved::Icons(paths) => {
@@ -417,21 +446,44 @@ fn refresh_icon_prompts(world: &mut World) {
                 entity.remove::<PendingIcons>();
                 entity.despawn_children();
                 // The brackets belong to the fallback, not to a prompt — see `IconPromptSpan`.
-                entity.insert(TextSpan::new(format!("[{text}]")));
+                let text = format!("[{text}]");
+                if block {
+                    let font = entity.get::<TextFont>().cloned().unwrap_or_default();
+                    let color = entity.get::<TextColor>().copied().unwrap_or_default();
+                    entity.with_child(block_text(text, font, color));
+                } else {
+                    entity.insert(TextSpan::new(text));
+                }
             }
         }
     }
 }
 
-/// A chord of icons waiting on its art, while the span goes on drawing whatever it drew before.
+/// Text inside an [`IconPrompt`]: the `+` in a chord, or the whole of a fallback.
+///
+/// Centred on its own, since the prompt's node leaves its children stretched to its height and a
+/// stretched text node draws at the top.
+fn block_text(text: impl Into<String>, font: TextFont, color: TextColor) -> impl Bundle {
+    (
+        Text::new(text),
+        font,
+        color,
+        Node {
+            align_self: AlignSelf::Center,
+            ..default()
+        },
+    )
+}
+
+/// A chord of icons waiting on its art, while the prompt goes on drawing whatever it drew before.
 ///
 /// Swapping the children as soon as the answer changes would lay the line out around icons still
 /// loading, which take no space, and then reflow it when the art lands. A newer answer replaces
-/// this one, so a span never swaps in a chord that has gone stale.
+/// this one, so a prompt never swaps in a chord that has gone stale.
 #[derive(Component)]
 struct PendingIcons(Vec<Handle<Image>>);
 
-/// Replaces a span's children with its pending chord once every icon in it has loaded.
+/// Replaces a prompt's children with its pending chord once every icon in it has loaded.
 ///
 /// Before UI layout, so each icon's box is sized from an image already in memory in the frame it
 /// first appears. A chord whose art is already loaded, such as one a rebind left unchanged, swaps
@@ -441,28 +493,48 @@ struct PendingIcons(Vec<Handle<Image>>);
 /// manifest has already said the file exists, so a failure is a broken install, and Bevy logs it.
 fn swap_in_icons(
     mut commands: Commands,
-    spans: Query<(Entity, &PendingIcons, &TextFont, &TextColor)>,
+    spans: Query<(
+        Entity,
+        &PendingIcons,
+        &TextFont,
+        &TextColor,
+        Has<IconPrompt>,
+    )>,
     images: Res<Assets<Image>>,
 ) {
-    for (entity, pending, font, color) in &spans {
+    for (entity, pending, font, color, block) in &spans {
         if !pending.0.iter().all(|icon| images.contains(icon)) {
             continue;
         }
         let mut span = commands.entity(entity);
-        span.remove::<PendingIcons>()
-            .despawn_related::<Children>()
-            .insert(TextSpan::default());
+        span.remove::<PendingIcons>().despawn_related::<Children>();
+        if !block {
+            span.insert(TextSpan::default());
+        }
         let icons = pending.0.clone();
         let (font, color) = (font.clone(), *color);
         span.with_children(|chord| {
             for (n, icon) in icons.into_iter().enumerate() {
-                if n > 0 {
-                    chord.spawn((TextSpan::new("+"), font.clone(), color));
+                if block {
+                    if n > 0 {
+                        chord.spawn(block_text("+", font.clone(), color));
+                    }
+                    chord.spawn((
+                        ImageNode::new(icon),
+                        Node {
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                    ));
+                } else {
+                    if n > 0 {
+                        chord.spawn((TextSpan::new("+"), font.clone(), color));
+                    }
+                    chord.spawn(InlineImage {
+                        image: icon,
+                        ..default()
+                    });
                 }
-                chord.spawn(InlineImage {
-                    image: icon,
-                    ..default()
-                });
             }
         });
     }

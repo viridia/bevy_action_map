@@ -1,10 +1,14 @@
-//! Every kind of prompt, on one screen, drawn as text and as icons side by side.
+//! Every kind of prompt, on one screen, drawn as text, as icons inline in a line of text, and as
+//! icons in a node of their own.
 //!
 //! `cargo run --example prompt_gallery`
 //!
 //! Each row binds one action one way — a key, a stick, a chord, a hold — and asks what fires it
-//! twice: once as the words a player would read, and once as art. Where there is no art for a
-//! control, the icon column falls back to the same words in brackets.
+//! three times: once as the words a player would read, and twice as art. Where there is no art for
+//! a control, both icon columns fall back to the same words in brackets.
+//!
+//! An inline icon does not yet centre on the line of text around it, which is Bevy's to fix. The
+//! block column is what a button or a row of hints would use, and lines up as any other node does.
 //!
 //! - `1` to `4` switch the pad brand the rows speak in: Xbox, PlayStation, Nintendo and Generic. No
 //!   pad needs to be connected. Generic has no art for face buttons, so those rows fall back to
@@ -28,7 +32,9 @@ use bevy_action_map::preset::Preset;
 #[path = "common/mod.rs"]
 mod common;
 
-use common::prompt_ui::{self, IconPromptSpan, PromptBrand, PromptFamily, PromptPick, PromptSpan};
+use common::prompt_ui::{
+    self, IconPrompt, IconPromptSpan, PromptBrand, PromptFamily, PromptPick, PromptSpan,
+};
 
 const TITLE: Color = Color::srgb(0.85, 0.9, 0.92);
 const LABEL: Color = Color::srgb(0.45, 0.5, 0.52);
@@ -36,7 +42,10 @@ const PROMPT: Color = Color::srgb(0.75, 0.82, 0.85);
 
 const FONT_SIZE: f32 = 15.0;
 const LABEL_WIDTH: f32 = 180.0;
-const CELL_WIDTH: f32 = 240.0;
+const CELL_WIDTH: f32 = 220.0;
+/// The height a block icon is scaled to: the size of the pre-scaled inline art, so the two columns
+/// compare like for like.
+const BLOCK_ICON: f32 = 25.0;
 
 #[derive(InputAction)]
 #[action(path = "prompt_gallery.interact", output = bool, intent = Button)]
@@ -150,7 +159,7 @@ fn main() {
         DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "prompt gallery".into(),
-                resolution: (720, 640).into(),
+                resolution: (900, 640).into(),
                 ..default()
             }),
             ..default()
@@ -280,13 +289,15 @@ fn gallery() -> impl Scene {
     }
 }
 
-/// One way of binding an action: its name, then what fires it as text and as icons.
+/// One way of binding an action: its name, then what fires it as text, as inline icons and as block
+/// icons.
 ///
 /// `parts` is how many prompts the action answers with at once, which is one for everything but a
 /// composite.
 fn row(label: &'static str, action: ActionId, family: DeviceFamily, parts: u8) -> impl Scene {
     let words: Vec<_> = (0..parts).map(|n| word(action, family, n)).collect();
     let icons: Vec<_> = (0..parts).map(|n| icon(action, family, n)).collect();
+    let blocks: Vec<_> = (0..parts).map(|n| block(action, family, n)).collect();
     bsn! {
         Node { align_items: AlignItems::Center }
         Children [
@@ -300,6 +311,9 @@ fn row(label: &'static str, action: ActionId, family: DeviceFamily, parts: u8) -
             --
             Node { width: {Val::Px(CELL_WIDTH)}, column_gap: Val::Px(8.0), align_items: AlignItems::Center }
             Children [ {icons} ]
+            --
+            Node { width: {Val::Px(CELL_WIDTH)}, column_gap: Val::Px(8.0), align_items: AlignItems::Center }
+            Children [ {blocks} ]
         ]
     }
 }
@@ -327,6 +341,17 @@ fn icon(action: ActionId, family: DeviceFamily, n: u8) -> impl Scene {
             TextFont { font_size: {FONT_SIZE} }
             TextColor(PROMPT)
         ]
+    }
+}
+
+fn block(action: ActionId, family: DeviceFamily, n: u8) -> impl Scene {
+    bsn! {
+        IconPrompt({action})
+        ~{PromptFamily(family)}
+        ~{PromptPick::Nth(n)}
+        TextFont { font_size: {FONT_SIZE} }
+        TextColor(PROMPT)
+        Node { height: {Val::Px(BLOCK_ICON)} }
     }
 }
 

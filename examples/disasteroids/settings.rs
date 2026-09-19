@@ -41,7 +41,7 @@ use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 use crate::actions::{
     Back, Clear, Confirm, Menu, Navigate, TURN_DEAD_ZONE_KEY, ToggleSettings, Turn,
 };
-use crate::common::prompt_ui::{IconPromptSpan, PromptFamily, PromptSpan};
+use crate::common::prompt_ui::{IconPrompt, PromptFamily, PromptSpan};
 use crate::common::widget_focus::{
     Adjusted, ButtonFocused, Stepper, decrement_pressed, focusable, increment_pressed,
 };
@@ -74,6 +74,10 @@ const CONTROL_WIDTH: f32 = 155.0;
 /// Wide enough for a chord: "Left Bumper+Right Bumper" is half again as long as anything a single
 /// control is called, and wrapping it would push every row under it down half a line.
 const GAMEPAD_CONTROL_WIDTH: f32 = 230.0;
+
+/// How tall a button's prompt icon is drawn. The buttons in a row stretch to the tallest, so this
+/// sets the height of all three.
+const BUTTON_ICON: f32 = 22.0;
 
 /// How many control cells each table draws per row.
 ///
@@ -524,7 +528,7 @@ fn screen(world: &World) -> impl Scene {
             TextFont { font_size: 13.0_f32 }
             TextColor(FIXED)
             Children [
-                PromptSpan({Clear::id()})
+                PromptSpan(Clear)
                 TextFont { font_size: 13.0_f32 }
                 TextColor(TITLE)
                 --
@@ -532,7 +536,7 @@ fn screen(world: &World) -> impl Scene {
                 TextFont { font_size: 13.0_f32 }
                 TextColor(FIXED)
                 --
-                PromptSpan({ToggleSettings::id()})
+                PromptSpan(ToggleSettings)
                 TextFont { font_size: 13.0_f32 }
                 TextColor(TITLE)
                 --
@@ -555,20 +559,24 @@ fn cancel_button() -> impl Scene {
         on(cancel_pressed)
         AutoFocus
         @focusable()
-        Text::new("Cancel ")
-        TextFont { font_size: 15.0_f32 }
-        TextColor(TITLE)
         BorderColor::all(FIXED)
         Node {
             border: {UiRect::all(Val::Px(1.0))},
             border_radius: {BorderRadius::all(Val::Px(4.0))},
             padding: {UiRect::axes(Val::Px(16.0), Val::Px(4.0))},
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
         }
         Children [
-            IconPromptSpan({Back::id()})
+            Text::new("Cancel")
+            TextFont { font_size: 15.0_f32 }
+            TextColor(TITLE)
+            --
+            IconPrompt(Back)
             ~{PromptFamily(DeviceFamily::Gamepad)}
             TextFont { font_size: 15.0_f32 }
             TextColor(TITLE)
+            Node { height: {Val::Px(BUTTON_ICON)} }
         ]
     }
 }
@@ -579,20 +587,24 @@ fn confirm_button() -> impl Scene {
         Button
         on(confirm_pressed)
         @focusable()
-        Text::new("Confirm ")
-        TextFont { font_size: 15.0_f32 }
-        TextColor(TITLE)
         BorderColor::all(FIXED)
         Node {
             border: {UiRect::all(Val::Px(1.0))},
             border_radius: {BorderRadius::all(Val::Px(4.0))},
             padding: {UiRect::axes(Val::Px(16.0), Val::Px(4.0))},
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
         }
         Children [
-            IconPromptSpan({Confirm::id()})
+            Text::new("Confirm")
+            TextFont { font_size: 15.0_f32 }
+            TextColor(TITLE)
+            --
+            IconPrompt(Confirm)
             ~{PromptFamily(DeviceFamily::Gamepad)}
             TextFont { font_size: 15.0_f32 }
             TextColor(TITLE)
+            Node { height: {Val::Px(BUTTON_ICON)} }
         ]
     }
 }
@@ -607,15 +619,20 @@ fn reset_button() -> impl Scene {
         Button
         on(reset_pressed)
         @focusable()
-        Text::new("Reset")
-        TextFont { font_size: 15.0_f32 }
-        TextColor(TITLE)
         BorderColor::all(FIXED)
+        // Laid out as the other two are, with no icon, so that stretched to their height it centres
+        // its caption as they do.
         Node {
             border: {UiRect::all(Val::Px(1.0))},
             border_radius: {BorderRadius::all(Val::Px(4.0))},
             padding: {UiRect::axes(Val::Px(16.0), Val::Px(4.0))},
+            align_items: AlignItems::Center,
         }
+        Children [
+            Text::new("Reset")
+            TextFont { font_size: 15.0_f32 }
+            TextColor(TITLE)
+        ]
     }
 }
 

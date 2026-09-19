@@ -34,7 +34,6 @@ use bevy::prelude::*;
 use bevy::ui::UiSystems;
 use bevy_action_map::device::{Brand, DeviceFamily, DeviceHandle, GamepadBrand};
 use bevy_action_map::player::Paired;
-use bevy_action_map::prelude::InputAction;
 
 use crate::common::prompt_ui::{PromptFamily, PromptSpan};
 use crate::popup::{self, ActivePreset, Popup};
@@ -254,7 +253,7 @@ fn pane_ui(index: u8) -> impl Scene {
                     padding: {UiRect::axes(Val::Px(12.0), Val::Px(8.0))},
                 }
                 Children [
-                    PromptSpan({Join::id()})
+                    PromptSpan(Join)
                     ~{PromptFamily(DeviceFamily::Gamepad)}
                     TextFont { font_size: 18.0_f32 }
                     TextColor(Color::WHITE)
@@ -263,7 +262,7 @@ fn pane_ui(index: u8) -> impl Scene {
                     TextFont { font_size: 18.0_f32 }
                     TextColor(Color::WHITE)
                     --
-                    PromptSpan({Join::id()})
+                    PromptSpan(Join)
                     ~{PromptFamily(DeviceFamily::KeyboardMouse)}
                     TextFont { font_size: 18.0_f32 }
                     TextColor(Color::WHITE)
