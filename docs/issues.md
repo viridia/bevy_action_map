@@ -28,7 +28,7 @@ chunk's own commit, and `docs/design.md` or `docs/decisions.md` where anything a
 are the record. A gap in the sequence below is a retired finding, not an omission. The next
 unassigned number is stated here; keep it up to date when numbering new items.
 
-**Next: 1066.**
+**Next: 1070.**
 
 **The calibration warning, stated up front because it is fair.** Most of these entries came from
 asking a model to scan `src/`, and a model asked to find sixty problems will find sixty. Some of
@@ -62,6 +62,42 @@ retired, as is everything since found another way. The tier is empty.
 ---
 
 ## 2. Latent — the code is wrong and nothing in tree takes the path
+
+### 1066 A consuming context takes the control out of every player's hands
+
+`ConsumedControls` (`eval.rs:36`), `claim` (`eval.rs:67`), `evaluate_context`'s claim loop
+(`eval.rs:271`) · **confirmed by running**, two probes against an ordinary `App`
+
+A claim records the control and the claiming context's `PATH`. It does not record whose device the
+control was pressed on, and `Control` cannot supply that: `GamepadButton::East` is one value
+whichever pad reported it. So a claim made on behalf of one player suppresses that control for every
+player.
+
+Two probes, both around thirty lines, both failing:
+
+- **Across contexts.** Player one's menu context (priority 10, `#[action(consume)]` on its `Back`)
+  is up. Player two's gameplay context binds a jump to the same button. Each is `Paired` to its own
+  pad. Both press East on their own pad. Result: the menu's `Back` fires, player one's jump does not
+  (right), **and player two's jump does not either** (wrong).
+- **Within one context**, which is worse because it needs no priority stack at all. Two instances of
+  one context, each `Paired` to a pad, both pressing their own East. Result: **the first instance
+  fires and the second does not.** The first instance's claim ate the second's press.
+
+The second case falsifies the comment sitting directly above the code, which reads "Every instance
+of one context sees the same claims and adds to them together, so two players sharing a context
+cannot take controls from each other". The claim loop is *inside* the per-instance loop
+(`eval.rs:278`), so instance _n+1_ reads what instance _n_ claimed.
+
+Latent in tree by a coincidence of which examples do what: Pong and Split Friction pair but nothing
+in them consumes; `text_field` consumes but is single-player. `docs/one-way-doors.md` door 4 already
+records this as a defect shared with `bevy_enhanced_input` and says no in-tree game has yet observed
+the failure — that sentence is a statement about the examples rather than about the code, and it is
+the only thing between the crate and a shipped bug.
+
+_Fix:_ **chunk 137**, which takes the exclusion ceiling and the capture path with it and retires
+1037's third bullet. A claim carries the claiming instance's `DeviceHandleSet` and a reader matches
+on intersection; written and tested in the `ported` branch's `crates/bevy_action_map_ported` at
+roughly forty lines, where `contains` and `claimant` gain a reader parameter.
 
 ### 1046 A class binding on an analog source has no dead zone
 
@@ -107,6 +143,36 @@ is missing from the crate.
 ## 3. Absent — something should exist and nothing does
 
 Ordered by what a real game would miss first.
+
+### 1067 A magnitude modifier on a composite part is silently a no-op
+
+`diagnose` (`plan.rs`), `apply_clamp_magnitude` and `apply_dead_zone` (`binding/modifier.rs`),
+`part_value` (`eval.rs`) · **confirmed by running** — written by mistake while porting, caught by a
+failing test
+
+`context.bind::<Move>(DirectionalButtons::wasd()).clamp_magnitude()` reads as the obvious way to
+stop a diagonal outrunning a straight line. It does nothing at all, and nothing says so.
+
+A composite expands to one binding per part, and `part_value` yields exactly rest or exactly unit —
+`Axis2(Vec2::Y)`, `Axis1(1.0)`, never anything between or beyond. So every modifier that acts on
+magnitude is the identity on a part:
+
+- `ClampMagnitude` acts only above `length() > 1.0`, which a unit part never is.
+- `DeadZone` with rescaling divides the surviving remainder by `1.0 - lower`, which for a magnitude
+  of exactly 1.0 returns exactly 1.0 — checked for both `Radial` and `PerAxis`.
+
+The spelling that works is `combined::<Move>().clamp_magnitude()`, acting on the folded value, which
+is the only place the 1.41 diagonal exists. `combined`'s own doc says so; nothing warns the person
+who did not read it. `diagnose` already refuses a `combined` naming an action with no bindings
+(`CombinedWithoutBindings`), so the machinery to report the mirror-image mistake is present.
+
+This is the class of error the diagnostics exist for: no error, no warning, and movement 41% faster
+on the diagonal, discovered by feel.
+
+_Fix, sketched:_ a warning when a `BindingInput::Part` carries `DeadZone` or `ClampMagnitude`,
+naming `combined` in the message. Warning rather than error, because it is inert rather than wrong
+and a game that chains one harmlessly should not fail to boot. `BindingSpec::continues_declaration`
+already makes it report once per `bind` call rather than four times.
 
 ### 1057 A refused capture is silent on Disasteroids' screen
 
@@ -282,6 +348,49 @@ The crate depends on `log` rather than `bevy_log`, and the comment in `Cargo.tom
 `bevy_log` installs a `tracing-subscriber` and is `std`-only. That is a decision by
 `docs/decisions.md`'s own admission test — name what breaks if reversed, and the answer is R22.3 or
 the `no_std` build — and that document does not carry it. Unrouted.
+
+### 1068 The prelude omits both types local multiplayer needs
+
+`prelude` (`lib.rs:371`), `Paired` (`player.rs:33`), `DeviceHandle` (`device.rs:36`) · read, and hit
+while writing 1066's probe
+
+`use bevy_action_map::prelude::*` gives you neither `Paired` nor `DeviceHandle`, so the minimal
+two-player setup needs two further imports reaching into `player` and `device` by hand. The prelude
+does export `DeviceFamily` and `ConnectedGamepad`, which are the types a prompt needs, so the
+omission reads as an oversight rather than a line drawn somewhere.
+
+Per-player input is one of the crate's headline distinctions in `docs/comparison.md`, and spawning
+`(Player, OnFoot, Paired::to(device))` is its whole surface.
+
+_Fix, sketched:_ add both. `Paired` is ungated, and `DeviceHandle` exists in every configuration
+since `KeyboardMouse` is unconditional.
+
+### 1069 Landing `touch` breaks every exhaustive match on the device enums
+
+`Control` (`binding/control.rs:434`), `ButtonControl` (`binding/control.rs:26`), `RawEvent`
+(`frame.rs:87`), `DeviceFamily` (`device.rs:19`), `DeviceHandle` (`device.rs:36`) · read only
+
+Four public enums in the crate are `#[non_exhaustive]`: `DiagnosticKind`, `OverrideProblemKind`,
+`Glyph` and `ActionObstacle`. The other thirty-six are not, and among them are the ones the reserved
+`touch` feature exists to grow.
+
+The five named above each gain a variant the day touch lands. Every downstream `match` on any of
+them — a glyph catalogue, a rebinding row, a backend deciding what a raw event was — stops compiling
+at that point. For a crate meant to become the engine's answer, that is every game that ever named
+the vocabulary.
+
+Marking them costs nothing now and is not itself a break; marking them after touch ships means
+shipping the break twice. The feature gating already half-forces the discipline, since a `match` on
+`Control` cannot be written portably across device-feature configurations today — so the callers who
+would be broken are the ones who fixed their feature set and matched exhaustively anyway.
+
+Not blanket advice. `ActionValue`, `ActionPhase` and `ChannelShape` are closed sets the design
+argues are complete, and `ActionIntent`'s four are load-bearing in `accepts`. Those should stay
+exhaustive.
+
+_Fix, sketched:_ `#[non_exhaustive]` on the five named above, and an entry in `docs/decisions.md`
+recording which enums are deliberately closed and on what grounds, so the next person adding one has
+a rule rather than a coin flip.
 
 ### 1029 Two routing gaps rather than findings
 
