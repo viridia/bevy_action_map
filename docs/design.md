@@ -273,6 +273,17 @@ A binding declared `consume` records its controls in `ConsumedControls` while it
 whether a context's binding or a capture claimed it, so a stick binding reads zero on each axis that
 was taken and keeps the other.
 
+A claim also records the devices the claiming instance reads, taken from its `Paired`, and a reader
+sees it only where the two device sets intersect (R15.3). So one player's menu consuming `South`
+leaves another player's gameplay context free to read it, and two instances of one context paired to
+two pads do not take controls from each other. A context with no `Paired` reads every device, which
+makes its claims reach everyone and everyone's claims reach it — the single-player case, with no
+opt-in. A `Paired` holding no device is the opposite, and the difference matters: it hears nothing,
+so it claims nothing and no claim reaches it, which is why `why_not` answers `Unowned` there rather
+than naming a claimant. `contains` and `claimant` therefore take the reader's devices; a live
+capture claims under its own session's `Paired` for the same reason, so two rebinding panes do not
+answer each other's presses.
+
 Consumption is recorded per schedule and cleared at two points:
 
 | | |
@@ -287,9 +298,12 @@ a fixed-tick one, and not the reverse.
 ### 5.3 Exclusive contexts
 
 A context declared `exclusive` treats every lower-priority context as inactive for as long as it is
-active. `ExclusionCeiling` holds the highest priority of any active exclusive context seen so far
-this tick. Each context's activation system, already running in priority order, checks the ceiling
-before trusting its own condition: at or below it, the context is *shadowed* instead.
+active. `ExclusionCeiling` holds one entry per active exclusive instance — its priority and its
+devices — and each context's activation system, already running in priority order, checks the
+ceiling before trusting its own condition: below an entry it shares a device with, the context is
+*shadowed* instead. Scoped by devices for the same reason a claim is, and read per instance rather
+than per context type, so one player opening a pause menu does not deactivate the other player's
+gameplay.
 
 Shadowing cancels in-flight actions and re-arms require-reset, exactly as deactivation does. It is
 tracked in a field of its own (`shadowed`) rather than by clearing `active`, so a context's own
@@ -297,7 +311,9 @@ condition and what is being forced on it do not overwrite each other. `is_active
 conjunction.
 
 The ceiling is set by the `PreUpdate` pass and read — never rewritten — by every `FixedPreUpdate`
-run that frame, then cleared at the top of the next frame alongside the consumption release.
+run that frame, then cleared at the top of the next frame alongside the consumption release. An
+exclusive context re-asserts the same entry on every run, so a run that adds nothing new leaves the
+list as it found it.
 
 ### 5.4 Class bindings
 
@@ -546,8 +562,9 @@ entity whose `Paired` names the presser. `join::is_claimed` tests a device again
 inserts behind it are deferred commands, so a game decides that from state it updates
 synchronously.
 
-`ConsumedControls` and `ExclusionCeiling` are computed once per context type and are not scoped by
-owner.
+`ConsumedControls` and `ExclusionCeiling` are world-wide resources holding per-occupant entries: a
+claim and an exclusion each carry the devices of the instance that made them, and reach only a
+reader sharing one (TD5.2, TD5.3).
 
 **Which device is "the" one for a prompt is the app's call**, on the same terms as `PromptDevice`
 (TD9.2): a player with two gamepads paired is an edge case nothing in this crate ranks, and a game

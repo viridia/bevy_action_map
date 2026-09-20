@@ -63,42 +63,6 @@ retired, as is everything since found another way. The tier is empty.
 
 ## 2. Latent — the code is wrong and nothing in tree takes the path
 
-### 1066 A consuming context takes the control out of every player's hands
-
-`ConsumedControls` (`eval.rs:36`), `claim` (`eval.rs:67`), `evaluate_context`'s claim loop
-(`eval.rs:271`) · **confirmed by running**, two probes against an ordinary `App`
-
-A claim records the control and the claiming context's `PATH`. It does not record whose device the
-control was pressed on, and `Control` cannot supply that: `GamepadButton::East` is one value
-whichever pad reported it. So a claim made on behalf of one player suppresses that control for every
-player.
-
-Two probes, both around thirty lines, both failing:
-
-- **Across contexts.** Player one's menu context (priority 10, `#[action(consume)]` on its `Back`)
-  is up. Player two's gameplay context binds a jump to the same button. Each is `Paired` to its own
-  pad. Both press East on their own pad. Result: the menu's `Back` fires, player one's jump does not
-  (right), **and player two's jump does not either** (wrong).
-- **Within one context**, which is worse because it needs no priority stack at all. Two instances of
-  one context, each `Paired` to a pad, both pressing their own East. Result: **the first instance
-  fires and the second does not.** The first instance's claim ate the second's press.
-
-The second case falsifies the comment sitting directly above the code, which reads "Every instance
-of one context sees the same claims and adds to them together, so two players sharing a context
-cannot take controls from each other". The claim loop is *inside* the per-instance loop
-(`eval.rs:278`), so instance _n+1_ reads what instance _n_ claimed.
-
-Latent in tree by a coincidence of which examples do what: Pong and Split Friction pair but nothing
-in them consumes; `text_field` consumes but is single-player. `docs/one-way-doors.md` door 4 already
-records this as a defect shared with `bevy_enhanced_input` and says no in-tree game has yet observed
-the failure — that sentence is a statement about the examples rather than about the code, and it is
-the only thing between the crate and a shipped bug.
-
-_Fix:_ **chunk 137**, which takes the exclusion ceiling and the capture path with it and retires
-1037's third bullet. A claim carries the claiming instance's `DeviceHandleSet` and a reader matches
-on intersection; written and tested in the `ported` branch's `crates/bevy_action_map_ported` at
-roughly forty lines, where `contains` and `claimant` gain a reader parameter.
-
 ### 1046 A class binding on an analog source has no dead zone
 
 `binding.rs`'s own doc for `bind_class` — "it skips modifiers, conditions and the presentation
@@ -352,7 +316,7 @@ the `no_std` build — and that document does not carry it. Unrouted.
 ### 1068 The prelude omits both types local multiplayer needs
 
 `prelude` (`lib.rs:371`), `Paired` (`player.rs:33`), `DeviceHandle` (`device.rs:36`) · read, and hit
-while writing 1066's probe
+while writing chunk 137's probes
 
 `use bevy_action_map::prelude::*` gives you neither `Paired` nor `DeviceHandle`, so the minimal
 two-player setup needs two further imports reaching into `player` and `device` by hand. The prelude
@@ -576,12 +540,6 @@ confirm is still true.
   themselves already. **Reviewed and left alone**: the compile-time cost is real and the type safety
   it buys is also real. Nothing has measured either, and this is not worth changing without a
   measurement.
-- **`ConsumedControls` is a `HashMap<TypeId, HashMap<Control, &'static str>>` over two schedules.**
-  `claim::<S>` is instantiated at `PreUpdate` and `FixedPreUpdate` and nowhere else, so the outer
-  map holds at most two entries for the life of the process and `claimant` walks both per lookup.
-  Two fields would say the same thing, and the `ScheduleLabel` bound would stop being propagated
-  through `evaluate_context`, `release_consumed_in` and `declare_context`'s two arms to key a map of
-  two.
 - **`MappedPart` caches two facts it could derive.** `family` is always `control.family()` and `key`
   is always `MappingKey::new(prefix_of(binding), part)` — which `mappings_of`'s follower pass
   recomputes from the same inputs twenty lines later rather than reading.

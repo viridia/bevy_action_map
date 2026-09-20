@@ -186,10 +186,11 @@ BEI's arrangement is more flexible at runtime (priority is a component you can c
 is fixed at build and cannot be changed per entity, which is a real limitation if you wanted two
 players' contexts at different priorities.
 
-**A caveat both BEI and this crate share:** consumption and exclusivity are recorded in global
-tables, so in local multiplayer one player's claim is visible to another's contexts. BEI scopes its
-gamepad reads per context but not its consumption; this crate scopes device *events* per context via
-`Paired` but leaves the consumed set global (Roadmap.md's deferred table has the row).
+**A difference that only shows in local multiplayer:** BEI records consumption in a table with
+nothing in it saying whose claim it was, so one player's menu consuming a button takes it from every
+player. It scopes its gamepad reads per context but not its consumption. This crate scopes both — a
+claim and an exclusion each carry the devices of the instance that made them, and reach only a
+context sharing one.
 
 ## 4. Folding several bindings into one action
 

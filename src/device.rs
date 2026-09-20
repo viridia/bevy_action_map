@@ -87,6 +87,20 @@ impl DeviceHandleSet {
         self.0.contains(&device)
     }
 
+    /// Whether the set claims no device at all — an occupant with nothing paired to them yet,
+    /// which is what a join flow spawns before a device reaches the player.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Whether any device is claimed by both sets.
+    ///
+    /// Two occupants overlap when they share a device — a keyboard both are reading, say — and the
+    /// input from it is then the same input to each of them.
+    pub fn intersects(&self, other: &Self) -> bool {
+        self.0.iter().any(|device| other.contains(*device))
+    }
+
     /// The claimed devices, in insertion order.
     pub fn iter(&self) -> impl Iterator<Item = DeviceHandle> + '_ {
         self.0.iter().copied()

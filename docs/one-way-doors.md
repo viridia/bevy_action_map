@@ -177,12 +177,11 @@ nothing in the consumed set says the claim belonged to player 1. The same applie
 existing consumption, and any third-party context that reasoned about the global set breaks. Adding
 it now is a field.
 
-**This crate has the same defect**, and has not fixed it: its `ConsumedControls` and its exclusion
-ceiling are both global, for the same reason — no in-tree game has yet observed the failure. Its
-device *routing* is per-entity (a `Paired` component filters events before anything reads them), so
-the two players do not hear each other's hardware; but their claims still share a table. So this is
-a shared open problem, not a BEI-specific one. It is on the list because the cost of fixing it is
-asymmetric: cheap before a public API exists, expensive after.
+**This crate had the same defect and has fixed it**, which is what the asymmetry above is about: it
+was cheap here because no public API had shipped. A claim in `ConsumedControls` and an entry in the
+exclusion ceiling each carry the devices of the instance that made them, and reach only a reader
+sharing one; `contains` and `claimant` take the reader's devices as a parameter. That is the one
+field this door says to add, paid for before the door shuts rather than after.
 
 ---
 
@@ -357,7 +356,7 @@ Ranked by (cost of reversing later) ÷ (cost of hedging now):
    declaration for the bindings, and an optional `#[action_path = "…"]` defaulting to today's
    behaviour. The second is the cheapest item on this whole list.
 2. **Put an owner on a consumption claim** (door 4). One field, and the alternative is local
-   multiplayer that quietly cross-talks. This crate should do it too.
+   multiplayer that quietly cross-talks. This crate has done it.
 3. **Make the input reader a public, substitutable seam** (door 1), by widening `CustomInputs`
    rather than inventing anything. It does not commit to event-based input; it just stops
    foreclosing it.

@@ -26,82 +26,131 @@ use crate::binding::Stick;
 use crate::binding::{BindingInput, ButtonThreshold, Control};
 use crate::condition::ConditionState;
 use crate::context::InputContextState;
+use crate::device::DeviceHandleSet;
 use crate::frame::{InputFrame, RawEvent, TimedRawEvent};
 
-/// Which controls have already been claimed this frame, and by which schedule.
+/// Which controls have already been claimed this frame, by which schedule, and for whose devices.
 ///
 /// What `PreUpdate` claimed stays claimed for every fixed tick in the frame; what one fixed tick
 /// claimed does not bind the next; and a frame where no fixed tick runs starts clear regardless.
+///
+/// # A claim is scoped to the devices it was made for
+///
+/// A claim records the devices the claiming context reads. Two players pressing the same button on
+/// two different pads are pressing two different things, so one player's menu consuming `South`
+/// leaves the other player's gameplay context free to read it. A context with no
+/// [`Paired`](crate::player::Paired) reads every device, so its claims reach every reader and every
+/// claim reaches it — which is the single-player case, and it needs no opt-in.
 #[derive(bevy_ecs::resource::Resource, Default)]
 pub struct ConsumedControls {
-    // Which context took it, not merely that something did: "consumed" is one of five reasons an
-    // action can silently not fire (R22.1), and the only useful form of the answer names the taker.
-    by_schedule: bevy_platform::collections::HashMap<
-        core::any::TypeId,
-        bevy_platform::collections::HashMap<Control, &'static str>,
-    >,
+    // A flat list rather than a map: a read matches a control *and* an overlapping device set,
+    // which no single key expresses. A frame holds a handful of claims.
+    claims: Vec<Claim>,
+}
+
+struct Claim {
+    schedule: core::any::TypeId,
+    control: Control,
+    /// The devices the claiming context reads; `None` for a context nobody paired, which reads
+    /// every device. Not a `Paired`, which is how a context entity carries this and nothing else.
+    devices: Option<DeviceHandleSet>,
+    /// Which context took it, not merely that something did: "consumed" is one of five reasons an
+    /// action can silently not fire (R22.1), and the only useful form of the answer names the
+    /// taker.
+    by: &'static str,
+}
+
+/// Whether a claim made for `claimed` devices reaches a reader that reads `reader` devices.
+///
+/// One question: do the two device sets overlap, where `None` stands for all of them. A reader that
+/// owns nothing is the case worth spelling out — it cannot lose what it never heard, so no claim
+/// reaches it, not even one made by a context nobody paired.
+fn reaches(claimed: Option<&DeviceHandleSet>, reader: Option<&DeviceHandleSet>) -> bool {
+    match (claimed, reader) {
+        (_, None) => true,
+        (None, Some(reader)) => !reader.is_empty(),
+        (Some(claimed), Some(reader)) => claimed.intersects(reader),
+    }
 }
 
 impl ConsumedControls {
-    /// Whether any schedule has claimed this control.
-    pub fn contains(&self, control: Control) -> bool {
-        self.claimant(control).is_some()
+    /// Whether this control has been claimed away from a reader that reads these devices.
+    ///
+    /// Pass the reader's [`Paired`](crate::player::Paired) devices, or `None` for a context that
+    /// reads every device.
+    pub fn contains(&self, control: Control, reader: Option<&DeviceHandleSet>) -> bool {
+        self.claimant(control, reader).is_some()
     }
 
-    /// The path of the context that claimed this control, if one did.
+    /// The path of the context that claimed this control away from such a reader, if one did.
     ///
     /// A stick counts as claimed when either of its axes is.
-    pub fn claimant(&self, control: Control) -> Option<&'static str> {
+    pub fn claimant(
+        &self,
+        control: Control,
+        reader: Option<&DeviceHandleSet>,
+    ) -> Option<&'static str> {
         #[cfg(feature = "gamepad")]
         if let Control::GamepadStick(stick) = control {
             let (x, y) = stick.axes();
             return self
-                .claimant(Control::GamepadAxis(x))
-                .or_else(|| self.claimant(Control::GamepadAxis(y)));
+                .claimant(Control::GamepadAxis(x), reader)
+                .or_else(|| self.claimant(Control::GamepadAxis(y), reader));
         }
-        self.by_schedule
-            .values()
-            .find_map(|claims| claims.get(&control).copied())
+        self.claims
+            .iter()
+            .find(|claim| claim.control == control && reaches(claim.devices.as_ref(), reader))
+            .map(|claim| claim.by)
     }
 
-    fn claim<S: bevy_ecs::schedule::ScheduleLabel>(&mut self, control: Control, by: &'static str) {
-        let claims = self
-            .by_schedule
-            .entry(core::any::TypeId::of::<S>())
-            .or_default();
+    fn claim<S: bevy_ecs::schedule::ScheduleLabel>(
+        &mut self,
+        control: Control,
+        devices: Option<&DeviceHandleSet>,
+        by: &'static str,
+    ) {
         // Stored as its two axes, which is how a context's claim on a stick already arrives and
         // what every reader checks, so a capture's whole-stick claim is not the one they miss.
         #[cfg(feature = "gamepad")]
         if let Control::GamepadStick(stick) = control {
             let (x, y) = stick.axes();
-            claims.insert(Control::GamepadAxis(x), by);
-            claims.insert(Control::GamepadAxis(y), by);
+            self.claim::<S>(Control::GamepadAxis(x), devices, by);
+            self.claim::<S>(Control::GamepadAxis(y), devices, by);
             return;
         }
-        claims.insert(control, by);
+        self.claims.push(Claim {
+            schedule: core::any::TypeId::of::<S>(),
+            control,
+            devices: devices.cloned(),
+            by,
+        });
     }
 
     /// Takes a control on behalf of a live capture, so that what a player presses at a rebinding
     /// screen does not also play the game.
     ///
+    /// Scoped to the session's own devices for the same reason a context's claim is: two players
+    /// rebinding at once are pressing two different things.
+    ///
     /// Claimed under `PreUpdate`, where capture runs, which is what carries it through to the fixed
     /// schedules: a fixed tick releases only its own claims, so this one still stands when a
     /// fixed-tick context evaluates later in the frame.
-    pub(crate) fn claim_for_capture(&mut self, control: Control) {
-        self.claim::<bevy_app::PreUpdate>(control, "capture");
+    pub(crate) fn claim_for_capture(
+        &mut self,
+        control: Control,
+        devices: Option<&DeviceHandleSet>,
+    ) {
+        self.claim::<bevy_app::PreUpdate>(control, devices, "capture");
     }
 
     /// Forgets what one schedule claimed, which it does on entry so that each run decides afresh.
     fn release<S: bevy_ecs::schedule::ScheduleLabel>(&mut self) {
-        if let Some(set) = self.by_schedule.get_mut(&core::any::TypeId::of::<S>()) {
-            set.clear();
-        }
+        let schedule = core::any::TypeId::of::<S>();
+        self.claims.retain(|claim| claim.schedule != schedule);
     }
 
     fn release_all(&mut self) {
-        for set in self.by_schedule.values_mut() {
-            set.clear();
-        }
+        self.claims.clear();
     }
 }
 
@@ -112,31 +161,55 @@ pub(crate) fn release_consumed_controls(
     consumed.release_all();
 }
 
-/// The priority of the highest-priority active exclusive context seen so far this frame.
+/// The active exclusive contexts seen so far this frame, each with the devices it holds.
+///
+/// One ceiling for the whole world would let one player's pause menu deactivate another player's
+/// gameplay, so an entry carries the same device scope a claim does and shadows only a context that
+/// shares a device with it.
 ///
 /// Unlike `ConsumedControls`, this needs no per-schedule bookkeeping: a context's activity does not
 /// reset between fixed ticks the way a control's actuation does, so an exclusive context re-raises
-/// the ceiling to the same value every time it runs. Reset once at the top of the frame, set by
-/// whichever exclusive context runs first in priority order, and read by everything lower that runs
-/// after it for the rest of the frame. Render-tick contexts run before fixed-tick ones, so exclusion
-/// flows forward through the frame the same way consumption does.
+/// the same entry every time it runs. Reset once at the top of the frame, set by whichever
+/// exclusive context runs first in priority order, and read by everything lower that runs after it
+/// for the rest of the frame. Render-tick contexts run before fixed-tick ones, so exclusion flows
+/// forward through the frame the same way consumption does.
 #[derive(bevy_ecs::resource::Resource, Default)]
-pub(crate) struct ExclusionCeiling(Option<i32>);
+pub(crate) struct ExclusionCeiling(Vec<Exclusion>);
+
+struct Exclusion {
+    priority: i32,
+    /// As [`Claim::devices`]: `None` is a context nobody paired, which shadows everything below it.
+    devices: Option<DeviceHandleSet>,
+}
 
 impl ExclusionCeiling {
     fn reset(&mut self) {
-        self.0 = None;
+        self.0.clear();
     }
 
-    /// Records that an exclusive context at this priority is active, raising the ceiling if it is
-    /// not already at least this high. Monotonic within a frame — nothing lowers it before `reset`.
-    fn raise(&mut self, priority: i32) {
-        self.0 = Some(self.0.map_or(priority, |ceiling| ceiling.max(priority)));
+    /// Records that an exclusive context at this priority is active over these devices. Every run
+    /// of that context re-asserts the same entry, so an identical one already standing is left
+    /// alone and the list stays a function of the world rather than of the frame's tick count.
+    fn raise(&mut self, priority: i32, devices: Option<&DeviceHandleSet>) {
+        if self
+            .0
+            .iter()
+            .any(|entry| entry.priority == priority && entry.devices.as_ref() == devices)
+        {
+            return;
+        }
+        self.0.push(Exclusion {
+            priority,
+            devices: devices.cloned(),
+        });
     }
 
-    /// Whether a context at this priority is shadowed by an exclusive one that has already run.
-    fn shadows(&self, priority: i32) -> bool {
-        self.0.is_some_and(|ceiling| priority < ceiling)
+    /// Whether a context at this priority reading these devices is shadowed by an exclusive one
+    /// that has already run and shares a device with it.
+    fn shadows(&self, priority: i32, reader: Option<&DeviceHandleSet>) -> bool {
+        self.0
+            .iter()
+            .any(|entry| priority < entry.priority && reaches(entry.devices.as_ref(), reader))
     }
 }
 
@@ -245,13 +318,13 @@ pub(crate) fn evaluate_context<
     >,
 ) {
     let delta = time.delta_secs();
-    // Read once, before this context's own instances can raise it further — evaluation order is
-    // priority order (TD5.1, TD5.3), so whatever a higher-priority exclusive context
-    // already did this frame is visible here, and nothing this context does can affect its own
-    // shadowing.
-    let shadowed = ceiling.shadows(C::PRIORITY);
-    let mut any_active = false;
+    // The ceiling is read inside the loop and raised only after it, so nothing this context does
+    // can affect its own shadowing — neither an instance shadowing its siblings, nor a context
+    // shadowing itself. Evaluation order is priority order (TD5.1, TD5.3), so what is standing
+    // here is what higher-priority exclusive contexts already did this frame.
+    let mut active_scopes: Vec<Option<DeviceHandleSet>> = Vec::new();
     for (mut state, pairing, authority) in &mut states {
+        let devices = pairing.map(|paired| &**paired);
         // Bypassed for the whole pass and re-marked at the end only if an action moved. Every tick
         // writes *something* here — the read cursor at least — so taking the deref at face value
         // would mark every instance changed every tick, which is the all-or-nothing wake-up R23.4
@@ -259,23 +332,23 @@ pub(crate) fn evaluate_context<
         let instance = state.bypass_change_detection();
         instance.dirty.clear();
 
-        if shadowed {
+        if ceiling.shadows(C::PRIORITY, devices) {
             instance.shadow();
         } else {
             instance.unshadow();
         }
-        if instance.is_active() {
-            any_active = true;
+        if C::EXCLUSIVE && instance.is_active() {
+            active_scopes.push(devices.cloned());
         }
 
-        // Every instance of one context sees the same claims and adds to them together, so two
-        // players sharing a context cannot take controls from each other.
+        // An instance's claims land scoped to its own devices, so the instance evaluated next
+        // reads them only where the two players overlap.
         let mut claims = Vec::new();
-        instance.apply_frame(&frame, &threshold, delta, &consumed, &mut claims, pairing);
+        instance.apply_frame(&frame, &threshold, delta, &consumed, &mut claims, devices);
         instance.apply_authority(authority, delta);
         let moved = !instance.dirty.is_clear();
         for control in claims {
-            consumed.claim::<S>(control, C::PATH);
+            consumed.claim::<S>(control, devices, C::PATH);
         }
         if moved {
             state.set_changed();
@@ -285,8 +358,8 @@ pub(crate) fn evaluate_context<
     // Only a context that is itself active-and-unshadowed gets to shadow anything below it — which
     // is what makes two stacked exclusive contexts compose correctly with nothing extra: a second
     // exclusive context shadowed by a third does not also shadow whatever the second would have.
-    if C::EXCLUSIVE && any_active {
-        ceiling.raise(C::PRIORITY);
+    for devices in active_scopes {
+        ceiling.raise(C::PRIORITY, devices.as_ref());
     }
 }
 
@@ -353,7 +426,7 @@ impl<C: InputContext> InputContextState<C> {
         delta: f32,
         consumed: &ConsumedControls,
         claims: &mut Vec<Control>,
-        pairing: Option<&crate::player::Paired>,
+        devices: Option<&DeviceHandleSet>,
     ) {
         // Only what has arrived since this context last looked: re-reading the whole queue counts
         // one mouse delta once per fixed tick in the frame. The cursor advances past the full
@@ -365,7 +438,8 @@ impl<C: InputContext> InputContextState<C> {
         }
         // A device's input must not reach a context paired to someone else (R15.3); a context
         // nobody paired hears every device, which is today's exact behaviour.
-        let owns = |event: &TimedRawEvent| pairing.is_none_or(|p| p.contains(event.event.device()));
+        let owns =
+            |event: &TimedRawEvent| devices.is_none_or(|set| set.contains(event.event.device()));
 
         // An inactive context still tracks its devices, shadowed or not. Skipping that would leave
         // the held state stale, so reactivating would need a rebuild — and R7.6 wants activation to
@@ -401,20 +475,37 @@ impl<C: InputContext> InputContextState<C> {
                 interruption_kind(&event.event),
                 consumed,
                 claims,
+                devices,
             );
             // After the fold, not before: TD5.4's ordering. Checked once here rather
             // than woven into the fold.
-            self.class_dispatch(&event.event, consumed, claims);
+            self.class_dispatch(&event.event, consumed, claims, devices);
             level_changes += 1;
         }
 
         // Time passes even when nothing arrives: a phase has to reach `Firing` from `Fired` on its
         // own, and without an event to prompt it nothing else would.
         if level_changes == 0 {
-            self.fold(threshold, Vec2::ZERO, delta, Fold::Level, consumed, claims);
+            self.fold(
+                threshold,
+                Vec2::ZERO,
+                delta,
+                Fold::Level,
+                consumed,
+                claims,
+                devices,
+            );
         }
 
-        self.fold(threshold, mouse_delta, delta, Fold::Delta, consumed, claims);
+        self.fold(
+            threshold,
+            mouse_delta,
+            delta,
+            Fold::Delta,
+            consumed,
+            claims,
+            devices,
+        );
     }
 
     /// Moves one control's held state, for the inputs that have a state to hold.
@@ -526,11 +617,15 @@ impl<C: InputContext> InputContextState<C> {
         event: &RawEvent,
         consumed: &ConsumedControls,
         claims: &mut Vec<Control>,
+        devices: Option<&DeviceHandleSet>,
     ) {
         let Some(control) = event.control() else {
             return;
         };
-        if !self.actuated(event) || consumed.contains(control) || self.plan.is_indexed(control) {
+        if !self.actuated(event)
+            || consumed.contains(control, devices)
+            || self.plan.is_indexed(control)
+        {
             return;
         }
         let Some(binding_index) = self
@@ -551,6 +646,10 @@ impl<C: InputContext> InputContextState<C> {
     }
 
     /// Resolves one half of the plan against the current device state.
+    // The last three are one question in three parts — what others took, whose devices this
+    // instance reads, what it takes in turn — and a claim only means anything against the devices
+    // that made it. Bundling them to satisfy a count would name something the code does not have.
+    #[allow(clippy::too_many_arguments)]
     fn fold(
         &mut self,
         threshold: &ButtonThreshold,
@@ -559,6 +658,7 @@ impl<C: InputContext> InputContextState<C> {
         kind: Fold,
         consumed: &ConsumedControls,
         claims: &mut Vec<Control>,
+        devices: Option<&DeviceHandleSet>,
     ) {
         let Self {
             plan,
@@ -588,7 +688,7 @@ impl<C: InputContext> InputContextState<C> {
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         let is_pressed = |control: ButtonControl| {
             // A control another context has taken reads as untouched, rather than being skipped.
-            if consumed.contains(control.into()) {
+            if consumed.contains(control.into(), devices) {
                 return false;
             }
             match control {
@@ -704,62 +804,63 @@ impl<C: InputContext> InputContextState<C> {
                 #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
                 let held_back = false;
 
-                let value = match binding.input {
-                    #[cfg(feature = "keyboard")]
-                    BindingInput::Button(key_code) => {
-                        ActionValue::Bool(is_pressed(ButtonControl::PhysicalKey(key_code)))
-                    }
-                    #[cfg(feature = "keyboard")]
-                    BindingInput::LogicalKey(character) => {
-                        ActionValue::Bool(is_pressed(ButtonControl::LogicalKey(character)))
-                    }
-                    #[cfg(feature = "mouse")]
-                    BindingInput::MouseButton(button) => {
-                        ActionValue::Bool(is_pressed(ButtonControl::MouseButton(button)))
-                    }
-                    // Four keys and a D-pad reach an action through this same arm, and the fold is
-                    // what turns their parts back into one direction.
-                    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-                    BindingInput::Part(button, part) => part_value(part, is_pressed(button)),
-                    BindingInput::MouseMotion => {
-                        ActionValue::Axis2(if consumed.contains(Control::MouseMotion) {
-                            Vec2::ZERO
-                        } else {
-                            mouse_delta
-                        })
-                    }
-                    // Both views of a button channel, chosen by what the action asked for. A
-                    // trigger carries a fraction, so an analog action gets the travel and a button
-                    // action gets the thresholded press — R2.10's case, and the reason a binding
-                    // cannot be resolved from the input alone.
-                    #[cfg(feature = "gamepad")]
-                    BindingInput::GamepadButton(button) => match intent {
-                        ActionIntent::Button => {
-                            ActionValue::Bool(is_pressed(ButtonControl::GamepadButton(button)))
+                let value =
+                    match binding.input {
+                        #[cfg(feature = "keyboard")]
+                        BindingInput::Button(key_code) => {
+                            ActionValue::Bool(is_pressed(ButtonControl::PhysicalKey(key_code)))
                         }
-                        _ => ActionValue::Axis1(
-                            if consumed.contains(Control::GamepadButton(button)) {
-                                0.0
+                        #[cfg(feature = "keyboard")]
+                        BindingInput::LogicalKey(character) => {
+                            ActionValue::Bool(is_pressed(ButtonControl::LogicalKey(character)))
+                        }
+                        #[cfg(feature = "mouse")]
+                        BindingInput::MouseButton(button) => {
+                            ActionValue::Bool(is_pressed(ButtonControl::MouseButton(button)))
+                        }
+                        // Four keys and a D-pad reach an action through this same arm, and the fold
+                        // is what turns their parts back into one direction.
+                        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+                        BindingInput::Part(button, part) => part_value(part, is_pressed(button)),
+                        BindingInput::MouseMotion => ActionValue::Axis2(
+                            if consumed.contains(Control::MouseMotion, devices) {
+                                Vec2::ZERO
                             } else {
-                                held_gamepad_buttons
-                                    .get(&button)
-                                    .map_or(0.0, |reading| reading.value)
+                                mouse_delta
                             },
                         ),
-                    },
-                    #[cfg(feature = "gamepad")]
-                    BindingInput::GamepadAxis(axis) => {
-                        ActionValue::Axis1(if consumed.contains(Control::GamepadAxis(axis)) {
-                            0.0
-                        } else {
-                            held_gamepad_axes.get(&axis).copied().unwrap_or(0.0)
-                        })
-                    }
-                    #[cfg(feature = "gamepad")]
-                    BindingInput::GamepadStick(stick) => {
-                        ActionValue::Axis2(gamepad_stick_value(held_gamepad_axes, stick, consumed))
-                    }
-                };
+                        // Both views of a button channel, chosen by what the action asked for. A
+                        // trigger carries a fraction, so an analog action gets the travel and a
+                        // button action gets the thresholded press — R2.10's case, and the reason a
+                        // binding cannot be resolved from the input alone.
+                        #[cfg(feature = "gamepad")]
+                        BindingInput::GamepadButton(button) => match intent {
+                            ActionIntent::Button => {
+                                ActionValue::Bool(is_pressed(ButtonControl::GamepadButton(button)))
+                            }
+                            _ => ActionValue::Axis1(
+                                if consumed.contains(Control::GamepadButton(button), devices) {
+                                    0.0
+                                } else {
+                                    held_gamepad_buttons
+                                        .get(&button)
+                                        .map_or(0.0, |reading| reading.value)
+                                },
+                            ),
+                        },
+                        #[cfg(feature = "gamepad")]
+                        BindingInput::GamepadAxis(axis) => ActionValue::Axis1(
+                            if consumed.contains(Control::GamepadAxis(axis), devices) {
+                                0.0
+                            } else {
+                                held_gamepad_axes.get(&axis).copied().unwrap_or(0.0)
+                            },
+                        ),
+                        #[cfg(feature = "gamepad")]
+                        BindingInput::GamepadStick(stick) => ActionValue::Axis2(
+                            gamepad_stick_value(held_gamepad_axes, stick, consumed, devices),
+                        ),
+                    };
 
                 // This binding's working memory, split into the three disjoint pieces
                 // `CompiledBinding::scratch_base` allocates.
@@ -1163,9 +1264,10 @@ fn gamepad_stick_value(
     axes: &bevy_platform::collections::HashMap<GamepadAxis, f32>,
     stick: Stick,
     consumed: &ConsumedControls,
+    devices: Option<&DeviceHandleSet>,
 ) -> Vec2 {
     let read = |axis| {
-        if consumed.contains(Control::GamepadAxis(axis)) {
+        if consumed.contains(Control::GamepadAxis(axis), devices) {
             0.0
         } else {
             axes.get(&axis).copied().unwrap_or(0.0)
@@ -2414,14 +2516,17 @@ mod tests {
         let mut consumed = ConsumedControls::default();
         consumed.claim::<bevy_app::PreUpdate>(
             Control::GamepadButton(GamepadButton::South),
+            None,
             "tests.menu",
         );
         consumed.claim::<bevy_app::PreUpdate>(
             Control::GamepadButton(GamepadButton::RightTrigger2),
+            None,
             "tests.menu",
         );
         consumed.claim::<bevy_app::PreUpdate>(
             Control::GamepadAxis(GamepadAxis::LeftStickX),
+            None,
             "tests.menu",
         );
 
@@ -2439,12 +2544,12 @@ mod tests {
 
         // A capture listening for a stick claims it whole, and that takes both axes.
         let mut consumed = ConsumedControls::default();
-        consumed.claim_for_capture(Control::GamepadStick(Stick::Left));
+        consumed.claim_for_capture(Control::GamepadStick(Stick::Left), None);
         let mut state = InputContextState::<Flying>::new(plan, None);
         state.apply_frame(&frame, &threshold, TICK, &consumed, &mut Vec::new(), None);
         assert_eq!(state.value::<Steer>(), Vec2::ZERO);
         assert_eq!(
-            consumed.claimant(Control::GamepadAxis(GamepadAxis::LeftStickY)),
+            consumed.claimant(Control::GamepadAxis(GamepadAxis::LeftStickY), None),
             Some("capture")
         );
     }

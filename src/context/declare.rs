@@ -684,7 +684,11 @@ fn read_instances<C: InputContext + Component>(
                     action: reading.action,
                     path: reading.path,
                     state: *reading.state,
-                    obstacle: state.why_not_id(reading.action, consumed, pairing),
+                    obstacle: state.why_not_id(
+                        reading.action,
+                        consumed,
+                        pairing.map(|paired| &**paired),
+                    ),
                 })
                 .collect(),
         })

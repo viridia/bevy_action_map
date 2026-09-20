@@ -305,12 +305,12 @@ impl<C: InputContext> InputContextState<C> {
     pub fn why_not<A>(
         &self,
         consumed: &crate::eval::ConsumedControls,
-        pairing: Option<&crate::player::Paired>,
+        devices: Option<&crate::device::DeviceHandleSet>,
     ) -> ActionObstacle
     where
         A: InputAction,
     {
-        self.why_not_id(A::id(), consumed, pairing)
+        self.why_not_id(A::id(), consumed, devices)
     }
 
     /// Explains why an action named at run time is not firing.
@@ -321,7 +321,7 @@ impl<C: InputContext> InputContextState<C> {
         &self,
         action: ActionId,
         consumed: &crate::eval::ConsumedControls,
-        pairing: Option<&crate::player::Paired>,
+        devices: Option<&crate::device::DeviceHandleSet>,
     ) -> ActionObstacle {
         let Some(slot) = self.plan.slot_for_action(action) else {
             return ActionObstacle::Unbound;
@@ -343,16 +343,16 @@ impl<C: InputContext> InputContextState<C> {
         // outrank the catch-all below even though all three are "the binding read nothing".
         // No pairing owns every device (R15.3's default), so `reachable` starts true in that case
         // and the loop below only ever narrows it when there is a `Paired` to narrow it against.
-        let mut reachable = pairing.is_none();
+        let mut reachable = devices.is_none();
         for binding in self.plan.bindings().iter().filter(|b| b.slot == slot) {
             let mut taken = None;
             let mut outranked = None;
             binding.input.for_each_control(|control| {
-                if pairing.is_some_and(|p| p.owner_for(control.family()).is_some()) {
+                if devices.is_some_and(|set| set.owner_for(control.family()).is_some()) {
                     reachable = true;
                 }
                 if taken.is_none()
-                    && let Some(by) = consumed.claimant(control)
+                    && let Some(by) = consumed.claimant(control, devices)
                 {
                     taken = Some(ActionObstacle::Consumed { control, by });
                 }
@@ -801,7 +801,8 @@ impl<C: InputContext + Component> ContextActions<'_, '_, C> {
     where
         A: InputAction,
     {
-        self.state().why_not::<A>(&self.consumed, self.state.2)
+        self.state()
+            .why_not::<A>(&self.consumed, self.state.2.map(|paired| &**paired))
     }
 }
 
@@ -867,7 +868,7 @@ impl<C: InputContext + Component> ActionsQuery<'_, '_, C> {
             .get(entity)
             .ok()
             .map_or(ActionObstacle::Unbound, |(_, state, pairing)| {
-                state.why_not::<A>(&self.consumed, pairing)
+                state.why_not::<A>(&self.consumed, pairing.map(|paired| &**paired))
             })
     }
 }
@@ -3011,7 +3012,7 @@ mod tests {
         let pairing = world.get::<Paired>(pad_player);
         let consumed = ConsumedControls::default();
         assert_eq!(
-            state.why_not::<Jump>(&consumed, pairing),
+            state.why_not::<Jump>(&consumed, pairing.map(|paired| &**paired)),
             ActionObstacle::Unowned,
             "the keyboard press happened, it just was never this instance's to see"
         );
@@ -3465,6 +3466,277 @@ mod tests {
         assert!(
             bytes < 512,
             "a three-action context snapshots {bytes} bytes"
+        );
+    }
+
+    // Arbitration is per occupant. A claim and an exclusion both carry the devices the context that
+    // made them reads, so what one player's screens take, they take from that player. The four
+    // below are the whole matrix: across contexts, within one context, exclusion, and the
+    // single-player path that must not have changed.
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn one_players_consuming_menu_leaves_another_players_control_alone() {
+        use crate::device::DeviceHandle;
+        use crate::player::Paired;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.per_player_back", output = bool, intent = Button)]
+        struct Back;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.per_player_menu", tick = Render, priority = 10)]
+        struct Menu;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.per_player_game", tick = Render, priority = 0)]
+        struct Gameplay;
+
+        let pad_a = bevy_ecs::entity::Entity::from_bits(1);
+        let pad_b = bevy_ecs::entity::Entity::from_bits(2);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Menu>(|context| {
+            context.bind::<Back>(GamepadButton::East).consume();
+        });
+        app.add_context::<Gameplay>(|context| {
+            context.bind::<Jump>(GamepadButton::East);
+        });
+        // Only player A has a menu up. Both are playing.
+        app.world_mut()
+            .spawn((Menu, Paired::to(DeviceHandle::Gamepad(pad_a))));
+        let player_a = app
+            .world_mut()
+            .spawn((Gameplay, Paired::to(DeviceHandle::Gamepad(pad_a))))
+            .id();
+        let player_b = app
+            .world_mut()
+            .spawn((Gameplay, Paired::to(DeviceHandle::Gamepad(pad_b))))
+            .id();
+
+        for pad in [pad_a, pad_b] {
+            app.world_mut().write_message(RawGamepadEvent::Button(
+                RawGamepadButtonChangedEvent::new(pad, GamepadButton::East, 1.0),
+            ));
+        }
+        app.update();
+
+        let jumped = |entity| {
+            app.world()
+                .get::<InputContextState<Gameplay>>(entity)
+                .unwrap()
+                .value::<Jump>()
+        };
+        assert!(!jumped(player_a), "player A's own menu took their button");
+        assert!(
+            jumped(player_b),
+            "player B pressed their own pad, which player A's menu never claimed"
+        );
+    }
+
+    // Worse than the case above, because it needs no priority stack at all: the claim loop runs
+    // inside the per-instance loop, so instance n+1 reads what instance n claimed.
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn two_instances_of_one_context_do_not_take_controls_from_each_other() {
+        use crate::device::DeviceHandle;
+        use crate::player::Paired;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.shared_consuming_context", tick = Render, priority = 0)]
+        struct Gameplay;
+
+        let pad_a = bevy_ecs::entity::Entity::from_bits(1);
+        let pad_b = bevy_ecs::entity::Entity::from_bits(2);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Gameplay>(|context| {
+            context.bind::<Jump>(GamepadButton::East).consume();
+        });
+        let player_a = app
+            .world_mut()
+            .spawn((Gameplay, Paired::to(DeviceHandle::Gamepad(pad_a))))
+            .id();
+        let player_b = app
+            .world_mut()
+            .spawn((Gameplay, Paired::to(DeviceHandle::Gamepad(pad_b))))
+            .id();
+
+        for pad in [pad_a, pad_b] {
+            app.world_mut().write_message(RawGamepadEvent::Button(
+                RawGamepadButtonChangedEvent::new(pad, GamepadButton::East, 1.0),
+            ));
+        }
+        app.update();
+
+        for (player, whose) in [(player_a, "the first"), (player_b, "the second")] {
+            assert!(
+                app.world()
+                    .get::<InputContextState<Gameplay>>(player)
+                    .unwrap()
+                    .value::<Jump>(),
+                "{whose} instance pressed its own pad"
+            );
+        }
+    }
+
+    // Exclusion is the same defect by a different mechanism: a shadow is about a context being
+    // active rather than a control being actuated, so there is no control to hang a device on and
+    // the consumption fix does not reach it.
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn one_players_exclusive_menu_does_not_deactivate_another_players_gameplay() {
+        use crate::device::DeviceHandle;
+        use crate::player::Paired;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.per_player_pause", tick = Render, priority = 10, exclusive)]
+        struct Pause;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.per_player_shadowed_game", tick = Render, priority = 0)]
+        struct Gameplay;
+
+        let pad_a = bevy_ecs::entity::Entity::from_bits(1);
+        let pad_b = bevy_ecs::entity::Entity::from_bits(2);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Pause>(|context| {
+            context.bind::<Jump>(GamepadButton::South);
+        });
+        app.add_context::<Gameplay>(|context| {
+            context.bind::<Jump>(GamepadButton::East);
+        });
+        app.world_mut()
+            .spawn((Pause, Paired::to(DeviceHandle::Gamepad(pad_a))));
+        let player_a = app
+            .world_mut()
+            .spawn((Gameplay, Paired::to(DeviceHandle::Gamepad(pad_a))))
+            .id();
+        let player_b = app
+            .world_mut()
+            .spawn((Gameplay, Paired::to(DeviceHandle::Gamepad(pad_b))))
+            .id();
+        app.update();
+
+        let shadowed = |entity| {
+            app.world()
+                .get::<InputContextState<Gameplay>>(entity)
+                .unwrap()
+                .shadowed
+        };
+        assert!(shadowed(player_a), "player A opened the pause menu");
+        assert!(
+            !shadowed(player_b),
+            "player B is still playing, and never opened anything"
+        );
+    }
+
+    // The single-player path, which is everything in tree today: a context nobody paired reads
+    // every device, so it claims against everyone and shadows everyone, and the device scope never
+    // narrows anything.
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn an_unpaired_context_claims_and_shadows_against_everything() {
+        use crate::device::DeviceHandle;
+        use crate::player::Paired;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.global_back", output = bool, intent = Button)]
+        struct Back;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.global_menu", tick = Render, priority = 10, exclusive)]
+        struct Menu;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.global_menu_game", tick = Render, priority = 0)]
+        struct Gameplay;
+
+        let pad = bevy_ecs::entity::Entity::from_bits(1);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Menu>(|context| {
+            context.bind::<Back>(GamepadButton::East).consume();
+        });
+        app.add_context::<Gameplay>(|context| {
+            context.bind::<Jump>(GamepadButton::East);
+        });
+        app.world_mut().spawn(Menu);
+        let paired = app
+            .world_mut()
+            .spawn((Gameplay, Paired::to(DeviceHandle::Gamepad(pad))))
+            .id();
+        let unpaired = app.world_mut().spawn(Gameplay).id();
+
+        app.world_mut()
+            .write_message(RawGamepadEvent::Button(RawGamepadButtonChangedEvent::new(
+                pad,
+                GamepadButton::East,
+                1.0,
+            )));
+        app.update();
+
+        for (instance, whose) in [(paired, "a paired"), (unpaired, "an unpaired")] {
+            let state = app
+                .world()
+                .get::<InputContextState<Gameplay>>(instance)
+                .unwrap();
+            assert!(state.shadowed, "{whose} instance is shadowed");
+            assert!(!state.value::<Jump>(), "and its control was taken");
+        }
+    }
+
+    // A pairing holding no device is what a join flow spawns before a device reaches the player,
+    // and it is the opposite of no pairing at all: it hears nothing rather than everything. So
+    // nothing can have been taken from it, and the obstacle is that it owns no device.
+
+    #[cfg(all(feature = "gamepad", feature = "keyboard"))]
+    #[test]
+    fn a_pairing_with_no_device_is_owed_unowned_rather_than_a_claimant() {
+        use crate::player::Paired;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.unowned_back", output = bool, intent = Button)]
+        struct Back;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.unowned_menu", tick = Render, priority = 10)]
+        struct Menu;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Menu>(|context| {
+            context.bind::<Back>(KeyCode::Escape).consume();
+        });
+        app.add_context::<OnFoot>(|context| {
+            context.bind::<Jump>(KeyCode::Escape);
+        });
+        // The menu is nobody's in particular, so its claim is global.
+        app.world_mut().spawn(Menu);
+        let joining = app.world_mut().spawn((OnFoot, Paired::default())).id();
+
+        app.world_mut()
+            .write_message(press(KeyCode::Escape, Key::Escape, ButtonState::Pressed));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        let world = app.world();
+        let state = world.get::<InputContextState<OnFoot>>(joining).unwrap();
+        assert_eq!(
+            state.why_not::<Jump>(
+                world.resource(),
+                world.get::<Paired>(joining).map(|paired| &**paired)
+            ),
+            ActionObstacle::Unowned,
+            "a claim can only take what this instance could have heard, and it heard nothing"
         );
     }
 }

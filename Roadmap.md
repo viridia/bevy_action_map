@@ -196,6 +196,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 110  | A glyph for a control, and an icon prompt                             |
 | 123  | Advice on a mapping set a player cannot break                         |
 | 109  | Reflect where a scene, a tool or a save file reaches the type         |
+| 137  | Arbitration that names whose input it is                              |
 
 ---
 
@@ -203,68 +204,10 @@ What is left, in semantic groups ordered roughly by priority. The order is a gui
 schedule: any chunk may be reordered once the one before it has been read, and a chunk's number is
 its identity rather than its position.
 
-(Next: 137, 94c, 130, 122, 28, 131, 33, 115)
+(Next: 94c, 130, 122, 28, 131, 33, 115)
 
-## Defects
-
-Wrong answers from code that has already shipped. The full register is
-[docs/issues.md](./docs/issues.md), which also holds the findings that carry no chunk and say so per
-entry.
-
-### 137. Arbitration that names whose input it is
-
-`docs/issues.md` 1066. Two global tables decide what a context may read, and neither records which
-player it is deciding for. `ConsumedControls` holds a claim as a control plus the claiming context's
-`PATH`, with nothing about the device the control was pressed on — which `Control` cannot supply,
-since `GamepadButton::East` is one value whichever pad sent it. `ExclusionCeiling` holds one
-priority for the whole world, read once per context *type* and applied to every instance of it.
-
-So one player's menu consuming a control takes it from every player; two instances of one context,
-each paired to its own pad, take it from each other; and one player opening an exclusive pause menu
-deactivates the other player's gameplay context outright. The first two are probed. The comment
-above `evaluate_context`'s claim loop asserts the opposite of what the loop does, and goes with the
-fix.
-
-- **A claim carries the claiming instance's devices**, read from the `Paired` already in
-  `evaluate_context`'s query, and a reader matches on intersection rather than on the control alone.
-  `contains` and `claimant` are public and both gain a reader parameter, which is the only breaking
-  change in this chunk — `ExclusionCeiling` is `pub(crate)`.
-- **The ceiling becomes a set of `(priority, DeviceHandleSet)`** rather than one priority, and
-  `shadows` takes the reader's devices. The consumption fix does not reach it and cannot: a shadow
-  is about a context being active rather than a control being actuated, so there is no control to
-  hang a device on. Same defect, different mechanism. Latent in tree — Disasteroids' menu,
-  `prompt_gallery`'s browse context and `widget_focus` are every exclusive context there is, all
-  single-player, and Split Friction declares none.
-- **What a claim binds is a policy, so it gets a newtype of its own.** `DeviceHandleSet` is a
-  collection and `Paired` is a policy over it — the devices one player owns. What a claim or a
-  ceiling entry binds is a third policy, and storing it as the bare collection means reading
-  `is_empty()` as "unconstrained", which is a convention rather than a type and silently inverts an
-  empty `Paired` from owning nothing to owning everything. A `DeviceScope` over the same collection,
-  with `all()` distinct from a set of devices, makes unconstrained a constructor. One type serves
-  both the claim and the ceiling for as long as the two policies agree; the moment they diverge that
-  is a second newtype, not a flag on the first. `contains` and `claimant` keep speaking
-  `Option<&Paired>` at the public boundary, since that is what a caller holds.
-- **Nothing about an empty `Paired` is then a decision.** It hears nothing, so it claims nothing —
-  no binding actuates, so the consume guard never fires. It owns nothing, so it shadows nobody.
-  `why_not` already answers `Unowned`. Reflection can produce one whether or not `Default` stays on
-  `Paired`, so what matters is that the behaviour follows rather than that the state is unreachable.
-- **A capture claims for its own player too.** `claim_for_capture` claims under a global "capture"
-  path, which is the same defect one layer up: two players rebinding at once in Split Friction's
-  panes would take each other's presses. `CaptureSession` is a component and `run_captures` already
-  queries its entity, so this is `Option<&Paired>` on that query. The session's own `family` field
-  does not serve — it names a family, not a pad.
-- **1037's third bullet is retired by this chunk rather than surviving it.**
-  `HashMap<TypeId, HashMap<Control, &'static str>>` cannot key a lookup that is also a device-set
-  intersection, so the structure changes here and that bullet stops describing anything.
-- **Not `ReservedControls`**, which is global and is meant to be. A reservation is declared at app
-  build by a context and withholds a control from capture across its family, so it describes the
-  game's own declarations rather than any player's live input. Nothing about it changes here.
-- **Verified by** three probes as tests — a consuming menu over a gameplay context with two players
-  on two pads, two instances of one context on two pads, and an exclusive context on one player's
-  entity with the other player's context left live — plus one that the single-player path is
-  untouched, where an unpaired context still claims and shadows against everything.
-
----
+No chunk currently carries a defect. The register of what is known to be wrong is
+[docs/issues.md](./docs/issues.md), and an entry there that acquires a chunk gets a section here.
 
 ## Devices and players
 
@@ -672,7 +615,6 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **A context-level exclusion from the mapping list** | a second screen needing the same filter and duplicating it. `ActionMapping::context` already carries the data, and one call site filtering on it costs one line — at two, the crate is the one paying for the repetition |
 | **An initial delay distinct from the repeat rate** (R22.5) | **a screen long enough to feel the difference.** `.on_change().pulse(0.25)` gives one number serving as both. Two numbers is a small change; what is missing is a case where equal is wrong, and a two-table settings screen is not it |
 | **Free-form mutually-exclusive context sets** (R7.7 remainder) | nothing in tree needs two independently-exclusive contexts to coexist rather than one dominating the other by priority |
-| **Owner-scoped `ConsumedControls`/exclusion ceiling** (R15.3 remainder, and D13's own remainder) | a real in-tree case with a per-player exclusive context, or a binding consumed across two players' devices. Design if built: a claim visible only if made globally or by the viewer's own paired device; an exclusive context's shadow implicit in its own pairing rather than a separate flag |
 | **A game-wide "more forgiving timings" control** (R20.4's withdrawal) | a game with enough timings that setting them one at a time is the complaint. One player-facing control across a whole game needs the crate to know which way forgiveness runs per threshold — down for `Hold` and `HoldAndRelease`'s floors, up for `Tap` and `MultiTap`'s ceilings and `Pulse`'s interval — which is the one part of this a game cannot get right without hand-checking five signs, and the reason the row exists rather than the idea being dropped with the requirement. Chunk 115's per-timing tunables come first regardless: they are what a game would expose the control *through*, and they may turn out to be all anyone wants |
 | **Auto-switching which device a player is paired to** (R15.8) | **a single-player game in tree that wants it**, which is where the value is: asked directly, LWIM's maintainer put pad-to-keyboard switching at mattering a bit, and much more in single player or networked multiplayer than in local co-op. One person pressing things makes "which device are they on now" a question with one right answer; two make it the wrong question, which is why Split Friction joins once and a player who wants the keyboard takes it the same way they took the pad. The gate stays untripped for a reason rather than for want of demand: Disasteroids is the single-player game, and it pins `PromptDevice` to the keyboard on purpose, being a desktop game whose prompts name keys with a pad plugged in. Deferred rather than withdrawn alongside R15.7, because unlike R15.7 an app cannot write it: telling a deliberate grab from a drifting stick means reading raw samples under a deadzone floor before any action fires, which an app watching `Fired` never sees. If it lands, a prompt reads the player's paired device rather than tracking one of its own, and R18.6 revives with it |
 | **Nintendo's confirm button** (what R18.7's withdrawal left) | **a game that wants confirm to follow the pad in hand**, checked first on a Nintendo pad reporting through gilrs. A Nintendo pad confirms with A, in the East position, where every other brand confirms with South. Only the gilrs path sees this, since a Steam Input backend hands over actions already mapped. Read, not run: gilrs takes SDL's `a`/`b` as `South`/`East`, and SDL_GameControllerDB maps a Nintendo pad by position (its `mapping_guide.png`), so A arrives as `East` and a game confirming on South confirms on a Nintendo player's B. A preset swapping South and East fixes that for a game that knows its player. Following the pad instead is per device rather than per family, since two brands can share one game, and `Brand` is already on the gamepad entity to read |

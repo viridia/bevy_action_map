@@ -995,7 +995,10 @@ handle "two players on one keyboard" gracefully.
 - **R15.2 (MUST)** Per-player action state and per-player context stacks, queryable by player
   without filtering global state.
 - **R15.3 (MUST)** A device's input must not reach a player who does not own it — this must be
-  enforced at L1/L2, not left to per-action filtering.
+  enforced at L1/L2, not left to per-action filtering. Arbitration is bounded the same way: a
+  consumption claim (R8.2) and an exclusive context's shadow (R7.8) apply only to contexts that
+  share a device with the one that made them, and a context owning no device makes neither. A
+  context with no pairing reads every device and is therefore in scope for both.
 - **R15.4 (MUST)** Join flow support: observe input from _unassigned_ devices (with bindings
   applied, so "press Start to join" works per device class) and assign on demand.
 - **R15.5 (MUST)** _(D73)_ Leave / disconnect: on device loss, the owning player must be

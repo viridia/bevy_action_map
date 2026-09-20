@@ -662,9 +662,13 @@ pub fn run_captures(
     threshold: Res<'_, ButtonThreshold>,
     reserved: Res<'_, ReservedControls>,
     mut consumed: ResMut<'_, crate::eval::ConsumedControls>,
-    mut sessions: Query<'_, '_, (Entity, &mut CaptureSession)>,
+    mut sessions: Query<'_, '_, (Entity, &mut CaptureSession, Option<&crate::player::Paired>)>,
 ) {
-    for (entity, mut session) in &mut sessions {
+    for (entity, mut session, pairing) in &mut sessions {
+        // A rebinding row on one player's pane answers to that player's devices only, or to every
+        // device when nothing paired it. The session's own `family` names a kind of device, not
+        // one.
+        let devices = pairing.map(|paired| &**paired);
         if !session.armed {
             session.armed = true;
             session.cursor = frame.latest();
@@ -672,7 +676,12 @@ pub fn run_captures(
         }
 
         for event in frame.events_after(session.cursor) {
+            // Advanced past another player's event too, so the cursor means "looked at" rather than
+            // "was allowed to see".
             session.cursor = Some(event.timestamp);
+            if devices.is_some_and(|set| !set.contains(event.event.device())) {
+                continue;
+            }
 
             let Some(arrival) = arrival(&event.event, &threshold, session.accepts) else {
                 continue;
@@ -692,7 +701,7 @@ pub fn run_captures(
             ) {
                 // Claimed even though it was refused: the player pressed it at a rebinding screen,
                 // and whatever it would otherwise have done is not what they meant.
-                consumed.claim_for_capture(arrival.control);
+                consumed.claim_for_capture(arrival.control, devices);
                 if arrival.deliberate {
                     commands.trigger(CaptureRefused {
                         entity,
@@ -704,7 +713,7 @@ pub fn run_captures(
                 continue;
             }
 
-            consumed.claim_for_capture(arrival.control);
+            consumed.claim_for_capture(arrival.control, devices);
             // Removed *before* the event, and both halves of that matter. An observer is entitled
             // to do anything to this entity, despawning it included — a settings row that closes on
             // being answered is an ordinary thing to write — so the crate must have finished with
@@ -1163,7 +1172,7 @@ mod tests {
         assert_eq!(
             app.world()
                 .resource::<crate::eval::ConsumedControls>()
-                .claimant(Control::PhysicalKey(KeyCode::Space)),
+                .claimant(Control::PhysicalKey(KeyCode::Space), None),
             Some("capture")
         );
         assert_eq!(
@@ -1219,6 +1228,72 @@ mod tests {
             [Control::GamepadButton(GamepadButton::South)]
         );
         assert_eq!(app.world().resource::<Fires>().0, 0);
+    }
+
+    /// Two panes of a split-screen settings screen listening at once. A session paired to a pad
+    /// answers to that pad, so neither player's press fills the other's row, and neither claim
+    /// reaches the other's game.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn two_players_rebinding_at_once_do_not_take_each_others_presses() {
+        use crate::device::DeviceHandle;
+        use crate::player::Paired;
+        use bevy_input::gamepad::{GamepadButton, RawGamepadButtonChangedEvent};
+
+        #[derive(InputContext)]
+        #[context(path = "capture_tests.split_pad", tick = Render)]
+        struct Pad;
+
+        #[derive(Resource, Default)]
+        struct Filled(Vec<(Entity, Control)>);
+
+        let pad_a = Entity::from_bits(1);
+        let pad_b = Entity::from_bits(2);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.init_resource::<Filled>();
+        app.add_observer(
+            |event: On<ControlCaptured>, mut filled: ResMut<'_, Filled>| {
+                filled.0.push((event.entity, event.control));
+            },
+        );
+        app.add_context::<Pad>(|controls| {
+            controls.bind::<Jump>(GamepadButton::South).mappable();
+        });
+        app.world_mut().spawn(Pad);
+
+        let target = crate::mapping::mappings(app.world())[0].clone();
+        let session = |app: &mut App, pad| {
+            app.world_mut()
+                .spawn((
+                    CaptureSession::for_mapping(&target).expect("a button mapping"),
+                    Paired::to(DeviceHandle::Gamepad(pad)),
+                ))
+                .id()
+        };
+        let row_a = session(&mut app, pad_a);
+        let row_b = session(&mut app, pad_b);
+        app.update();
+
+        // Different buttons, so which row got which press is visible in the answer rather than only
+        // in the order the two arrived.
+        for (pad, button) in [(pad_a, GamepadButton::East), (pad_b, GamepadButton::North)] {
+            app.world_mut()
+                .write_message(bevy_input::gamepad::RawGamepadEvent::Button(
+                    RawGamepadButtonChangedEvent::new(pad, button, 1.0),
+                ));
+        }
+        app.update();
+
+        let mut filled = app.world().resource::<Filled>().0.clone();
+        filled.sort_by_key(|&(entity, _)| entity);
+        let mut expected = [
+            (row_a, Control::GamepadButton(GamepadButton::East)),
+            (row_b, Control::GamepadButton(GamepadButton::North)),
+        ];
+        expected.sort_by_key(|&(entity, _)| entity);
+        assert_eq!(filled, expected, "each pane took its own player's press");
     }
 
     /// A capture says which slot it fills, and a slot is addressed rather than appended: a screen

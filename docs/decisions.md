@@ -337,9 +337,9 @@ forced on it; collapsing them into one flag makes the two fight, so a shadowed c
 or fail to resume depending on which wrote last. The diagnostic path needs no new case either — a
 shadowed context is genuinely inactive, so "context inactive" already names it.
 
-**Still open.** The ceiling is global. Nothing in it says whose exclusive context raised it, so in
-local multiplayer one player's modal would shadow every other player's gameplay context. Single
-player is unaffected.
+**Whose ceiling it is.** An entry records the devices of the instance that raised it and shadows
+only a context sharing one, so one player's modal leaves another player's gameplay alone — D88,
+which scopes consumption the same way and for the same reason.
 
 ### D14 — A class binding is a second list, not an expanded set of controls
 
@@ -2044,3 +2044,35 @@ when something moves it, so there is no equivalent to slide off with. A focus-dr
 therefore settle at `Fired`, and nothing is left to decide when the control is released. What
 crosses the pair is presentation and only presentation, and removing a highlight from the entity
 that got it requires knowing nothing about what kind of widget it is.
+
+### D88 — A claim names whose input it is
+
+**Decided.** A consumption claim, and an entry in the exclusion ceiling, carry the devices of the
+instance that made them. A reader sees a claim only where the two device sets intersect, so
+`ConsumedControls::contains` and `claimant` take the reader's devices as a parameter. One player's
+menu consuming `South` leaves another player's gameplay context free to read it; two instances of
+one context paired to two pads do not take controls from each other; one player's pause menu does
+not deactivate the other player's game. A live capture claims under its own session's pairing for
+the same reason.
+
+**The type that travels is `DeviceHandleSet`, not `Paired`.** `Paired` derives `Component`, and a
+component type is used as a component and nothing else — what a function takes and a struct holds is
+the plain value type it wraps. A caller holding a `Paired` derefs at the call site.
+
+**No pairing and an empty pairing are different answers.** No pairing means every device: a
+single-player context claims against everyone and is claimed against by everyone, with no opt-in. An
+empty pairing means no device — a player entity spawned before a device reaches it, which is what a
+join flow produces — so such a context hears nothing, claims nothing and shadows nobody. Collapsing
+the two by reading an empty set as "unconstrained" is free in the evaluator, where a context that
+hears nothing never actuates a binding, and wrong in `why_not`, which would then name a claimant
+where the honest answer is `Unowned`.
+
+**Rules out.** One priority ceiling for the world; a claim keyed by control alone;
+`ConsumedControls` as a map, since a lookup matches a control *and* an overlapping device set and no
+single key expresses both.
+
+**Reversal.** Cheap while no public API has shipped and expensive afterwards, which is the whole
+point of paying for it now: `contains` and `claimant` are public, and a third-party context that
+reasoned about a world-wide claim table breaks when the table stops being world-wide.
+`docs/one-way-doors.md` door 4 is this door seen from `bevy_enhanced_input`'s side, where it is
+still open.
