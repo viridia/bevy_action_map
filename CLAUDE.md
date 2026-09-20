@@ -23,7 +23,7 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 | File | Holds | Reach for it when |
 | --- | --- | --- |
 | `docs/design.md` | how the crate works, in sections `TD1`–`TD11` | you need the shape of a thing before changing it |
-| `docs/decisions.md` | why it is that way, `D1`–`D88` | a decision looks arbitrary, or you are about to reverse one |
+| `docs/decisions.md` | why it is that way, `D1`–`D89` | a decision looks arbitrary, or you are about to reverse one |
 | `Roadmap.md` | what is left, what is broken, the chunk sequence | **start here for any chunk** |
 | `Requirements.md` | 224 numbered requirements, `R<section>.<n>`, in sections `R0`–`R24` | you need to know what must be true, or a chunk cites an R-number |
 | `docs/comparison.md` | how this crate differs from BEI and LWIM | someone asks why this exists |

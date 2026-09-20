@@ -454,10 +454,10 @@ impl<'a, C> BindingBuilder<'a, C> {
     /// Reserving is per family, because that is the scope a control is unambiguous in: reserving
     /// `F1` says nothing about the gamepad, and the pad binding above is what reserves `Select`.
     ///
-    /// Capture refuses a reserved control out loud, with
-    /// [`RefusedReason::Reserved`](crate::capture::RefusedReason::Reserved), rather than ignoring
-    /// it — a player who has just pressed it is owed the reason. That is what separates this from
-    /// [`excluding`](crate::capture::CaptureSession::excluding), which is silent because the
+    /// A capture still reports a reserved control, and storing it is refused with
+    /// [`Reserved`](crate::overrides::OverrideProblemKind::Reserved) — so a player who has just
+    /// pressed it is owed the reason, and a screen has one to show. That is what separates this
+    /// from [`excluding`](crate::capture::CaptureSession::excluding), which is silent because the
     /// control is busy doing its normal job.
     ///
     /// Reserving and [`mappable`](Self::mappable) contradict each other, and declaring both is

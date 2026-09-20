@@ -217,6 +217,36 @@ impl Overrides {
         }
     }
 
+    /// This row with `control` in one of its cells, ready for [`Rebind::checked`].
+    ///
+    /// The cell the player pressed is the cell that gets the control, whether or not the row reaches
+    /// that far yet: a row that does not is grown, and the cells skipped on the way are left empty.
+    /// Writing to the third cell of a row holding one control gives a row of three with a blank in
+    /// the middle, so a table can offer whatever cells it draws without first asking how long the
+    /// row happens to be.
+    ///
+    /// A cell already holding something keeps whatever it was held with, so retyping the control of
+    /// a `Ctrl+S` cell leaves the `Ctrl`. An empty cell takes the control on its own.
+    ///
+    /// This computes a row and changes nothing. [`Rebind::checked`] is what says whether the row may
+    /// be held, and writing it is [`Rebind::write`].
+    pub fn with_cell(
+        &self,
+        mapping: &ActionMapping,
+        slot: usize,
+        control: Control,
+    ) -> Vec<Option<BoundSlot>> {
+        let mut slots = self.slots_of(mapping);
+        if slot >= slots.len() {
+            slots.resize(slot + 1, None);
+        }
+        match &mut slots[slot] {
+            Some(filled) => filled.control = control,
+            empty => *empty = Some(control.into()),
+        }
+        slots
+    }
+
     /// Sets a row directly, for the two states [`bind`](Self::bind) cannot express.
     pub fn set(&mut self, family: DeviceFamily, mapping: MappingKey, value: Override) {
         self.rows.insert((family, mapping), value);
@@ -907,6 +937,105 @@ pub fn resolve_saved(
     }
 
     Ok((overrides, problems, unresolved))
+}
+
+/// A row that may be held, and the only thing that writes one into a set.
+///
+/// A rebinding screen has a question to ask before it stores what a player pressed: a key cannot
+/// fill a gamepad row, a reserved control is spoken for, a row the game marked fixed is not the
+/// player's to change. [`checked`](Self::checked) asks all of it at once and answers with an
+/// [`OverrideProblemKind`] naming what is wrong, so a screen can say so while the player is still
+/// looking at the cell they pressed.
+///
+/// ```ignore
+/// let slots = pending.with_cell(&row, cell, control);
+/// match Rebind::checked(world, &row, slots) {
+///     Ok(rebind) => rebind.write(&mut pending),
+///     Err(problem) => show(problem),
+/// }
+/// ```
+///
+/// [`Overrides::bind`] writes whatever it is handed and asks nothing, which is what a set loaded
+/// from a file needs — a file can hold anything, and [`apply_overrides`] is what judges one. This
+/// is the door for a screen, where the answer is wanted before the write rather than after it.
+#[must_use = "a checked rebind does nothing until it is written"]
+#[derive(Clone, Debug)]
+pub struct Rebind {
+    family: DeviceFamily,
+    mapping: MappingKey,
+    slots: Vec<Option<BoundSlot>>,
+}
+
+impl Rebind {
+    /// Checks a row against everything the world forbids.
+    ///
+    /// `slots` is the row as it would stand — [`Overrides::with_cell`] builds one from a cell and a
+    /// control, and a screen that edits a row some other way builds its own.
+    ///
+    /// Use [`checked_with_preset`](Self::checked_with_preset) where the screen offers presets, or a
+    /// fixed row a preset legitimately moves is refused.
+    pub fn checked(
+        world: &World,
+        mapping: &ActionMapping,
+        slots: Vec<Option<BoundSlot>>,
+    ) -> Result<Self, OverrideProblemKind> {
+        Self::check(world, mapping, slots, false)
+    }
+
+    /// As [`checked`](Self::checked), for a row a preset authorized.
+    ///
+    /// A preset moves rows a rebinding screen never offers a button for, which is the whole point
+    /// of one — so pass the selected preset and a row it names is exempt from
+    /// [`NotRebindable`](OverrideProblemKind::NotRebindable). Pass an empty [`Overrides`] where no
+    /// preset is selected.
+    pub fn checked_with_preset(
+        world: &World,
+        preset: &Overrides,
+        mapping: &ActionMapping,
+        slots: Vec<Option<BoundSlot>>,
+    ) -> Result<Self, OverrideProblemKind> {
+        let authorized = preset.get(mapping.family, mapping.key).is_some();
+        Self::check(world, mapping, slots, authorized)
+    }
+
+    fn check(
+        world: &World,
+        mapping: &ActionMapping,
+        slots: Vec<Option<BoundSlot>>,
+        preset_authorized: bool,
+    ) -> Result<Self, OverrideProblemKind> {
+        // Absent resources are the ordinary case rather than an error: a game that reserved no
+        // control and set no ceiling forbids nothing.
+        let reserved: Vec<Control> = world
+            .get_resource::<crate::capture::ReservedControls>()
+            .map(|reserved| reserved.iter().map(|entry| entry.control).collect())
+            .unwrap_or_default();
+        let limits = Limits {
+            reserved: &reserved,
+            max_slots: world.get_resource::<MaxSlots>().map(|max| max.0),
+        };
+        // The same predicate `apply_overrides` runs, so a screen and a save file cannot disagree
+        // about one control.
+        if let Some(kind) = refusal(mapping, &slots, &limits, preset_authorized) {
+            return Err(kind);
+        }
+        Ok(Self {
+            family: mapping.family,
+            mapping: mapping.key,
+            slots,
+        })
+    }
+
+    /// The row this would write, for a screen that wants to show it before committing.
+    pub fn slots(&self) -> &[Option<BoundSlot>] {
+        &self.slots
+    }
+
+    /// Writes it, on the same terms as [`Overrides::bind`] — trailing empties dropped, and a row
+    /// with nothing left stored as [`Override::Cleared`].
+    pub fn write(self, overrides: &mut Overrides) {
+        overrides.bind(self.family, self.mapping, self.slots);
+    }
 }
 
 /// Makes a running game agree with an override set.
@@ -2744,32 +2873,25 @@ mod tests {
         );
     }
 
-    /// A capture can now reach past the ceiling, which it could not while a row grew one slot at a
-    /// time. The session is still made — the warning is for the developer whose screen draws more
-    /// columns than their own `MaxSlots` allows — and the apply is what turns the row down.
+    /// A screen can draw a cell past the ceiling its own game set, so the row that cell would make
+    /// has to be refused. `Rebind::checked` turns it down where the screen can say so, and applying
+    /// turns down the same row loaded from a file.
     #[test]
-    fn a_capture_past_the_ceiling_is_refused_where_it_lands() {
+    fn a_row_past_the_ceiling_is_refused_where_it_lands() {
         let mut app = app();
         app.insert_resource(MaxSlots(2));
         let jump = row(&app, "override_tests.jump");
 
-        let session = crate::capture::CaptureSession::for_slot(&jump, 2)
-            .expect("a slot past the ceiling is still addressable");
-        assert_eq!(session.slot(), 2);
-        app.world_mut().spawn(session);
-        app.update();
-
         // Filling slot 2 makes a row of three, which is what the ceiling refuses.
         let mut overrides = Overrides::new();
-        overrides.bind(
-            jump.family,
-            jump.key,
-            [
-                Some(BoundSlot::from(Control::PhysicalKey(KeyCode::Space))),
-                None,
-                Some(BoundSlot::from(Control::PhysicalKey(KeyCode::KeyL))),
-            ],
+        let wanted = overrides.with_cell(&jump, 2, Control::PhysicalKey(KeyCode::KeyL));
+        assert_eq!(
+            Rebind::checked(app.world(), &jump, wanted.clone()).err(),
+            Some(OverrideProblemKind::TooManyControls { limit: 2, given: 3 }),
+            "the screen hears it before the player does"
         );
+
+        overrides.bind(jump.family, jump.key, wanted);
         let problems = apply_overrides(app.world_mut(), &overrides);
         assert_eq!(
             problems
@@ -2778,6 +2900,157 @@ mod tests {
                 .collect::<Vec<_>>(),
             [OverrideProblemKind::TooManyControls { limit: 2, given: 3 }],
             "a hole counts toward the length, since it is a column the row reaches"
+        );
+    }
+
+    /// The claim the whole arrangement rests on: a screen asking before it writes and a save file
+    /// judged as it is applied get the same answer for the same row. Driven over the refusals
+    /// rather than asserted on one, because "they agree" is the property, not one case of it.
+    #[test]
+    fn what_a_screen_is_told_is_what_applying_would_say() {
+        let mut app = app();
+        app.insert_resource(MaxSlots(2));
+        let jump = row(&app, "override_tests.jump");
+        let settings = row(&app, "override_tests.settings");
+
+        // The expected answer is spelled out as well as compared: a case both sides happen to
+        // accept would otherwise agree with itself and pass while proving neither.
+        let cases: [(&str, &ActionMapping, Vec<Option<BoundSlot>>, _); 5] = [
+            (
+                "a control reserved for the settings key",
+                &jump,
+                alloc::vec![Some(BoundSlot::from(Control::PhysicalKey(KeyCode::F1)))],
+                Some(OverrideProblemKind::Reserved {
+                    control: Control::PhysicalKey(KeyCode::F1),
+                }),
+            ),
+            (
+                "a row the game marked fixed",
+                &settings,
+                alloc::vec![Some(BoundSlot::from(Control::PhysicalKey(KeyCode::KeyG)))],
+                Some(OverrideProblemKind::NotRebindable),
+            ),
+            (
+                "mouse motion where the row drives a button",
+                &jump,
+                alloc::vec![Some(BoundSlot::from(Control::MouseMotion))],
+                Some(OverrideProblemKind::WrongShape {
+                    control: Control::MouseMotion,
+                    accepts: ChannelShape::Button,
+                }),
+            ),
+            (
+                "a row grown past the ceiling",
+                &jump,
+                jump_row_of_three(),
+                Some(OverrideProblemKind::TooManyControls { limit: 2, given: 3 }),
+            ),
+            (
+                "and one that is simply fine",
+                &jump,
+                alloc::vec![Some(BoundSlot::from(Control::PhysicalKey(KeyCode::KeyG)))],
+                None,
+            ),
+        ];
+
+        for (what, target, wanted, expected) in cases {
+            let told = Rebind::checked(app.world(), target, wanted.clone()).err();
+
+            let mut overrides = Overrides::new();
+            overrides.bind(target.family, target.key, wanted);
+            let applied = apply_overrides(app.world_mut(), &overrides)
+                .into_iter()
+                .next()
+                .map(|problem| problem.kind);
+
+            assert_eq!(told, expected, "{what}: what the screen is told");
+            assert_eq!(applied, expected, "{what}: what applying says");
+            // Put the defaults back, so the next case is judged against the same world.
+            apply_overrides(app.world_mut(), &Overrides::new());
+        }
+    }
+
+    /// A three-column row for the ceiling case, with the hole that makes it three.
+    fn jump_row_of_three() -> Vec<Option<BoundSlot>> {
+        alloc::vec![
+            Some(BoundSlot::from(Control::PhysicalKey(KeyCode::Space))),
+            None,
+            Some(BoundSlot::from(Control::PhysicalKey(KeyCode::KeyL))),
+        ]
+    }
+
+    /// A preset moves rows a rebinding screen never offers a button for, so a screen that offers
+    /// presets must not be told a preset's own row is unchangeable. Only the rows it names, though.
+    #[test]
+    fn a_preset_exempts_the_rows_it_names_and_no_others() {
+        let app = app();
+        let settings = row(&app, "override_tests.settings");
+        assert_eq!(settings.rebind_policy, RebindPolicy::Fixed);
+
+        let moved = alloc::vec![Some(BoundSlot::from(Control::PhysicalKey(KeyCode::F2)))];
+        let mut preset = Overrides::new();
+        preset.bind(settings.family, settings.key, moved.clone());
+
+        assert!(
+            Rebind::checked_with_preset(app.world(), &preset, &settings, moved.clone()).is_ok(),
+            "the preset names this row, so it may move"
+        );
+        assert_eq!(
+            Rebind::checked_with_preset(app.world(), &Overrides::new(), &settings, moved.clone())
+                .err(),
+            Some(OverrideProblemKind::NotRebindable),
+            "no preset selected, so the fixed row stands"
+        );
+        assert_eq!(
+            Rebind::checked(app.world(), &settings, moved).err(),
+            Some(OverrideProblemKind::NotRebindable),
+            "and a manual capture never moves one"
+        );
+    }
+
+    /// The cell the player pressed is the cell that gets the control, so a row grows to reach it
+    /// and the columns skipped on the way stay empty — a screen offers whatever cells it draws
+    /// without first asking how long the row is. A filled cell keeps what it was held with.
+    #[test]
+    fn a_cell_is_addressed_and_the_row_grows_to_reach_it() {
+        let app = app();
+        let jump = row(&app, "override_tests.jump");
+        assert_eq!(jump.slots.len(), 1, "one default");
+
+        let overrides = Overrides::new();
+        let grown = overrides.with_cell(&jump, 2, Control::PhysicalKey(KeyCode::KeyL));
+        assert_eq!(
+            grown
+                .iter()
+                .map(|slot| slot.as_ref().map(|slot| slot.control))
+                .collect::<Vec<_>>(),
+            [
+                Some(Control::PhysicalKey(KeyCode::Space)),
+                None,
+                Some(Control::PhysicalKey(KeyCode::KeyL)),
+            ],
+            "a row of three with a blank in the middle, not a row of two"
+        );
+
+        // A chord is the cell's, not the control's: retyping the control of a `Ctrl+S` cell leaves
+        // the `Ctrl` where it was.
+        let mut held = Overrides::new();
+        held.bind(
+            jump.family,
+            jump.key,
+            [Some(BoundSlot {
+                control: Control::PhysicalKey(KeyCode::KeyS),
+                with: alloc::vec![ControlOrigin::Ours(Control::PhysicalKey(
+                    KeyCode::ControlLeft
+                ))],
+            })],
+        );
+        let retyped = held.with_cell(&jump, 0, Control::PhysicalKey(KeyCode::KeyD));
+        assert_eq!(
+            retyped[0]
+                .as_ref()
+                .map(|slot| (slot.control, slot.with.len())),
+            Some((Control::PhysicalKey(KeyCode::KeyD), 1))
         );
     }
 

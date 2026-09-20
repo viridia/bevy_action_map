@@ -138,20 +138,6 @@ naming `combined` in the message. Warning rather than error, because it is inert
 and a game that chains one harmlessly should not fail to boot. `BindingSpec::continues_declaration`
 already makes it report once per `bind` call rather than four times.
 
-### 1057 A refused capture is silent on Disasteroids' screen
-
-`examples/disasteroids/settings.rs` · carried from `Roadmap.md`, **not re-probed** — read from the
-screen's own code, which never renders `CaptureRefused::reason`
-
-Wrong shape, wrong device family, or reserved: the capture session keeps listening and says nothing
-about why the press did not take. A player cannot tell a refusal from a key the game did not hear.
-
-The crate side is built — capture already reports why it refused — so this is the screen declining
-to render a reason it is handed. No requirement asks for it; R19 says what a rebinding UI may
-legally offer, not what it must say when it says no. It is here because ground rule 3 makes the
-examples the acceptance test, and an example that swallows a diagnostic is not demonstrating the
-thing the diagnostic was built for.
-
 ### 1060 A chord spanning two device families escapes conflict detection
 
 `binding_family` (`mapping.rs`) derives a row's family from the binding's primary input alone; the

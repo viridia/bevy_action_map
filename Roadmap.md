@@ -197,6 +197,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 123  | Advice on a mapping set a player cannot break                         |
 | 109  | Reflect where a scene, a tool or a save file reaches the type         |
 | 137  | Arbitration that names whose input it is                              |
+| 130  | Capture as a sensor, answering on the release                         |
 
 ---
 
@@ -204,7 +205,7 @@ What is left, in semantic groups ordered roughly by priority. The order is a gui
 schedule: any chunk may be reordered once the one before it has been read, and a chunk's number is
 its identity rather than its position.
 
-(Next: 130, 122, 28, 131, 33, 115)
+(Next: 122, 28, 131, 33, 115)
 
 No chunk currently carries a defect. The register of what is known to be wrong is
 [docs/issues.md](./docs/issues.md), and an entry there that acquires a chunk gets a section here.
@@ -464,25 +465,6 @@ and the convention already needs help: `delegate` pushes all five, `compile` pus
   their scratch in each instance; that split is forced by the `Arc`, not a pair of lists to merge.
 - **Verified by:** the existing suite unchanged, and no diff in `examples/` — an internal change, so
   any example diff means the abstraction leaked.
-
-### 130. Capture as a sensor and nothing else
-
-`CaptureSession` already installs nothing — `ControlCaptured` reports, and writing the answer into
-`Overrides` is the caller's, which is what both examples do. What it still carries is a *target*,
-and with it a write-time policy decided at listen time.
-
-- **`for_slot` takes a slot it never writes to** and returns `None` for a row the player may not
-  change. That check is duplicated: `refusal` (`overrides.rs`) re-asks `rebind_policy` and then
-  calls the same `admissible`, so the apply-time check is a strict superset of both earlier ones.
-  Three validation points for one question, of which one is authoritative.
-- **What is left after the collapse** is a class, a family and an exclusion list. A caller
-  correlates the answer through the entity it fired on, which both callers already have something on
-  — Disasteroids has `RebindCell` there.
-- **The two earlier checks buy UX, not correctness**, and that is the argument to weigh: not
-  starting a doomed capture, and telling a player why a press did not take, are both worth
-  something. Deciding whether an app should have to ask `admissible` itself is the chunk.
-- **Breaking, on the most user-facing surface this crate has.** Cheap now, expensive after
-  publication, which is what puts it before the crates.io gate rather than after it.
 
 ### 112. A backend suppresses a device family at L0
 

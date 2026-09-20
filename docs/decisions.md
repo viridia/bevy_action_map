@@ -914,12 +914,13 @@ table has. The workaround it forced was a second row under an alias name — `th
 `thrust_alt` — telling the player two things are separate when they are the same thing twice. A
 fixed two cannot express the "add shortcut" button that tools grow instead.
 
-**A slot is addressed, not appended.** `for_slot` takes whatever slot number the screen names and
-grows the row to reach it, leaving the slots skipped on the way empty — assignment, the way writing
-to index four of a JavaScript array gives you five. The rule it replaced refused anything more than
-one past the end, which existed to stop a capture leaving a hole and became arbitrary once a hole
-was legal: it allowed the primary of an emptied two-cell row and refused the secondary, on no
-principle a screen could explain. What bounds a row now is the number of cells the screen draws.
+**A slot is addressed, not appended.** `Overrides::with_cell` takes whatever slot number the screen
+names and grows the row to reach it, leaving the slots skipped on the way empty — assignment, the
+way writing to index four of a JavaScript array gives you five. The rule it replaced refused
+anything more than one past the end, which existed to stop a capture leaving a hole and became
+arbitrary once a hole was legal: it allowed the primary of an emptied two-cell row and refused the
+secondary, on no principle a screen could explain. What bounds a row now is the number of cells the
+screen draws.
 
 **Save format.** A row holds a list because a mapping does, and position is which slot, so a cleared
 middle slot needs the cleared marker rather than a shortened list — which would silently promote the
@@ -1252,6 +1253,12 @@ wrong. An excluded control is not being refused — it is busy doing its normal 
 key that cancels a capture reaches the thing that cancels it. One predicate is what stops a control
 getting two different reasons depending on which direction it arrived from; before the two were
 merged they genuinely disagreed, and no test noticed.
+
+**Where the loudness comes out changed, and the order did not.** D89 moved the refusal from an event
+the crate fires to an answer the screen gets from `Rebind::checked` at the write. The ordering here
+is what that predicate still does, so pressing the settings key is still answered with the reason it
+cannot be bound rather than a complaint about its channel; *excluded* is still the silent case, and
+still the only one capture decides by itself.
 
 **Reserving has two halves and the second is the one that matters.** A reserved binding takes no
 mapping *and* its controls are refused by capture across the family. Without the second half a
@@ -2076,3 +2083,67 @@ point of paying for it now: `contains` and `claimant` are public, and a third-pa
 reasoned about a world-wide claim table breaks when the table stops being world-wide.
 `docs/one-way-doors.md` door 4 is this door seen from `bevy_enhanced_input`'s side, where it is
 still open.
+
+### D89 — A capture reports a control on the way up, and the store judges it
+
+**Decided.** `CaptureSession` carries a class and an exclusion list. It carries no target — no
+mapping, no slot — and makes no judgement about admissibility. A deliberate press ends the capture
+and is reported, whatever it was; whether it may be stored is asked once, at the write, through
+`Rebind::checked`. The row's own cell arithmetic is `Overrides::with_cell`, and `Rebind` is the
+token that writes a checked row.
+
+**Rules out.** `CaptureSession::for_slot` and `within`; `CaptureSession::mapping`, `slot` and
+`family`; the target fields on `ControlCaptured`; `CaptureRefused` and a public `RefusedReason`; and
+the observer that warned when a screen opened a capture past `MaxSlots`, which needed a slot number
+to warn about.
+
+**Reversal.** One question was being answered in three places. `for_slot` returned `None` for a row
+the player may not change, `run_captures` fired a refusal for a wrong shape, family or reserved
+control, and applying asked all of it again plus the row length and chordability the first two could
+not see. Only the last was authoritative, and it is a strict superset, so the crate was holding a
+write-time policy decided at listen time and could disagree with itself. Reversing this brings that
+back, and makes `for_mapping` fallible again for a reason unrelated to the control it is listening
+for.
+
+**The target was an echo.** Both callers already correlate the answer through the entity the event
+fires on, because they must: a screen has to know which cell is listening before the answer arrives.
+Carrying the row and slot on the session as well meant two copies of one fact, of which the crate's
+was the one nobody read.
+
+**Blender's rule, deliberately.** A refusal used to leave the session listening. It now ends, which
+is what lets the screen say why while the player is still looking at the cell — the alternative was
+a whole row silently accepted into a working copy and turned down minutes later at Confirm. The cost
+is that an arrival nobody chose must not end a capture either, so a deliberate press and a
+continuous reading past its threshold are treated differently: the press always answers, the reading
+only answers a session listening for that class. Without that split, a pad drifting on a desk
+cancels every keyboard rebind in the game.
+
+**The answer comes on the release, and that is a fix rather than a flourish.** A claim is an
+instant; a held control is a level. `apply_level_event` records held state as events arrive and
+consumption is applied where that state is *read*, so a session claiming on the press and then
+vanishing left the control down with nothing claiming it — and the context underneath read it on the
+very next frame. Observed: a capture on a settings screen took the arrow key *and* moved the
+selection, because the menu's own navigation is a composite over those keys and `on_change` saw the
+direction appear one frame late. The session therefore holds the control it is waiting on and
+re-claims it every frame, so the claim lasts exactly as long as the press and the control is already
+up when it stops. The defect predates this chunk — it reproduces unchanged on the tree before it —
+and is folded in here because this is the chunk that decides when a capture ends.
+
+**Rules out.** A claim that outlives the session, which would need an owner with a lifetime of its
+own; `ConsumedControls` learning about releases, which would put a level concept in a per-schedule
+claim table.
+
+**What it costs.** `CaptureSession` carries the pending control, a second press while one is held is
+ignored rather than latched, and every test that used to press now has to let go. The mouse's motion
+keeps answering immediately, since a displacement that has already happened is never held and there
+is nothing to wait for.
+
+**What did not move.** The predicate itself, and the claim. `admissible` is still one function
+answering for a press and for a save file, which is D42's point and survives it; and capture still
+claims everything it takes, including a control the row cannot hold, so the settings key pressed at
+a rebinding screen neither binds nor re-opens the screen.
+
+**The screen pays for it, once.** A game now needs a line for the reason, where before it had an
+event it could ignore — and ignoring it is what `examples/disasteroids` did, which is why that
+silence was a known finding rather than a feature. A screen that wants the old silence drops the
+`Err` arm.

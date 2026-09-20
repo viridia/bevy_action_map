@@ -16,10 +16,10 @@
 //!
 //! - press `Escape` — it skips the row instead of being captured, because it is *excluded*, and an
 //!   excluded control goes on doing its normal job while a capture listens;
-//! - press `F1` — refused out loud, because it opens the settings screen and is *reserved*;
 //! - press a key that is already bound — captured, with the clash reported;
-//! - press a **gamepad** button on a keyboard row, or a key on a gamepad row — refused, because a
-//!   mapping is rebound within its own device family.
+//! - press `F1`, which opens the settings screen, or a **gamepad** button on a keyboard row — both
+//!   are captured and then turned down when the walk tries to store them, because a capture reports
+//!   what the player chose and the row is what decides whether it can hold it.
 //!
 //! Two lines print after every rebind, and both are the point. `capture_demo.wall_jump` rides
 //! Jump's row rather than having one of its own, so rebinding Jump moves it too — two actions
@@ -38,7 +38,7 @@
 use bevy::input::gamepad::GamepadButton;
 use bevy::prelude::*;
 use bevy_action_map::mapping;
-use bevy_action_map::overrides::{Overrides, apply_overrides};
+use bevy_action_map::overrides::{Overrides, Rebind, apply_overrides};
 use bevy_action_map::prelude::*;
 
 #[derive(InputAction)]
@@ -118,7 +118,6 @@ fn main() {
 
     app.add_systems(Startup, begin)
         .add_observer(took)
-        .add_observer(would_not_take)
         .add_systems(Update, skip)
         .run();
 }
@@ -161,8 +160,8 @@ fn begin(world: &mut World) {
 /// Every slot this walk offers for a row: the ones holding something, plus the next empty one where
 /// the row can take it.
 ///
-/// One spare and no more is *this walk's* choice, not a rule the crate enforces — `for_slot` takes
-/// whatever slot number it is handed and grows the row to reach it, exactly as a settings screen
+/// One spare and no more is *this walk's* choice, not a rule the crate enforces — `with_cell` takes
+/// whatever cell number it is handed and grows the row to reach it, exactly as a settings screen
 /// with four columns would want. A console walk has no columns, so one at a time is what reads.
 ///
 /// The exception is a row that is one direction of a composite: a second "forward" key is one part
@@ -191,16 +190,16 @@ fn next(world: &mut World) {
     // answers with what is bound *now*, and by this point the player may have changed it.
     let mapping = current(world, &stale);
 
-    let Some(session) = CaptureSession::for_slot(&mapping, slot) else {
-        // A stick or a mouse bound whole: no single control can fill it, so there is nothing to
-        // capture. TD9.1 gives those a tunable rather than a rebinding row.
+    // Asked here rather than by the crate: capture will listen for any row, and whether the answer
+    // may be stored is a question about the row. This walk would rather not ask it at all.
+    if !mapping.rebind_policy.is_rebindable() {
         println!(
-            "\n{} — no single control can fill this; skipping",
+            "\n{} — the game does not offer this row for rebinding; skipping",
             mapping.key
         );
         next(world);
         return;
-    };
+    }
 
     println!(
         "\n{} [{:?}] {} — the row holds {}. Press a control, or Escape to skip.",
@@ -212,7 +211,10 @@ fn next(world: &mut World) {
 
     // Escape is excluded so that it can go on meaning "not this one" — see `skip` below.
     let listening = world
-        .spawn(session.excluding([Control::PhysicalKey(KeyCode::Escape)]))
+        .spawn(
+            CaptureSession::for_mapping(&mapping)
+                .excluding([Control::PhysicalKey(KeyCode::Escape)]),
+        )
         .id();
     let mut walk = world.resource_mut::<Walk>();
     walk.listening = Some(listening);
@@ -274,19 +276,25 @@ fn column(slot: usize) -> String {
 
 fn took(captured: On<ControlCaptured>, mut commands: Commands) {
     let control = captured.control;
-    let mapping = captured.mapping;
-    println!(
-        "  captured {} into slot {} — stored as `{}`",
-        control.fallback_label(),
-        captured.slot + 1,
-        control.name(),
-    );
 
     commands.queue(move |world: &mut World| {
+        // Which row and cell this answers is the walk's own business — the crate reported a control
+        // and nothing else. A settings screen reads it off the cell the session was sitting on;
+        // this walk asks only one question at a time and keeps it in a resource.
+        let Some((row, slot)) = world.resource::<Walk>().asking.clone() else {
+            return;
+        };
+        println!(
+            "  captured {} into slot {} — stored as `{}`",
+            control.fallback_label(),
+            slot + 1,
+            control.name(),
+        );
+
         // Asked afterwards rather than carried on the event. Answering it means reading every
         // declared context, which capture cannot do from the middle of the input pipeline — and it
         // is the caller's question anyway, since what to *do* about a clash is a policy.
-        for clash in conflicts(world, &control.into(), mapping) {
+        for clash in conflicts(world, &control.into(), Some(row.key)) {
             let certainty = match clash.overlap {
                 ConflictOverlap::SameContext => {
                     "in this same context, so they are certainly in each other's way"
@@ -297,7 +305,8 @@ fn took(captured: On<ControlCaptured>, mut commands: Commands) {
             };
             println!("  ! `{}` already holds it — {certainty}", clash.mapping);
         }
-        rebind(world, control);
+        rebind(world, &row, slot, control);
+        world.resource_mut::<Walk>().asking = None;
         next(world);
     });
 }
@@ -307,40 +316,22 @@ fn took(captured: On<ControlCaptured>, mut commands: Commands) {
 /// The two halves of a rebind, and they are separate on purpose: the set is the app's to keep and
 /// [`apply_overrides`] is what a running game hears about it. A settings screen with a Confirm
 /// button edits the first for as long as it likes and calls the second once.
-fn rebind(world: &mut World, control: Control) {
-    let Some((row, slot)) = world.resource_mut::<Walk>().asking.take() else {
-        return;
-    };
-
-    // A row is written whole, so the slot-level edit — "put this in the secondary" — happens here,
-    // against the list the row currently holds. The crate's unit is the row; the cell is the
-    // screen's. Assignment rather than appending: the cell the player pressed is the cell that gets
-    // the control, whether or not the row reaches that far yet. A row that does not is grown, and
-    // the slots skipped on the way stay empty — writing to the third cell of a one-control row
-    // gives a row of three with a blank in the middle, not a row of two. A cell already holding
-    // something keeps whatever it was held with; an empty one takes the control on its own.
-    let mut slots = row.slots.clone();
-    if slot >= slots.len() {
-        slots.resize(slot + 1, None);
-    }
-    match &mut slots[slot] {
-        Some(filled) => filled.control = control,
-        empty => *empty = Some(control.into()),
-    }
-
+fn rebind(world: &mut World, row: &mapping::ActionMapping, slot: usize, control: Control) {
     let mut chosen = world.remove_resource::<Chosen>().unwrap_or_default();
-    chosen.0.bind(row.family, row.key, slots);
-    let problems = apply_overrides(world, &chosen.0);
+
+    // The crate's unit is the row; the cell is the screen's. `with_cell` does that arithmetic: grow
+    // the row to reach the cell the player pressed, and leave the columns skipped on the way empty.
+    // `Rebind::checked` then says whether the result may be held, before anything is written.
+    let wanted = chosen.0.with_cell(row, slot, control);
+    match Rebind::checked(world, row, wanted) {
+        Ok(rebind) => rebind.write(&mut chosen.0),
+        Err(problem) => println!("  ! not stored: {problem:?}"),
+    }
+
+    apply_overrides(world, &chosen.0);
     world.insert_resource(chosen);
 
-    for problem in &problems {
-        println!(
-            "  ! `{}` was not applied: {:?}",
-            problem.mapping, problem.kind
-        );
-    }
-
-    let now = current(world, &row);
+    let now = current(world, row);
     println!("    the row now holds {}", bound(&now));
     // The rider moved with it, which is the difference between rebinding a control and rebinding
     // one of the two actions that read it.
@@ -363,17 +354,6 @@ fn rebind(world: &mut World, control: Control) {
     if let Some(declared) = declared {
         println!("    the game still ships {}", bound(&declared));
     }
-}
-
-fn would_not_take(refused: On<CaptureRefused>) {
-    let why = match refused.reason {
-        RefusedReason::Reserved => {
-            "reserved — it opens this screen, so nothing may be bound over it"
-        }
-        RefusedReason::Family => "wrong device — a mapping is rebound within its own device family",
-        RefusedReason::Shape => "wrong kind of control for what this mapping drives",
-    };
-    println!("  x {} — {why}", refused.control.fallback_label());
 }
 
 /// Escape reaches this because capture was told to leave it alone.

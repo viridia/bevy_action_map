@@ -10,16 +10,14 @@
 //! filled by the sampler either way.
 //!
 //! ```ignore
-//! // The player activated a table cell on the settings screen. A mapping holds an ordered list of
-//! // slots, so `for_slot` says which one this capture is going to fill — `for_mapping` takes the
-//! // first, which is the only one a single-column table has.
-//! commands.entity(cell).insert(CaptureSession::for_slot(&mapping, column));
+//! // The player activated a table cell on the settings screen. The session takes the shape of
+//! // control the mapping can hold, so a stick row accepts a stick and a button row a button.
+//! commands.entity(cell).insert(CaptureSession::for_mapping(&mapping));
 //!
 //! // …and the crate answers on that same entity, once.
 //! commands.entity(cell).observe(|captured: On<ControlCaptured>, world: &World| {
 //!     let name = captured.control.fallback_label();
-//!     let clashes = conflicts(world, &captured.control.into(), captured.mapping);
-//!     // `captured.slot` comes back too, which is where the new control belongs in the row.
+//!     // Which row and cell this was for is whatever the screen put on the entity.
 //! });
 //! ```
 //!
@@ -28,20 +26,24 @@
 //! step. Put it on whatever entity the answer is useful on — usually the widget that will show it.
 //! Removing the component cancels the capture; the crate removes it itself once something is taken.
 //!
-//! # What capture will not take
+//! # It reports, it does not judge
 //!
-//! Three separate refusals, which look alike and are not:
+//! A capture ends on the control the player chose. Whether that control may go where the screen
+//! means to put it is a separate question with one answer, and
+//! [`Rebind::checked`](crate::overrides::Rebind::checked) is where a screen asks it — a key offered
+//! for a gamepad row, a reserved control, a row the game marked fixed, a row grown past the ceiling
+//! the game set. Asking there means a press and a loaded save file get the same answer, and a
+//! screen can say what is wrong while the player is still looking at the cell they pressed.
 //!
-//! - **Shape and family.** A mapping holding a key accepts another key, not a stick axis and not a
-//!   gamepad button — the first because the action cannot use it, the second because a rebind is
-//!   scoped to one control family, and moving a binding across families would mean moving it to a
-//!   different mapping.
+//! Two kinds of arrival never end a capture:
+//!
 //! - **Excluded** ([`excluding`](CaptureSession::excluding)): the screen's own controls, so it
-//!   stays operable while listening. Silent: an excluded control is not being refused, it is busy
-//!   doing its normal job, which is how the key that cancels a capture gets through to cancel it.
-//! - **Reserved** ([`reserved`](crate::binding::BindingBuilder::reserved)): declared on a binding,
-//!   global across its family. Loud, because a player who just pressed it meant to bind it and is
-//!   owed the reason.
+//!   stays operable while listening. An excluded control is not being refused — it is busy doing
+//!   its normal job, which is how the key that cancels a capture gets through to cancel it.
+//! - **A reading nobody chose.** A stick at rest is not quite at rest and a hand on the desk moves
+//!   the mouse, so a session listening for a button ignores a deflection past [`DEFLECTION`] or a
+//!   twitch past [`MOUSE_MOTION`]. A session listening for that kind of control takes it, because
+//!   for a stick row the deflection *is* the answer.
 
 use alloc::vec::Vec;
 
@@ -225,10 +227,7 @@ impl ReservedControls {
 /// entity and removes the component. Remove it yourself to cancel.
 #[derive(Component, Clone, Debug)]
 pub struct CaptureSession {
-    mapping: Option<MappingKey>,
-    slot: usize,
     accepts: ControlClass,
-    family: Option<DeviceFamily>,
     excluded: Vec<Control>,
     // `false` until the session has seen one run of the capture system. Arming costs a frame and
     // buys the thing this would otherwise get wrong every time: the press that opened the capture
@@ -236,65 +235,38 @@ pub struct CaptureSession {
     // would bind whichever key the player activated the row with.
     armed: bool,
     cursor: Option<FrameTimestamp>,
+    // The control the player is holding down, which the capture will answer with once they let go.
+    // A claim is an instant and a held control is a level, so a session that answered on the press
+    // and vanished would leave the control down with nothing claiming it — and the game underneath
+    // would read it on the very next frame. Holding it here is what lets the claim last as long as
+    // the press does.
+    pending: Option<Control>,
 }
 
 impl CaptureSession {
-    /// Listens for a control for this mapping's first slot.
+    /// Listens for a control this mapping could hold.
     ///
-    /// Takes the shape and the family from the mapping, which is what makes a keyboard row accept a
-    /// key and not a gamepad button, and a stick row accept a stick pushed whole rather than one of
-    /// its axes.
+    /// Takes the shape from the mapping, which is what makes a stick row accept a stick pushed
+    /// whole rather than one of its axes, and what keeps a drifting pad from answering a button
+    /// row.
     ///
-    /// A mapping holds a list of slots, and this addresses the front of it — the "primary" column
-    /// of a table with more than one. Use [`for_slot`](Self::for_slot) for the others.
-    pub fn for_mapping(mapping: &ActionMapping) -> Option<Self> {
-        Self::for_slot(mapping, 0)
-    }
-
-    /// Listens for a control for one numbered slot of this mapping.
-    ///
-    /// A mapping holds an ordered list of slots, and a "primary and secondary" table is that list
-    /// drawn as columns — so which slot the player activated is what a capture has to carry, or the
-    /// answer has nowhere to go but the front of the row.
-    ///
-    /// Any slot number is addressable, whether the row reaches that far yet or not: the row grows
-    /// to fit, and the slots skipped on the way are left empty. Writing to the third cell of a row
-    /// holding one control gives a row of three, the middle one blank — so a screen can offer
-    /// whatever cells it draws without first checking how long the row happens to be.
-    ///
-    /// Returns `None` only for a mapping the player may not change at all — see
-    /// [`RebindPolicy`](crate::mapping::RebindPolicy).
-    pub fn for_slot(mapping: &ActionMapping, slot: usize) -> Option<Self> {
-        // A mapping the player cannot change has nothing to capture *for*. It is on the screen so
-        // they can read it, and a screen that asked anyway would be offering a rebind it could not
-        // then apply.
-        if !mapping.rebind_policy.is_rebindable() {
-            return None;
-        }
-        Some(Self {
-            mapping: Some(mapping.key),
-            slot,
-            ..Self::accepting(ControlClass::of(mapping.accepts)).within(mapping.family)
-        })
+    /// Where the answer *goes* is the screen's to track. A mapping holds an ordered list of slots
+    /// and a "primary and secondary" table is that list drawn as columns, so which row and which
+    /// cell a capture is for is whatever the screen put on the entity it listens on — the answer
+    /// comes back there.
+    pub fn for_mapping(mapping: &ActionMapping) -> Self {
+        Self::accepting(ControlClass::of(mapping.accepts))
     }
 
     /// Listens for any control of a class, without a mapping in mind.
     pub fn accepting(class: ControlClass) -> Self {
         Self {
-            mapping: None,
-            slot: 0,
             accepts: class,
-            family: None,
             excluded: Vec::new(),
             armed: false,
             cursor: None,
+            pending: None,
         }
-    }
-
-    /// Restricts capture to one control family.
-    pub fn within(mut self, family: DeviceFamily) -> Self {
-        self.family = Some(family);
-        self
     }
 
     /// Ignores these controls entirely, so they keep doing whatever they normally do.
@@ -307,24 +279,9 @@ impl CaptureSession {
         self
     }
 
-    /// The mapping this capture is for, if it was made for one.
-    pub fn mapping(&self) -> Option<MappingKey> {
-        self.mapping
-    }
-
-    /// Which slot of that mapping it is for. Zero for a session made without a mapping.
-    pub fn slot(&self) -> usize {
-        self.slot
-    }
-
     /// The class of control it will take.
     pub fn accepts(&self) -> ControlClass {
         self.accepts
-    }
-
-    /// The family it is restricted to, if any.
-    pub fn family(&self) -> Option<DeviceFamily> {
-        self.family
     }
 
     /// The controls it ignores.
@@ -344,9 +301,9 @@ impl CaptureSession {
 
 /// Whether a control may fill a slot that takes `accepts`, and if not, why not.
 ///
-/// The same three questions arrive from two directions — a press at a rebinding screen, and a row
-/// in a save file — and one control must get one answer either way. `family` is `None` for a
-/// capture not restricted to one.
+/// Asked once, where a row is stored, so a control pressed at a rebinding screen and the same
+/// control loaded from a save file cannot get different answers. `family` is `None` where a row is
+/// not scoped to one.
 ///
 /// The order is the order the reasons come in, and reserved is asked before shape so that pressing
 /// the settings key is answered with the reason it cannot be bound rather than with a complaint
@@ -371,44 +328,28 @@ pub(crate) fn admissible(
 
 /// The player chose a control.
 ///
-/// Fired on the entity that carried the [`CaptureSession`], which is then removed. Nothing has been
-/// rebound: this reports what was chosen, and what to do about it — including what it clashes with,
-/// via [`conflicts`] — is the caller's.
+/// Fired on the entity that carried the [`CaptureSession`], which is then removed — so which row
+/// and cell this answers is whatever the screen put on that entity. One press, one answer: the
+/// session ends whether or not the control turns out to be one the row may hold.
+///
+/// Nothing has been rebound. Whether the control may go where the screen means to put it is
+/// [`Rebind::checked`](crate::overrides::Rebind::checked), and what it clashes with is
+/// [`conflicts`].
 #[derive(EntityEvent, Clone, Debug)]
 pub struct ControlCaptured {
     /// The entity whose capture this was.
     pub entity: Entity,
-    /// The mapping it was for, if it was made for one.
-    pub mapping: Option<MappingKey>,
-    /// Which slot of that mapping the control belongs in.
-    ///
-    /// Zero unless the session named another, which is what a "primary and secondary" table does.
-    /// See [`CaptureSession::for_slot`].
-    pub slot: usize,
     /// The control the player chose.
     pub control: Control,
 }
 
-/// The player pressed something capture will not take, and deserves to be told why.
+/// Why a control may not fill a slot.
 ///
-/// Fired for a deliberate press only. A stick drifting or a mouse twitching past its threshold is
-/// dropped silently, because a screen that complained about every one of those would do nothing
-/// else. The session stays: the player can try again.
-#[derive(EntityEvent, Clone, Debug)]
-pub struct CaptureRefused {
-    /// The entity whose capture this is.
-    pub entity: Entity,
-    /// The mapping it is for, if it was made for one.
-    pub mapping: Option<MappingKey>,
-    /// The control that was refused.
-    pub control: Control,
-    /// Why it was refused.
-    pub reason: RefusedReason,
-}
-
-/// Why capture would not take a control.
+/// Internal: [`OverrideProblemKind`](crate::overrides::OverrideProblemKind) is what a caller sees,
+/// and it says more — a row past the ceiling, a chord entry nobody can hold, a row the player may
+/// not change at all.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RefusedReason {
+pub(crate) enum RefusedReason {
     /// It reports on a channel the mapping's action cannot use.
     Shape,
     /// It belongs to a different device family than the one being rebound.
@@ -550,12 +491,16 @@ fn holds(mapping: &ActionMapping, pending: Option<&Overrides>, candidate: &Bound
         .any(|slot| slot.clashes_with(candidate))
 }
 
-/// One control arriving, and whether the player meant it.
+/// One control arriving, and what kind of arrival it is.
 struct Arrival {
     control: Control,
-    /// True for a press, false for a continuous reading that crossed its threshold. Only a
-    /// deliberate arrival is worth refusing out loud.
+    /// True for a press, false for a continuous reading that crossed its threshold. A reading
+    /// nobody chose only answers a session listening for that class.
     deliberate: bool,
+    /// Whether the control is still down once this event has been read, so the capture has to wait
+    /// for it to come up. True of everything with a resting position; false of the mouse's motion,
+    /// which is a displacement that has already finished and is never "held".
+    holds: bool,
 }
 
 /// Turns one raw event into the control a player would say they just used, if any.
@@ -573,24 +518,29 @@ fn arrival(
     let _ = (threshold, accepts);
 
     match event {
-        // Presses only. Capturing on release would let go of a key the player is still holding, and
-        // `repeat` would bind the same key several times over while they waited.
+        // The press is what latches; `releases` below is what ends the capture. `repeat` is
+        // neither, and must not read as a second press of a key already latched.
         #[cfg(feature = "keyboard")]
         RawEvent::Keyboard(key) => (key.state == bevy_input::ButtonState::Pressed && !key.repeat)
             .then_some(Arrival {
                 control: Control::PhysicalKey(key.key_code),
                 deliberate: true,
+                holds: true,
             }),
-        // A press, like a key: the player meant it, so refusing one is worth saying out loud.
+        // A press, like a key: the player meant it.
         #[cfg(feature = "mouse")]
         RawEvent::MouseButton(button) => (button.state == bevy_input::ButtonState::Pressed)
             .then_some(Arrival {
                 control: Control::MouseButton(button.button),
                 deliberate: true,
+                holds: true,
             }),
         RawEvent::MouseMotion(delta) => (delta.length() >= MOUSE_MOTION).then_some(Arrival {
             control: Control::MouseMotion,
             deliberate: false,
+            // The one control with nothing to wait for: a motion is a displacement that has already
+            // happened, so there is no level left for the game underneath to read.
+            holds: false,
         }),
         #[cfg(feature = "gamepad")]
         RawEvent::Gamepad(event) => match event {
@@ -600,6 +550,7 @@ fn arrival(
                 threshold.pressed(button.value, false).then_some(Arrival {
                     control: Control::GamepadButton(button.button),
                     deliberate: true,
+                    holds: true,
                 })
             }
             bevy_input::gamepad::RawGamepadEvent::Axis(axis) => (axis.value.abs() >= DEFLECTION)
@@ -611,6 +562,7 @@ fn arrival(
                     Arrival {
                         control,
                         deliberate: false,
+                        holds: true,
                     }
                 }),
             bevy_input::gamepad::RawGamepadEvent::Connection(_) => None,
@@ -621,34 +573,48 @@ fn arrival(
     }
 }
 
-/// Says so when a screen opens a capture for a slot its own [`MaxSlots`] would then refuse.
+/// Whether this event says the control a session latched has come back up.
 ///
-/// Filling slot `n` makes the row at least `n + 1` long, so the slot number alone settles it and
-/// nothing has to look the row up. The capture still runs and the control is still captured; it is
-/// [`apply_overrides`](crate::overrides::apply_overrides) that turns the row down, and this is the
-/// line that says why before the player finds out by pressing something.
-///
-/// A game that set no ceiling has no cell this could be wrong about, so the observer costs it one
-/// absent-resource check per session.
-pub(crate) fn warn_if_past_the_ceiling(
-    session: bevy_ecs::prelude::On<'_, '_, bevy_ecs::lifecycle::Insert<CaptureSession>>,
-    sessions: Query<'_, '_, &CaptureSession>,
-    max_slots: Option<Res<'_, crate::overrides::MaxSlots>>,
-) {
-    let Some(max) = max_slots else {
-        return;
-    };
-    let Ok(started) = sessions.get(session.entity) else {
-        return;
-    };
-    if started.slot >= max.0 {
-        bevy_utils::once!(log::warn!(
-            "a capture was opened for slot {} of a row, but `MaxSlots` is {} — the control will be \
-             captured and then refused when the override set is applied. The screen is offering a \
-             cell past the ceiling the game set",
-            started.slot,
-            max.0
-        ));
+/// The mirror of [`arrival`], and written out rather than derived from it: a key `repeat` is not an
+/// arrival either, and reading one as a release would answer the capture while the player still had
+/// the key down — which is the whole thing the wait exists to prevent.
+fn releases(event: &RawEvent, control: Control, threshold: &ButtonThreshold) -> bool {
+    #[cfg(not(feature = "gamepad"))]
+    let _ = threshold;
+
+    match (event, control) {
+        #[cfg(feature = "keyboard")]
+        (RawEvent::Keyboard(key), Control::PhysicalKey(code)) => {
+            key.key_code == code && key.state == bevy_input::ButtonState::Released
+        }
+        #[cfg(feature = "mouse")]
+        (RawEvent::MouseButton(button), Control::MouseButton(which)) => {
+            button.button == which && button.state == bevy_input::ButtonState::Released
+        }
+        #[cfg(feature = "gamepad")]
+        (RawEvent::Gamepad(event), control) => match (event, control) {
+            (
+                bevy_input::gamepad::RawGamepadEvent::Button(button),
+                Control::GamepadButton(which),
+            ) => button.button == which && !threshold.pressed(button.value, true),
+            (bevy_input::gamepad::RawGamepadEvent::Axis(axis), Control::GamepadAxis(which)) => {
+                axis.axis == which && axis.value.abs() < DEFLECTION
+            }
+            // A stick is two axes and this watches whichever one reports. Letting go of one while
+            // still holding the other ends the capture early, which costs nothing: the answer was
+            // the stick either way, and the axis still deflected is claimed for that one frame.
+            (bevy_input::gamepad::RawGamepadEvent::Axis(axis), Control::GamepadStick(stick)) => {
+                crate::binding::Stick::containing(axis.axis) == Some(stick)
+                    && axis.value.abs() < DEFLECTION
+            }
+            _ => false,
+        },
+        // Every control comes up when the window stops hearing them, and the evaluator clears its
+        // held state to match. A session that kept waiting would never see the release, because it
+        // is going to another window.
+        #[cfg(any(feature = "keyboard", feature = "mouse"))]
+        (RawEvent::FocusLost, _) => true,
+        _ => false,
     }
 }
 
@@ -660,19 +626,24 @@ pub fn run_captures(
     mut commands: Commands<'_, '_>,
     frame: Res<'_, InputFrame>,
     threshold: Res<'_, ButtonThreshold>,
-    reserved: Res<'_, ReservedControls>,
     mut consumed: ResMut<'_, crate::eval::ConsumedControls>,
     mut sessions: Query<'_, '_, (Entity, &mut CaptureSession, Option<&crate::player::Paired>)>,
 ) {
     for (entity, mut session, pairing) in &mut sessions {
         // A rebinding row on one player's pane answers to that player's devices only, or to every
-        // device when nothing paired it. The session's own `family` names a kind of device, not
-        // one.
+        // device when nothing paired it.
         let devices = pairing.map(|paired| &**paired);
         if !session.armed {
             session.armed = true;
             session.cursor = frame.latest();
             continue;
+        }
+
+        // Re-claimed every frame for as long as the player holds it, which is the point of holding
+        // it at all: the claim has to last as long as the press, or the game underneath reads the
+        // control the moment this session stops claiming it.
+        if let Some(pending) = session.pending {
+            consumed.claim_for_capture(pending, devices);
         }
 
         for event in frame.events_after(session.cursor) {
@@ -683,56 +654,62 @@ pub fn run_captures(
                 continue;
             }
 
+            // Waiting on a control: the only thing worth reading is that control coming up.
+            // Everything else the player does meanwhile is ignored rather than latched, so a second
+            // press cannot change the answer out from under the first.
+            if let Some(pending) = session.pending {
+                if !releases(&event.event, pending, &threshold) {
+                    continue;
+                }
+                answer(&mut commands, entity, pending);
+                break;
+            }
+
             let Some(arrival) = arrival(&event.event, &threshold, session.accepts) else {
                 continue;
             };
 
-            // Asked before admissibility, and unconditionally: an excluded control is not capture's
-            // business at all.
+            // Unconditional, and asked first: an excluded control is not capture's business at all.
             if session.excluded.contains(&arrival.control) {
                 continue;
             }
 
-            if let Err(reason) = admissible(
-                arrival.control,
-                session.family,
-                session.accepts,
-                reserved.contains(arrival.control),
-            ) {
-                // Claimed even though it was refused: the player pressed it at a rebinding screen,
-                // and whatever it would otherwise have done is not what they meant.
-                consumed.claim_for_capture(arrival.control, devices);
-                if arrival.deliberate {
-                    commands.trigger(CaptureRefused {
-                        entity,
-                        mapping: session.mapping,
-                        control: arrival.control,
-                        reason,
-                    });
-                }
+            // A reading nobody chose only answers a session that wants that kind of control. For a
+            // stick row the deflection *is* the answer; for a button row it is a pad on a desk, and
+            // a capture that ended on it would cancel itself before the player touched anything.
+            //
+            // A deliberate press answers whatever the session is, admissible or not: one press, one
+            // answer, and `Rebind::checked` is where the screen finds out which.
+            if !arrival.deliberate && !session.accepts.contains(arrival.control) {
                 continue;
             }
 
+            // Claimed whether or not the row can hold it: the player pressed this at a rebinding
+            // screen, and whatever it would otherwise have done is not what they meant.
             consumed.claim_for_capture(arrival.control, devices);
-            // Removed *before* the event, and both halves of that matter. An observer is entitled
-            // to do anything to this entity, despawning it included — a settings row that closes on
-            // being answered is an ordinary thing to write — so the crate must have finished with
-            // the entity before it hands it over. It also means the observer sees the component
-            // already gone, so "is this row still listening" reads the same from inside the
-            // observer as from anywhere else.
-            //
-            // Fallible because one run can answer several sessions, and the first observer to run
-            // may despawn a later one's entity.
-            commands.entity(entity).try_remove::<CaptureSession>();
-            commands.trigger(ControlCaptured {
-                entity,
-                mapping: session.mapping,
-                slot: session.slot,
-                control: arrival.control,
-            });
+            if arrival.holds {
+                session.pending = Some(arrival.control);
+                continue;
+            }
+            answer(&mut commands, entity, arrival.control);
             break;
         }
     }
+}
+
+/// Hands one session's answer over and takes the session away.
+///
+/// Removed *before* the event, and both halves of that matter. An observer is entitled to do
+/// anything to this entity, despawning it included — a settings row that closes on being answered
+/// is an ordinary thing to write — so the crate must have finished with the entity before it hands
+/// it over. It also means the observer sees the component already gone, so "is this row still
+/// listening" reads the same from inside the observer as from anywhere else.
+///
+/// Fallible because one run can answer several sessions, and the first observer to run may despawn
+/// a later one's entity.
+fn answer(commands: &mut Commands<'_, '_>, entity: Entity, control: Control) {
+    commands.entity(entity).try_remove::<CaptureSession>();
+    commands.trigger(ControlCaptured { entity, control });
 }
 
 // No test here spawns an instance of the context being rebound, except where one is the point:
@@ -777,13 +754,10 @@ mod tests {
     #[context(path = "capture_tests.menu", tick = Render)]
     struct Menu;
 
-    /// Everything a captured or refused control was reported as, in order.
+    /// Every control a capture reported, in order.
     #[derive(Resource, Default)]
     struct Heard {
         captured: Vec<Control>,
-        slots: Vec<usize>,
-        rows: Vec<Option<MappingKey>>,
-        refused: Vec<(Control, RefusedReason)>,
     }
 
     fn app() -> App {
@@ -792,11 +766,6 @@ mod tests {
         app.init_resource::<Heard>();
         app.add_observer(|event: On<ControlCaptured>, mut heard: ResMut<'_, Heard>| {
             heard.captured.push(event.control);
-            heard.slots.push(event.slot);
-            heard.rows.push(event.mapping);
-        });
-        app.add_observer(|event: On<CaptureRefused>, mut heard: ResMut<'_, Heard>| {
-            heard.refused.push((event.control, event.reason));
         });
         app.add_context::<OnFoot>(|controls| {
             controls
@@ -834,6 +803,47 @@ mod tests {
             .write_message(key_event(code, ButtonState::Pressed));
     }
 
+    fn release(app: &mut App, code: KeyCode) {
+        app.world_mut()
+            .write_message(key_event(code, ButtonState::Released));
+    }
+
+    /// A whole keystroke: down, a frame, up, a frame. A capture answers on the release, so a test
+    /// that only presses is a test of a capture still waiting.
+    fn tap(app: &mut App, code: KeyCode) {
+        press(app, code);
+        app.update();
+        release(app, code);
+        app.update();
+    }
+
+    /// The same, for a gamepad button: to full deflection and back to rest.
+    #[cfg(feature = "gamepad")]
+    fn tap_pad(app: &mut App, pad: Entity, button: bevy_input::gamepad::GamepadButton) {
+        use bevy_input::gamepad::{RawGamepadButtonChangedEvent, RawGamepadEvent};
+
+        for value in [1.0, 0.0] {
+            app.world_mut().write_message(RawGamepadEvent::Button(
+                RawGamepadButtonChangedEvent::new(pad, button, value),
+            ));
+            app.update();
+        }
+    }
+
+    /// The same, for a stick axis: past [`DEFLECTION`] and back to centre.
+    #[cfg(feature = "gamepad")]
+    fn push_axis(app: &mut App, pad: Entity, axis: bevy_input::gamepad::GamepadAxis, to: f32) {
+        use bevy_input::gamepad::{RawGamepadAxisChangedEvent, RawGamepadEvent};
+
+        for value in [to, 0.0] {
+            app.world_mut()
+                .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
+                    pad, axis, value,
+                )));
+            app.update();
+        }
+    }
+
     fn mapping(app: &App, key: &str) -> ActionMapping {
         crate::mapping::mappings(app.world())
             .into_iter()
@@ -849,20 +859,27 @@ mod tests {
         let target = mapping(&app, "capture_tests.move.up");
         let row = app
             .world_mut()
-            .spawn(CaptureSession::for_mapping(&target).expect("a button mapping"))
+            .spawn(CaptureSession::for_mapping(&target))
             .id();
 
         // The arming frame takes no control, which is what stops it binding the key the player
         // opened the row with.
-        press(&mut app, KeyCode::Enter);
-        app.update();
+        tap(&mut app, KeyCode::Enter);
         assert!(app.world().resource::<Heard>().captured.is_empty());
         assert!(
             app.world().get::<CaptureSession>(row).is_some(),
             "still listening"
         );
 
+        // Held is not yet answered: the capture waits for the key to come up, so that the control
+        // is no longer down when this session stops claiming it.
         press(&mut app, KeyCode::KeyT);
+        app.update();
+        assert!(
+            app.world().resource::<Heard>().captured.is_empty(),
+            "still held"
+        );
+        release(&mut app, KeyCode::KeyT);
         app.update();
         assert_eq!(
             app.world().resource::<Heard>().captured,
@@ -881,8 +898,7 @@ mod tests {
         app.world_mut()
             .entity_mut(cancelled)
             .remove::<CaptureSession>();
-        press(&mut app, KeyCode::KeyM);
-        app.update();
+        tap(&mut app, KeyCode::KeyM);
         assert_eq!(
             app.world().resource::<Heard>().captured.len(),
             1,
@@ -925,8 +941,7 @@ mod tests {
             .spawn(CaptureSession::accepting(ControlClass::AnyButton))
             .id();
         app.update();
-        press(&mut app, KeyCode::KeyP);
-        app.update();
+        tap(&mut app, KeyCode::KeyP);
 
         assert_eq!(
             app.world().resource::<StillListening>().0,
@@ -953,8 +968,7 @@ mod tests {
             .id();
         app.update();
 
-        press(&mut app, KeyCode::KeyN);
-        app.update();
+        tap(&mut app, KeyCode::KeyN);
 
         assert_eq!(
             app.world().resource::<Heard>().captured,
@@ -998,7 +1012,6 @@ mod tests {
             app.update();
             let heard = app.world().resource::<Heard>();
             assert!(heard.captured.is_empty(), "{what} was captured");
-            assert!(heard.refused.is_empty(), "{what} was refused");
         }
 
         #[cfg(feature = "mouse")]
@@ -1012,12 +1025,10 @@ mod tests {
             app.update();
             let heard = app.world().resource::<Heard>();
             assert!(heard.captured.is_empty(), "a mouse button release");
-            assert!(heard.refused.is_empty(), "a mouse button release");
         }
 
         // And the session is still listening through all of it.
-        press(&mut app, KeyCode::KeyY);
-        app.update();
+        tap(&mut app, KeyCode::KeyY);
         assert_eq!(
             app.world().resource::<Heard>().captured,
             [Control::PhysicalKey(KeyCode::KeyY)]
@@ -1037,14 +1048,16 @@ mod tests {
         let target = mapping(&clicking, "capture_tests.jump");
         clicking
             .world_mut()
-            .spawn(CaptureSession::for_mapping(&target).expect("a button mapping"));
+            .spawn(CaptureSession::for_mapping(&target));
         clicking.update();
-        clicking.world_mut().write_message(MouseButtonInput {
-            button: MouseButton::Left,
-            state: ButtonState::Pressed,
-            window: Entity::PLACEHOLDER,
-        });
-        clicking.update();
+        for state in [ButtonState::Pressed, ButtonState::Released] {
+            clicking.world_mut().write_message(MouseButtonInput {
+                button: MouseButton::Left,
+                state,
+                window: Entity::PLACEHOLDER,
+            });
+            clicking.update();
+        }
         assert_eq!(
             clicking.world().resource::<Heard>().captured,
             [Control::MouseButton(MouseButton::Left)]
@@ -1075,64 +1088,157 @@ mod tests {
         );
     }
 
-    /// A control refusable twice over gets the reason it is owed. The order is checked on the
-    /// predicate as well, because a saved file is answered from the same rule and the two must not
-    /// disagree.
+    /// One press, one answer. A deliberate press ends the capture whether or not the row can hold
+    /// it, and the reason comes from the one place that decides: the row being stored.
+    ///
+    /// The control is still claimed, which is the half that matters for a reserved one — a player
+    /// who presses the settings key at a rebinding screen must not open the settings screen.
     #[test]
-    fn a_refusal_names_its_reason_and_leaves_the_session_listening() {
-        assert_eq!(
-            admissible(
-                Control::PhysicalKey(KeyCode::F1),
-                None,
-                ControlClass::AnyAxis,
-                true
-            ),
-            Err(RefusedReason::Reserved),
-            "reserved is answered before shape"
-        );
+    fn a_press_the_row_cannot_hold_still_ends_the_capture() {
+        use crate::overrides::{OverrideProblemKind, Overrides, Rebind};
 
         let mut app = app();
-        let target = mapping(&app, "capture_tests.jump");
-        app.world_mut()
-            .spawn(CaptureSession::for_mapping(&target).expect("a button mapping"));
+        let jump = mapping(&app, "capture_tests.jump");
+        let row = app
+            .world_mut()
+            .spawn(CaptureSession::for_mapping(&jump))
+            .id();
         app.update();
 
-        // Reserving would be worth little if the screen key merely had no mapping of its own —
-        // anything else could still be bound over the top of it.
-        press(&mut app, KeyCode::F1);
-        app.update();
-        assert!(app.world().resource::<Heard>().captured.is_empty());
+        // `F1` opens the settings screen, so nothing may be bound over it.
+        tap(&mut app, KeyCode::F1);
         assert_eq!(
-            app.world().resource::<Heard>().refused,
-            [(Control::PhysicalKey(KeyCode::F1), RefusedReason::Reserved)]
+            app.world().resource::<Heard>().captured,
+            [Control::PhysicalKey(KeyCode::F1)],
+            "reported rather than swallowed"
+        );
+        assert!(
+            app.world().get::<CaptureSession>(row).is_none(),
+            "and the capture is over: the screen answers, not the crate"
         );
 
-        // A mapping is rebound within its family, so the pad cannot answer for the keyboard.
+        let pending = Overrides::new();
+        let slots = pending.with_cell(&jump, 0, Control::PhysicalKey(KeyCode::F1));
+        assert_eq!(
+            Rebind::checked(app.world(), &jump, slots).err(),
+            Some(OverrideProblemKind::Reserved {
+                control: Control::PhysicalKey(KeyCode::F1)
+            }),
+            "reserved is answered before shape, so the player hears why rather than about a channel"
+        );
+
+        // A mapping is rebound within its family, so the pad cannot answer for the keyboard — and
+        // that is the store's judgement now, not the session's.
         #[cfg(feature = "gamepad")]
         {
-            use bevy_input::gamepad::{GamepadButton, RawGamepadButtonChangedEvent};
+            use bevy_input::gamepad::GamepadButton;
 
-            app.world_mut()
-                .write_message(bevy_input::gamepad::RawGamepadEvent::Button(
-                    RawGamepadButtonChangedEvent::new(
-                        Entity::PLACEHOLDER,
-                        GamepadButton::South,
-                        1.0,
-                    ),
-                ));
+            let row = app
+                .world_mut()
+                .spawn(CaptureSession::for_mapping(&jump))
+                .id();
             app.update();
+            tap_pad(&mut app, Entity::PLACEHOLDER, GamepadButton::South);
+            assert!(app.world().get::<CaptureSession>(row).is_none());
+
+            let pad = Control::GamepadButton(GamepadButton::South);
+            let slots = pending.with_cell(&jump, 0, pad);
             assert_eq!(
-                app.world().resource::<Heard>().refused[1],
-                (
-                    Control::GamepadButton(GamepadButton::South),
-                    RefusedReason::Family
-                )
+                Rebind::checked(app.world(), &jump, slots).err(),
+                Some(OverrideProblemKind::WrongFamily { control: pad })
             );
         }
+    }
 
-        // Refused, not cancelled: the player can pick something else.
-        press(&mut app, KeyCode::KeyE);
+    /// A menu whose own navigation is bound to the keys being rebound: the case a settings screen
+    /// operable from the keyboard always has, and the one an instant claim got wrong.
+    ///
+    /// The press frame was never the problem. The frame *after* it was: the key is still in the
+    /// evaluator's held set, and a session that had answered and gone left nothing claiming it, so
+    /// `on_change` saw the direction appear and the table moved under the player.
+    #[test]
+    fn a_held_control_does_not_act_once_the_capture_has_taken_it() {
+        use crate::event::Fired;
+
+        #[derive(InputAction)]
+        #[action(path = "capture_tests.navigate", output = bevy_math::Vec2, intent = Directional2)]
+        struct Navigate;
+
+        #[derive(InputContext)]
+        #[context(path = "capture_tests.nav_menu", tick = Render)]
+        struct NavMenu;
+
+        #[derive(Resource, Default)]
+        struct Moves(usize);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.init_resource::<Heard>();
+        app.init_resource::<Moves>();
+        app.add_observer(|event: On<ControlCaptured>, mut heard: ResMut<'_, Heard>| {
+            heard.captured.push(event.control);
+        });
+        app.add_observer(|_: On<Fired<Navigate>>, mut moves: ResMut<'_, Moves>| {
+            moves.0 += 1;
+        });
+        app.add_context::<NavMenu>(|controls| {
+            controls.bind::<Navigate>(crate::binding::DirectionalButtons::arrow_keys());
+            controls.combined::<Navigate>().on_change();
+        });
+        app.world_mut().spawn(NavMenu);
+        app.world_mut()
+            .spawn(CaptureSession::accepting(ControlClass::AnyButton));
         app.update();
+
+        press(&mut app, KeyCode::ArrowUp);
+        app.update();
+        // Held for a while, as a player who has not let go yet holds it.
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<Moves>().0, 0, "while it is held");
+
+        release(&mut app, KeyCode::ArrowUp);
+        app.update();
+        assert_eq!(
+            app.world().resource::<Heard>().captured,
+            [Control::PhysicalKey(KeyCode::ArrowUp)]
+        );
+
+        app.update();
+        assert_eq!(
+            app.world().resource::<Moves>().0,
+            0,
+            "and after: the capture took it, so the menu never saw it"
+        );
+    }
+
+    /// A pad on a desk drifts and a hand on a desk moves the mouse, so an arrival nobody chose must
+    /// not end a capture that was not listening for that kind of control. Without this the drifting
+    /// pad cancels every keyboard rebind in the game.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_reading_nobody_chose_leaves_a_button_session_listening() {
+        use bevy_input::gamepad::{GamepadAxis, RawGamepadAxisChangedEvent};
+
+        let mut app = app();
+        let row = app
+            .world_mut()
+            .spawn(CaptureSession::accepting(ControlClass::AnyButton))
+            .id();
+        app.update();
+
+        app.world_mut()
+            .write_message(bevy_input::gamepad::RawGamepadEvent::Axis(
+                RawGamepadAxisChangedEvent::new(Entity::PLACEHOLDER, GamepadAxis::LeftStickX, 1.0),
+            ));
+        app.update();
+        assert!(app.world().resource::<Heard>().captured.is_empty());
+        assert!(
+            app.world().get::<CaptureSession>(row).is_some(),
+            "still listening: the player has not chosen anything yet"
+        );
+
+        tap(&mut app, KeyCode::KeyE);
         assert_eq!(
             app.world().resource::<Heard>().captured,
             [Control::PhysicalKey(KeyCode::KeyE)]
@@ -1164,17 +1270,34 @@ mod tests {
         // Space is Jump's default binding, so an unsuppressed press would fire it.
         press(&mut app, KeyCode::Space);
         app.update();
-
-        assert_eq!(
-            app.world().resource::<Heard>().captured,
-            [Control::PhysicalKey(KeyCode::Space)]
-        );
         assert_eq!(
             app.world()
                 .resource::<crate::eval::ConsumedControls>()
                 .claimant(Control::PhysicalKey(KeyCode::Space), None),
             Some("capture")
         );
+
+        // Still down, and still claimed a frame later. This is the half a claim made only on the
+        // press frame would get wrong: the key stays in the evaluator's held set, so a session that
+        // had already answered and gone would leave it there for the game to read.
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<crate::eval::ConsumedControls>()
+                .claimant(Control::PhysicalKey(KeyCode::Space), None),
+            Some("capture"),
+            "the claim lasts as long as the press"
+        );
+
+        release(&mut app, KeyCode::Space);
+        app.update();
+        assert_eq!(
+            app.world().resource::<Heard>().captured,
+            [Control::PhysicalKey(KeyCode::Space)]
+        );
+
+        // And the frame after the session is gone, with nothing claiming anything.
+        app.update();
         assert_eq!(
             app.world().resource::<Fires>().0,
             0,
@@ -1188,7 +1311,7 @@ mod tests {
     #[test]
     fn a_capture_on_a_gamepad_button_does_not_reach_the_game() {
         use crate::event::Fired;
-        use bevy_input::gamepad::{GamepadButton, RawGamepadButtonChangedEvent};
+        use bevy_input::gamepad::GamepadButton;
 
         #[derive(InputContext)]
         #[context(path = "capture_tests.pad", tick = Render)]
@@ -1213,14 +1336,11 @@ mod tests {
 
         app.world_mut().spawn(Pad);
         let target = &crate::mapping::mappings(app.world())[0];
-        app.world_mut()
-            .spawn(CaptureSession::for_mapping(target).expect("a button mapping"));
+        app.world_mut().spawn(CaptureSession::for_mapping(target));
         app.update();
 
-        app.world_mut()
-            .write_message(bevy_input::gamepad::RawGamepadEvent::Button(
-                RawGamepadButtonChangedEvent::new(Entity::PLACEHOLDER, GamepadButton::South, 1.0),
-            ));
+        tap_pad(&mut app, Entity::PLACEHOLDER, GamepadButton::South);
+        // A frame past the release, where an instant claim would have let the button through.
         app.update();
 
         assert_eq!(
@@ -1267,7 +1387,7 @@ mod tests {
         let session = |app: &mut App, pad| {
             app.world_mut()
                 .spawn((
-                    CaptureSession::for_mapping(&target).expect("a button mapping"),
+                    CaptureSession::for_mapping(&target),
                     Paired::to(DeviceHandle::Gamepad(pad)),
                 ))
                 .id()
@@ -1277,12 +1397,16 @@ mod tests {
         app.update();
 
         // Different buttons, so which row got which press is visible in the answer rather than only
-        // in the order the two arrived.
-        for (pad, button) in [(pad_a, GamepadButton::East), (pad_b, GamepadButton::North)] {
-            app.world_mut()
-                .write_message(bevy_input::gamepad::RawGamepadEvent::Button(
-                    RawGamepadButtonChangedEvent::new(pad, button, 1.0),
-                ));
+        // in the order the two arrived. Both pressed together and both released together, since the
+        // answer comes on the release.
+        for value in [1.0, 0.0] {
+            for (pad, button) in [(pad_a, GamepadButton::East), (pad_b, GamepadButton::North)] {
+                app.world_mut()
+                    .write_message(bevy_input::gamepad::RawGamepadEvent::Button(
+                        RawGamepadButtonChangedEvent::new(pad, button, value),
+                    ));
+            }
+            app.update();
         }
         app.update();
 
@@ -1296,46 +1420,32 @@ mod tests {
         assert_eq!(filled, expected, "each pane took its own player's press");
     }
 
-    /// A capture says which slot it fills, and a slot is addressed rather than appended: a screen
-    /// offers whatever cells it draws without first asking how long the row happens to be.
+    /// A fixed row is capturable, because a capture no longer decides where its answer goes. What
+    /// used to be a `None` from the constructor is now an answer from the store, and it says more:
+    /// the constructor could only refuse the whole row, and this names the row it refused.
     #[test]
-    fn a_row_is_addressed_by_slot() {
+    fn a_fixed_row_captures_and_the_store_turns_it_down() {
+        use crate::overrides::{OverrideProblemKind, Overrides, Rebind};
+
         let mut app = app();
-        let jump = mapping(&app, "capture_tests.jump");
-        assert_eq!(jump.slots.len(), 1, "one default");
-
-        // What a single-column table gets without asking.
-        assert_eq!(
-            CaptureSession::for_mapping(&jump)
-                .expect("a button mapping")
-                .slot(),
-            0
-        );
-        assert!(CaptureSession::for_slot(&jump, 1).is_some(), "the next one");
-        assert!(
-            CaptureSession::for_slot(&jump, 4).is_some(),
-            "and one well past the end: the row grows to reach it"
-        );
-
-        // A row the player may not change has nothing to capture for, at any slot — the one rule
-        // left.
         let settings = mapping(&app, "capture_tests.settings");
         assert!(!settings.rebind_policy.is_rebindable());
-        assert!(CaptureSession::for_slot(&settings, 0).is_none());
 
-        // And the slot the session was made for is what reaches the observer.
         app.world_mut()
-            .spawn(CaptureSession::for_slot(&jump, 1).expect("the empty second slot"));
+            .spawn(CaptureSession::for_mapping(&settings));
         app.update();
-        press(&mut app, KeyCode::KeyK);
-        app.update();
+        tap(&mut app, KeyCode::KeyK);
+        assert_eq!(
+            app.world().resource::<Heard>().captured,
+            [Control::PhysicalKey(KeyCode::KeyK)],
+            "the session was made and it answered"
+        );
 
-        let heard = app.world().resource::<Heard>();
-        assert_eq!(heard.captured, [Control::PhysicalKey(KeyCode::KeyK)]);
-        assert_eq!(heard.slots, [1]);
-        // The row travels with the slot: without it a screen knows which column was filled and not
-        // which line of the table it belongs to.
-        assert_eq!(heard.rows, [Some(jump.key)]);
+        let slots = Overrides::new().with_cell(&settings, 0, Control::PhysicalKey(KeyCode::KeyK));
+        assert_eq!(
+            Rebind::checked(app.world(), &settings, slots).err(),
+            Some(OverrideProblemKind::NotRebindable)
+        );
     }
 
     /// A row holds a list, so *any* slot of it holding the control is a clash — a secondary binding
@@ -1580,9 +1690,6 @@ mod tests {
         app.add_observer(|event: On<ControlCaptured>, mut heard: ResMut<'_, Heard>| {
             heard.captured.push(event.control);
         });
-        app.add_observer(|event: On<CaptureRefused>, mut heard: ResMut<'_, Heard>| {
-            heard.refused.push((event.control, event.reason));
-        });
         app.add_context::<WithStick>(|controls| {
             controls
                 .bind::<Move>(crate::binding::Stick::Left)
@@ -1591,8 +1698,7 @@ mod tests {
 
         let target = &crate::mapping::mappings(app.world())[0];
         assert_eq!(target.accepts, ChannelShape::Axis2);
-        app.world_mut()
-            .spawn(CaptureSession::for_mapping(target).expect("a stick mapping"));
+        app.world_mut().spawn(CaptureSession::for_mapping(target));
         app.update();
 
         app.world_mut()
@@ -1602,13 +1708,10 @@ mod tests {
         app.update();
         let heard = app.world().resource::<Heard>();
         assert!(heard.captured.is_empty(), "a trigger is not this stick");
-        assert!(heard.refused.is_empty(), "and is not complained about");
 
-        app.world_mut()
-            .write_message(bevy_input::gamepad::RawGamepadEvent::Axis(
-                RawGamepadAxisChangedEvent::new(Entity::PLACEHOLDER, GamepadAxis::LeftStickX, 0.8),
-            ));
-        app.update();
+        // Pushed, then let go: a deflected stick is as held as a pressed button, so the answer
+        // comes when it returns to centre.
+        push_axis(&mut app, Entity::PLACEHOLDER, GamepadAxis::LeftStickX, 0.8);
         assert_eq!(
             app.world().resource::<Heard>().captured,
             [Control::GamepadStick(crate::binding::Stick::Left)]

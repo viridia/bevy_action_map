@@ -33,7 +33,9 @@ use bevy::ui::UiSystems;
 use bevy::ui::auto_directional_navigation::AutoDirectionalNavigator;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_action_map::mapping::{Tunable, TunableValue, fallback_label, tunables};
-use bevy_action_map::overrides::{Overrides, apply_overrides_with_preset};
+use bevy_action_map::overrides::{
+    OverrideProblemKind, Overrides, Rebind, apply_overrides_with_preset,
+};
 use bevy_action_map::prelude::*;
 use bevy_action_map::preset::Preset;
 use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
@@ -65,6 +67,9 @@ const LISTENING: Color = Color::srgb(0.4, 0.28, 0.05);
 /// The preset currently in effect, drawn distinct from the rest of the row — its own color, since
 /// "selected" and "listening" are not the same fact about a cell.
 const SELECTED: Color = Color::srgb(0.25, 0.55, 0.35);
+/// Why a press did not take. A lighter relative of [`LISTENING`], because it is the same
+/// conversation — the row asked for a control and this is the answer.
+const REFUSED_TEXT: Color = Color::srgb(0.95, 0.72, 0.3);
 
 /// The width of the column holding what a row is called, and of each control column after it.
 const NAME_WIDTH: f32 = 210.0;
@@ -204,6 +209,7 @@ pub fn plugin(app: &mut App) {
     app.init_state::<Settings>();
     app.init_resource::<PendingOverrides>();
     app.init_resource::<AppliedControls>();
+    app.init_resource::<Refusal>();
     // Chained: `show` builds the screen out of the working copy, so it has to see the copy this
     // visit starts from rather than the one the last visit left behind.
     app.add_systems(OnEnter(Settings::Showing), (seed_pending, show).chain());
@@ -217,6 +223,12 @@ pub fn plugin(app: &mut App) {
         PostUpdate,
         redraw_pending
             .run_if(resource_changed::<PendingOverrides>)
+            .before(UiSystems::Prepare),
+    );
+    app.add_systems(
+        PostUpdate,
+        redraw_refusal
+            .run_if(resource_changed::<Refusal>)
             .before(UiSystems::Prepare),
     );
 
@@ -355,10 +367,11 @@ fn clear_cell(
 fn apply_and_close(world: &mut World) {
     let controls = world.resource::<PendingOverrides>().0.clone();
     let (merged, preset_rows) = working_copy(world, &controls);
-    // A refused row is dropped without the screen having shown it as anything but applied, which is
-    // a worse silence than it looks: the cells were drawn from the working copy, so the player saw
-    // the change take. A shipped game says so on screen; this one says so on the console, because
-    // the machinery for a message is a screen of its own and this example is about the bindings.
+    // Nothing a capture wrote can turn up here: `resolve_capture` asks
+    // `Rebind::checked_with_preset` before it stores anything, and turns the press down on screen.
+    // What is left is a row this build no longer agrees with — a saved file naming a control that
+    // has since moved or gone — so the console is the right place for it, since the player cannot
+    // act on it either way.
     for problem in apply_overrides_with_preset(world, &merged, &preset_rows) {
         warn!("`{}` was not applied: {:?}", problem.mapping, problem.kind);
     }
@@ -544,6 +557,16 @@ fn screen(world: &World) -> impl Scene {
                 TextFont { font_size: 13.0_f32 }
                 TextColor(FIXED)
             ]
+            --
+            // Empty until a press is turned down. A line that is always present, rather than one
+            // spawned and despawned, so nothing below it moves when a refusal appears.
+            Text::new("")
+            RefusalLine
+            Node {
+                margin: UiRect::axes(percent(10), px(0))
+            }
+            TextFont { font_size: 13.0_f32 }
+            TextColor(REFUSED_TEXT)
         ]
     }
 }
@@ -1306,7 +1329,7 @@ struct FollowerCell(DeviceFamily, MappingKey, usize, ConditionDescriptor);
 /// works from inside a capture: without this, pressing B here would be captured as this row's new
 /// binding instead of reaching [`back`] and cancelling the capture.
 fn start_capture(activate: On<Activate>, cells: Query<&RebindCell>, mut commands: Commands) {
-    let Ok(&RebindCell(family, key, slot)) = cells.get(activate.entity) else {
+    let Ok(&RebindCell(family, key, _)) = cells.get(activate.entity) else {
         return;
     };
     let entity = activate.entity;
@@ -1317,11 +1340,10 @@ fn start_capture(activate: On<Activate>, cells: Query<&RebindCell>, mut commands
         else {
             return;
         };
-        let Some(session) = CaptureSession::for_slot(&mapping, slot) else {
-            return;
-        };
+        // Whatever the last capture had to say about, the player has moved on from.
+        world.resource_mut::<Refusal>().0 = None;
         world.entity_mut(entity).insert((
-            session.excluding([
+            CaptureSession::for_mapping(&mapping).excluding([
                 Control::PhysicalKey(KeyCode::Escape),
                 Control::GamepadButton(GamepadButton::East),
             ]),
@@ -1371,24 +1393,25 @@ fn resolve_capture(
         return;
     };
     // Conflicts are read against the merged copy, so a control a preset moved onto a row still
-    // counts as taken; the steal itself is written into the captures, since the player made it.
-    let working = pending_copy(world);
+    // counts as taken; the steal itself is written into the captures, since the player made it. The
+    // preset's own rows come back too, because they are what the check below exempts.
+    let controls = world.resource::<PendingOverrides>().0.clone();
+    let (working, preset_rows) = working_copy(world, &controls);
 
-    // The cell the player pressed is the cell that gets it, so the row grows to reach that column
-    // if it has to. This is what lets the second cell be filled on a row whose first one is empty —
-    // the state a steal leaves behind.
-    let mut slots = working.slots_of(&target);
-    if slot >= slots.len() {
-        slots.resize(slot + 1, None);
+    // The cell the player pressed is the cell that gets it, and `with_cell` grows the row to reach
+    // that column if it has to — what lets the second cell be filled on a row whose first one is
+    // empty, the state a steal leaves behind. The new control keeps whatever the cell was held
+    // with, and that whole press is what is stolen from elsewhere.
+    let mut slots = working.with_cell(&target, slot, control);
+    let candidate = slots[slot].clone().expect("the cell just filled");
+
+    // Asked before anything is stolen: a press the row cannot hold must not empty other rows on its
+    // way to being turned down. Nothing below this line can be refused, which is why `confirm` has
+    // no capture of its own left to report.
+    if let Err(problem) = Rebind::checked_with_preset(world, &preset_rows, &target, slots.clone()) {
+        world.resource_mut::<Refusal>().0 = Some(explain(problem));
+        return;
     }
-    // The new control keeps whatever the cell was held with, and that whole press is what is stolen
-    // from elsewhere.
-    let candidate = BoundSlot {
-        control,
-        with: slots[slot]
-            .as_ref()
-            .map_or_else(Vec::new, |filled| filled.with.clone()),
-    };
 
     let mut pending = world.resource_mut::<PendingOverrides>();
     for clash in conflicts_pending(&all, &working, &candidate, Some(key)) {
@@ -1410,6 +1433,53 @@ fn resolve_capture(
     slots[slot] = Some(candidate);
     pending.0.captures.bind(target.family, target.key, slots);
 }
+
+/// What a refused press is called on screen.
+///
+/// Empty for as long as the last thing the player did worked, which is nearly always.
+#[derive(Resource, Default)]
+struct Refusal(Option<String>);
+
+/// A refusal in the words a player can act on, rather than the name of its variant.
+fn explain(problem: OverrideProblemKind) -> String {
+    match problem {
+        OverrideProblemKind::Reserved { control } => format!(
+            "{} is how you reach this screen — it cannot be bound to anything else",
+            control.fallback_label()
+        ),
+        OverrideProblemKind::WrongFamily { control } => format!(
+            "{} is the wrong kind of device for this row",
+            control.fallback_label()
+        ),
+        OverrideProblemKind::WrongShape { control, .. } => format!(
+            "{} is the wrong kind of control for what this does",
+            control.fallback_label()
+        ),
+        OverrideProblemKind::NotRebindable => "this row is not one the game lets you change".into(),
+        OverrideProblemKind::TooManyControls { limit, .. } => {
+            format!("a row holds at most {limit} controls")
+        }
+        // The rest cannot arise from a single captured press: they are what a *saved file* can be
+        // wrong about, and the screen renders the variant name rather than inventing a sentence for
+        // a case a player cannot reach.
+        other => format!("{other:?}"),
+    }
+}
+
+/// Paints whatever [`Refusal`] currently says, and blanks the line when it is clear.
+///
+/// The line exists only while the screen is up, and the resource changes when it is inserted at
+/// startup and again when a capture clears it — so "no line to paint" is the ordinary case here,
+/// not a failure.
+fn redraw_refusal(refusal: Res<Refusal>, mut text: Query<&mut Text, With<RefusalLine>>) {
+    if let Ok(mut text) = text.single_mut() {
+        *text = Text::new(refusal.0.clone().unwrap_or_default());
+    }
+}
+
+/// The one line that shows why a press did not take.
+#[derive(Component, Clone, Default)]
+struct RefusalLine;
 
 /// Empties whichever cells of a row answer the same press as `candidate`, leaving the gap where it
 /// was.

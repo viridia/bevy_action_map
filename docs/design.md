@@ -986,15 +986,17 @@ with no gameplay context spawned and no evaluator stepping.
 button the player activated, so "which cell is listening" is answered by where the component is.
 
 ```rust
-CaptureSession::for_mapping(&mapping)        // first slot
-CaptureSession::for_slot(&mapping, 1)        // the secondary
+CaptureSession::for_mapping(&mapping)        // the shape that mapping can hold
 CaptureSession::accepting(ControlClass::AnyButton)
-    .within(DeviceFamily::KeyboardMouse)
     .excluding([Control::PhysicalKey(KeyCode::Escape)])
 ```
 
-The crate answers with a `ControlCaptured` or `CaptureRefused` event on that same entity and removes
-the component; removing it yourself cancels. It never touches the player or context entities.
+The crate answers with a `ControlCaptured` event on that same entity and removes the component;
+removing it yourself cancels. It never touches the player or context entities.
+
+A session carries a class and an exclusion list, and no target: which row and cell a capture answers
+is whatever the screen put on the entity it listens on. `for_mapping` takes the class from the
+mapping — `ControlClass::of(row.accepts)` — and nothing else from it.
 
 A captured key is always a `PhysicalKey`. The player is sitting at a known layout, where the
 position and the character it produces name the same key, so there is no ambiguity left for a
@@ -1003,24 +1005,33 @@ game declares, and rebinding one overwrites it with the position captured; reset
 brings it back.
 
 A session skips whatever is already queued on its first run, so the press that opened it is not what
-it binds. Any slot number is addressable: `for_slot` fills the cell the screen names, growing the
-row to reach it and leaving the slots skipped on the way empty, so a screen offers whatever cells it
-draws without first asking how long the row happens to be. The only refusal left is a mapping the
-player may not change.
+it binds.
 
-**Three refusals, and one silent guard.**
+**One press, one answer, on the way up.** A capture ends on the control the player chose, whether or
+not the row can hold it, and reports it. Whether it may be stored is asked once, where the row is
+written — `Rebind::checked` (TD10.1) — so a press and a loaded save file cannot get different
+answers, and the screen is what says why.
+
+**The answer comes on the release**, and the session claims the control for as long as it is held. A
+claim is an instant and a held control is a level: the evaluator records held state as events arrive
+and applies consumption where it *reads*, so a session that answered on the press and vanished would
+leave the control down with nothing claiming it, and the context underneath would read it on the
+very next frame. Waiting means the control is already up when the claim stops. The mouse's motion is
+the exception with nothing to wait for — a displacement that has already happened is never held — so
+it answers immediately. Losing focus ends the wait too, since the release is going to another window
+and the evaluator clears its held state to match.
+
+Two kinds of arrival do not end a capture:
 
 | | |
 | --- | --- |
-| `RefusedReason::Reserved` | declared on a binding; loud, because the player meant to bind it |
-| `RefusedReason::Shape` | the mapping cannot hold that kind of control |
-| `RefusedReason::Family` | the control belongs to the other device family |
-| *excluded* | the screen's own controls; silent, so the key that cancels a capture still cancels it |
+| *excluded* | the screen's own controls, so the key that cancels a capture still cancels it |
+| a reading nobody chose | a deflection past `DEFLECTION` or a twitch past `MOUSE_MOTION`, on a session listening for some other class — a pad on a desk must not cancel a keyboard rebind |
 
-Reserved is asked before shape, so pressing the settings key hears that it is spoken for rather than
-that its channel is wrong. Declaring a binding both `reserved` and `mappable` is a plan-build error.
-A deliberate press is refused out loud; a continuous reading past its threshold (`DEFLECTION`,
-`MOUSE_MOTION`) is dropped quietly, and both are claimed so neither also plays the game.
+A session listening for that class takes such a reading, because for a stick row the deflection *is*
+the answer. Everything a capture does take is claimed, so a control pressed at a rebinding screen
+never also plays the game — which is what makes reserving work: the settings key neither binds nor
+re-opens the screen. Declaring a binding both `reserved` and `mappable` is a plan-build error.
 
 **Conflicts are detected, not resolved.** `conflicts(world, candidate, target)` is a pure query over
 the mapping list, answerable before anything is committed; `conflicts_pending` asks the same of a
@@ -1049,7 +1060,12 @@ pub enum Override {
 ```
 
 `Overrides::slots_of(row)` is the list to edit: the set's own slots where it has changed the row,
-and the row's declared ones, chords included, where it has not.
+and the row's declared ones, chords included, where it has not. `with_cell(row, n, control)` is that
+list with one cell replaced — **a cell is addressed, not appended**: the row grows to reach `n` and
+the cells skipped on the way are left empty, so writing to the third cell of a one-control row gives
+a row of three with a blank in the middle. A screen therefore offers whatever cells it draws without
+first asking how long the row is. A filled cell keeps whatever it was held with; an empty one takes
+the control alone.
 
 Rows are keyed by `(DeviceFamily, MappingKey)` and tunables by `(DeviceFamily, key)`. Nothing in an
 `Overrides` names a device: what a player bound is a control on a device *class*, and which physical
@@ -1096,6 +1112,30 @@ pub enum OverrideProblemKind {
     Reserved { .. }, NotChordable { .. }, TooManyControls { .. }, UnknownControl { .. },
 }
 ```
+
+A whole row is refused rather than partly applied: half a rebind is worse than none, and the player
+still has the default.
+
+**A screen asks before it writes.** Applying is where a *file* is judged, which is too late for a
+player still looking at the cell they pressed, so the same predicate is reachable ahead of the
+write:
+
+```rust
+Rebind::checked(world, &row, slots)                   -> Result<Rebind, OverrideProblemKind>
+Rebind::checked_with_preset(world, &preset, &row, ..) -> Result<Rebind, OverrideProblemKind>
+rebind.write(&mut overrides)                          // the only thing that writes a checked row
+```
+
+`Rebind` is a checked row and the token that writes it, so a row cannot be stored through this door
+without having been judged. `Overrides::bind` stays unchecked beside it, because a set loaded from a
+file has no world to be judged against and `apply_overrides` is what judges one — the guarantee is
+about the screen's path, not an absolute. The preset form exempts the rows a preset authorized, on
+the same terms as `apply_overrides_with_preset`; a screen that offers presets wants it, or a `Fixed`
+row a preset legitimately moves reads as unchangeable.
+
+`unbind` needs no token: emptying a cell removes a slot rather than adding one, can only shorten the
+row, and leaves `rebind_policy` alone, so a row that was admissible stays admissible. Only the
+adding side can be refused.
 
 ### 10.2 Presets
 
