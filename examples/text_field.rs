@@ -68,7 +68,7 @@ struct Submit;
 #[context(path = "text_field.field", tick = Render, priority = 10)]
 struct TextField;
 
-/// What a modifier means on this platform, since the crate has no platform modifier yet.
+/// What a modifier means on this platform, since the crate has no platform modifier.
 ///
 /// macOS puts the editing commands on Command and word motion on Option; everywhere else both are
 /// Control. Naming a side would be wrong for either: a player who reaches for the right-hand

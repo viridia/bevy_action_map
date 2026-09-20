@@ -204,7 +204,7 @@ What is left, in semantic groups ordered roughly by priority. The order is a gui
 schedule: any chunk may be reordered once the one before it has been read, and a chunk's number is
 its identity rather than its position.
 
-(Next: 94c, 130, 122, 28, 131, 33, 115)
+(Next: 130, 122, 28, 131, 33, 115)
 
 No chunk currently carries a defect. The register of what is known to be wrong is
 [docs/issues.md](./docs/issues.md), and an entry there that acquires a chunk gets a section here.
@@ -278,18 +278,6 @@ keyboard row applies.
   may not either, and the reverse.
 - **Verified by** tests on both paths — a declaration mixing families, and a saved row naming a
   gamepad entry on a keyboard row.
-
-### 94c. A platform modifier
-
-R12.4: `Cmd` on macOS should be usable as `Ctrl` everywhere else, as a named modifier resolved at
-binding time rather than something every cross-platform game re-derives by hand.
-
-- **Resolved at binding time, not read time.** The name a game binds does not change per platform;
-  what it expands to does, once, when the plan is built — not on every frame the control is read.
-- **One more `ModifierKey`, and 94b landed the enum.** A platform modifier is a fifth variant in the
-  same position rather than a mechanism beside it, which is what makes it a binding-time expansion
-  of a name a game already had a way to write. `text_field`'s two `cfg(target_os)` constants are the
-  hand-rolling this removes, and the caller it needs.
 
 ### 121. A camera that takes the mouse, and gives it back
 

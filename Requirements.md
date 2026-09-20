@@ -774,8 +774,16 @@ is unmodeled.
   when the binding is physical (R18) — showing "W" to an AZERTY user is a bug.
 - **R12.3 (MUST)** Modifier handling: left/right variants plus "either" as a first-class concept;
   and a modifier participating in a chord must be able to suppress the unmodified binding (R8.1).
-- **R12.4 (MUST)** Platform-conventional modifier abstraction (`Cmd` on macOS ≡ `Ctrl` elsewhere) as
-  a named modifier, resolved at binding time.
+- **R12.4 (WITHDRAWN)** ~~Platform-conventional modifier abstraction (`Cmd` on macOS ≡ `Ctrl`
+  elsewhere) as a named modifier, resolved at binding time.~~ _Withdrawn: the convention covers one
+  modifier pair and a game needs two. `text_field` hand-rolls Command as Super-or-Ctrl and word
+  motion as Alt-or-Ctrl, and a fifth `ModifierKey` variant leaves the second where it is. Resolving
+  at binding time also does not survive a save: an override serializes the resolved modifier, so a
+  file written on macOS carries `mod/super` and the abstraction is lost at the first rebind. D83
+  keeps platform knowledge out of the crate and in whatever draws, and `ModifierKey::Super` and
+  `ModifierKey::Ctrl` are both bindable meanwhile. What would revive this is resolution at read
+  time, surviving a save, wanted by an app with enough application-command shortcuts for the
+  hand-rolled constants to be the complaint._
 - **R12.5 (MUST)** OS key-repeat events (`KeyboardInput::repeat`) must be distinguishable and
   excluded by default from press-edge conditions, while remaining available for text/navigation
   repeat.
