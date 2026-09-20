@@ -1508,13 +1508,25 @@ character keys.
   over type paths, or something else — is deferred to the design phase. What is fixed here is the
   dependency direction, because it is the part that cannot be renegotiated later without breaking
   users.
-- **R22.10 (SHOULD)** Focus integration as a whole should sit behind a feature flag (R24.1), so that
-  a game using this crate with no UI at all pays nothing for it — the same "vice versa" that R22.9
-  requires of the widget side.
-- **R22.11 (MUST)** Focus changes must resolve _before_ the same frame's actions are evaluated, or a
-  one-frame window exists in which the previously focused widget's map is still live.
-- **R22.12 (MUST)** Focus changing mid-action must cancel that action's in-flight state per R7.4 —
-  holding `Increment` on a slider and then tab-navigating away must not leave a hold running.
+- **R22.10 (WITHDRAWN)** ~~Focus integration as a whole should sit behind a feature flag (R24.1), so
+  that a game using this crate with no UI at all pays nothing for it — the same "vice versa" that
+  R22.9 requires of the widget side.~~ _Withdrawn on D87: there is no focus integration in the crate
+  to put behind a flag. A game with no UI pays nothing because nothing is there, not because a
+  feature excludes it, and the `focus` feature — which gated the dependency and nothing else — is
+  removed._
+- **R22.11 (WITHDRAWN)** ~~Focus changes must resolve _before_ the same frame's actions are
+  evaluated, or a one-frame window exists in which the previously focused widget's map is still
+  live.~~ _Withdrawn: not orderable, and ordering would not close it. `InputFocus::set` is a plain
+  resource write, and `AutoFocus`'s `on_add` hook calls it at command-application time inside no
+  system set, so there is nothing to order against. Nor would there be a point: tabbing between two
+  widgets of the same kind leaves the activation condition's value unchanged, so the context never
+  deactivates and R7.4 never fires — no cancel is late, because none is owed. What is left is the
+  app's, and D87 states it._
+- **R22.12 (MUST)** A focus change that deactivates a context must cancel that context's in-flight
+  actions per R7.4 — holding `Increment` and then tab-navigating to a widget that no longer
+  satisfies the context's activation condition must not leave the action held. A focus change that
+  leaves the condition satisfied cancels nothing: the action is still held, and which widget it now
+  applies to is D87's.
 - **R22.13 (MUST)** _(D23)_ Interception is **static**: a focus-activated context claims a control
   before dispatch, and R8's ordinary priority decides the winner in one deterministic pass. A widget
   does not decide at handling time whether to let an input fall through, so no two-phase

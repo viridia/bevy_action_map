@@ -122,19 +122,6 @@ legally offer, not what it must say when it says no. It is here because ground r
 examples the acceptance test, and an example that swallows a diagnostic is not demonstrating the
 thing the diagnostic was built for.
 
-### 1018 A platform modifier
-
-R12.4: `Cmd` on macOS should be usable as `Ctrl` everywhere else, as a named modifier resolved at
-binding time rather than something every cross-platform game re-derives by hand.
-
-Self-contained, independent of 1017.
-
-_Fix:_ **chunk 94c**. (R12.2 and R12.7, the physical-binding layout-label gap, wait on upstream
-winit — [winit#4606][] and [winit#2678][] — and are the deferred table's row, not a chunk.)
-
-[winit#4606]: https://github.com/rust-windowing/winit/issues/4606
-[winit#2678]: https://github.com/rust-windowing/winit/issues/2678
-
 ### 1060 A chord spanning two device families escapes conflict detection
 
 `binding_family` (`mapping.rs`) derives a row's family from the binding's primary input alone; the
@@ -274,32 +261,6 @@ TD6 says "a test or replay harness can drive one directly." From outside, the on
 instance is to spawn an entity and the only way to advance one is `App::update`. The struct's
 freedom from ECS references is real and unreachable, and R23.6's standalone half has no citation
 anywhere. The netcode deferred row is where this plausibly already belongs. Unrouted.
-
-### 1026 Focus and picking ordering is neither documented nor enforced
-
-R22.4 (MUST) wants documented ordering and integration with `bevy_input::InputSystems`,
-`bevy_input_focus` and `bevy_picking`. The `InputSystems` third is met and documented
-(`frame.rs:363`, TD1). The other two:
-
-- **`bevy_picking` is named once, about something else.** `docs/decisions.md` mentions it flattening
-  its generic `Pointer<E>`, which is a reversal note rather than an ordering. Nothing in `src/`,
-  `examples/` or `Roadmap.md` mentions it at all, and no ordering constraint anywhere relates the
-  two — which is the third R22.4 asks for. What that clause owes is narrower than "pointer actions
-  coexist" sounds. The pipelines are parallel and neither feeds the other, so they contend over one
-  signal only: the **buttons**, where a single physical press reaches picking as a click and this
-  crate as a bound control (R13.0). Suppressing one side is the app's lever and it has several —
-  cursor grab, a barrier entity covering the screen, deactivating the context — so what is owed is
-  the ordering and which lever applies when, not a mechanism.
-- R22.11 (MUST) — focus changes must resolve before the same frame's actions are evaluated.
-  `active_if` schedules `condition.pipe(apply_active::<C>)` in `PreUpdate` `.before(Evaluate)` with
-  no constraint against whatever writes `InputFocus`, and `examples/common/widget_focus.rs`'s
-  `focus_is` adds none. Disasteroids is not bitten because it disables `InputDispatchPlugin` and
-  moves focus from an observer in `Dispatch`, so the write lands after the read by construction
-  rather than by an ordering — which is exactly the arrangement that stops holding for a game that
-  keeps the plugin. **Reasoned, not probed.**
-
-_Fix:_ the picking half is **chunk 121**, whose captured mode is the ordering being exercised rather
-than asserted. The R22.11 half is unrouted.
 
 ### 1027 Two documentation requirements with no document
 

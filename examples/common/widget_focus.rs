@@ -1,4 +1,4 @@
-//! A widget's *kind*, and the bridge that presses whichever one has focus.
+//! A widget's *kind*, and the focus orchestrator that acts on whichever one has focus.
 //!
 //! `bevy_ui_widgets` already activates a focused `Button` from a mouse click and from a
 //! `FocusedInput<KeyboardInput>` its own `InputDispatchPlugin` dispatches — the keyboard half of "a
@@ -7,10 +7,14 @@
 //! currently has focus": neither crate may depend on the other, so a game depending on both is the
 //! only place that association can live.
 //!
-//! This module is that bridge, kept general enough to answer for any widget kind rather than only
-//! `Button` — a candidate for eventually living in `bevy_ui_widgets` itself rather than here, see
-//! <https://github.com/bevyengine/bevy/issues/25592>. Because it covers the keyboard as well as
-//! the pad, this game disables `InputDispatchPlugin` entirely rather than leave two mechanisms
+//! This module is a *focus orchestrator*: the layer that works out which widget an action was meant
+//! for and drives that widget. The mapper underneath knows nothing about focus — it reports that
+//! `Activate` fired, not what should light up — and the widgets above it know nothing about
+//! devices, so an orchestrator is where the two meet. This one is kept general enough to answer for
+//! any widget kind rather than only `Button` — a candidate for eventually living in
+//! `bevy_ui_widgets` itself rather than here, see
+//! <https://github.com/bevyengine/bevy/issues/25592>. Because it covers the keyboard as well as the
+//! pad, this game disables `InputDispatchPlugin` entirely rather than leave two mechanisms
 //! answering the same keys.
 
 use bevy::input_focus::{AcquireFocus, FocusCause, FocusGained, FocusLost, InputFocus};
@@ -147,7 +151,7 @@ fn adjust_focused_stepper(
 ///
 /// Does not claim focus itself — a pointer press already does, the moment it lands, through
 /// whatever intercepts `bevy_input_focus`'s own `AcquireFocus` for a focusable ancestor (a game's
-/// own bridge for a non-`TabIndex` navigation scheme, or `acquire_focus_tab_index` for one that
+/// own handler for a non-`TabIndex` navigation scheme, or `acquire_focus_tab_index` for one that
 /// uses `TabIndex`). By the time `Activate` fires here, the stepper is already focused.
 fn chevron_pressed(
     pressed: Entity,

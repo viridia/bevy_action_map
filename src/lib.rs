@@ -205,7 +205,6 @@
 //! | `touch`       |         | Planned: touch as a binding input. Gates the dependency only.    |
 //! | `bevy_reflect`|   yes   | Runtime reflection, needed to register custom modifiers and conditions. |
 //! | `serialize`   |         | `serde` support for saving and loading binding overrides.         |
-//! | `focus`       |         | Planned: `bevy_input_focus` integration. Gates the dependency only. |
 //! | `state`       |   yes   | A context's activation can follow a `bevy_state` state.           |
 
 extern crate self as bevy_action_map;

@@ -346,6 +346,7 @@ pub fn sample_input(
 /// Runs after fixed-tick evaluation, which is the moment at which that is true of everything:
 /// render-tick contexts drained in `PreUpdate`, earlier in the same frame, and fixed-tick ones
 /// have just drained now.
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 pub(crate) fn retire_read_events(mut frame: bevy_ecs::system::ResMut<'_, InputFrame>) {
     frame.clear();
 }

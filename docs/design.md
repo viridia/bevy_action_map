@@ -1209,7 +1209,6 @@ src/
   present.rs         control naming, prompts, prompt scope and staleness
   inspect.rs         the type-erased read of contexts and actions
   backend.rs         AuthorityValues, the component a delegated action reads its value from
-  focus.rs           reserved for bevy_input_focus integration — a stub today
 bevy_action_map_macros/   #[derive(InputAction)], #[derive(InputContext)]
 ```
 

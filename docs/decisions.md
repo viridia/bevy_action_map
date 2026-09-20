@@ -2008,3 +2008,39 @@ and `Eq` that change under the player's hands — `ConsumedControls` and the pla
 those being stable — and the layout is exactly what the crate cannot see (R12.2, and winit#4606).
 The collision needs two bindings on one key declared two different ways in one game, which is a
 shape an author chooses rather than one they fall into.
+
+### D87 — Which widget an action was about is the game's to remember
+
+**Decided.** A game can bind one action inside a context that is active only while some widget has
+focus, and have the observer act on whichever entity `InputFocus` currently names. One `Activate`
+serves every button on the screen, and focus decides which button it meant.
+
+That holds as long as the observer asks the question once. It stops holding when the game keeps
+state between an action's `Fired` and its paired `Completed` or `Canceled`, which a pressed
+highlight is the usual reason to do: the observer adds `Pressed` to the focused entity on `Fired`
+and removes it from the focused entity on the paired event. Those are two separate reads of
+`InputFocus`, and if focus moved in between, the second names a different button — so the first
+keeps its highlight, with no event left anywhere that would clear it.
+
+Neither event carries a target, and the crate will not grow one. An action's events report what the
+action did, not which entity a game decided it was about. A game holding state across the pair
+records the entity when `Fired` arrives and addresses the paired event to that entity instead of
+reading focus a second time. A game that finishes its work at `Fired` and keeps nothing, as
+`widget_focus.rs` does, has no second read to disagree with the first.
+
+**Rules out.** A schedule ordering that resolves focus before evaluation (R22.11, withdrawn); a
+target the crate supplies alongside the event; anything focus-shaped in this crate's own surface.
+
+**Reversal.** The crate cannot supply the target, because it cannot tell that a target exists.
+`active_if` takes an arbitrary run condition, and nothing marks one that reads `InputFocus` apart
+from one that reads the clock — there is no notion of focus in the crate's model at all. Reversing
+this means an activation condition grows a declared subject, which is a second activation mechanism
+beside the one contexts already have.
+
+**Why the game's share of this is small.** A mouse-driven button activates on release so that the
+press can be taken back: hold the button, slide off the widget, release, and nothing happens. That
+gesture needs a pointer that can move off a widget while held. Focus cannot — it jumps, and only
+when something moves it, so there is no equivalent to slide off with. A focus-driven activation can
+therefore settle at `Fired`, and nothing is left to decide when the control is released. What
+crosses the pair is presentation and only presentation, and removing a highlight from the entity
+that got it requires knowing nothing about what kind of widget it is.
