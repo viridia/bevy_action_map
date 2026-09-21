@@ -715,7 +715,9 @@ requirements ask only for what is missing. Read against Bevy's
   - a click aimed at a selector rather than at coordinates, folding in the `UiGlobalTransform` and
     scale-factor steps the Bevy example does by hand;
   - waiting until a selector matches and its scene is loaded. BSN's `Ready` is an `EntityEvent`
-    without `Reflect`, so the plugin observes it and inserts a marker component a query can see;
+    without `Reflect`, and a client that spawns a scene and then observes `Ready` can miss it, since
+    it may fire before the watch starts. An observer on the scene root that inserts a marker
+    component answers both: a query can see the marker, and it is still there when the client looks;
   - quitting;
   - a client, and the form a test plan is written in.
 
@@ -750,7 +752,26 @@ The deliverables:
   occluded, and Bevy's own example warns that an occluded window screenshots black; if no window
   setting fixes it, the design turns to rendering offscreen. The second can fail by design, since
   chunk 62 releases held controls when the window loses focus, and a window under test need not have
-  it. The spike's findings go into the design; its code does not survive.
+  it. The spike's findings go into the design; its code does not survive. **Done.** Findings, for
+  the design to take up:
+  - A covered window captures an empty image, every byte zero including alpha, and the app's own
+    `ScreenshotCaptured` observer sees the same, so the loss is in rendering, not in transport. In
+    front, the capture is correct. The design turns to rendering offscreen.
+  - A key written as `bevy_input::keyboard::KeyboardInput` through `world.write_message` reaches the
+    mapper whether or not the window has focus. Losing focus sends one `KeyboardFocusLost`, which
+    releases what is held; it does not gate later input.
+  - Injecting a raw event therefore needs nothing from this crate. The `remote` feature is needed
+    only for the authority level, and for anything a message cannot express.
+  - A launched window takes focus from whatever had it, which is another reason to go offscreen.
+  - A covered window ran at about half the frame rate. A test that depends on timing has to step
+    frames rather than wait on the clock, which bears on 1041.
+  - Bevy's `bevy_remote` feature can be enabled on the dev-dependency from the command line, as
+    `--features bevy/bevy_remote`, with no change to `Cargo.toml`.
+- **Instructions for writing a test**, addressed to an agent: how to launch the app under test,
+  write a plan, run it, and read a failure, without the author's attention being needed partway
+  through. The spike found that every approval prompt brings the editor to the front and covers the
+  window, so a run has to complete from one command. This goes in the driver's design, or in a
+  document of its own if it outgrows a section.
 - **Not doing: code**, beyond that spike.
 - **Verified by:** review of the two documents, and implementation chunks in this section with
   ground rule 4's omissions stated.
