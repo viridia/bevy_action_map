@@ -1,42 +1,22 @@
-# Findings awaiting routing
+# Findings awaiting triage
 
-The register of things known to be wrong, missing, or out of proportion, and not yet given a chunk.
-A finding lands here whatever turned it up — the six-session scan of `src/` that started the
-document, a session that tripped over something, or a defect noticed while writing an example — and
-leaves when a chunk takes it. Ordered by how much it matters rather than by what found it.
-
-**What this document admits.** A finding is a claim that something is wrong and a statement of what
-someone would observe; it is not a plan. The moment a finding acquires a chunk, the chunk is where
-it lives and the entry is retired. Nothing here describes what the crate does, which is
-`docs/design.md`'s job, and nothing here is a limitation accepted on purpose, which is a decision
-and lives in `docs/decisions.md` where it says what reversing it would cost.
+The triage queue: things known to be wrong, missing, or out of proportion that the author has not
+yet decided what to do about. An entry leaves when that decision is made — given a chunk, a deferred
+row in `Roadmap.md`, a decision in `docs/decisions.md`, or dropped — and whatever it knew goes with
+it to that destination. Nothing here describes what the crate does, which is `docs/design.md`'s job.
 
 **How to read an entry.** Each says where the problem is, what someone would actually observe, and
-whether it was confirmed by running something or only by reading. That last distinction is the
-important one, and it is stated per entry rather than assumed.
+whether it was confirmed by running something or only by reading. Many were found by a model asked
+to scan `src/`, and some are rules nobody would violate, so that distinction matters; where the
+reachable case is hypothetical, the entry says so.
 
-**Line numbers are as of the entry, and several have since drifted** — `eval.rs:247` is now 257, and
-the two `cargo doc` sites in 1038 have moved and been fixed. Take a `file.rs:NNN` as "roughly here,
-find it by name"; the symbol named beside it is the part that is still good. Re-verify before acting
-on one.
+**Line numbers drift.** Take a `file.rs:NNN` as "roughly here"; the symbol named beside it is the
+part that stays good. Re-verify before acting on one.
 
-**Numbering.** Each entry's number is a flat, permanent identity, assigned once from a single
-counter and independent of which tier it sits in — the tier is where it's filed today, not what it
-is. A number is never reused: once an entry is fixed and its chunk has landed, the entry is retired
-from this document rather than kept as a silent record, and its number simply does not reappear. The
-chunk's own commit, and `docs/design.md` or `docs/decisions.md` where anything about it was durable,
-are the record. A gap in the sequence below is a retired finding, not an omission. The next
-unassigned number is stated here; keep it up to date when numbering new items.
+**Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
+tier, and never reused. A gap in the sequence is a retired entry.
 
-**Next: 1070.**
-
-**The calibration warning, stated up front because it is fair.** Most of these entries came from
-asking a model to scan `src/`, and a model asked to find sixty problems will find sixty. Some of
-what follows is real and some is a rule nobody would ever violate. The tiers below are the honest
-attempt to separate them. Where a finding rests on reasoning rather than on a probe, or where the
-reachable case is hypothetical, the entry says so in as many words. Where an entry judges a small
-cost not worth acting on, that verdict is stated inline rather than collected into a tier of its
-own.
+**Next: 1074.**
 
 **What the tiers mean.**
 
@@ -48,16 +28,64 @@ own.
 | **4. Prose**            | A comment or document contradicts the code. No behaviour at stake                                |
 | **5. Cost and surface** | Public items nothing asks for, and machinery out of proportion                                   |
 
-This document does not _decide_ routing, which is ground rule 5's business and the author's. It
-records routing once it happens: an entry given a chunk says so on its `Fix` line, so what is still
-unrouted can be read off the entries that stay silent.
-
 ---
 
 ## 1. Live — an ordinary build gets a wrong answer
 
-Every entry the `src/` scan filed here has landed (chunks 81, 84, 85, 86, 88, 89, 90, 91) and is
-retired, as is everything since found another way. The tier is empty.
+### 1070 A hold charges once per event, not once per tick
+
+`eval.rs`, `apply_frame`'s replay loop · **confirmed by a probe**
+
+`apply_frame` runs one fold per level event and hands each fold the whole tick's `delta`, and `Hold`
+adds `delta` on every call (`condition.rs`, `BindingCondition::evaluate`). A tick carrying three
+level events advances every hold timer by three ticks. Probed: `hold(0.25)` at a `delta` of 0.1,
+Space down on one tick, then a tick carrying three unrelated key events: `Firing` after 0.2 s.
+
+A moving stick sends axis events nearly every frame, so a pad hold charges two to three times faster
+while the player steers. `Tap`, `HoldAndRelease` and any modifier that integrates `delta` take the
+same path.
+
+_Fix, sketched:_ the tick's `delta` to one fold and zero to the rest, which keeps the per-event
+replay R9.3 needs. Which fold gets it decides how a press and release inside one tick are timed.
+Riding along: `part_value` carries the same `#[cfg]` twice.
+
+### 1071 Require-reset lets a held key through if the binding has a hold
+
+`eval.rs`, `commit_slot`'s require-reset check · **confirmed by a probe**
+
+`commit_slot` holds a `Button` action back while its value reads pressed, and clears the latch the
+first time it reads rest. The value it checks is taken after conditions, and a binding whose hold is
+still `Building` contributes rest. So the latch clears on the first tick after activation with the
+key still down, and the hold charges and fires. Probed: Space held across `deactivate`/`activate`
+with `hold(0.25)` gave `Started`, `Building`, `Fired`.
+
+R7.5 fails for every binding with a time condition, through `activate`, `enable` (R3.7) and
+`unshadow` alike. `a_context_activating_ignores_a_control_already_held` binds plainly, which is why
+it passes.
+
+### 1072 `Started<A>` is public and never triggered
+
+`eval.rs`, `commit_slot`'s edge filter · **confirmed by a probe**
+
+`dispatch_for` maps `ActionPhase::Started` to `Started<A>`, whose doc promises it for "a hold that
+has just been pressed", and TD5.6 lists it. `commit_slot` logs only `Fired`, `Completed` and
+`Canceled`, so `Started` never reaches the log. Probed: a tick ending in `Started` leaves the log
+empty. Nothing in tree observes `Started<A>`; Disasteroids reads the phase instead (`ship.rs`),
+while its comment in `actions.rs` says `Started` fires.
+
+### 1073 A claim lifting reads as a fresh press to the context below
+
+`eval.rs`, `fold`'s `is_pressed` · **confirmed by a probe; needs a ruling before a fix**
+
+A consumed control reads as untouched, and nothing records that the reader never saw it go down.
+When a claim stops with the key still held (the hold completes or is abandoned, its chord breaks,
+the higher context deactivates) the lower context's plain binding on that key fires. Probed: Space
+claimed on one tick, unclaimed on the next, never released: `Jump` `Fired`. In play: Shift+Space
+held for a vehicle boost, Shift released first, and the on-foot context jumps.
+
+R7.5 and R3.7 give require-reset to activation and to `enable`. Nothing gives it to consumption, and
+R8.2 says only that lower contexts "do not see" the control. Whether this is the require-reset case
+is the author's call.
 
 ---
 
@@ -138,40 +166,6 @@ naming `combined` in the message. Warning rather than error, because it is inert
 and a game that chains one harmlessly should not fail to boot. `BindingSpec::continues_declaration`
 already makes it report once per `bind` call rather than four times.
 
-### 1060 A chord spanning two device families escapes conflict detection
-
-`binding_family` (`mapping.rs`) derives a row's family from the binding's primary input alone; the
-chord is never consulted. So a gamepad binding chorded with a keyboard key files under `Gamepad`,
-and since conflicts are per family, that key is invisible to keyboard conflict detection — a player
-could bind it elsewhere and nothing would report the overlap. Confirmed by reading `mapping.rs` and
-`capture.rs`.
-
-What is wrong is the family crossing rather than the device. `DeviceFamily` has two variants, and a
-chord inside either is ordinary: `Shift + Right Mouse` is one family, and so is a gamepad binding
-that wants both triggers held, or a shoulder button standing in as a modifier. Only a chord with a
-foot in each family has no family to file under, and it is also the combination nobody wants —
-`Shift + Left Trigger` asks a player to reach for two devices at once. Nothing in tree writes either
-kind today, so this is latent rather than live. Since chunk 129 an override can write one too: a
-keyboard row's slot saved as `pad/LeftTrigger+key/KeyS` applies, because `refusal` asks nothing of a
-chord entry's family. Confirmed by reading `overrides.rs`, not by applying one.
-
-_Fix:_ **chunk 135**, which decides between refusing such a chord and detecting across it.
-
-### 1043 No auto-switching which device a player is paired to
-
-R15.8 (SHOULD, split from 1020) — auto-switching on input from another device, with hysteresis.
-Nothing — and R18.6's _withdrawal_ names this as the one thing that would revive it, so an unbuilt
-SHOULD is load-bearing for a withdrawn requirement staying withdrawn.
-
-_Fix:_ **deferred**, with the gate stated in Roadmap's deferred table.
-
-### 1044 No opaque platform-user identity
-
-R15.9 (SHOULD, split from 1020) — opaque platform-user identity attached to a player. Nothing to
-show without a real platform SDK behind it, unlike the rest of this group.
-
-_Fix:_ **deferred**, with the gate stated in Roadmap's deferred table.
-
 ### 1052 Naming a device to the player has no requirement and no support
 
 `split_screen.rs`'s `device_name` · R11, R18
@@ -186,52 +180,25 @@ The gap is in `Requirements.md` first: no requirement covers it, so the crate is
 Whether a device name is R18's business (a display string, like a control's) or R11's (a fact about
 the device, like its brand) is the question to settle before anything is built.
 
-Unrouted.
+### 1021 A chord has no sequential alternative
 
-### 1021 Accessibility has no citation anywhere in the project
+R20.3 (SHOULD) · uncited anywhere in tree
 
-R20, all six requirements, uncited in `src/`, `examples/`, `docs/`, `Roadmap.md` and `CLAUDE.md`.
-The section's own preamble calls these "cheap to accommodate now and expensive to retrofit," which
-is the argument for looking at it before more is built on top.
+R20.3 wants every chord re-expressible as a sequence. Its destination was the sequence condition,
+and R6.4 withdrew that, so nothing is built and nothing is planned. What a player would need is
+narrower than R6.4's matching models: press the modifier, release it, then press the key. That is
+R20.6's sticky modifier (MAY), which is **reviewed and left alone** for want of a case behind it —
+so the two requirements stand or fall together, and neither is decided.
 
-R20.2 and R20.5 are built (chunk 64) and R20.1 holds by construction. R20.4 is withdrawn, and R20.7,
-the narrower requirement that replaced it, is 1045. R20.6 (MAY, sticky modifiers / one-handed
-support) is **reviewed and left alone**: no in-tree pressure and no case behind it — not worth a
-chunk unless one shows up.
-
-R20.3's sequential alternative to chords is 1023 by content and by no other link.
-
-### 1045 No timing threshold can be offered to the player at all
-
-R20.7 (was R20.4, withdrawn; split from 1021) · `binding/builder.rs`
-
-`tunable_dead_zone` lets a game expose a dead zone as a named, bounded, persisted value. Nothing
-does the same for a duration: `hold`, `tap`, `multi_tap` and `pulse` each take a compile-time
-constant, and `TunableValue`'s own doc says its two shapes cover "both tunables this crate declares
-anywhere in-tree". So a game wanting to offer a longer double-tap window cannot, at any granularity.
-
-The finding used to be R20.4's global scale. That requirement is withdrawn — its thresholds do not
-share a sign, so one factor cannot move them all toward forgiveness — and what is absent survives
-the withdrawal in a narrower form: not "a game cannot move all the timings at once" but "a game
-cannot move one".
-
-_Fix:_ **chunk 115**.
-
-### 1022 A backend-owned row cannot be told apart from an ordinary fixed one
-
-R19.8 (MUST) — a row a backend owns should say "not rebindable here, delegate to that backend's own
-UI". `RebindPolicy` is `Here | Fixed` and `Override::NotOurs` is a row in the _player's_ diff, so a
-screen reading `mappings()` cannot tell a backend-owned row from an ordinary fixed one without
-consulting its own working copy.
-
-_Fix:_ **chunk 42** — its binding panel is where this distinction has to render anyway.
+The rest of R20 is accounted for: R20.2 and R20.5 are built, R20.1 holds by construction, R20.4 is
+withdrawn, and R20.7 is chunk 115.
 
 ### 1041 No way to stop the frame sampling itself
 
 R9.9 — a pumped sampling mode. `sample_input`, `begin_sample` and `record` are all public, so the
 pieces exist; what is missing is a way to stop `InputFramePlugin` scheduling sampling at all.
 Floated as a companion to chunk 83's rewind; chunk 83 says to confirm the need before routing it
-there. Unrouted.
+there.
 
 ### 1047 Capability queries are absent for devices the crate already models
 
@@ -250,8 +217,6 @@ Chunk 117k removed the module doc's claim rather than leaving it promising a MUS
 behind it. Whatever lands this puts it back: `device.rs`'s summary line and its second paragraph
 both list what the module holds, and capabilities belong in both once they exist.
 
-Unrouted.
-
 ### 1048 Virtual devices have no first-class support
 
 R11.8 (SHOULD) · no citation anywhere in `src/`
@@ -267,8 +232,6 @@ modeled inside the crate's own closed set rather than through an escape hatch fo
 written. What's missing is a variant and an identity for "not a real piece of hardware," not a
 mechanism for hardware this crate has never seen.
 
-Unrouted.
-
 ### 1025 A context instance cannot be driven from outside the crate
 
 R23.6 · `InputContextState::new` and `apply_frame` are both `pub(crate)`
@@ -276,7 +239,7 @@ R23.6 · `InputContextState::new` and `apply_frame` are both `pub(crate)`
 TD6 says "a test or replay harness can drive one directly." From outside, the only way to get an
 instance is to spawn an entity and the only way to advance one is `App::update`. The struct's
 freedom from ECS references is real and unreachable, and R23.6's standalone half has no citation
-anywhere. The netcode deferred row is where this plausibly already belongs. Unrouted.
+anywhere. The netcode deferred row is where this plausibly already belongs.
 
 ### 1027 Two documentation requirements with no document
 
@@ -287,8 +250,6 @@ anywhere. The netcode deferred row is where this plausibly already belongs. Unro
   for the list. Nothing mentions pointer lock or the user gesture.
 - R16.5 (SHOULD) — name the OS-reserved combinations that are unavailable. Nothing.
 
-Unrouted.
-
 ### 1028 `tracing` is contradicted by a dependency choice recorded only in `Cargo.toml`
 
 R22.3 (SHOULD) wants spans and events at the sampling and firing boundaries. What exists is six
@@ -297,7 +258,7 @@ R22.3 (SHOULD) wants spans and events at the sampling and firing boundaries. Wha
 The crate depends on `log` rather than `bevy_log`, and the comment in `Cargo.toml` gives the reason:
 `bevy_log` installs a `tracing-subscriber` and is `std`-only. That is a decision by
 `docs/decisions.md`'s own admission test — name what breaks if reversed, and the answer is R22.3 or
-the `no_std` build — and that document does not carry it. Unrouted.
+the `no_std` build — and that document does not carry it.
 
 ### 1068 The prelude omits both types local multiplayer needs
 
@@ -355,8 +316,6 @@ a rule rather than a coin flip.
   missing is any example or production caller: the MUST's "unless explicitly opted in" clause is
   proven correct in isolation but has never been asked for by a game in tree.
 
-Unrouted.
-
 ---
 
 ## 4. Prose — a comment or document contradicts the code
@@ -369,15 +328,8 @@ any one of them is misled about a mechanism.
 - TD3's trait sketch says `// plus CATEGORY and CONSUME, with defaults`. The constant is `CONSUMES`.
   Copying the sketch into a hand-written impl does not compile.
 
-Unrouted.
-
 ### 1032 Internal comments whose stated reason is false
 
-- `binding/builder.rs:24`, `BindingSpec` justifies its copies with "the plan keys state by
-  `ActionId`, which does not reach back to the type." `ActionId::info` reaches back to exactly the
-  three fields the comment is justifying. The copies are still right — `info` takes the registry
-  lock and linear scans — but the stated reason is the one a reader would use to decide whether the
-  duplication may go.
 - `frame.rs:340` credits calibration's placement with meeting R14.10. R14.10 governs an authority
   backend, which per D51 enters at the button state machine and never touches the frame. The
   placement is right and the `R`-number is wrong; it is the crate's only claim on R14.10. **Small —
@@ -386,8 +338,6 @@ Unrouted.
   one too (`TOGGLE_LATCH`, `binding.rs:2311`). Related, and worth carrying with it: `condition.rs`'s
   own constant does not carry the note `binding.rs`'s does, explaining why two constants in two
   files can both be `1 << 0` — `plan.rs:691` gives every modifier and every condition its own cell.
-
-Unrouted.
 
 ### 1033 Design sentences that are a clause short
 
@@ -402,7 +352,10 @@ Unrouted.
   priority _fixed_ contexts and never a render one, in that frame or the next, because the reset
   runs at the top of `PreUpdate`. TD5.2 states this for consumption and nothing states it for
   exclusion.
-- **TD6's "a test or replay harness can drive one directly"** — see 1025.
+- **TD2 says "Order is preserved."** Within one device stream it is. Across streams it is not:
+  `sample_input` records every key event, then focus loss, mouse buttons, motion and gamepad, so a
+  click and a key press in one frame always arrive key first. It matters to anything comparing
+  arrival order across families, chunk 135's chord among them.
 - **TD7 does not state R7.3's cost.** Two simultaneously-active layers hold separate action state,
   so a game reading `ContextActions<Base>` does not see the layer's answer and has to read both.
   R7.3 is a MUST that is met and claimed nowhere.
@@ -411,8 +364,6 @@ Unrouted.
   this is not about applying. Two others, both in `overrides.rs` and both about the serialized form
   (now TD10.3), went with 117e. **Small — worth a minute alongside the R14.10 mis-citation above,
   not worth a pass of its own.**
-
-Unrouted.
 
 ### 1055 Split Friction teaches a disputed claim about somebody else's crate
 
@@ -428,8 +379,6 @@ behaviour, so a third camera works and the paragraph has no subject left; or the
 and the explanation comes out of the comment, since what a reader needs is that each pane's UI is
 `UiTargetCamera`'d at its own pane's camera, not why the alternative was dropped. The second is
 cheap and the first is the one that would make the example teach more.
-
-Unrouted.
 
 ---
 
@@ -449,8 +398,7 @@ hundred and twenty context binding lists.
 
 `PromptGeneration` bounds how _often_ this runs and nothing bounds what one pass costs.
 `BindingTable` holds the world for exactly the lifetime an amortization would want. Not on the
-per-tick path, so R23.2 does not apply — but see 1003 (fixed) which made "how often" every frame
-while it lasted. Unrouted.
+per-tick path, so R23.2 does not apply.
 
 ### 1035 R23.2 is unenforced, and reading is the only thing enforcing it
 
@@ -469,7 +417,7 @@ there:
 This entry once recorded the second as gone, on a grep for `binding.source.controls()` that missed
 it: the field was renamed to `input`, not removed. Which is the finding. Violations keep being found
 by reading, and then a reading finds them absent with equal confidence — "a rule with no tooling
-behind it," as the register puts it, does not only fail to prevent them. Unrouted.
+behind it," as the register puts it, does not only fail to prevent them.
 
 ### 1053 The release itself has no destination
 
@@ -488,7 +436,7 @@ descriptions do not mention it: 42's backend trait is "cheap now, breaking later
 that is a publishing deadline rather than a preference.
 
 _Fix:_ a deferred row gated on the Bevy 0.20 release would be the smallest thing that stops this
-being forgotten. What belongs in it is the ordering question rather than the date. Unrouted.
+being forgotten. What belongs in it is the ordering question rather than the date.
 
 ### 1054 Deriving a pane's persistent identity is boilerplate every game rewrites
 
@@ -509,62 +457,6 @@ and by comment — `PopupMenu` at 10 "matching Disasteroids' `Menu`", `ButtonFoc
 focused button outranks both. Named bands would be cheap, but two examples agreeing is not yet
 evidence of a convention worth fixing in the crate, and a game with a different layering would want
 different numbers.
-
-Unrouted.
-
-### 1037 Machinery out of proportion
-
-None of these costs anything measurable at run time. What each costs is an invariant a reader has to
-confirm is still true.
-
-- **The action registry holds one fact three ways.** `next_id` is always `entries.len()`; each
-  entry's stored `ActionId` is always its own index; and `ActionId::info` linear-scans the vector
-  that index would subscript. Written once per process, holding tens of rows.
-- **`Plan<C>`'s type parameter is phantom.** No field and no method reads `C`. It buys that handing
-  context A's plan to context B's state does not compile; it costs `compile`, 130 lines of it,
-  monomorphized once per context type — and the three wrappers that hold a `Plan` carry `C`
-  themselves already. **Reviewed and left alone**: the compile-time cost is real and the type safety
-  it buys is also real. Nothing has measured either, and this is not worth changing without a
-  measurement.
-- **`MappedPart` caches two facts it could derive.** `family` is always `control.family()` and `key`
-  is always `MappingKey::new(prefix_of(binding), part)` — which `mappings_of`'s follower pass
-  recomputes from the same inputs twenty lines later rather than reading.
-- **`BindingInput::for_each_part` always visits exactly once.** A composite expands into a binding
-  per part, so every input is one part holding one control, and the callback, `MappedPart` being
-  collected per part, and `binding_family` returning an `Option` all describe more than one. The
-  method is public, so narrowing it to a single `(BindingPart, Control)` is a breaking change.
-
-Unrouted.
-
-### 1063 Two checks written twice
-
-`overrides.rs`'s `apply_with` and `apply_for_entity_with`; `eval.rs`'s `bound_character` and
-`Control::from_name` · read only
-
-- **The `NoSuchMapping` report is copied whole** between the world-wide and per-entity apply:
-  sixteen lines, identical but for a comment. The two functions differ only in which applier they
-  collect, so either one function over an `Option<Entity>` or the report as a helper removes the
-  copy. The per-entity copy is untested: `apply_overrides_for_reaches_only_its_own_entity` asserts
-  its problems are empty, and only `apply_overrides` is tested reporting one.
-- **"Exactly one character" is decided twice**, for a key event's text and for a saved `char/` name,
-  both as `(Some(single), None)` then `normalize_character`. A change to what counts as one
-  character has to be made in both. Four lines each, and not worth acting on alone.
-
-Unrouted.
-
-### 1038 One command the Verification list does not run
-
-`cargo doc --no-deps --all-features` warned twice when the scan ran — a redundant explicit link
-target in `device.rs`, and a link to `GamepadBrand::Generic` in `present.rs` with nothing importing
-`GamepadBrand` into that scope. **Both are fixed**: rebuilt from a touched `lib.rs`, the command is
-now warning-free.
-
-The finding survives the fix, because it was never really about the two warnings. That command is
-the only one in the project that reads doc comments at all, and it is not in `CLAUDE.md`'s
-Verification list — so nothing would have caught either warning, and nothing will catch the next.
-
-_Fix:_ **chunk 28**, which adds the command and extends this to the no-devices build, where eighteen
-intra-doc links `--all-features` resolves go unresolved.
 
 ---
 

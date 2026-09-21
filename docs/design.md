@@ -220,16 +220,30 @@ pub enum DiagnosticKind {
 One pass per context per tick: raw events in, action state and a transition log out.
 
 ```
-raw event
+raw event, one at a time
   → held-state update
-  → chord clash pre-pass (once per fold, if the plan has chords)
-  → modifier chain      negate · swizzle · scale · dead zone · curve · clamp · compass · custom
-  → conditions          explicit: any satisfies · implicit: all hold · blocking: any vetoes
-  → fold by intent      several bindings, one action
-  → stage after fold    modifiers · conditions, declared once per action
+  → chord clash pre-pass  once per fold, if the plan has chords
+  → shared toggle latch   once per fold, per shared hold_or_toggle key
+  → per binding
+      read the control    a consumed control reads as untouched
+      modifier chain      negate · swizzle · scale · dead zone · curve · clamp · compass · custom
+      press threshold     a Button action fed by a non-bool value, remembered per binding
+      conditions          explicit: any satisfies · implicit: all hold · blocking: any vetoes
+      consume?            Building or Satisfied adds its controls to the instance's claims
+  → fold by intent        several bindings, one action
+  → stage after fold      modifiers · conditions, declared once per action
   → write ActionState, mark dirty, append transition
-  → consume?            record the control so later contexts skip it
+  → class dispatch        the event itself, if no plain binding indexes its control
 ```
+
+Level events are replayed one at a time, each followed by a whole fold, so a press and a release
+inside one tick are two readings rather than none. A tick with no level event still folds once, so
+time-driven conditions advance. Mouse motion is summed across the tick and read by one further fold
+at the end, in which only `Delta2` actions take part. An inactive context applies the held-state
+update and nothing after it.
+
+Claims gather in a list local to the instance and reach `ConsumedControls` once it has finished, so
+an instance never reads back its own claim partway through a tick.
 
 ### 5.1 Arbitration
 
@@ -267,8 +281,8 @@ player the other will not do.
 
 ### 5.2 Consumption
 
-A binding declared `consume` records its controls in `ConsumedControls` while it is `Fired` or
-`Ongoing`, and contexts evaluating later see those controls as untouched.
+A binding declared `consume` records its controls in `ConsumedControls` while its conditions report
+`Building` or `Satisfied`, and contexts evaluating later see those controls as untouched.
 `ConsumedControls::claimant` names the context that took one. A stick is recorded as its two axes,
 whether a context's binding or a capture claimed it, so a stick binding reads zero on each axis that
 was taken and keeps the other.

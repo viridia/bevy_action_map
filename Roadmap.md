@@ -205,7 +205,20 @@ What is left, in semantic groups ordered roughly by priority. The order is a gui
 schedule: any chunk may be reordered once the one before it has been read, and a chunk's number is
 its identity rather than its position.
 
-(Next: 122, 28, 131, 33, 115)
+## Next
+
+* 145: A remote driver
+* 131: A plan slot as one struct
+* 115: A timing declared as a tunable
+* 122: The wheel as a binding source
+* 138: A plan compiled once, not once per context
+* 139: ActionId changes
+* 140: A mapping key derived in one place
+* 141: A binding input has one part
+* 143: One apply, for the world or for an entity
+* 144: One rule for what counts as a character
+* 28: Docs that run
+* 33: Conditions that read other actions
 
 No chunk currently carries a defect. The register of what is known to be wrong is
 [docs/issues.md](./docs/issues.md), and an entry there that acquires a chunk gets a section here.
@@ -466,6 +479,117 @@ and the convention already needs help: `delegate` pushes all five, `compile` pus
 - **Verified by:** the existing suite unchanged, and no diff in `examples/` — an internal change, so
   any example diff means the abstraction leaked.
 
+### 138. A plan compiled once, not once per context
+
+`Plan<C>`'s type parameter is phantom: no field and no method reads `C`, so the whole
+`impl<C> Plan<C>` — `compile` and everything around it, some 300 lines — is instantiated in the
+game's crate once per context type, and rebuilt with it. What it buys is that one context's plan
+cannot reach another's state, and nothing could get it there anyway: `InputContextPlan<C>`,
+`AppliedPlan<C>` and `InputContextState<C>` are each keyed by `C` already, and every function a plan
+moves through is generic over a single context.
+
+- **`Plan` loses its parameter**; the three holders keep theirs. The tests' `Plan::<()>` turbofish
+  goes with it.
+- **`Plan` becomes `pub(crate)`.** Every method already is, and no public signature names the type,
+  so a game can name it and do nothing with it.
+- **Not doing: measuring first.** The type safety being traded away is nil, so there is no trade-off
+  for a measurement to settle. `cargo llvm-lines` on an example, before and after, is the number to
+  quote in the commit if one is wanted.
+- **Verified by:** the existing suite unchanged, and no diff in `examples/`.
+
+### 139. The action registry, and what an `ActionId` can reach
+
+Three small things about `ActionId`, in one review because each one's reasoning leans on the others.
+
+- **The registry holds one fact three ways.** `intern_action` only appends, so `next_id` is always
+  `entries.len()` and each entry's stored `ActionId` is always its own index — and `ActionId::info`
+  linear-scans the vector that index would subscript. `entries` becomes `Vec<ActionInfo>`: the id is
+  the position, `info` is a `get`, `from_path` a `position`. The public signatures do not change.
+- **`BindingSpec`'s comment gives a false reason** (`binding/builder.rs`). It says the plan copies
+  intent, path and category because `ActionId` "does not reach back to the type"; `ActionId::info`
+  reaches exactly those three. The copies stay — `info` takes the global registry lock, which the
+  fold must not — and the comment is rewritten to say so, against the registry as this chunk leaves
+  it rather than as it is now.
+- **`ActionId::default()` is a real action.** The derive gives `ActionId(0)`, the first action
+  registered, so a `PromptSpan` spawned without an action silently shows whatever action happened to
+  be interned first. `Default` stays — `bsn!` needs it on the components that hold one — and becomes
+  a public `ActionId::PLACEHOLDER`, `u32::MAX - 1`: clear of `ActionIdCache`'s `UNRESOLVED` at
+  `u32::MAX`, and with `intern_action`'s exhaustion assert lowered to match. Every id-indexed lookup
+  already goes through `get`, so the placeholder reads as bound nowhere, with no case of its own.
+- **Not doing: a name for the placeholder in presentation.** What a prompt shows for it is the
+  example's business, and `prompt_ui` already has a path for an action bound nowhere.
+- **Verified by:** a unit test that the placeholder has no `info`, no slot in any plan, and is never
+  handed out by `intern_action`; the existing suite otherwise unchanged; no diff in `examples/`.
+
+### 140. A mapping key derived in one place
+
+`mapped_parts` exists so that `mappings_of` and `overrides::rewrite` agree on what each row holds,
+and it is where a part's `MappingKey` is derived: the declaration's prefix or the binding's path,
+then `MappingKey::new`. `mappings_of`'s follower pass derives it a third time, from the leader's
+declaration, rather than reading it. If prefix resolution changes in one place and not the other,
+followers silently stop attaching to their leader's row.
+
+- **The follower pass reads `mapped_parts`.** Computed once at the top of `mappings_of`, and
+  filtered to `binding == leader_index` where the pass now re-resolves the prefix and walks the
+  leader's parts itself.
+- **`MappedPart::family` goes.** It is always `control.family()`, beside `control` in the same
+  struct.
+- **Not doing: dropping `MappedPart::key`.** It is not a cache but the one derivation both consumers
+  share; removing it would put the rule back in each of them.
+- **Not doing: `BindingInput::for_each_part`'s shape**, which is chunk 141.
+- **Verified by:** the existing follower tests unchanged, and no diff in `examples/`.
+
+### 141. A binding input has one part
+
+`BindingInput::for_each_part` calls its visitor exactly once in every arm — a stick is one `Whole`
+part, unlike `for_each_control`, which visits its two axes — and the no-devices build still has
+`MouseMotion`, so no input yields none. Every caller is written for a generality that does not
+exist, and `binding_family`'s `Option` is where it shows: its four callers guard a `None` that
+cannot happen, in three different ways. `plan.rs`'s two skip work silently, `mapping.rs`'s
+`tunables_of` panics, and `overrides.rs` compares against `Some`.
+
+- **`for_each_part` becomes `part(&self) -> (BindingPart, Control)`.** Its callers in `plan.rs`,
+  `mapping.rs` and `context/declare.rs` lose their closures, and `mapped_parts` yields at most one
+  entry per binding.
+- **`binding_family` returns `DeviceFamily`**, and the four guards go. It stays a function rather
+  than being inlined, since chunk 135 names it.
+- **Now rather than later.** The method is public, so narrowing it breaks a caller — and there are
+  none until the first publish, after which there would be.
+- **Not doing: `for_each_control`.** A stick really does read two controls there.
+- **After chunk 140**, which settles what `mapped_parts` is for before this changes how it walks.
+- **Verified by:** the existing suite unchanged, and no diff in `examples/`.
+
+### 143. One apply, for the world or for an entity
+
+`overrides.rs`'s `apply_with` and `apply_for_entity_with` are the same function: they differ only in
+which applier they collect from `DeclaredContexts`, and then both run the same `NoSuchMapping`
+report and the same prompt bump. The per-entity copy's own comment says so. The report is tested
+only through `apply_overrides`, so a change made to one copy and not the other fails nothing.
+
+- **One `apply_with(world, target: Option<Entity>, overrides, preset)`**, matching on `target` to
+  call `apply` or `apply_for_entity`. Everything after the appliers exists once. The four public
+  entry points keep their signatures and pass `None` or `Some(entity)`.
+- **A test that `apply_overrides_for` reports `NoSuchMapping`**, the path nothing covers today.
+- **Not doing: merging `DeclaredContexts`'s two function pointers.** `apply_to_context` rewrites the
+  shared default and every instance, and `apply_to_entity` rewrites one instance. Those are two
+  operations rather than a copy of one.
+- **Verified by:** the new test, the existing suite unchanged, and no diff in `examples/`.
+
+### 144. One rule for what counts as a character
+
+A logical key is decided from text in two places: `eval.rs`'s `bound_character`, from a key event's
+`Key::Character`, and `Control::from_name` (`present.rs`), from a saved `char/` name. Both take
+exactly one `char`, then `normalize_character`, written out twice. The two have to agree — a saved
+name is only good if a key event can produce the same character — and nothing makes them.
+
+- **One `pub(crate) fn single_character(text: &str) -> Option<char>`** beside `normalize_character`
+  in `binding/control.rs`, returning the normalized character when `text` holds exactly one.
+  `bound_character` and `from_name` both call it.
+- **Not doing: `normalize_character`'s own one-character match.** It asks whether lowercasing is
+  one-for-one, which is a different question.
+- **Verified by:** a unit test on `single_character` (empty, one, two, uppercase), `from_name`'s
+  existing `char/` tests unchanged, and no diff in `examples/`.
+
 ### 112. A backend suppresses a device family at L0
 
 R0.6's other half, and the smallest it will ever be: `docs/steam.md` S1 and S3 killed the
@@ -555,10 +679,81 @@ Nothing here is faked — `examples/pong_robot` is already an authority resolvin
 - **`cargo doc` is not in the Verification list, and fails outside `--all-features`.** The
   no-devices build reports eighteen unresolved intra-doc links, every one to a feature-gated item
   linked from ungated prose — `KeyCode`, `LogicalKey`, `SavedOverrides`, `active_in_state`, `Stick`,
-  `InputFramePlugin` among them. `--all-features` resolves all of them and so hides the lot. Extends
-  `docs/issues.md` 1038, which named only the all-features build.
+  `InputFramePlugin` among them. `--all-features` resolves all of them and so hides the lot.
 - **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
   look at the module pages the way a stranger would.
+
+---
+
+## Driving an example from outside
+
+Nothing in tree can run an example, act on it and see the result without a person at the keyboard.
+Live screenshots and window driving have been unreliable, so every check that needs a running window
+has been made by reading instead. What is wanted works the way Playwright does: start the app, find
+an element by a path of names, click it, wait until what it opens exists and has loaded, take a
+screenshot, quit — all over HTTP and JSON.
+
+It is developed here because that is faster, as a workspace member (`bevy_remote_driver/`) with its
+own documents. Where it ends up is an open question: a standalone crate, or parts of it upstreamed
+into Bevy.
+
+### 145. A remote driver: requirements and design
+
+Documents only. The implementation chunks come out of this one, and it writes them into this section
+before it lands.
+
+What Bevy's remote protocol (`bevy_remote`) already covers is the starting point, and the
+requirements ask only for what is missing. Read against Bevy's
+`examples/remote/integration_test.rs`:
+
+- **Already there:** queries with component filters; spawning a `Screenshot` and streaming its
+  `ScreenshotCaptured` back through `world.observe+watch`; clicks written as `WindowEvent` messages;
+  events triggered; and custom methods, since `RemoteMethods` is a public resource a second plugin
+  can `insert` into.
+- **Missing, and what the requirements cover:**
+  - a selector over the hierarchy by `Name`, which BSN's `#Name` already inserts;
+  - a click aimed at a selector rather than at coordinates, folding in the `UiGlobalTransform` and
+    scale-factor steps the Bevy example does by hand;
+  - waiting until a selector matches and its scene is loaded. BSN's `Ready` is an `EntityEvent`
+    without `Reflect`, so the plugin observes it and inserts a marker component a query can see;
+  - quitting;
+  - a client, and the form a test plan is written in.
+
+The deliverables:
+
+- **`bevy_remote_driver/docs/requirements.md` and `docs/design.md`**, admitting what their
+  counterparts here admit. Numbering uses prefixes of their own, so a reference to one is never
+  mistaken for an `R` or a `TD`; `scripts/xref.py` learns them, and `CLAUDE.md`'s document table
+  gains a row for each.
+- **Where each piece should end up**, as a section of the design. For each capability: whether it
+  belongs in the standalone crate or upstream in Bevy. A reflectable `Ready`, name-path selection
+  and click-by-entity look like Bevy's own gaps rather than this crate's features. This is the
+  question that decides how much of the crate should exist at all.
+- **Identifiers in the examples' scenes.** A selector needs something stable to select, so the
+  examples gain ids the way any app under automated test does. They are cheap enough to ship: the
+  requirement is that an id costs nothing a release build would notice, so none are stripped or
+  gated. What an id *is* is the design question — BSN's `#Name`, which already inserts a `Name`, or
+  a component of its own that makes no promise of display text or uniqueness. Adding the ids is an
+  intended diff in `examples/`, so the implementation chunk that adds them says so rather than
+  tripping ground rule 3.
+- **Input injection into the action mapper is a separate half.** It lives in `bevy_action_map`
+  behind a `remote` feature, registering its own methods, so the driver never depends on the mapper.
+  It gets its own requirements in `Requirements.md` and its own chunk. The levels it could inject at
+  — a raw event into the frame, or an already-resolved value as an authority — are the design
+  question. Read against it before routing: `docs/issues.md` 1048 (virtual devices), 1041 (pumped
+  sampling) and 1025 (driving a context from outside). Each may be answered by this or only resemble
+  it, and telling which is part of this chunk.
+- **First, a throwaway spike**, in a session of its own, because two assumptions decide the design
+  and neither has been tested. Add `RemotePlugin` to one example, launch it from a background shell,
+  and over `curl`: take a screenshot and check it is not black, then inject a key and check it
+  reaches the mapper. The first is the likely failure. A window launched behind the editor may be
+  occluded, and Bevy's own example warns that an occluded window screenshots black; if no window
+  setting fixes it, the design turns to rendering offscreen. The second can fail by design, since
+  chunk 62 releases held controls when the window loses focus, and a window under test need not have
+  it. The spike's findings go into the design; its code does not survive.
+- **Not doing: code**, beyond that spike.
+- **Verified by:** review of the two documents, and implementation chunks in this section with
+  ground rule 4's omissions stated.
 
 ---
 
