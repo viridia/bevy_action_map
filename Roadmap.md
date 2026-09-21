@@ -198,6 +198,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 109  | Reflect where a scene, a tool or a save file reaches the type         |
 | 137  | Arbitration that names whose input it is                              |
 | 130  | Capture as a sensor, answering on the release                         |
+| 145  | A remote driver: requirements and design                              |
 
 ---
 
@@ -697,84 +698,48 @@ It is developed here because that is faster, as a workspace member (`bevy_remote
 own documents. Where it ends up is an open question: a standalone crate, or parts of it upstreamed
 into Bevy.
 
-### 145. A remote driver: requirements and design
+### 146. The driver's plugin
 
-Documents only. The implementation chunks come out of this one, and it writes them into this section
-before it lands.
+`bevy_remote_driver` as a workspace member, and `RemoteDriverPlugin`, inert unless
+`BEVY_REMOTE_DRIVER_PORT` is set: `driver.select` and `driver.locate` taking a path as an array,
+`driver.diagnostics`, and the `SceneReady` observer (DD3).
 
-What Bevy's remote protocol (`bevy_remote`) already covers is the starting point, and the
-requirements ask only for what is missing. Read against Bevy's
-`examples/remote/integration_test.rs`:
+- **Not doing:** the client, or anything in `examples/`.
+- **Verified by:** headless `App` tests calling the handlers directly.
 
-- **Already there:** queries with component filters; spawning a `Screenshot` and streaming its
-  `ScreenshotCaptured` back through `world.observe+watch`; clicks written as `WindowEvent` messages;
-  events triggered; and custom methods, since `RemoteMethods` is a public resource a second plugin
-  can `insert` into.
-- **Missing, and what the requirements cover:**
-  - a selector over the hierarchy by `Name`, which BSN's `#Name` already inserts;
-  - a click aimed at a selector rather than at coordinates, folding in the `UiGlobalTransform` and
-    scale-factor steps the Bevy example does by hand;
-  - waiting until a selector matches and its scene is loaded. BSN's `Ready` is an `EntityEvent`
-    without `Reflect`, and a client that spawns a scene and then observes `Ready` can miss it, since
-    it may fire before the watch starts. An observer on the scene root that inserts a marker
-    component answers both: a query can see the marker, and it is still there when the client looks;
-  - quitting;
-  - a client, and the form a test plan is written in.
+### 147. The client and the runner
 
-The deliverables:
+The Python client, JSON plans, `run.py`, the report and PNG output (DD4, DD5.1, DD5.2): the
+`present`, `absent` and `expect` checks with their timeouts, the input steps, `frames` and
+`seconds`, and a generic `call` step for a method the client does not know. DD9 is finalized here,
+which satisfies DR7.4.
 
-- **`bevy_remote_driver/docs/requirements.md` and `docs/design.md`**, admitting what their
-  counterparts here admit. Numbering uses prefixes of their own, so a reference to one is never
-  mistaken for an `R` or a `TD`; `scripts/xref.py` learns them, and `CLAUDE.md`'s document table
-  gains a row for each.
-- **Where each piece should end up**, as a section of the design. For each capability: whether it
-  belongs in the standalone crate or upstream in Bevy. A reflectable `Ready`, name-path selection
-  and click-by-entity look like Bevy's own gaps rather than this crate's features. This is the
-  question that decides how much of the crate should exist at all.
-- **Identifiers in the examples' scenes.** A selector needs something stable to select, so the
-  examples gain ids the way any app under automated test does. They are cheap enough to ship: the
-  requirement is that an id costs nothing a release build would notice, so none are stripped or
-  gated. What an id *is* is the design question — BSN's `#Name`, which already inserts a `Name`, or
-  a component of its own that makes no promise of display text or uniqueness. Adding the ids is an
-  intended diff in `examples/`, so the implementation chunk that adds them says so rather than
-  tripping ground rule 3.
-- **Input injection into the action mapper is a separate half.** It lives in `bevy_action_map`
-  behind a `remote` feature, registering its own methods, so the driver never depends on the mapper.
-  It gets its own requirements in `Requirements.md` and its own chunk. The levels it could inject at
-  — a raw event into the frame, or an already-resolved value as an authority — are the design
-  question. Read against it before routing: `docs/issues.md` 1048 (virtual devices), 1041 (pumped
-  sampling) and 1025 (driving a context from outside). Each may be answered by this or only resemble
-  it, and telling which is part of this chunk.
-- **First, a throwaway spike**, in a session of its own, because two assumptions decide the design
-  and neither has been tested. Add `RemotePlugin` to one example, launch it from a background shell,
-  and over `curl`: take a screenshot and check it is not black, then inject a key and check it
-  reaches the mapper. The first is the likely failure. A window launched behind the editor may be
-  occluded, and Bevy's own example warns that an occluded window screenshots black; if no window
-  setting fixes it, the design turns to rendering offscreen. The second can fail by design, since
-  chunk 62 releases held controls when the window loses focus, and a window under test need not have
-  it. The spike's findings go into the design; its code does not survive. **Done.** Findings, for
-  the design to take up:
-  - A covered window captures an empty image, every byte zero including alpha, and the app's own
-    `ScreenshotCaptured` observer sees the same, so the loss is in rendering, not in transport. In
-    front, the capture is correct. The design turns to rendering offscreen.
-  - A key written as `bevy_input::keyboard::KeyboardInput` through `world.write_message` reaches the
-    mapper whether or not the window has focus. Losing focus sends one `KeyboardFocusLost`, which
-    releases what is held; it does not gate later input.
-  - Injecting a raw event therefore needs nothing from this crate. The `remote` feature is needed
-    only for the authority level, and for anything a message cannot express.
-  - A launched window takes focus from whatever had it, which is another reason to go offscreen.
-  - A covered window ran at about half the frame rate. A test that depends on timing has to step
-    frames rather than wait on the clock, which bears on 1041.
-  - Bevy's `bevy_remote` feature can be enabled on the dev-dependency from the command line, as
-    `--features bevy/bevy_remote`, with no change to `Cargo.toml`.
-- **Instructions for writing a test**, addressed to an agent: how to launch the app under test,
-  write a plan, run it, and read a failure, without the author's attention being needed partway
-  through. The spike found that every approval prompt brings the editor to the front and covers the
-  window, so a run has to complete from one command. This goes in the driver's design, or in a
-  document of its own if it outgrows a section.
-- **Not doing: code**, beyond that spike.
-- **Verified by:** review of the two documents, and implementation chunks in this section with
-  ground rule 4's omissions stated.
+- **Not doing:** gamepads, or this crate's examples.
+- **Verified by:** a plan against a small test app of the driver's own, in
+  `bevy_remote_driver/examples/`, run once in front and once covered.
+
+### 148. Ids in the examples
+
+`#Name`s where plans need them, and `RemoteDriverPlugin` in each `main`. This is an intended diff in
+`examples/`, not a leak ground rule 3 would flag.
+
+- **Not doing:** a plan per example. One proves the ids work, and more are written when a chunk
+  needs one.
+- **Verified by:** a plan for Disasteroids reaching its settings screen and rebinding a row.
+
+### 149. The mapper's `remote` feature
+
+R25 and DD6: `action_map.dump` and `action_map.authority`.
+
+- **Not doing:** raw injection, which R25.4 says needs nothing.
+- **Verified by:** a headless test of each handler, and 148's plan reading `Fired` through `call`.
+
+### 150. A virtual gamepad
+
+DR4.4 and DD5.3: the `pad` step. DD5.3 is read, not run, so the first job is measuring it.
+
+- **Not doing:** more than one virtual pad at a time.
+- **Verified by:** a plan driving Disasteroids from the pad.
 
 ---
 
@@ -789,6 +754,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Focus orchestration: guidance, and a worked example** (D87) | **community feedback, and Bevy's own direction on driving widget state from outside.** D87 keeps the mapper focus-agnostic, so the layer binding actions to whichever widget has focus sits outside the crate — `widget_focus.rs` is one, and names the role. What is deferred is telling someone how to build their own: a requirements-and-design section for an orchestrator, and the worked example of held-down visual state with the latch D87 describes. Guidance is the deliverable whether or not this project ever ships an orchestrator itself. Both gates are real rather than a delay. The first: that a game activating widgets from the keyboard and the pad wants the pressed highlight a mouse gives, and that the one-shot activation `widget_focus.rs` ships today is not already enough, are guesses about other people's UI. The second: open Bevy issues on remote control of widget state will change what an orchestrator has to do, so guidance written now would describe a shape about to move. Nothing is blocked — a game wanting the highlight has D87's rule and no crate change to wait for |
 | **Resolving a stored device identity to the connected devices that match it** | a caller asking in that direction. Written for chunk 72 and withdrawn for want of one; chunks 72d and 92 did not need it either. Devices arrive as connection events one at a time, the ones already plugged in at launch included, so every caller has one device in hand and asks the inverse question. Two identical pads never present themselves as a set to choose from |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it. Measured (`docs/steam.md` S17): `get_glyph_for_action_origin` resolves to an absolute filesystem path inside the client's own app bundle — `Contents/MacOS/controller_base/images/api/dark/shared_lstick_md.png` on macOS, not the `tenfoot/resource/...` path this row previously guessed — and the `dark` component says the glyphs are themed, so a light variant has to be selected rather than assumed. A Bevy `AssetPath` can carry it natively via `from_path_buf` — no string-escaping the drive letter or backslashes. The path is not to be opened as given: a custom `AssetSource` reader must canonicalize it and reject anything outside a known root before reading, rather than trust an external SDK's return value as a bare filesystem path. One scheme, one hard-coded root is the right size while only this one root is confirmed; a second scheme is warranted only if a second root with its own lifecycle surfaces (e.g. something ephemeral, which cannot share a stable root's caching and hot-reload assumptions) — not one scheme per SDK call that happens to return a path |
+| **Proposing the driver's server methods upstream** (DD8) | **chunk 148's plan passing, and a second plan against a different example.** Four gaps: selection by name path, locating a UI node, readiness as state, and a reflected `DiagnosticsStore`. The deliverable is a short brief for each, for the author to edit and post. Until two apps have used the methods, their shapes are guesses about what a test needs |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import. The crate's docs owe a game the warning `widget_focus.rs` carries today: `InputDispatchPlugin` in `DefaultPlugins` activates a focused `Button` on a key a context has consumed, so a game using both disables it |
 | **The generic tier's art** | **the presentation crate**, which is what has to ship an atlas with no holes in it. Kenney's generic set is blank, unlabeled buttons, so each generic face button needs a short text stamp authored onto it by hand: content work with a known answer, and no code. Until then an unrecognized pad's face buttons resolve to text, which is also where the fallback chain shows itself in tree, on Disasteroids' Cancel and Confirm and in the gallery's Generic brand |
 | **Netcode injection and reconciliation** | a networked target. The injection point is built: chunk 111 landed `delegate` and `AuthorityValues`, so a peer's resolved action already has somewhere to go (D71). Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. Injection targets L2 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs a remote player's resolved action to inject and a later correction to reconcile against it |

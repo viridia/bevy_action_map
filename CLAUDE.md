@@ -25,11 +25,13 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 | `docs/design.md` | how the crate works, in sections `TD1`–`TD11` | you need the shape of a thing before changing it |
 | `docs/decisions.md` | why it is that way, `D1`–`D89` | a decision looks arbitrary, or you are about to reverse one |
 | `Roadmap.md` | what is left, what is broken, the chunk sequence | **start here for any chunk** |
-| `Requirements.md` | 224 numbered requirements, `R<section>.<n>`, in sections `R0`–`R24` | you need to know what must be true, or a chunk cites an R-number |
+| `Requirements.md` | 228 numbered requirements, `R<section>.<n>`, in sections `R0`–`R25` | you need to know what must be true, or a chunk cites an R-number |
 | `docs/comparison.md` | how this crate differs from BEI and LWIM | someone asks why this exists |
 | `docs/one-way-doors.md` | what stops being revisable if an input crate goes upstream | upstreaming comes up |
 | `docs/issues.md` | findings awaiting routing, in five tiers by severity | a finding needs routing, or you are about to re-find one |
 | `docs/steam.md` | what a running Steam client actually does, `S1`–`S12` | a decision rests on how an external backend behaves |
+| `bevy_remote_driver/docs/requirements.md` | 31 numbered requirements for the remote test driver, `DR<section>.<n>`, in sections `DR1`–`DR7` | a chunk touches the driver, or cites a DR-number |
+| `bevy_remote_driver/docs/design.md` | how the driver works, in sections `DD1`–`DD9` | you are writing or running a test against an example |
 
 `archive/` holds the retired `Design.md`, `Log.md` and `Log-archive.md`. **Nothing in flight reasons
 from them** — they describe the crate as it was, two of them are longer than anything in `docs/`,
@@ -40,7 +42,7 @@ There is **one `D`-numbering** in the project, defined in `docs/decisions.md`. `
 tags requirements with it; it used to carry a rival `D1`–`D9` of its own, and does not any more.
 
 Two documents have numbered sections, and each has its own prefix so a reference never needs to know
-which document it is standing in. `Requirements.md`'s sections are `R0`–`R24`, told from the
+which document it is standing in. `Requirements.md`'s sections are `R0`–`R25`, told from the
 requirements inside them by the dot: `R19` is the section, `R19.14` a requirement in it.
 `docs/design.md`'s are `TD1`–`TD11`, with subsections such as `TD5.3`. The section sign these
 replaced is retired, and `scripts/xref.py` fails on one: any that survives is a reference nothing

@@ -11,7 +11,8 @@ stay correct only because people are careful. This reports every reference that 
 
 Each numbered document owns a prefix, so a reference resolves without knowing where it is written:
 `R19` is a section of `Requirements.md` and `R19.14` a requirement inside it, `TD5.3` a subsection of
-`docs/design.md`. The section sign these replaced is retired, and finding one is an error.
+`docs/design.md`. The remote driver's two documents own `DR` and `DD` the same way. The section sign
+these replaced is retired, and finding one is an error.
 """
 
 import argparse
@@ -28,13 +29,21 @@ D_DEF = re.compile(r"^### (D\d+)\b")
 D_CITE = re.compile(r"\bD\d+\b")
 R_SECTION = re.compile(r"\bR(\d+)\b(?!\.\d)")
 TD_SECTION = re.compile(r"\bTD(\d+(?:\.\d+)?)\b")
+DR_DEF = re.compile(r"^\s*- \*\*(DR\d+\.\d+[a-z]?) \((?:MUST|SHOULD|MAY|WITHDRAWN)\)\*\*")
+DR_CITE = re.compile(r"\bDR\d+\.\d+[a-z]?\b")
+DR_SECTION = re.compile(r"\bDR(\d+)\b(?!\.\d)")
+DD_SECTION = re.compile(r"\bDD(\d+(?:\.\d+)?)\b")
 RETIRED = re.compile(r"§")
 H2_NUM = re.compile(r"^## (\d+)\.")
 H3_NUM = re.compile(r"^### (\d+\.\d+)\b")
 
 
 def sources():
-    md = sorted(ROOT.glob("*.md")) + sorted(ROOT.glob("docs/*.md"))
+    md = (
+        sorted(ROOT.glob("*.md"))
+        + sorted(ROOT.glob("docs/*.md"))
+        + sorted(ROOT.glob("bevy_remote_driver/docs/*.md"))
+    )
     rs = sorted(
         p
         for d in ("src", "tests", "examples")
@@ -80,6 +89,12 @@ def main():
     req_sections = headings(req, H2_NUM)
     des_sections = headings(des, H2_NUM) | headings(des, H3_NUM)
 
+    driver = ROOT / "bevy_remote_driver/docs"
+    dreq, ddes = driver / "requirements.md", driver / "design.md"
+    dr_defined = {m.group(1) for _, l in prose(dreq) for m in [DR_DEF.match(l)] if m}
+    dreq_sections = headings(dreq, H2_NUM)
+    ddes_sections = headings(ddes, H2_NUM) | headings(ddes, H3_NUM)
+
     fails, cited = [], set()
 
     def fail(path, n, msg):
@@ -118,6 +133,19 @@ def main():
                 if m.group(1) not in des_sections:
                     fail(path, n, f"TD{m.group(1)} is not a section of docs/design.md")
 
+            for m in DR_CITE.finditer(line):
+                if m.group() not in dr_defined:
+                    fail(path, n, f"{m.group()} has no definition in {dreq.relative_to(ROOT)}")
+
+            if path in md:
+                for m in DR_SECTION.finditer(line):
+                    if m.group(1) not in dreq_sections:
+                        fail(path, n, f"DR{m.group(1)} is not a section of {dreq.relative_to(ROOT)}")
+
+            for m in DD_SECTION.finditer(line):
+                if m.group(1) not in ddes_sections:
+                    fail(path, n, f"DD{m.group(1)} is not a section of {ddes.relative_to(ROOT)}")
+
             if RETIRED.search(line):
                 fail(path, n, "a retired section sign survived the TD/R migration")
 
@@ -134,6 +162,12 @@ def main():
         (r"in sections `R\d+`–`R(\d+)`", max(req_sections, key=int), "highest requirements section"),
         (r"in sections `TD\d+`–`TD(\d+)`",
          max((s for s in des_sections if "." not in s), key=int), "highest design section"),
+        (r"(\d+) numbered requirements for the remote", str(len(dr_defined)),
+         "driver requirement count"),
+        (r"in sections `DR\d+`–`DR(\d+)`", max(dreq_sections, key=int),
+         "highest driver requirements section"),
+        (r"in sections `DD\d+`–`DD(\d+)`",
+         max((s for s in ddes_sections if "." not in s), key=int), "highest driver design section"),
     ):
         m = re.search(pattern, text)
         if not m:
