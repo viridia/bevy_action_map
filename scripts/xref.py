@@ -46,7 +46,7 @@ def sources():
     )
     rs = sorted(
         p
-        for d in ("src", "tests", "examples")
+        for d in ("src", "tests", "examples", "bevy_remote_driver/src")
         for p in (ROOT / d).rglob("*.rs")
     )
     return md, rs

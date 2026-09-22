@@ -99,6 +99,10 @@ run_step "cargo clippy --all-features --all-targets" cargo clippy --all-features
 run_step "cargo clippy --no-default-features --features libm" \
     cargo clippy --no-default-features --features libm
 run_step "cargo test --all-features --lib --tests" cargo test --all-features --lib --tests
+# A workspace member of its own, which the bare commands above take no part of.
+run_step "cargo clippy -p bevy_remote_driver --all-targets" \
+    cargo clippy -p bevy_remote_driver --all-targets
+run_step "cargo test -p bevy_remote_driver" cargo test -p bevy_remote_driver
 [[ ${doc} -eq 1 ]] && run_doc_step
 run_step "cargo test --no-default-features --features libm --test no_devices" \
     cargo test --no-default-features --features libm --test no_devices

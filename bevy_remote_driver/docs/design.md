@@ -3,9 +3,9 @@
 A driver for a running Bevy app, for automated tests. Its sections are numbered `DD1`–`DD9`, and its
 requirements are [requirements.md](./requirements.md)'s `DR` numbers.
 
-Nothing here is built yet. This is the design the implementation chunks build to, and it becomes the
-description of what is built as they land. Where a claim rests on reading Bevy's source rather than
-on running something, it says so.
+The plugin, DD3, is built. The rest is the design the remaining implementation chunks build to, and
+becomes the description of what is built as they land. Where a claim rests on reading Bevy's source
+rather than on running something, it says so.
 
 ---
 
@@ -28,7 +28,10 @@ work happens.
 
 `RemoteDriverPlugin` adds `RemotePlugin` and `RemoteHttpPlugin` itself, and only when the
 environment variable `BEVY_REMOTE_DRIVER_PORT` is set, on that port. Without it the plugin adds
-nothing, so a build containing it opens no port when started normally (DR1.5).
+nothing, so a build containing it opens no port when started normally (DR1.5). A value that is not a
+port panics at startup, since running without the port would leave the client timing out with no
+reason given. An app does not add either remote plugin itself, since Bevy refuses a plugin added
+twice.
 
 ## 2. What BRP already does
 
@@ -86,21 +89,24 @@ spawns, such as a prompt's glyph, is not among them, and nothing signals when it
 waits for those with `seconds` (DR3.6). Loading runs on IO threads rather than per frame, so time is
 the right measure there, where the app's own logic is measured in frames.
 
-### 3.3 Locating a node
+### 3.3 Where a node is drawn
 
-`driver.locate { path }` resolves one UI node and returns the window it is drawn in and its centre
-in logical pixels: `UiGlobalTransform`'s translation divided by that window's scale factor. The
-window is the one the node's camera renders to, taken from `UiTargetCamera` when the node has one
-and the primary window otherwise. The method only locates. The client writes the click itself, using
-BRP (DD5.1).
+`driver.locate { path }` resolves one UI node and returns `{ window, logical }`: the window it is
+drawn in, and its centre in logical pixels, `UiGlobalTransform`'s translation divided by that
+window's scale factor. The window is the one the node's camera renders to, read from
+`ComputedUiTargetCamera`, which Bevy propagates from a root's `UiTargetCamera`; a node with no
+camera falls back to the primary window. A node drawn to an image rather than a window is refused.
+The method only locates. The client writes the click itself, using BRP (DD5.1).
 
 ### 3.4 Diagnostics
 
 `driver.diagnostics` returns the latest value of each diagnostic in `DiagnosticsStore`, by path.
 Nothing in `bevy_diagnostic` is reflected, so BRP cannot read the store itself. Every wait measured
 in frames reads `frame_count` from it, which `FrameTimeDiagnosticsPlugin` records from `FrameCount`.
-That plugin is not in `DefaultPlugins`, so the driver's plugin adds it when it is missing (DR1.4). A
-value is an `f64`, which holds a frame count exactly for longer than any test runs.
+That plugin is not in `DefaultPlugins`, so the driver's plugin adds it when it is missing (DR1.4).
+`is_plugin_added` sees only plugins added before the driver's, so an app that adds
+`FrameTimeDiagnosticsPlugin` too must add it first, or Bevy panics on the duplicate. A value is an
+`f64`, which holds a frame count exactly for longer than any test runs.
 
 Returning every diagnostic rather than only the frame count costs nothing, and leaves room for a
 plan to `expect` on one, such as a floor on `fps`, when a test needs it.
@@ -250,7 +256,7 @@ intended diff in `examples/`, which the chunk adding them says it is.
 | Piece | Home | Why |
 | --- | --- | --- |
 | Selection by name path | upstream, a filter on `world.query` | any app's test wants it, and it needs nothing but `Name` and `ChildOf` |
-| Locating a UI node | upstream, `bevy_remote` or `bevy_ui` | the scale factor and target-camera steps are Bevy's own knowledge, which every client repeats |
+| Where a UI node is drawn, for a click | upstream, `bevy_remote` or `bevy_ui` | the scale factor and target-camera steps are Bevy's own knowledge, which every client repeats |
 | Readiness as state | upstream, `bevy_scene` | a `Reflect` derive on `Ready` would not fix the race; the scene spawner leaving a component would |
 | Diagnostics over BRP | upstream, `Reflect` on `DiagnosticsStore` and what it holds | about as small as reflecting `FrameCount` alone, and makes every diagnostic readable through `world.get_resources`, frame count included |
 | Bringing the window forward before a screenshot | the client | a policy for tests, not a property of screenshots |

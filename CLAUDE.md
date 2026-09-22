@@ -183,6 +183,8 @@ prefer it to running each command by hand.
 python3 scripts/xref.py                                 # the documents' cross-references
 cargo fmt --check
 cargo test --all-features --lib --tests
+cargo clippy -p bevy_remote_driver --all-targets        # a workspace member the above skip
+cargo test -p bevy_remote_driver
 cargo clippy --all-features --all-targets
 cargo clippy --no-default-features --features libm      # the no-devices build
 cargo test --no-default-features --features libm --test no_devices
