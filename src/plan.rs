@@ -1,7 +1,6 @@
 //! Compiling bindings into the plan the evaluator runs against.
 
 use alloc::{collections::BTreeMap, vec::Vec};
-use core::marker::PhantomData;
 
 use crate::action::{ActionId, ActionIntent, ChannelShape};
 use crate::binding::{
@@ -685,7 +684,7 @@ pub(crate) struct CompiledSlot {
 // One slot per action, not per binding: an action may be bound several times, and all of those
 // bindings write the same state. Bindings are grouped by slot so the evaluator can fold each
 // action's contributions in a single pass with no per-frame bookkeeping.
-pub struct Plan<C> {
+pub(crate) struct Plan {
     bindings: Vec<CompiledBinding>,
     slots: Vec<CompiledSlot>,
     // The reverse direction, as a direct index rather than a search: `ActionId` is dense, so the id
@@ -714,10 +713,9 @@ pub struct Plan<C> {
     // Every control any binding above reads, deduped. Not an arbitration index — a class binding
     // never competes for a control on specificity; it yields whenever this set claims one.
     indexed_controls: Vec<Control>,
-    _marker: PhantomData<C>,
 }
 
-impl<C> Plan<C> {
+impl Plan {
     /// Compiles a plan from authored bindings.
     // Compilation takes the bindings as sound; `diagnose` is what decides whether they are.
     pub(crate) fn from_bindings(
@@ -903,7 +901,6 @@ impl<C> Plan<C> {
             class_bindings: Vec::new(),
             indexed_controls,
             has_chords,
-            _marker: PhantomData,
         }
     }
 
@@ -1275,7 +1272,7 @@ mod tests {
         let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<Jump>(KeyCode::Space);
         let (bindings, class_bindings, _) = builder.finish();
-        let plan = Plan::<()>::from_bindings(bindings, class_bindings);
+        let plan = Plan::from_bindings(bindings, class_bindings);
 
         assert!(plan.is_indexed(Control::PhysicalKey(KeyCode::Space)));
         assert!(!plan.is_indexed(Control::PhysicalKey(KeyCode::KeyA)));
@@ -1375,7 +1372,7 @@ mod tests {
         builder.combined::<Move>().on_change();
         let combined = builder.take_combined();
         let (bindings, class_bindings, _) = builder.finish();
-        let mut plan = Plan::<()>::from_bindings(bindings, class_bindings);
+        let mut plan = Plan::from_bindings(bindings, class_bindings);
         plan.combine(combined);
 
         let stage = plan.stage(
@@ -1404,7 +1401,7 @@ mod tests {
         builder.combined::<Move>().on_change();
         let combined = builder.take_combined();
         let (bindings, class_bindings, _) = builder.finish();
-        let mut template = Plan::<()>::from_bindings(bindings.clone(), class_bindings);
+        let mut template = Plan::from_bindings(bindings.clone(), class_bindings);
         template.combine(combined);
 
         // WASD emptied, and one arrow left with its condition.

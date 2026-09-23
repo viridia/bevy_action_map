@@ -8,6 +8,7 @@ use bevy_ecs::prelude::{Query, Resource};
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_ecs::world::{DeferredWorld, World};
 use bevy_platform::sync::Arc;
+use core::marker::PhantomData;
 
 use crate::action::{InputContext, TickDomain};
 use crate::binding::InputContextBuilder;
@@ -28,7 +29,7 @@ use super::state::InputContextState;
 // keeps R17.1's diff against the defaults possible after the first apply.
 #[derive(Resource)]
 pub(crate) struct InputContextPlan<C> {
-    plan: Arc<Plan<C>>,
+    plan: Arc<Plan>,
     // The bindings as authored, kept so that an override can be applied as a diff against them.
     // Cloned and rewritten per apply rather than mutated, for the reason above.
     bindings: alloc::vec::Vec<crate::binding::BindingSpec>,
@@ -41,6 +42,7 @@ pub(crate) struct InputContextPlan<C> {
     // had a chance to say otherwise — including an instance spawned once the answer is already yes,
     // which the condition's next run brings up.
     starts_active: bool,
+    _marker: PhantomData<C>,
 }
 
 /// What one context's bindings currently are, once an override has been applied to them.
@@ -50,9 +52,10 @@ pub(crate) struct InputContextPlan<C> {
 /// presentation mapping list — reads this and falls back to `InputContextPlan<C>`.
 #[derive(Resource)]
 pub(crate) struct AppliedPlan<C> {
-    pub(crate) plan: Arc<Plan<C>>,
+    pub(crate) plan: Arc<Plan>,
     pub(crate) mappings: alloc::vec::Vec<crate::mapping::ActionMapping>,
     pub(crate) tunables: alloc::vec::Vec<crate::mapping::Tunable>,
+    _marker: PhantomData<C>,
 }
 
 /// Gives a newly added context entity the state tables for its bindings.
@@ -543,6 +546,7 @@ fn apply_to_context<C: InputContext + Component>(
         plan: plan.clone(),
         mappings,
         tunables,
+        _marker: PhantomData,
     });
 
     let mut instances = world.query::<&mut InputContextState<C>>();
@@ -850,6 +854,7 @@ fn declare_context<C: InputContext + Component>(
         mappings,
         tunables,
         starts_active,
+        _marker: PhantomData,
     });
 
     // Bevy's own assertion for a hook attached after something already carries the component says

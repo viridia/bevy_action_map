@@ -204,6 +204,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 148  | Ids in the examples                                                   |
 | 150  | A virtual gamepad                                                     |
 | 131  | A plan slot as one struct                                             |
+| 138  | A plan compiled once, not once per context                            |
 
 ---
 
@@ -215,7 +216,6 @@ its identity rather than its position.
 
 * 115: A timing declared as a tunable
 * 122: The wheel as a binding source
-* 138: A plan compiled once, not once per context
 * 139: ActionId changes
 * 140: A mapping key derived in one place
 * 141: A binding input has one part
@@ -462,24 +462,6 @@ Six chunks no game asks for and no published crate can do without: an extension 
 outside has exercised, a rebinding surface that does one job, the reflection the documents promise,
 documentation that runs, documentation that is true, and the advice that keeps a player out of a
 corner.
-
-### 138. A plan compiled once, not once per context
-
-`Plan<C>`'s type parameter is phantom: no field and no method reads `C`, so the whole
-`impl<C> Plan<C>` — `compile` and everything around it, some 300 lines — is instantiated in the
-game's crate once per context type, and rebuilt with it. What it buys is that one context's plan
-cannot reach another's state, and nothing could get it there anyway: `InputContextPlan<C>`,
-`AppliedPlan<C>` and `InputContextState<C>` are each keyed by `C` already, and every function a plan
-moves through is generic over a single context.
-
-- **`Plan` loses its parameter**; the three holders keep theirs. The tests' `Plan::<()>` turbofish
-  goes with it.
-- **`Plan` becomes `pub(crate)`.** Every method already is, and no public signature names the type,
-  so a game can name it and do nothing with it.
-- **Not doing: measuring first.** The type safety being traded away is nil, so there is no trade-off
-  for a measurement to settle. `cargo llvm-lines` on an example, before and after, is the number to
-  quote in the commit if one is wanted.
-- **Verified by:** the existing suite unchanged, and no diff in `examples/`.
 
 ### 139. The action registry, and what an `ActionId` can reach
 

@@ -1479,7 +1479,7 @@ mod tests {
         let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<Thrust>(GamepadButton::LeftTrigger2);
         let (bindings, class_bindings, _) = builder.finish();
-        crate::plan::Plan::<()>::from_bindings(bindings, class_bindings);
+        crate::plan::Plan::from_bindings(bindings, class_bindings);
     }
 
     /// Only one of the two can decide what the action does, and a context that says both has not

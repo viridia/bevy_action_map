@@ -172,7 +172,7 @@ bare.
 
 ## 4. The compiled plan
 
-Bindings are authored as data and compiled once per context into a `Plan<C>`.
+Bindings are authored as data and compiled once per context into a `Plan`.
 
 | Compilation produces | Serves |
 | --- | --- |
@@ -457,7 +457,7 @@ what keeps the shape uniform across every built-in condition and stateful modifi
 
 `InputContextState<C>` is the component on the context entity, and holds:
 
-- `plan: Arc<Plan<C>>`, and the two tables above;
+- `plan: Arc<Plan>`, and the two tables above;
 - `dirty`, a per-action bitset — evaluation writes through a bypassed borrow and re-marks the
   component only where a bit was set, so a tick that changed nothing is invisible to a subscriber;
 - `active` and `shadowed`;

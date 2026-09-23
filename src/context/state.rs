@@ -50,7 +50,7 @@ pub(crate) struct ButtonReading {
 /// changing.
 #[derive(Component)]
 pub struct InputContextState<C> {
-    pub(crate) plan: Arc<Plan<C>>,
+    pub(crate) plan: Arc<Plan>,
     pub(crate) actions: Vec<ActionState>,
     // Parallel to `actions`: which ones changed state since evaluation last cleared this. Per
     // action rather than per context because the component's own change tick cannot distinguish
@@ -108,7 +108,7 @@ pub struct InputContextState<C> {
 }
 
 impl<C: InputContext> InputContextState<C> {
-    pub(crate) fn new(plan: Arc<Plan<C>>, read_through: Option<FrameTimestamp>) -> Self {
+    pub(crate) fn new(plan: Arc<Plan>, read_through: Option<FrameTimestamp>) -> Self {
         let slots = plan.slot_count();
         let scratch_slots = plan.scratch_count();
         let tunable_scratch_slots = plan.tunable_scratch_count();
@@ -454,7 +454,7 @@ impl<C: InputContext> InputContextState<C> {
     ///
     /// The variant keeps the declared plan's slot allocation, so the action table and the
     /// require-reset flags stay aligned and only the scratch has to be rebuilt.
-    pub(crate) fn adopt(&mut self, plan: Arc<Plan<C>>) {
+    pub(crate) fn adopt(&mut self, plan: Arc<Plan>) {
         let was_active = self.active;
         self.deactivate();
 
