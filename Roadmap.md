@@ -200,6 +200,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 130  | Capture as a sensor, answering on the release                         |
 | 145  | A remote driver: requirements and design                              |
 | 146  | The driver's plugin                                                   |
+| 147  | The driver's client and runner                                        |
 
 ---
 
@@ -699,17 +700,6 @@ It is developed here because that is faster, as a workspace member (`bevy_remote
 own documents. Where it ends up is an open question: a standalone crate, or parts of it upstreamed
 into Bevy.
 
-### 147. The client and the runner
-
-The Python client, JSON plans, `run.py`, the report and PNG output (DD4, DD5.1, DD5.2): the
-`present`, `absent` and `expect` checks with their timeouts, the input steps, `frames` and
-`seconds`, and a generic `call` step for a method the client does not know. DD9 is finalized here,
-which satisfies DR7.4.
-
-- **Not doing:** gamepads, or this crate's examples.
-- **Verified by:** a plan against a small test app of the driver's own, in
-  `bevy_remote_driver/examples/`, run once in front and once covered.
-
 ### 148. Ids in the examples
 
 `#Name`s where plans need them, and `RemoteDriverPlugin` in each `main`. This is an intended diff in
@@ -721,10 +711,16 @@ which satisfies DR7.4.
 
 ### 149. The mapper's `remote` feature
 
-R25 and DD6: `action_map.dump` and `action_map.authority`.
+R25 and DD6: `action_map.dump` and `action_map.authority`, and the client's generic `call` step for
+a method it does not know, which is how a plan reaches either.
+
+The first job is deciding whether an end-to-end plan should check an action's state at all. A check
+on `Fired` couples a test to how the mapper resolved the input, not to what the game did with it,
+but what the game did, such as a ship accelerating, may be harder to observe from outside. The
+answer sets whether `call` checks its result, as `expect` does, or only records it.
 
 - **Not doing:** raw injection, which R25.4 says needs nothing.
-- **Verified by:** a headless test of each handler, and 148's plan reading `Fired` through `call`.
+- **Verified by:** a headless test of each handler, and 148's plan reaching one through `call`.
 
 ### 150. A virtual gamepad
 

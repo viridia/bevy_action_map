@@ -3,9 +3,9 @@
 A driver for a running Bevy app, for automated tests. Its sections are numbered `DD1`–`DD9`, and its
 requirements are [requirements.md](./requirements.md)'s `DR` numbers.
 
-The plugin, DD3, is built. The rest is the design the remaining implementation chunks build to, and
-becomes the description of what is built as they land. Where a claim rests on reading Bevy's source
-rather than on running something, it says so.
+The plugin, DD3, and the client, DD4, DD5.1 and DD5.2, are built. The rest is the design the
+remaining implementation chunks build to, and becomes the description of what is built as they land.
+Where a claim rests on reading Bevy's source rather than on running something, it says so.
 
 ---
 
@@ -108,8 +108,8 @@ That plugin is not in `DefaultPlugins`, so the driver's plugin adds it when it i
 `FrameTimeDiagnosticsPlugin` too must add it first, or Bevy panics on the duplicate. A value is an
 `f64`, which holds a frame count exactly for longer than any test runs.
 
-Returning every diagnostic rather than only the frame count costs nothing, and leaves room for a
-plan to `expect` on one, such as a floor on `fps`, when a test needs it.
+Returning every diagnostic rather than only the frame count costs nothing, so a test that wants
+another, such as a floor on `fps`, needs only a client step to read it.
 
 ## 4. Plans and the client
 
@@ -121,7 +121,8 @@ beyond the interpreter this project's own tooling already needs.
 ### 4.1 A plan
 
 A plan is a JSON file: the example to launch and a list of steps. JSON so that the client reads it
-with the standard library (DR7.3).
+with the standard library (DR7.3). An example outside the workspace's root package also names its
+`package`, as the driver's own `testbed` does.
 
 ```json
 {
@@ -147,66 +148,86 @@ later: a menu that animates out, a value set by the next system to run.
 | `absent` | the selector matches nothing | the timeout is reached |
 | `expect` | a component on the one selected entity has the given value | the timeout is reached |
 
-A check's `timeout` takes `frames`, `seconds` or both, and ends at whichever is reached first. It
-defaults to 300 frames and 10 seconds (DR3.4). A timeout of `{ "frames": 0 }` looks once, so
-checking that something is still gone later is a `frames` step followed by an `absent` that looks
-once.
+A check's `timeout` takes `frames`, `seconds` or both, and ends at whichever is reached first; a
+limit it leaves out does not apply. It defaults to 300 frames and 10 seconds (DR3.4). A timeout of
+`{ "frames": 0 }` looks once, so checking that something is still gone later is a `frames` step
+followed by an `absent` that looks once.
 
 The other steps:
 
 | Step | Does |
 | --- | --- |
-| `click` | locate, move the cursor, press, one frame, release |
+| `click` | locate, move the cursor, press, release, each on its own frame |
 | `key` | press, one frame, release; `"hold": n` holds for `n` frames |
 | `press`, `release` | one half of a key, for chords and holds that span other steps |
-| `type` | a string, one key per frame |
+| `type` | a string, a press and a release per character, with Shift around a shifted one |
 | `pad` | a virtual gamepad's button or axis (DD5.3) |
 | `frames` | let `n` frames pass |
 | `seconds` | let `n` seconds pass |
-| `screenshot` | save a PNG under the given name |
+| `screenshot` | save a PNG of the primary window under the given name |
 
+A plan's step is an object with one key naming the step, whose value is the step's first argument;
+its other keys are the rest, by name. `key`, `press` and `release` take `logical_key` and `text` for
+a key the US table lacks.
 
 ### 4.2 A Python plan
 
 When a test needs a loop, a branch or a computed value, it is a Python program instead, calling the
 same functions the JSON runner calls (DR7.2). The step table is the client's API: each step is a
-method on a `Driver` object with the same name and arguments.
+method on a `Driver` object with the same name and arguments. The program sets `EXAMPLE`, and
+`PACKAGE` where a JSON plan would, and defines `run(driver)`; it runs through the same command as a
+JSON plan, and a failure's report adds the line of the program that made the failing call.
 
 ### 4.3 A run
 
 `python3 bevy_remote_driver/client/run.py <plan>` is the one command (DR6.1). It:
 
-1. builds the example with `cargo build --example`, and fails fast on a build error;
+1. builds the example with `cargo build --example`, and fails fast on a build error. Cargo's JSON
+   messages give the binary's path and its package's directory;
 2. picks a free port, and starts the binary with `BEVY_REMOTE_DRIVER_PORT` set, its output going to
-   a log file. On macOS it also sets `DYLD_FALLBACK_LIBRARY_PATH`, which `dynamic_linking` needs;
-3. polls `rpc.discover` until the port answers;
+   a log file. `CARGO_MANIFEST_DIR` is set to the package's directory, where Bevy looks for
+   `assets/` as it would under `cargo run`. On macOS `DYLD_FALLBACK_LIBRARY_PATH` names the
+   toolchain's libstd and the Bevy dylib, which `dynamic_linking` needs;
+3. polls until the app answers a query for its primary window, which every key step names;
 4. runs the steps;
-5. writes `AppExit`, waits briefly, then kills the process. This runs in a `finally`, so an
-   interrupted run closes the app too (DR6.2).
+5. writes `AppExit`, waits up to three seconds, then kills the process. This runs in a `finally`, so
+   an interrupted run closes the app too (DR6.2).
 
-Everything a run produces goes to `target/remote-driver/<plan name>/`: the log, the screenshots and
-`report.txt`. A failure prints the step's index and text, what it expected, what it found, and those
-paths (DR6.3).
+Everything a run produces goes to `target/remote-driver/<example>/<plan name>/`, emptied first: the
+log, the screenshots and `report.txt`. The report is also printed. A failure gives the step's number
+and text, what it expected, what it found, whether the app had exited, and those paths (DR6.3). The
+exit status is 0 on a pass, 1 on a failure and 2 when the plan could not run.
 
-Steps are separated by at least one frame (DR3.5). The client reads `frame_count` from
-`driver.diagnostics` before an input step and does not send the next one until the count has moved
-on.
+Consecutive inputs land on distinct frames (DR3.5). After writing an input the client reads
+`frame_count`, and it does not write the next input until the count has passed that value. The read
+is answered no earlier than the frame the input was, since BRP answers requests in order, so a
+larger count is a later frame.
+
+### 4.4 Screenshots
+
+A covered window captures an empty image (DD2), so the step first sets `Window.focused` and waits a
+tenth of a second. It then opens a `world.observe+watch` stream on `ScreenshotCaptured`, spawns a
+`Screenshot` of the primary window, and takes the event whose entity is the one spawned. Watching
+first means the capture cannot finish before anything is listening. The image arrives as BGRA bytes
+in a JSON array, which the client reorders and writes as a PNG with `zlib`. A capture whose every
+byte is zero fails the step rather than saving a blank file.
 
 ## 5. Input
 
 ### 5.1 Clicks
 
-`driver.locate`, then three `world.write_message` calls of `WindowEvent`: `CursorMoved` to the
-centre, `MouseButtonInput` pressed, and one frame later released. Picking needs the cursor to have
-moved before the press, and a press and a release in the same frame are indistinguishable from a tap
-the app may treat differently.
+`driver.locate`, then three `world.write_message` calls of `WindowEvent`, each on its own frame:
+`CursorMoved` to the centre, `MouseButtonInput` pressed, then released. Picking needs the cursor to
+have moved before the press, and a press and a release in the same frame are indistinguishable from
+a tap the app may treat differently.
 
 ### 5.2 Keys and text
 
-A key is a `KeyboardInput` message naming the window. The client derives `logical_key` and `text`
-from the key code for the printable keys of a US layout, so `type` produces what a real keyboard
-would. A test that needs another layout supplies both itself. The message goes to `KeyboardInput`
-directly rather than through `WindowEvent`, which is what the spike measured.
+A key is a `KeyboardInput` message naming the primary window. The client derives `logical_key` and
+`text` from the key code for the printable keys of a US layout and the common named keys, so `type`
+produces what a real keyboard would. A test that needs another layout, or a key the table lacks,
+supplies both itself. The message goes to `KeyboardInput` directly rather than through
+`WindowEvent`, which is what the spike measured.
 
 ### 5.3 Gamepads
 
@@ -270,22 +291,29 @@ why the plugin is kept this small.
 
 ## 9. Writing a test
 
-For an agent writing a test, and the draft of the instructions DR7.4 requires. Finalized by the
-chunk that ships the client.
+For an agent writing a test: the instructions DR7.4 requires. `plans/testbed/` holds a JSON plan and
+a Python plan that between them use every step.
 
 1. **Find what to select.** Read the example's scenes for `#Name`s. If what the test needs has none,
    add one where the entity is declared, rather than selecting by component or position.
-2. **Write a JSON plan** under `bevy_remote_driver/plans/<example>/`. Start with a `present` on the
-   screen's root with `"ready": true`. Use a Python plan only for what JSON cannot say.
-3. **Wait for a condition, then frames, then seconds.** A covered window runs slower, so a margin in
+2. **Write a JSON plan** under `bevy_remote_driver/plans/<example>/`, with the steps of DD4.1. Start
+   with a `present` on the screen's root with `"ready": true`. Name the `package` if the example is
+   not the root crate's. Use a Python plan only for what JSON cannot say.
+3. **Name a component by its full type path**, such as `bevy_ui::widget::text::Text`, as BRP does.
+   `expect` compares only the keys its value gives, so give the fields the test is about and no
+   others.
+4. **Wait for a condition, then frames, then seconds.** A covered window runs slower, so a margin in
    seconds for the app's own logic passes in front and fails behind the editor. `seconds` is for
    assets loaded after a scene is ready, such as prompt glyphs, and nothing else.
-4. **Run it with the one command, and nothing else.** Every approval prompt brings the editor
-   forward and covers the window, so a run split across several commands tests a different app from
-   the one that runs in one. Do not start the app in one command and drive it in another.
-5. **Read a failure from the report first**, then the log, then the screenshots, in that order. The
-   report names the step, and the log says what the app did.
-6. **A key released unexpectedly is focus.** If someone clicked another window during a hold, the
+5. **Run it with the one command, and nothing else:**
+   `python3 bevy_remote_driver/client/run.py <plan>`, from anywhere in the workspace. Every approval
+   prompt brings the editor forward and covers the window, so a run split across several commands
+   tests a different app from the one that runs in one. Do not start the app in one command and
+   drive it in another.
+6. **Read a failure from the report first**, then the log, then the screenshots, in that order. The
+   report names the step, and the log says what the app did. An exit status of 2 is the plan or the
+   build, not the app.
+7. **A key released unexpectedly is focus.** If someone clicked another window during a hold, the
    mapper released the key. Rerun it before looking for a bug.
-7. **Leave the screenshots for the person reading the run.** A screenshot shows that something is
+8. **Leave the screenshots for the person reading the run.** A screenshot shows that something is
    drawn. It does not replace an `expect` or an `absent`, which are what make a test fail.

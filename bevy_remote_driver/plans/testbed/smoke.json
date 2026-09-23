@@ -1,0 +1,23 @@
+{
+  "package": "bevy_remote_driver",
+  "example": "testbed",
+  "steps": [
+    { "present": "Menu", "ready": true },
+    { "absent": "Panel", "timeout": { "frames": 0 } },
+    { "screenshot": "menu" },
+    { "click": "Menu/Start" },
+    { "present": "Panel" },
+    { "type": "Hi!" },
+    { "expect": "Menu/Typed", "component": "bevy_ui::widget::text::Text", "value": "Hi!" },
+    { "press": "ShiftLeft" },
+    { "key": "Slash", "hold": 5, "logical_key": { "Character": "?" }, "text": "?" },
+    { "release": "ShiftLeft" },
+    { "expect": "Menu/Typed", "component": "bevy_ui::widget::text::Text", "value": "Hi!?" },
+    { "screenshot": "open" },
+    { "key": "Escape" },
+    { "absent": "Panel" },
+    { "frames": 10 },
+    { "seconds": 0.1 },
+    { "absent": "Panel", "timeout": { "frames": 0 } }
+  ]
+}
