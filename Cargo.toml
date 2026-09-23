@@ -64,8 +64,15 @@ fixedbitset = "0.5"
 bevy = { version = "0.20.0-rc.1", features = [
   "dynamic_linking",
   "bevy_settings",
+  # For the driver, below. The examples never name `bevy_remote` themselves, but the umbrella's
+  # feature is what registers `Image`'s serialization, without which a screenshot step panics the
+  # app rather than failing the step.
+  "bevy_remote",
 ] }
 trybuild = "1.0"
+# Every example adds `RemoteDriverPlugin`, which is inert unless the port variable is set, so a
+# plan can drive any of them without the example knowing it is under test.
+bevy_remote_driver = { path = "bevy_remote_driver", version = "0.1.0" }
 # Picked as the concrete format for chunk 55's golden persistence test — a format this crate never
 # learns about outside that one test (§10.1).
 toml = "0.8"

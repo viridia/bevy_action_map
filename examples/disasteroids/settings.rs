@@ -465,6 +465,7 @@ fn screen(world: &World) -> impl Scene {
     bsn! {
         // Closing the screen is nothing but despawning it, which the state can do on its own — and
         // that takes the context below with it.
+        #Settings
         DespawnOnExit::<Settings>(Settings::Showing)
         Menu
         on(navigate)
@@ -491,11 +492,11 @@ fn screen(world: &World) -> impl Scene {
             --
             Node { column_gap: Val::Px(48.0), align_items: AlignItems::Start }
             Children [
-                @{table("Keyboard & Mouse", rows(DeviceFamily::KeyboardMouse), KEYBOARD_COLUMNS, CONTROL_WIDTH)}
+                @{table("Keyboard & Mouse", DeviceFamily::KeyboardMouse, rows(DeviceFamily::KeyboardMouse), KEYBOARD_COLUMNS, CONTROL_WIDTH)}
                 --
                 Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0) }
                 Children [
-                    @{table("Gamepad", rows(DeviceFamily::Gamepad), GAMEPAD_COLUMNS, GAMEPAD_CONTROL_WIDTH)}
+                    @{table("Gamepad", DeviceFamily::Gamepad, rows(DeviceFamily::Gamepad), GAMEPAD_COLUMNS, GAMEPAD_CONTROL_WIDTH)}
                     --
                     @{preset_row(&presets, selected)}
                     --
@@ -578,6 +579,7 @@ fn screen(world: &World) -> impl Scene {
 /// [`Back`]'s own binding (`Escape`) off the row it is bound on, and the pad has no such row here.
 fn cancel_button() -> impl Scene {
     bsn! {
+        #Cancel
         Button
         on(cancel_pressed)
         AutoFocus
@@ -607,6 +609,7 @@ fn cancel_button() -> impl Scene {
 /// Applies the working copy to the running game and leaves.
 fn confirm_button() -> impl Scene {
     bsn! {
+        #Confirm
         Button
         on(confirm_pressed)
         @focusable()
@@ -639,6 +642,7 @@ fn confirm_button() -> impl Scene {
 /// that resets everything is not one to put a single press away.
 fn reset_button() -> impl Scene {
     bsn! {
+        #Reset
         Button
         on(reset_pressed)
         @focusable()
@@ -1029,10 +1033,19 @@ fn redraw_pending(world: &mut World) {
 /// wide.
 fn table(
     title: &'static str,
+    family: DeviceFamily,
     mut rows: Vec<ActionMapping>,
     columns: usize,
     control_width: f32,
 ) -> impl Scene {
+    // A row appears in both tables under the same key, so the family is what tells the two apart
+    // for a test selecting one. Named off the family rather than the heading above it: the heading
+    // is display text and may be translated, and a selector that moved with it would be a test
+    // broken by a wording change.
+    let id = match family {
+        DeviceFamily::KeyboardMouse => "KeyboardMouse",
+        DeviceFamily::Gamepad => "Gamepad",
+    };
     // Stable, so rows keep the order the game declared them in within each category.
     rows.sort_by_key(|mapping| (mapping.category.is_none(), mapping.category));
 
@@ -1054,9 +1067,14 @@ fn table(
                     role: CellRole::Label,
                 }],
                 0.0,
+                None,
             ));
         }
-        lines.push(line(cells(&mapping, columns, control_width), 0.0));
+        lines.push(line(
+            cells(&mapping, columns, control_width),
+            0.0,
+            Some(mapping.key),
+        ));
         // A follower is drawn under the row it rides: indented and dimmed rather than a row of its
         // own, and not activatable — a follower is not separately rebindable, and a button that did
         // nothing would say otherwise.
@@ -1064,11 +1082,13 @@ fn table(
             lines.push(line(
                 follower_cells(&mapping, follower, columns, control_width),
                 FOLLOWER_INDENT,
+                None,
             ));
         }
     }
 
     bsn! {
+        ~{Name::new(id)}
         Node { flex_direction: FlexDirection::Column, row_gap: {Val::Px(ROW_GAP)} }
         Children [
             Text::new(title)
@@ -1231,9 +1251,13 @@ enum CellRole {
 /// principal above it rather than a row of its own, since every cell in it is already
 /// [`SUBORDINATE`]. A parameter rather than a second function, since `table` below collects
 /// ordinary and follower lines into one `Vec`.
-fn line(cells: Vec<Cell>, indent: f32) -> impl Scene {
+fn line(cells: Vec<Cell>, indent: f32, id: Option<MappingKey>) -> impl Scene {
     let cells: Vec<_> = cells.into_iter().map(cell).collect();
+    // Only a principal row is named, which is what a test selects a cell under. A heading and a
+    // follower are read, never operated, so neither is given one.
+    let name = id.map(|key| bsn! { ~{Name::new(key.to_string())} });
     bsn! {
+        @name
         Node { column_gap: Val::Px(8.0), margin: {UiRect::left(Val::Px(indent))} }
         Children [
             {cells}
@@ -1242,10 +1266,11 @@ fn line(cells: Vec<Cell>, indent: f32) -> impl Scene {
 }
 
 fn cell(cell: Cell) -> impl Scene {
-    // A changeable cell is a button and a stop for the selection; a fixed one is neither, and
-    // stays the plain text it was. Three independent splices rather than branching to one of three
+    // A changeable cell is a button and a stop for the selection; a fixed one is neither, and stays
+    // the plain text it was. Three independent splices rather than branching to one of three
     // different `bsn!` blocks — each of those would be its own opaque type, and this way there is
     // exactly one `impl Scene` this function ever returns.
+    //
     // `BackgroundColor` starts at `Color::NONE` here rather than being absent, so `start_capture`
     // and its two ways out (`captured`, `back`'s mid-capture branch) are all just writing the same
     // component, never inserting or removing it.
@@ -1281,6 +1306,15 @@ fn cell(cell: Cell) -> impl Scene {
     } else {
         None
     };
+    // The slot number, under the row's own name: a test says which column of which row it means,
+    // and a `Fixed` cell is named as well as a changeable one, since a preset moves those and a
+    // test watching a preset take effect has to read them.
+    let name = match cell.role {
+        CellRole::Changeable(_, _, slot) | CellRole::Fixed(_, _, slot) => {
+            Some(bsn! { ~{Name::new(slot.to_string())} })
+        }
+        CellRole::Label | CellRole::Follower(..) => None,
+    };
     // Every cell carries the same border and padding whether or not the border is visible, so the
     // columns line up down the table rather than shifting where a box begins.
     bsn! {
@@ -1288,6 +1322,7 @@ fn cell(cell: Cell) -> impl Scene {
         @rebind_tag
         @row_tag
         @follower_tag
+        @name
         Text({cell.text})
         TextFont { font_size: {ROW_FONT_SIZE} }
         TextColor({cell.color})

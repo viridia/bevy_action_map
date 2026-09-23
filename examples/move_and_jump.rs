@@ -26,7 +26,11 @@ struct FreeLook;
 
 fn main() {
     let mut app = App::new();
-    app.add_plugins((DefaultPlugins, ActionMapPlugin));
+    app.add_plugins((
+        DefaultPlugins,
+        ActionMapPlugin,
+        bevy_remote_driver::RemoteDriverPlugin,
+    ));
     app.add_context::<OnFoot>(|context| {
         context.bind::<Move>(DirectionalButtons::wasd());
         context

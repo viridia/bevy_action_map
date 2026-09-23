@@ -167,6 +167,7 @@ fn main() {
         common::font::plugin,
         ActionMapPlugin,
         prompt_ui::plugin,
+        bevy_remote_driver::RemoteDriverPlugin,
     ))
     // Every span below names its own family, so there is no primary device to state.
     .insert_resource(PromptDevice(None))

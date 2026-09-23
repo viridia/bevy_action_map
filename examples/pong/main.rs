@@ -38,6 +38,7 @@ fn main() {
             }),
             common::font::plugin,
             bevy_action_map::ActionMapPlugin,
+            bevy_remote_driver::RemoteDriverPlugin,
         ))
         .add_plugins(pong::plugin)
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.03)))

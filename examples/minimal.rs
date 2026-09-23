@@ -13,7 +13,11 @@ struct OnFoot;
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, ActionMapPlugin))
+        .add_plugins((
+            DefaultPlugins,
+            ActionMapPlugin,
+            bevy_remote_driver::RemoteDriverPlugin,
+        ))
         .add_context::<OnFoot>(|context| {
             context.bind::<Jump>(KeyCode::Space);
         })

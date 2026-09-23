@@ -201,6 +201,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 145  | A remote driver: requirements and design                              |
 | 146  | The driver's plugin                                                   |
 | 147  | The driver's client and runner                                        |
+| 148  | Ids in the examples                                                   |
 
 ---
 
@@ -697,28 +698,25 @@ an element by a path of names, click it, wait until what it opens exists and has
 screenshot, quit — all over HTTP and JSON.
 
 It is developed here because that is faster, as a workspace member (`bevy_remote_driver/`) with its
-own documents. Where it ends up is an open question: a standalone crate, or parts of it upstreamed
-into Bevy.
-
-### 148. Ids in the examples
-
-`#Name`s where plans need them, and `RemoteDriverPlugin` in each `main`. This is an intended diff in
-`examples/`, not a leak ground rule 3 would flag.
-
-- **Not doing:** a plan per example. One proves the ids work, and more are written when a chunk
-  needs one.
-- **Verified by:** a plan for Disasteroids reaching its settings screen and rebinding a row.
+own documents, and is meant to leave as a standalone crate, so what it needs travels with it. Which
+of its server methods are proposed upstream to Bevy is a separate question, and DD8's.
 
 ### 149. The mapper's `remote` feature
 
 R25 and DD6: `action_map.dump` and `action_map.authority`, and the client's generic `call` step for
 a method it does not know, which is how a plan reaches either.
 
-The first job is deciding whether an end-to-end plan should check an action's state at all. A check
-on `Fired` couples a test to how the mapper resolved the input, not to what the game did with it,
-but what the game did, such as a ship accelerating, may be harder to observe from outside. The
-answer sets whether `call` checks its result, as `expect` does, or only records it.
+`call` polls while the step carries a `value` and invokes once where it does not: the client's
+checks re-run until they pass, which is what a read wants and what a write cannot have. `dump` is
+the read, `authority` the write. Matching reuses `expect`'s `subset`, so a result is given as a
+skeleton rather than through a pointer language — confirm first that `inspect::dump` does not put
+instances in a list, which `subset` cannot index.
 
+Which to assert on: the game's own state where that is the subject and unambiguous, since it is
+reflected already and `expect` reads it today; the dump where the mapper is the subject, as a
+rebinding is.
+
+- **Not doing:** a step of the mapper's own, or a Python helper over `call`. Deferred below.
 - **Not doing:** raw injection, which R25.4 says needs nothing.
 - **Verified by:** a headless test of each handler, and 148's plan reaching one through `call`.
 
@@ -743,6 +741,8 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Resolving a stored device identity to the connected devices that match it** | a caller asking in that direction. Written for chunk 72 and withdrawn for want of one; chunks 72d and 92 did not need it either. Devices arrive as connection events one at a time, the ones already plugged in at launch included, so every caller has one device in hand and asks the inverse question. Two identical pads never present themselves as a set to choose from |
 | **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it. Measured (`docs/steam.md` S17): `get_glyph_for_action_origin` resolves to an absolute filesystem path inside the client's own app bundle — `Contents/MacOS/controller_base/images/api/dark/shared_lstick_md.png` on macOS, not the `tenfoot/resource/...` path this row previously guessed — and the `dark` component says the glyphs are themed, so a light variant has to be selected rather than assumed. A Bevy `AssetPath` can carry it natively via `from_path_buf` — no string-escaping the drive letter or backslashes. The path is not to be opened as given: a custom `AssetSource` reader must canonicalize it and reject anything outside a known root before reading, rather than trust an external SDK's return value as a bare filesystem path. One scheme, one hard-coded root is the right size while only this one root is confirmed; a second scheme is warranted only if a second root with its own lifecycle surfaces (e.g. something ephemeral, which cannot share a stable root's caching and hot-reload assumptions) — not one scheme per SDK call that happens to return a path |
 | **Proposing the driver's server methods upstream** (DD8) | **chunk 148's plan passing, and a second plan against a different example.** Four gaps: selection by name path, where a UI node is drawn, readiness as state, and a reflected `DiagnosticsStore`. The deliverable is a short brief for each, for the author to edit and post. Until two apps have used the methods, their shapes are guesses about what a test needs |
+| **Isolating an app under test from what it has saved** | **an app whose state a plan cannot reach through its own controls.** A run shares the developer's settings file: Disasteroids saves a confirmed rebind, so chunk 148's plan found its own last run's rebinding still there and failed on the second run. It now bookends itself with Reset and Confirm (DD9), which is a plan reaching a known state the way a player would — the right answer while an app offers one, and it exercises two more paths besides. What it does not cover is a plan that fails halfway, which leaves the file dirty for the next run to reset. Deleting the file first is the obvious answer and is half of one: it makes a run repeatable without stopping it writing the developer's real settings on the way out, which the bookend does handle. Isolation is the whole answer, and costs the same platform branch — `XDG_CONFIG_HOME` on Linux, `LOCALAPPDATA` on Windows, and on macOS `HOME` itself, since `preferences_dir` is `home_dir()/Library/Preferences` with no narrower lever; `environment()` in `run.py` already branches on `sys.platform`, so this is an entry in it rather than new machinery. Whichever is built wants a check that the throwaway directory was actually written, because a path or variable that is wrong fails silently: nothing is deleted, or the redirect does not take, and the plan passes while reading the real file. `SettingsPlugin`'s `app_name` is the directory component and is a plain `pub` field, so a per-run app id would isolate with no platform code at all — turned down because the example would have to read an env var, and a plan drives an example without the example knowing it is under test |
+| **A step of the mapper's own, or a Python helper over `call`** | **a second plan whose raw `call` steps are unreadable**, which is DD8's gate as well. Both extension points exist: BRP registration is the Rust one, and the mapper's `remote` feature adding `action_map.*` is already a plugin adding methods with no dependency either way; a Python plan is a program (DD4.2), so a helper is a module it imports. What is deferred is sugar over those, and a step registry would be a third mechanism where two already reach |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import. The crate's docs owe a game the warning `widget_focus.rs` carries today: `InputDispatchPlugin` in `DefaultPlugins` activates a focused `Button` on a key a context has consumed, so a game using both disables it |
 | **The generic tier's art** | **the presentation crate**, which is what has to ship an atlas with no holes in it. Kenney's generic set is blank, unlabeled buttons, so each generic face button needs a short text stamp authored onto it by hand: content work with a known answer, and no code. Until then an unrecognized pad's face buttons resolve to text, which is also where the fallback chain shows itself in tree, on Disasteroids' Cancel and Confirm and in the gallery's Generic brand |
 | **Netcode injection and reconciliation** | a networked target. The injection point is built: chunk 111 landed `delegate` and `AuthorityValues`, so a peer's resolved action already has somewhere to go (D71). Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. Injection targets L2 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs a remote player's resolved action to inject and a later correction to reconcile against it |

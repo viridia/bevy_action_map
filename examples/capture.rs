@@ -77,6 +77,7 @@ fn main() {
             ..default()
         }),
         ActionMapPlugin,
+        bevy_remote_driver::RemoteDriverPlugin,
     ));
 
     app.add_context::<Playing>(|controls| {

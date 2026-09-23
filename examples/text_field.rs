@@ -163,6 +163,7 @@ fn main() {
             .disable::<InputDispatchPlugin>(),
         common::font::plugin,
         ActionMapPlugin,
+        bevy_remote_driver::RemoteDriverPlugin,
     ));
     // Every binding here consumes: a chord that fires has to take its key from whatever reads it
     // next, which is the character class for the letters and `Move` for the arrows.

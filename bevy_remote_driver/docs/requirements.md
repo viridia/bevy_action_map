@@ -98,8 +98,8 @@ test. A run that needs attention partway through fails because of that.
 
 - **DR7.1 (MUST)** A test can be written as a data file, which the client runs without anything
   being compiled.
-- **DR7.2 (MUST)** A test can be written as a Python program that uses the client, when it needs
-  more than a data file can say.
+- **DR7.2 (MUST)** A test can be written as a Python program that uses the client, reaching every
+  step a data file can.
 - **DR7.3 (MUST)** The client needs only Python's standard library.
 - **DR7.4 (MUST)** The driver ships instructions that an agent follows to write, run and diagnose a
   test.

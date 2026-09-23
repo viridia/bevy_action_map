@@ -506,6 +506,7 @@ dependencies = [
  "bevy_math",
  "bevy_platform",
  "bevy_reflect",
+ "bevy_remote_driver",
  "bevy_state",
  "bevy_time",
  "bevy_utils",

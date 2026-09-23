@@ -64,6 +64,7 @@ fn main() {
             // falling back to on-screen position, so it has to exist even though nothing here ever
             // writes an edge to it.
             bevy::input_focus::directional_navigation::DirectionalNavigationPlugin,
+            bevy_remote_driver::RemoteDriverPlugin,
         ))
         .add_plugins((
             protagonist::plugin,

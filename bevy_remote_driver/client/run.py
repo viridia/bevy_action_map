@@ -30,12 +30,17 @@ class PlanError(Exception):
 
 
 def load(plan_path):
-    """The plan's example, package, and a function running its steps on a driver."""
+    """The plan's example, package, features, and a function running its steps on a driver."""
     if plan_path.suffix == ".py":
         spec = importlib.util.spec_from_file_location(plan_path.stem, plan_path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        return module.EXAMPLE, getattr(module, "PACKAGE", None), module.run
+        return (
+            module.EXAMPLE,
+            getattr(module, "PACKAGE", None),
+            getattr(module, "FEATURES", None),
+            module.run,
+        )
     plan = json.loads(plan_path.read_text())
     steps = plan["steps"]
 
@@ -48,14 +53,18 @@ def load(plan_path):
             options = {key: value for key, value in entry.items() if key != name}
             getattr(driver, name)(entry[name], **options)
 
-    return plan["example"], plan.get("package"), run
+    return plan["example"], plan.get("package"), plan.get("features"), run
 
 
-def build(example, package):
+def build(example, package, features):
     """Builds the example, and returns its binary and its package's directory."""
     command = ["cargo", "build", "--example", example, "--message-format=json-render-diagnostics"]
     if package:
         command += ["-p", package]
+    # An example declaring `required-features` is skipped rather than refused without them, so
+    # leaving these out ends at "the build produced no example named …" below.
+    if features:
+        command += ["--features", ",".join(features)]
     result = subprocess.run(command, cwd=ROOT, stdout=subprocess.PIPE, text=True)
     if result.returncode != 0:
         raise PlanError(f"`{' '.join(command)}` failed")
@@ -135,7 +144,7 @@ def main(argv):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     plan_path = Path(argv[1])
-    example, package, run = load(plan_path)
+    example, package, features, run = load(plan_path)
     out_dir = ROOT / "target" / "remote-driver" / example / plan_path.stem
     shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True)
@@ -145,7 +154,7 @@ def main(argv):
     status = 0
     driver = None
     try:
-        binary, package_dir = build(example, package)
+        binary, package_dir = build(example, package, features)
         port = free_port()
         with open(log_path, "wb") as log:
             app = subprocess.Popen(

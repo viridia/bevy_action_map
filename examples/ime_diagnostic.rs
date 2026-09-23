@@ -36,6 +36,7 @@ fn main() {
             }),
             ..default()
         }))
+        .add_plugins(bevy_remote_driver::RemoteDriverPlugin)
         .add_systems(Update, print_keyboard_events)
         .run();
 }

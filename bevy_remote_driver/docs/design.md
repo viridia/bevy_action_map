@@ -120,9 +120,13 @@ beyond the interpreter this project's own tooling already needs.
 
 ### 4.1 A plan
 
-A plan is a JSON file: the example to launch and a list of steps. JSON so that the client reads it
-with the standard library (DR7.3). An example outside the workspace's root package also names its
-`package`, as the driver's own `testbed` does.
+A plan names the example to launch and lists the steps to run against it. The vocabulary below is
+the same whichever way it is written: as a Python program, which is the default (DD4.2), or as the
+JSON file shown here, which the client reads with the standard library and nothing compiled (DR7.1,
+DR7.3). An example outside the workspace's root package also names its `package`, as the driver's
+own `testbed` does, and one declaring `required-features` names its `features`, as Disasteroids does
+— cargo skips an example whose required features are off rather than refusing to build it, so a plan
+leaving them out fails as an example that does not exist.
 
 ```json
 {
@@ -172,18 +176,30 @@ a key the US table lacks.
 
 ### 4.2 A Python plan
 
-When a test needs a loop, a branch or a computed value, it is a Python program instead, calling the
-same functions the JSON runner calls (DR7.2). The step table is the client's API: each step is a
-method on a `Driver` object with the same name and arguments. The program sets `EXAMPLE`, and
-`PACKAGE` where a JSON plan would, and defines `run(driver)`; it runs through the same command as a
-JSON plan, and a failure's report adds the line of the program that made the failing call.
+A plan is a Python program by default, calling the same functions the JSON runner calls (DR7.2). The
+step table is the client's API: each step is a method on a `Driver` object with the same name and
+arguments. The program sets `EXAMPLE`, and `PACKAGE` and `FEATURES` where a JSON plan would, and
+defines `run(driver)`; it runs through the same command as a JSON plan, and a failure's report adds
+the line of the program that made the failing call.
+
+A loop, a branch or a computed value needs a program. So does most of what a test is actually made
+of: a sequence it repeats, which becomes a named function instead of the same six steps written out
+three times, and a step whose point is not its arguments, which gets a sentence beside it. JSON says
+neither, so a plan of any size written that way asks its next reader to reconstruct the intent from
+the step order. `plans/disasteroids/rebind.py` checks the same cell twice on purpose — once for the
+uncommitted working copy, once for what Confirm wrote — and in JSON those two steps are identical.
+
+JSON stays for a test that is a flat list of steps and reads as one, and for DR7.1's own sake: it
+runs with nothing compiled and nothing imported, which is what `plans/testbed/smoke.json` is kept as
+the worked example of.
 
 ### 4.3 A run
 
 `python3 bevy_remote_driver/client/run.py <plan>` is the one command (DR6.1). It:
 
-1. builds the example with `cargo build --example`, and fails fast on a build error. Cargo's JSON
-   messages give the binary's path and its package's directory;
+1. builds the example with `cargo build --example`, adding `-p` and `--features` where the plan
+   names them, and fails fast on a build error. Cargo's JSON messages give the binary's path and its
+   package's directory;
 2. picks a free port, and starts the binary with `BEVY_REMOTE_DRIVER_PORT` set, its output going to
    a log file. `CARGO_MANIFEST_DIR` is set to the package's directory, where Bevy looks for
    `assets/` as it would under `cargo run`. On macOS `DYLD_FALLBACK_LIBRARY_PATH` names the
@@ -267,10 +283,38 @@ An id is a `Name`, given in a scene with BSN's `#Name`, which already inserts on
 component of the driver's own: `Name` is already there, already reflected, and already what an
 inspector shows. Names are given to what a plan needs to select, and not to every entity.
 
-Each example adds `RemoteDriverPlugin` in its `main`. The examples take the driver as a
-dev-dependency, and `bevy` gains its `bevy_remote` feature there, which every example build then
-compiles. The plugin is inert unless the port variable is set. Adding the plugin and the names is an
-intended diff in `examples/`, which the chunk adding them says it is.
+A screen built from data is where that last rule stops being a choice. Disasteroids' controls screen
+draws its rows from the mapping list in a loop, so there is no `#Name` to write and no way to name
+one row without naming all of them: the name is a computed `Name::new`, and the rule becomes which
+*kinds* of entity are named. There, the two tables, every principal row and every control cell are;
+category headings, row labels and follower lines are not.
+
+What such a name is computed *from* matters more than how many there are. Each is an identity the
+screen already holds rather than the text it draws:
+
+| Level | Name | From |
+| --- | --- | --- |
+| screen root | `Settings` | `#Settings` |
+| table | `KeyboardMouse`, `Gamepad` | the `DeviceFamily`, not the heading above it |
+| row | `disasteroids.thrust` | `MappingKey` |
+| control cell | `0`, `1` | the slot index its `CellRole` carries |
+
+A heading is display text and may be translated; a key is not. Naming a table after its family also
+answers what would otherwise be ambiguous, since an action appears in both tables under one key. The
+part suffix a `MappingKey` carries is what keeps its rows apart: `Turn` splits into
+`disasteroids.turn.negative` and `disasteroids.turn.positive`, two rows driving one action, so the
+bare action path would name both. Where a game declares no localization prefix of its own — which is
+every action in the examples — a `MappingKey`'s prefix *is* the action's declared path, so these are
+the same strings `action_map.dump` keys an action by (DD6).
+
+Each example adds `RemoteDriverPlugin` in its `main`; `diagnostics.rs` is the exception, having no
+`App` to add it to. The examples take the driver as a dev-dependency, and `bevy` gains its
+`bevy_remote` feature there, which every example build then compiles. The feature is not redundant
+with the driver's own dependency on the `bevy_remote` subcrate: without it an example still builds
+and still answers BRP, but `Image` has no serialization registered, and the screenshot step panics
+the app inside `bevy_remote` rather than failing the step. The plugin is inert unless the port
+variable is set. Adding the plugin and the names is an intended diff in `examples/`, which the chunk
+adding them says it is.
 
 ## 8. Where each piece ends up
 
@@ -296,24 +340,33 @@ a Python plan that between them use every step.
 
 1. **Find what to select.** Read the example's scenes for `#Name`s. If what the test needs has none,
    add one where the entity is declared, rather than selecting by component or position.
-2. **Write a JSON plan** under `bevy_remote_driver/plans/<example>/`, with the steps of DD4.1. Start
-   with a `present` on the screen's root with `"ready": true`. Name the `package` if the example is
-   not the root crate's. Use a Python plan only for what JSON cannot say.
-3. **Name a component by its full type path**, such as `bevy_ui::widget::text::Text`, as BRP does.
+2. **Write a Python plan** under `bevy_remote_driver/plans/<example>/`, with the steps of DD4.1 as
+   methods on the driver. Start with a `present` on the screen's root with `ready=True`. Set
+   `PACKAGE` if the example is not the root crate's, and `FEATURES` if it declares
+   `required-features`. Write JSON only for a plan that is a flat list of steps and reads as one
+   (DD4.2).
+3. **Put the app into the state the test assumes, rather than assuming it.** An app that saves
+   anything is a different app on its second run, and the settings file outlives the process: a plan
+   that rebinds a row and leaves finds that row already rebound next time. Reach a known state
+   through the app's own controls — `plans/disasteroids/rebind.json` bookends itself with Reset and
+   Confirm — and end there too, so a run leaves the developer's own saved settings as it found them.
+   A plan that fails halfway still leaves them dirty, which is why the opening matters more than the
+   closing.
+4. **Name a component by its full type path**, such as `bevy_ui::widget::text::Text`, as BRP does.
    `expect` compares only the keys its value gives, so give the fields the test is about and no
    others.
-4. **Wait for a condition, then frames, then seconds.** A covered window runs slower, so a margin in
+5. **Wait for a condition, then frames, then seconds.** A covered window runs slower, so a margin in
    seconds for the app's own logic passes in front and fails behind the editor. `seconds` is for
    assets loaded after a scene is ready, such as prompt glyphs, and nothing else.
-5. **Run it with the one command, and nothing else:**
+6. **Run it with the one command, and nothing else:**
    `python3 bevy_remote_driver/client/run.py <plan>`, from anywhere in the workspace. Every approval
    prompt brings the editor forward and covers the window, so a run split across several commands
    tests a different app from the one that runs in one. Do not start the app in one command and
    drive it in another.
-6. **Read a failure from the report first**, then the log, then the screenshots, in that order. The
+7. **Read a failure from the report first**, then the log, then the screenshots, in that order. The
    report names the step, and the log says what the app did. An exit status of 2 is the plan or the
    build, not the app.
-7. **A key released unexpectedly is focus.** If someone clicked another window during a hold, the
+8. **A key released unexpectedly is focus.** If someone clicked another window during a hold, the
    mapper released the key. Rerun it before looking for a bug.
-8. **Leave the screenshots for the person reading the run.** A screenshot shows that something is
+9. **Leave the screenshots for the person reading the run.** A screenshot shows that something is
    drawn. It does not replace an `expect` or an `absent`, which are what make a test fail.

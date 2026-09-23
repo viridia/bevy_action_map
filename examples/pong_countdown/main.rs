@@ -39,6 +39,7 @@ fn main() {
             }),
             common::font::plugin,
             bevy_action_map::ActionMapPlugin,
+            bevy_remote_driver::RemoteDriverPlugin,
         ))
         // Every part of Pong except `paddle` and `ball`, which `rally` replaces.
         .add_plugins((

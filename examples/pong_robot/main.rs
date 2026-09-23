@@ -38,6 +38,7 @@ fn main() {
                 ..default()
             }),
             bevy_action_map::ActionMapPlugin,
+            bevy_remote_driver::RemoteDriverPlugin,
         ))
         // Every part of Pong except `paddle`, which `robot` replaces.
         .add_plugins((
