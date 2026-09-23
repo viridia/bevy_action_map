@@ -18,10 +18,20 @@ WINDOW = "bevy_window::window::Window"
 PRIMARY_WINDOW = "bevy_window::window::PrimaryWindow"
 WINDOW_EVENT = "bevy_window::event::WindowEvent"
 KEYBOARD_INPUT = "bevy_input::keyboard::KeyboardInput"
+GAMEPAD_CONNECTION = "bevy_input::gamepad::GamepadConnectionEvent"
+RAW_GAMEPAD = "bevy_input::gamepad::RawGamepadEvent"
 SCREENSHOT = "bevy_render::view::window::screenshot::Screenshot"
 SCREENSHOT_CAPTURED = "bevy_render::view::window::screenshot::ScreenshotCaptured"
 SCENE_READY = "bevy_remote_driver::ready::SceneReady"
 APP_EXIT = "bevy_app::app::AppExit"
+
+# `GamepadAxis`'s variants. Every other control name is taken for a `GamepadButton`, and one that is
+# neither fails to deserialize, which names the offending word in the step's error.
+AXES = frozenset({"LeftStickX", "LeftStickY", "LeftZ", "RightStickX", "RightStickY", "RightZ"})
+# What the pad reports itself as. No vendor or product id, so a game that themes its prompts by
+# brand sees a pad it does not recognize and falls back — the same answer on every machine, rather
+# than one that depends on what is plugged into it.
+VIRTUAL_PAD = {"name": "Virtual Gamepad", "vendor_id": None, "product_id": None}
 
 
 class StepFailed(Exception):
@@ -77,6 +87,8 @@ class Driver:
         # The frame count read after the last input was sent. The next input waits until the count
         # has passed it, so two inputs never land on the same frame (DR3.5).
         self._sent_at = None
+        # The virtual pad's entity, spawned by the first `pad` step.
+        self._gamepad = None
         windows = self._call(
             "world.query", {"data": {"components": []}, "filter": {"with": [PRIMARY_WINDOW]}}
         )
@@ -178,6 +190,24 @@ class Driver:
                 self._key("ShiftLeft", "Released")
 
     @step
+    def pad(self, control, value=None):
+        """Presses a gamepad button, or holds a control at a value.
+
+        With no `value`, presses `control` and releases it on the next frame, as `key` does. With
+        one, writes it and leaves it there: a stick pushed over, a trigger part-way down, a button
+        held while later steps run. A second call with `0.0` centres it.
+
+        The first call connects the pad, and it stays connected for the rest of the plan.
+        """
+        if value is not None:
+            self._pad(control, value)
+            return
+        if control in AXES:
+            raise StepFailed(f"a value for the axis {control}", "a press")
+        self._pad(control, 1.0)
+        self._pad(control, 0.0)
+
+    @step
     def frames(self, n):
         """Lets `n` frames pass."""
         self._until(self.frame() + n)
@@ -263,6 +293,21 @@ class Driver:
                 "repeat": False,
                 "window": self.window,
             },
+        )
+
+    def _pad(self, control, value):
+        """One raw gamepad message, connecting the pad first if this is the plan's first."""
+        if self._gamepad is None:
+            # An entity of its own, as `bevy_input` gives a real pad. The connection is what puts
+            # `Gamepad` on it, and `_send` leaves a frame for that before the first control arrives.
+            self._gamepad = self._call("world.spawn_entity", {"components": {}})["entity"]
+            self._send(
+                GAMEPAD_CONNECTION,
+                {"gamepad": self._gamepad, "connection": {"Connected": VIRTUAL_PAD}},
+            )
+        kind, part = ("Axis", "axis") if control in AXES else ("Button", "button")
+        self._send(
+            RAW_GAMEPAD, {kind: {"gamepad": self._gamepad, part: control, "value": value}}
         )
 
     def _send(self, message, value):

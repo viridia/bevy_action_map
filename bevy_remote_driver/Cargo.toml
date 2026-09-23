@@ -18,6 +18,7 @@ bevy_app = "0.20.0-rc.1"
 bevy_camera = "0.20.0-rc.1"
 bevy_diagnostic = "0.20.0-rc.1"
 bevy_ecs = "0.20.0-rc.1"
+bevy_input = { version = "0.20.0-rc.1", features = ["gamepad"] }
 bevy_reflect = "0.20.0-rc.1"
 bevy_remote = { version = "0.20.0-rc.1", default-features = false, features = ["http"] }
 bevy_scene = "0.20.0-rc.1"

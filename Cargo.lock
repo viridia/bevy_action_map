@@ -1612,6 +1612,7 @@ dependencies = [
  "bevy_camera",
  "bevy_diagnostic",
  "bevy_ecs",
+ "bevy_input",
  "bevy_math",
  "bevy_reflect",
  "bevy_remote",

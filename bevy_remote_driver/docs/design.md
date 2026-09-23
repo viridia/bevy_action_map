@@ -45,7 +45,7 @@ Measured against this crate's `minimal` example with the `bevy/bevy_remote` feat
 | Bring the window forward | `world.mutate_components`, `Window.focused` to `true` | `bevy_winit` calls winit's `focus_window`; a capture 0.1 s later is correct |
 | Click | `world.write_message`, `WindowEvent::CursorMoved` then `MouseButtonInput` | read, from Bevy's `examples/remote/integration_test.rs` |
 | Quit | `world.write_message`, `bevy_app::AppExit` | read: `AppExit` is a reflected `Message` |
-| Connect a gamepad | `world.spawn_entity` an empty entity, then `world.write_message` `GamepadConnectionEvent` naming it | read: `gamepad_connection_system` inserts `Gamepad` onto the entity the event names |
+| Connect a gamepad | `world.spawn_entity` an empty entity, then `world.write_message` `GamepadConnectionEvent` naming it | measured later, against `disasteroids`: `gamepad_connection_system` inserts `Gamepad` onto the entity the event names, but the gamepad messages carry no `reflect(Message)`, so `world.write_message` refuses them until something registers it (DD5.3) |
 
 Two behaviours matter for every test. A covered window runs at about half the frame rate, so timing
 is measured in frames (DD4.3). And a window brought forward takes focus from whatever had it, the
@@ -165,7 +165,7 @@ The other steps:
 | `key` | press, one frame, release; `"hold": n` holds for `n` frames |
 | `press`, `release` | one half of a key, for chords and holds that span other steps |
 | `type` | a string, a press and a release per character, with Shift around a shifted one |
-| `pad` | a virtual gamepad's button or axis (DD5.3) |
+| `pad` | a virtual gamepad's button, pressed and released; with `"value": v`, a control left at `v` (DD5.3) |
 | `frames` | let `n` frames pass |
 | `seconds` | let `n` seconds pass |
 | `screenshot` | save a PNG of the primary window under the given name |
@@ -173,6 +173,10 @@ The other steps:
 A plan's step is an object with one key naming the step, whose value is the step's first argument;
 its other keys are the rest, by name. `key`, `press` and `release` take `logical_key` and `text` for
 a key the US table lacks.
+
+`pad` has no `hold` because it does not need one: a control that carries a value is left at it, and
+returned to `0.0` by a second step, which is what spans frames for a pad. A key has no value, so
+`hold` is the only thing that can span them for a keyboard.
 
 ### 4.2 A Python plan
 
@@ -247,9 +251,26 @@ supplies both itself. The message goes to `KeyboardInput` directly rather than t
 
 ### 5.3 Gamepads
 
-Read, not run. The client spawns an empty entity, writes a `GamepadConnectionEvent` naming it, then
-writes `RawGamepadEvent`s for its buttons and axes. `bevy_input` does the rest as it would for a
-gilrs device. A real pad plugged in at the same time is a second gamepad, not a conflict.
+The client spawns an empty entity, writes a `GamepadConnectionEvent` naming it, then writes
+`RawGamepadEvent`s for its buttons and axes. `bevy_input` does the rest as it would for a gilrs
+device: the connection is what puts `Gamepad` on the entity, and `_send`'s frame between writes
+(DR3.5) is enough for that to have happened before the first control arrives. A real pad plugged in
+at the same time is a second gamepad, not a conflict.
+
+One thing has to be added for that to work at all. Bevy's gamepad messages are reflected but carry
+no `reflect(Message)`, which `KeyboardInput` does, so `world.write_message` refuses them as "not
+reflectable". The plugin registers the type data itself, for the two messages a virtual pad is made
+of, because DR1.4 says an app under test adds the plugin and nothing else. If Bevy closes the gap
+the registration becomes a no-op rather than a conflict.
+
+A button and an axis are separate enums with no name in common, so the client tells them apart by a
+set of the six `GamepadAxis` variants and takes every other name for a button. A name in neither
+enum fails to deserialize, and the error names the word, so there is no table to keep in step with
+Bevy's.
+
+The pad reports no vendor or product id, which resolves to whatever a game shows for a pad it does
+not recognize. That is the stable answer for a test: the alternative is the brand of whatever is
+plugged into the machine the plan runs on.
 
 ## 6. The mapper's half
 
@@ -325,18 +346,19 @@ adding them says it is.
 | Readiness as state | upstream, `bevy_scene` | a `Reflect` derive on `Ready` would not fix the race; the scene spawner leaving a component would |
 | Diagnostics over BRP | upstream, `Reflect` on `DiagnosticsStore` and what it holds | about as small as reflecting `FrameCount` alone, and makes every diagnostic readable through `world.get_resources`, frame count included |
 | Bringing the window forward before a screenshot | the client | a policy for tests, not a property of screenshots |
-| Keys, text, gamepads, clicks | the client | the messages are already reflected |
+| Keys, text, gamepads, clicks | the client | the messages are already reflected, bar the type data DD5.3 registers |
 | Plans, the runner, the report | the driver crate | upstream has no reason to want a Python client |
 | Action state and authority values | `bevy_action_map`, `remote` feature | the mapper's own types |
 
 Every server method the plugin adds is a stopgap for an upstream gap. If all four close, the plugin
-is `SceneReady`'s observer at most, and the crate is its client. That is the expected end state, and
-why the plugin is kept this small.
+is `SceneReady`'s observer and DD5.3's type-data registration at most, and the crate is its client.
+That is the expected end state, and why the plugin is kept this small.
 
 ## 9. Writing a test
 
 For an agent writing a test: the instructions DR7.4 requires. `plans/testbed/` holds a JSON plan and
-a Python plan that between them use every step.
+a Python plan that between them use every step but `pad`, which the testbed binds nothing to;
+`plans/disasteroids/pad.py` is that one.
 
 1. **Find what to select.** Read the example's scenes for `#Name`s. If what the test needs has none,
    add one where the entity is declared, rather than selecting by component or position.
@@ -348,7 +370,7 @@ a Python plan that between them use every step.
 3. **Put the app into the state the test assumes, rather than assuming it.** An app that saves
    anything is a different app on its second run, and the settings file outlives the process: a plan
    that rebinds a row and leaves finds that row already rebound next time. Reach a known state
-   through the app's own controls — `plans/disasteroids/rebind.json` bookends itself with Reset and
+   through the app's own controls — `plans/disasteroids/rebind.py` bookends itself with Reset and
    Confirm — and end there too, so a run leaves the developer's own saved settings as it found them.
    A plan that fails halfway still leaves them dirty, which is why the opening matters more than the
    closing.

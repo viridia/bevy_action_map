@@ -42,6 +42,8 @@ mod select;
 
 use bevy_app::{App, Plugin};
 use bevy_diagnostic::FrameTimeDiagnosticsPlugin;
+use bevy_ecs::reflect::ReflectMessage;
+use bevy_input::gamepad::{GamepadConnectionEvent, RawGamepadEvent};
 use bevy_remote::{RemotePlugin, http::RemoteHttpPlugin};
 
 pub use ready::SceneReady;
@@ -91,11 +93,27 @@ fn install(app: &mut App, port: u16) {
     ))
     .register_type::<SceneReady>()
     .add_observer(ready::mark_ready);
+    register_gamepad_messages(app);
+}
+
+// `KeyboardInput` carries `reflect(Message)` and the gamepad messages do not, so a write of one is
+// refused as "not reflectable" (DD5.3). Registering the data here rather than asking for it in
+// `main` is DR1.4: the plugin is all an app under test adds.
+//
+// `register_type_data` panics on a type nothing has registered, which `reflect_auto_register` does
+// for every app that leaves that feature on. The `register_type` calls are for the app that turns
+// it off; registering a type twice is harmless.
+fn register_gamepad_messages(app: &mut App) {
+    app.register_type::<GamepadConnectionEvent>()
+        .register_type_data::<GamepadConnectionEvent, ReflectMessage>()
+        .register_type::<RawGamepadEvent>()
+        .register_type_data::<RawGamepadEvent, ReflectMessage>();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_ecs::reflect::AppTypeRegistry;
     use bevy_remote::RemoteMethods;
     use std::env::VarError;
 
@@ -119,6 +137,25 @@ mod tests {
         let methods = app.world().resource::<RemoteMethods>();
         for method in [select::METHOD, locate::METHOD, diagnostics::METHOD] {
             assert!(methods.get(method).is_some(), "{method} is not registered");
+        }
+    }
+
+    #[test]
+    fn installing_makes_the_gamepad_messages_writable() {
+        let mut app = App::new();
+        install(&mut app, 0);
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        for path in [
+            "bevy_input::gamepad::GamepadConnectionEvent",
+            "bevy_input::gamepad::RawGamepadEvent",
+        ] {
+            let registration = registry
+                .get_with_type_path(path)
+                .unwrap_or_else(|| panic!("{path} is not registered"));
+            assert!(
+                registration.data::<ReflectMessage>().is_some(),
+                "{path} is registered but `world.write_message` would refuse it"
+            );
         }
     }
 }
