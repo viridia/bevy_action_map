@@ -103,6 +103,9 @@ fn install(app: &mut App, port: u16) {
 // `register_type_data` panics on a type nothing has registered, which `reflect_auto_register` does
 // for every app that leaves that feature on. The `register_type` calls are for the app that turns
 // it off; registering a type twice is harmless.
+//
+// bevyengine/bevy#25904 would add the attribute upstream, after which all of this is redundant —
+// silently, since registering data a type already carries overwrites rather than fails.
 fn register_gamepad_messages(app: &mut App) {
     app.register_type::<GamepadConnectionEvent>()
         .register_type_data::<GamepadConnectionEvent, ReflectMessage>()

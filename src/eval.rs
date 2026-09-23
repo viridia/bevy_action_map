@@ -1018,7 +1018,7 @@ impl<C: InputContext> InputContextState<C> {
         {
             let intent = plan.intent_for_slot(slot);
             let value = authority
-                .and_then(|values| values.value_of(plan.slot_actions()[slot]))
+                .and_then(|values| values.value_of(plan.action_for_slot(slot)))
                 .unwrap_or_else(|| at_rest(intent));
             // The no-conditions path a plain binding takes, rather than a second reading of what a
             // value means: delegating leaves no way to declare a condition in the first place.

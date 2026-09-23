@@ -391,13 +391,12 @@ impl<C: InputContext> InputContextState<C> {
     /// bound.
     pub fn iter(&self) -> impl Iterator<Item = ActionReading<'_>> {
         self.plan
-            .slot_actions()
+            .slots()
             .iter()
-            .zip(self.plan.bound_paths())
             .zip(&self.actions)
-            .map(|((&action, &path), state)| ActionReading {
-                action,
-                path,
+            .map(|(slot, state)| ActionReading {
+                action: slot.action,
+                path: slot.path,
                 state,
             })
     }
@@ -422,9 +421,9 @@ impl<C: InputContext> InputContextState<C> {
     /// Use [`activate_including_held`](Self::activate_including_held) for the other behaviour.
     ///
     /// "At rest" means the value the action reads after its modifiers have run, so an analog
-    /// control needs a deadzone for this to ever be satisfied — a stick that idles at 0.02 is
-    /// never exactly at rest, and an action waiting for it would stay quiet indefinitely. Give
-    /// sticks a [`DeadZone`](crate::binding::DeadZone), which they want regardless.
+    /// control needs a deadzone for this to ever be satisfied — a stick that idles at 0.02 is never
+    /// exactly at rest, and an action waiting for it would stay quiet indefinitely. Give sticks a
+    /// [`DeadZone`](crate::binding::DeadZone), which they want regardless.
     pub fn activate(&mut self) {
         self.activate_with_reset(true);
     }
@@ -599,21 +598,31 @@ impl<C: InputContext> InputContextState<C> {
     }
 }
 
-/// Formats a context's bound action paths for a diagnostic, without building a string to do it.
-struct BoundPaths<'a>(&'a [&'static str]);
+/// A context's bound action paths, comma-separated, with a phrase in place of the empty list so the
+/// sentence around it still reads.
+// Written into the formatter rather than a `String`, which keeps the diagnostic allocation-free.
+// `Clone` because a `Display` may be formatted more than once, and each walk has to start from the
+// beginning.
+struct BoundPaths<I>(I);
 
-impl core::fmt::Display for BoundPaths<'_> {
+impl<I> core::fmt::Display for BoundPaths<I>
+where
+    I: Iterator<Item = &'static str> + Clone,
+{
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        if self.0.is_empty() {
-            return f.write_str("nothing — this context binds no actions at all");
-        }
-        for (index, path) in self.0.iter().enumerate() {
-            if index > 0 {
+        let mut written = false;
+        for path in self.0.clone() {
+            if written {
                 f.write_str(", ")?;
             }
             f.write_str(path)?;
+            written = true;
         }
-        Ok(())
+        if written {
+            Ok(())
+        } else {
+            f.write_str("nothing — this context binds no actions at all")
+        }
     }
 }
 
@@ -1279,12 +1288,15 @@ mod tests {
         use alloc::format;
 
         assert_eq!(
-            format!("{}", BoundPaths(&["tests.turn", "tests.fire"])),
+            format!("{}", BoundPaths(["tests.turn", "tests.fire"].into_iter())),
             "tests.turn, tests.fire"
         );
-        assert_eq!(format!("{}", BoundPaths(&["tests.turn"])), "tests.turn");
         assert_eq!(
-            format!("{}", BoundPaths(&[])),
+            format!("{}", BoundPaths(["tests.turn"].into_iter())),
+            "tests.turn"
+        );
+        assert_eq!(
+            format!("{}", BoundPaths([].into_iter())),
             "nothing — this context binds no actions at all"
         );
     }

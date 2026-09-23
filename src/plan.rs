@@ -666,28 +666,33 @@ fn encode_slot(slot: usize) -> u16 {
         .unwrap_or_else(|| panic!("a context may hold at most {UNBOUND} actions"))
 }
 
+/// One action's state slot, and what compilation resolved about it.
+#[derive(Clone)]
+pub(crate) struct CompiledSlot {
+    pub(crate) intent: ActionIntent,
+    // How a transition on this slot becomes a typed event.
+    pub(crate) dispatch: Dispatch,
+    // The declared path of the action holding this slot, kept for the diagnostics that have to name
+    // an action rather than identify one.
+    pub(crate) path: &'static str,
+    // And its identity, for the reads that walk a context rather than naming what they want.
+    pub(crate) action: ActionId,
+    // What `combined` runs on the folded value.
+    pub(crate) stage: CompiledStage,
+}
+
 /// The plan is the immutable runtime view of a context's authored bindings.
 // One slot per action, not per binding: an action may be bound several times, and all of those
 // bindings write the same state. Bindings are grouped by slot so the evaluator can fold each
 // action's contributions in a single pass with no per-frame bookkeeping.
 pub struct Plan<C> {
     bindings: Vec<CompiledBinding>,
-    slot_intents: Vec<ActionIntent>,
-    // Parallel to `slot_intents`: how a transition on this slot becomes a typed event.
-    slot_dispatch: Vec<Dispatch>,
-    // Parallel again: the declared path of the action holding this slot, kept for the diagnostics
-    // that have to name an action rather than identify one.
-    slot_paths: Vec<&'static str>,
-    // And its identity, for the reads that walk a context rather than naming what they want.
-    slot_actions: Vec<ActionId>,
-    // The reverse direction, as a direct index rather than a search: `ActionId` is dense, so the
-    // id is the subscript and `UNBOUND` means this context does not bind it. Sized by the largest
-    // id the context binds rather than by the registry, and held once per plan rather than per
+    slots: Vec<CompiledSlot>,
+    // The reverse direction, as a direct index rather than a search: `ActionId` is dense, so the id
+    // is the subscript and `UNBOUND` means this context does not bind it. Sized by the largest id
+    // the context binds rather than by the registry, and held once per plan rather than per
     // instance, so the slack costs two bytes an id in one allocation.
     slot_by_action: Vec<u16>,
-    // Parallel to `slot_intents`: what `combined` runs on the slot's folded value. Held per slot
-    // rather than as a list to search, so a slot that declared nothing costs one emptiness check.
-    stages: Vec<CompiledStage>,
     // The slots an outside authority writes rather than the fold. Held as a list rather than a bit
     // per slot because the evaluator only ever walks it, and the overwhelmingly common plan
     // delegates nothing.
@@ -696,15 +701,15 @@ pub struct Plan<C> {
     // One cell per group of bindings sharing a tunable — see `CompiledBinding::tunable_shared`.
     // Most plans have none.
     tunable_scratch_count: usize,
-    // Read only by the clash pass, which no build without device features has: no controls means
-    // no binding can carry a chord. Computed unconditionally so the builder needs no `cfg`.
+    // Read only by the clash pass, which no build without device features has: no controls means no
+    // binding can carry a chord. Computed unconditionally so the builder needs no `cfg`.
     #[cfg_attr(
         not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")),
         allow(dead_code)
     )]
     has_chords: bool,
-    // TD5.4's second structure: consulted only when `indexed_controls` doesn't
-    // already claim the control an event arrived on.
+    // TD5.4's second structure: consulted only when `indexed_controls` doesn't already claim the
+    // control an event arrived on.
     class_bindings: Vec<CompiledClassBinding>,
     // Every control any binding above reads, deduped. Not an arbitration index — a class binding
     // never competes for a control on specificity; it yields whenever this set claims one.
@@ -749,11 +754,9 @@ impl<C> Plan<C> {
         plan.class_bindings.clone_from(&template.class_bindings);
         // Carried over for the same reason class bindings are: an override rewrites which controls
         // a binding reads, and a delegated action has none to rewrite. The slots themselves survive
-        // already, since `compile` starts from the template's slot tables.
+        // already, since `compile` starts from the template's slots.
         plan.delegated_slots.clone_from(&template.delegated_slots);
-        // Never rebindable either, but not copied whole: the bindings' scratch may have changed
-        // length, and the stages' sits after it.
-        plan.stages.clone_from(&template.stages);
+        // The bindings' scratch may have changed length, and each stage's sits after it.
         plan.place_stages();
         plan
     }
@@ -763,36 +766,32 @@ impl<C> Plan<C> {
     /// After compilation, as `delegate` is, and for the same reason. An action with no slot is
     /// never reached: `diagnose_combined` refuses the context first.
     pub(crate) fn combine(&mut self, combined: Vec<CombinedSpec>) {
-        self.stages
-            .resize_with(self.slot_intents.len(), CompiledStage::default);
         for spec in combined {
             let Some(slot) = self.slot_for_action(spec.action) else {
                 continue;
             };
-            self.stages[slot].modifiers.extend(spec.modifiers);
-            self.stages[slot].conditions.extend(spec.conditions);
+            let stage = &mut self.slots[slot].stage;
+            stage.modifiers.extend(spec.modifiers);
+            stage.conditions.extend(spec.conditions);
         }
         self.place_stages();
     }
 
     fn place_stages(&mut self) {
-        for stage in self.stages.iter_mut().filter(|stage| !stage.is_empty()) {
-            stage.scratch_base = self.scratch_count;
-            self.scratch_count += stage.modifiers.len() + stage.conditions.len();
+        for slot in &mut self.slots {
+            if slot.stage.is_empty() {
+                continue;
+            }
+            slot.stage.scratch_base = self.scratch_count;
+            self.scratch_count += slot.stage.modifiers.len() + slot.stage.conditions.len();
         }
     }
 
     fn compile(bindings: Vec<BindingSpec>, template: Option<&Self>) -> Self {
-        let mut slot_intents: Vec<ActionIntent> = Vec::new();
-        let mut slot_dispatch: Vec<Dispatch> = Vec::new();
-        let mut slot_paths: Vec<&'static str> = Vec::new();
-        let mut slot_actions: Vec<ActionId> = Vec::new();
+        let mut slots: Vec<CompiledSlot> = Vec::new();
         let mut slot_by_action: Vec<u16> = Vec::new();
         if let Some(template) = template {
-            slot_intents.clone_from(&template.slot_intents);
-            slot_dispatch.clone_from(&template.slot_dispatch);
-            slot_paths.clone_from(&template.slot_paths);
-            slot_actions.clone_from(&template.slot_actions);
+            slots.clone_from(&template.slots);
             slot_by_action.clone_from(&template.slot_by_action);
         }
         let mut compiled = Vec::with_capacity(bindings.len());
@@ -840,11 +839,14 @@ impl<C> Plan<C> {
             }
             let slot = match slot_by_action[id] {
                 UNBOUND => {
-                    slot_intents.push(binding.intent);
-                    slot_dispatch.push(binding.dispatch);
-                    slot_paths.push(binding.path);
-                    slot_actions.push(binding.action);
-                    let slot = slot_intents.len() - 1;
+                    slots.push(CompiledSlot {
+                        intent: binding.intent,
+                        dispatch: binding.dispatch,
+                        path: binding.path,
+                        action: binding.action,
+                        stage: CompiledStage::default(),
+                    });
+                    let slot = slots.len() - 1;
                     slot_by_action[id] = encode_slot(slot);
                     slot
                 }
@@ -878,7 +880,6 @@ impl<C> Plan<C> {
         compiled.sort_by_key(|binding| binding.slot);
 
         let has_chords = compiled.iter().any(|binding| binding.chord_len > 1);
-        let slot_count = slot_intents.len();
 
         // Recomputed on every compile, including a variant's: an override rewrites which controls
         // these bindings read, so a rebind has to move a control between "indexed" and "not" along
@@ -894,12 +895,8 @@ impl<C> Plan<C> {
 
         Self {
             bindings: compiled,
-            slot_intents,
-            slot_dispatch,
-            slot_paths,
-            slot_actions,
+            slots,
             slot_by_action,
-            stages: alloc::vec![CompiledStage::default(); slot_count],
             delegated_slots: Vec::new(),
             scratch_count,
             tunable_scratch_count,
@@ -924,12 +921,14 @@ impl<C> Plan<C> {
             // error and `add_context` refuses the context before anything is compiled.
             let slot = match self.slot_by_action[id] {
                 UNBOUND => {
-                    self.slot_intents.push(spec.intent);
-                    self.slot_dispatch.push(spec.dispatch);
-                    self.slot_paths.push(spec.path);
-                    self.slot_actions.push(spec.action);
-                    self.stages.push(CompiledStage::default());
-                    let slot = self.slot_intents.len() - 1;
+                    self.slots.push(CompiledSlot {
+                        intent: spec.intent,
+                        dispatch: spec.dispatch,
+                        path: spec.path,
+                        action: spec.action,
+                        stage: CompiledStage::default(),
+                    });
+                    let slot = self.slots.len() - 1;
                     self.slot_by_action[id] = encode_slot(slot);
                     slot
                 }
@@ -946,7 +945,7 @@ impl<C> Plan<C> {
     }
 
     pub(crate) fn stage(&self, slot: usize) -> &CompiledStage {
-        &self.stages[slot]
+        &self.slots[slot].stage
     }
 
     pub(crate) fn delegated_slots(&self) -> &[usize] {
@@ -954,7 +953,7 @@ impl<C> Plan<C> {
     }
 
     pub(crate) fn slot_count(&self) -> usize {
-        self.slot_intents.len()
+        self.slots.len()
     }
 
     pub(crate) fn scratch_count(&self) -> usize {
@@ -976,11 +975,15 @@ impl<C> Plan<C> {
     }
 
     pub(crate) fn intent_for_slot(&self, slot: usize) -> ActionIntent {
-        self.slot_intents[slot]
+        self.slots[slot].intent
     }
 
     pub(crate) fn dispatch_for_slot(&self, slot: usize) -> Dispatch {
-        self.slot_dispatch[slot]
+        self.slots[slot].dispatch
+    }
+
+    pub(crate) fn action_for_slot(&self, slot: usize) -> ActionId {
+        self.slots[slot].action
     }
 
     pub(crate) fn slot_for_action(&self, action: ActionId) -> Option<usize> {
@@ -992,14 +995,13 @@ impl<C> Plan<C> {
         }
     }
 
-    /// The declared paths of every action this context binds, in slot order.
-    pub(crate) fn bound_paths(&self) -> &[&'static str] {
-        &self.slot_paths
+    pub(crate) fn slots(&self) -> &[CompiledSlot] {
+        &self.slots
     }
 
-    /// The identity of every action this context binds, in slot order.
-    pub(crate) fn slot_actions(&self) -> &[ActionId] {
-        &self.slot_actions
+    /// The declared paths of every action this context binds, in slot order.
+    pub(crate) fn bound_paths(&self) -> impl Iterator<Item = &'static str> + Clone + '_ {
+        self.slots.iter().map(|slot| slot.path)
     }
 
     /// This context's class bindings, in declaration order — the order they arbitrate in.

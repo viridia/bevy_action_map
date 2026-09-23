@@ -31,7 +31,7 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 | `docs/issues.md` | findings awaiting routing, in five tiers by severity | a finding needs routing, or you are about to re-find one |
 | `docs/steam.md` | what a running Steam client actually does, `S1`–`S12` | a decision rests on how an external backend behaves |
 | `bevy_remote_driver/docs/requirements.md` | 31 numbered requirements for the remote test driver, `DR<section>.<n>`, in sections `DR1`–`DR7` | a chunk touches the driver, or cites a DR-number |
-| `bevy_remote_driver/docs/design.md` | how the driver works, in sections `DD1`–`DD9` | you are writing or running a test against an example |
+| `bevy_remote_driver/docs/design.md` | how the driver works, in sections `DD1`–`DD9` | you are writing or running an end-to-end test against a live example — see "Verification" for the command |
 
 `archive/` holds the retired `Design.md`, `Log.md` and `Log-archive.md`. **Nothing in flight reasons
 from them** — they describe the crate as it was, two of them are longer than anything in `docs/`,
@@ -208,6 +208,22 @@ dev-dependency leaves that binary without an rpath to the toolchain's own libstd
 ```sh
 DYLD_FALLBACK_LIBRARY_PATH="$(rustc --print target-libdir)" cargo test --workspace --all-features --doc
 ```
+
+**An end-to-end run** is out of the default recipe as well, and out of the per-chunk habit: it
+builds a real example, launches it, drives it over BRP and reads the scene back, which costs a
+windowed app and a minute. Run one when a change could only fail in a running game, or when a
+chunk's acceptance test is something a player does.
+
+```sh
+python3 bevy_remote_driver/client/run.py bevy_remote_driver/plans/disasteroids/rebind.py
+```
+
+The plans live under `bevy_remote_driver/plans/<example>/`: `disasteroids/rebind.py` covers the
+controls screen and the override path, `disasteroids/pad.py` the virtual gamepad, and `testbed/` the
+steps themselves. One command per run, from anywhere in the workspace — `DD9` is the instructions
+for writing a plan, and says why a run cannot be split across two commands. A plan that rebinds
+writes the developer's real settings file: a clean pass puts it back, a failure halfway leaves it
+dirty.
 
 **Known, not regressions:** 42 of the 51 doctests are `ignore` fences — fragments written to be read
 mid-prose rather than to stand alone — so they are neither compiled nor run, and chunk 28 owns

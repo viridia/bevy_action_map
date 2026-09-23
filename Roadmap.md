@@ -203,6 +203,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 147  | The driver's client and runner                                        |
 | 148  | Ids in the examples                                                   |
 | 150  | A virtual gamepad                                                     |
+| 131  | A plan slot as one struct                                             |
 
 ---
 
@@ -212,8 +213,6 @@ its identity rather than its position.
 
 ## Next
 
-* 145: A remote driver
-* 131: A plan slot as one struct
 * 115: A timing declared as a tunable
 * 122: The wheel as a binding source
 * 138: A plan compiled once, not once per context
@@ -459,30 +458,10 @@ the expensive part.
 
 ## The library itself
 
-Seven chunks no game asks for and no published crate can do without: a plan that holds a slot as one
-thing, an extension point nothing outside has exercised, a rebinding surface that does one job, the
-reflection the documents promise, documentation that runs, documentation that is true, and the
-advice that keeps a player out of a corner.
-
-### 131. A plan slot as one struct
-
-`Plan<C>` holds five vectors indexed by slot — `slot_intents`, `slot_dispatch`, `slot_paths`,
-`slot_actions` and `stages` — kept aligned by convention. That is the shape D79 rejected for chords,
-and the convention already needs help: `delegate` pushes all five, `compile` pushes four and leaves
-`stages` behind, and `combine` opens with a `resize_with` to bring it level.
-
-- **One `CompiledSlot` per slot**, holding the five, so a slot is pushed once and cannot be half
-  there. The `resize_with` goes, and the next per-slot field is one line in one struct rather than a
-  sixth vector to find every push site for.
-- **`bound_paths()` and `slot_actions()` return slices today**, which `InputContextState::iter`
-  zips. They become iterators over the slots.
-- **Not `InputContextState`'s bitsets.** `dirty`, `require_reset` and `disabled` are parallel to
-  `actions` on purpose: one call clears every dirty bit, and a rollback snapshot is the two tables
-  plus those bits (TD6). Their length is fixed at spawn, so they cannot drift.
-- **Not the split between plan and instance.** A binding's modifiers live in the shared plan and
-  their scratch in each instance; that split is forced by the `Arc`, not a pair of lists to merge.
-- **Verified by:** the existing suite unchanged, and no diff in `examples/` — an internal change, so
-  any example diff means the abstraction leaked.
+Six chunks no game asks for and no published crate can do without: an extension point nothing
+outside has exercised, a rebinding surface that does one job, the reflection the documents promise,
+documentation that runs, documentation that is true, and the advice that keeps a player out of a
+corner.
 
 ### 138. A plan compiled once, not once per context
 
@@ -737,6 +716,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **Proposing the driver's server methods upstream** (DD8) | **chunk 148's plan passing, and a second plan against a different example.** Four gaps: selection by name path, where a UI node is drawn, readiness as state, and a reflected `DiagnosticsStore`. The deliverable is a short brief for each, for the author to edit and post. Until two apps have used the methods, their shapes are guesses about what a test needs |
 | **Isolating an app under test from what it has saved** | **an app whose state a plan cannot reach through its own controls.** A run shares the developer's settings file: Disasteroids saves a confirmed rebind, so chunk 148's plan found its own last run's rebinding still there and failed on the second run. It now bookends itself with Reset and Confirm (DD9), which is a plan reaching a known state the way a player would — the right answer while an app offers one, and it exercises two more paths besides. What it does not cover is a plan that fails halfway, which leaves the file dirty for the next run to reset. Deleting the file first is the obvious answer and is half of one: it makes a run repeatable without stopping it writing the developer's real settings on the way out, which the bookend does handle. Isolation is the whole answer, and costs the same platform branch — `XDG_CONFIG_HOME` on Linux, `LOCALAPPDATA` on Windows, and on macOS `HOME` itself, since `preferences_dir` is `home_dir()/Library/Preferences` with no narrower lever; `environment()` in `run.py` already branches on `sys.platform`, so this is an entry in it rather than new machinery. Whichever is built wants a check that the throwaway directory was actually written, because a path or variable that is wrong fails silently: nothing is deleted, or the redirect does not take, and the plan passes while reading the real file. `SettingsPlugin`'s `app_name` is the directory component and is a plain `pub` field, so a per-run app id would isolate with no platform code at all — turned down because the example would have to read an env var, and a plan drives an example without the example knowing it is under test |
 | **A step of the mapper's own, or a Python helper over `call`** | **a second plan whose raw `call` steps are unreadable**, which is DD8's gate as well. Both extension points exist: BRP registration is the Rust one, and the mapper's `remote` feature adding `action_map.*` is already a plugin adding methods with no dependency either way; a Python plan is a program (DD4.2), so a helper is a module it imports. What is deferred is sugar over those, and a step registry would be a third mechanism where two already reach |
+| **Deleting the gamepad message registration** | [bevy#25904][] landing, and this crate's Bevy pin moving past it. `RemoteDriverPlugin` registers `ReflectMessage` for `GamepadConnectionEvent` and `RawGamepadEvent`, because `bevy_input`'s nine gamepad messages carry no `reflect(Message)` where the ten in its other input modules all do, and `world.write_message` refuses a message without it (DD5.3). The PR is not expected to make 0.20, so the registration ships rather than waits. What to check when it lands is only whether the pinned version has it, because nothing else will say so: `register_type_data` over data a type already carries is an overwrite rather than an error, so the redundancy is silent |
 | **A virtual pad that says which pad it is** | **a plan whose subject is brand-specific presentation.** The connection event carries `name`, `vendor_id` and `product_id`, and the client fills all three with a pad no vendor table knows, so every machine sees the same fallback rather than whatever is plugged in. Exposing them is three optional arguments and no new mechanism; what is missing is a plan that would read differently for a pad a game recognizes, which is the generic tier's art row from the other side |
 | **A second virtual pad, and disconnecting one** | **a plan driving Split Friction, or one whose subject is a pad going away.** The client holds one pad's entity and connects it on first use, so a second is another entity and a `pad` step that says which; a disconnect is one more message on the one it already has. Neither is hard and neither has a caller: Disasteroids is one player who never unplugs anything, so nothing in tree can tell a pad from the pad |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import. The crate's docs owe a game the warning `widget_focus.rs` carries today: `InputDispatchPlugin` in `DefaultPlugins` activates a focused `Button` on a key a context has consumed, so a game using both disables it |
@@ -777,5 +757,6 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 [bevy#25675]: https://github.com/bevyengine/bevy/pull/25675
 [bevy#25710]: https://github.com/bevyengine/bevy/pull/25710
 [bevy#25842]: https://github.com/bevyengine/bevy/issues/25842
+[bevy#25904]: https://github.com/bevyengine/bevy/pull/25904
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678

@@ -631,7 +631,7 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
 
     let mut prompts = alloc::vec::Vec::new();
     for binding in plan.bindings() {
-        let action = plan.slot_actions()[binding.slot];
+        let action = plan.action_for_slot(binding.slot);
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         let chord: alloc::vec::Vec<crate::present::ControlOrigin> =
             binding.chord.iter().copied().map(Into::into).collect();
