@@ -4,11 +4,10 @@
 
 //! Input action mapping for Bevy.
 //!
-//! Declare what your game reacts to — `Jump`, `Move`, `Fire` — as Rust types, bind whichever
-//! keyboard, mouse, and gamepad controls should drive them, and read the result back in a system
-//! without ever naming the device that produced it. The same declarations also drive a settings
-//! screen: what is bound, which of it can be rebound, and a prompt that stays correct after a
-//! rebind.
+//! Declare the things your game reacts to, such as `Jump`, `Move` and `Fire`, as Rust types. Bind
+//! the keyboard, mouse and gamepad controls that drive them, and read the result in a system
+//! without naming the device that produced it. The same declarations drive a settings screen: what
+//! is bound, what the player may rebind, and a prompt that stays correct after they do.
 //!
 //! # Quick start
 //!
@@ -45,24 +44,23 @@
 //! An [action] is a type, not a value. `#[derive(InputAction)]` gives it the Rust type your
 //! gameplay reads (`bool`, `f32`, `Vec2`, …) and an [`ActionIntent`](action::ActionIntent) saying
 //! what that value means: a button, a continuous axis, a direction to keep moving, or a delta that
-//! already happened this frame. A mouse delta and a stick position are both `Vec2`, but one
-//! already happened and the other tells you which way to keep moving. `ActionIntent` is what keeps
-//! a binding from mixing the two up. Every action also declares a stable `path` such as
-//! `"gameplay.jump"`, which is what a settings file stores; it does not have to match the Rust
-//! type name, and should not change when the type is renamed.
+//! already happened this frame. A mouse delta and a stick position are both `Vec2`, and the intent
+//! is what stops a binding from treating one as the other. Every action also declares a stable
+//! `path` such as `"gameplay.jump"`, which is what a settings file stores; it does not have to
+//! match the Rust type name, and should not change when the type is renamed.
 //!
 //! A [context] groups the actions that are active together: on foot, in a vehicle, in a menu.
-//! [`add_context`](context::ActionMapAppExt::add_context) declares one and assigns it to an
-//! entity, and that entity carries the live state for every action in it. Local multiplayer
-//! follows directly: give each player's entity its own context instance, and query them with
-//! [`ActionsQuery`](context::ActionsQuery) instead of
-//! [`ContextActions`](context::ContextActions) when there may be more than one live at a time.
+//! [`add_context`](context::ActionMapAppExt::add_context) declares one and assigns it to an entity,
+//! and that entity carries the live state for every action in it. Each player in a local
+//! multiplayer game gets their own instance on their own entity; when more than one may be live at
+//! once, read them with [`ActionsQuery`](context::ActionsQuery) instead of
+//! [`ContextActions`](context::ContextActions).
 //!
 //! A context can be always active, or gated with
 //! [`active_in_state`](binding::InputContextBuilder::active_in_state) or
 //! [`active_if`](binding::InputContextBuilder::active_if). Contexts also carry a priority
-//! (`#[context(priority = …)]`): while a menu's context is active and consumes the arrow keys for
-//! navigation, a lower-priority gameplay context never sees them move the player.
+//! (`#[context(priority = …)]`), so a menu that consumes the arrow keys for navigation keeps them
+//! from also moving the player in the gameplay context beneath it.
 //!
 //! ## Bindings, modifiers, and conditions
 //!
@@ -73,29 +71,27 @@
 //! ```
 //!
 //! Several bindings can feed one action, such as a key and a gamepad button for the same jump, or
-//! four keys combined into one `Move` composite. The crate resolves them by specificity, so
-//! `Ctrl+S` beats a plain `S` bound in the same context without either binding knowing the other
+//! four keys combined into one `Move` composite. When two bindings in a context share a control,
+//! the more specific one wins: `Ctrl+S` beats a plain `S` without either binding knowing the other
 //! exists.
 //!
-//! A keyboard binding says which of the two things it means. A
+//! A keyboard binding names either where a key is or what it types. A
 //! [`KeyCode`](bevy_input::keyboard::KeyCode) is a position, which is what movement wants: `WASD`
-//! is a shape under the left hand and should stay that shape on an AZERTY board. A
+//! is a shape under the left hand and should keep that shape on an AZERTY board. A
 //! [`LogicalKey`](binding::LogicalKey) is the character the player's own layout produces, which is
-//! what an editor-style shortcut wants, so `Ctrl+Z` reaches the key a French player reads as `z`.
+//! what a shortcut wants, so `Ctrl+Z` reaches the key a French player reads as `z`.
 //!
 //! [Modifiers](binding) reshape the raw value on its way to the action: dead zones, response
-//! curves, scale, negate, swizzle, clamping, and rate conversion (turning a stick's *position*
-//! into the same per-frame *delta* a mouse reports). [Conditions](condition) decide *when* a
-//! binding counts as firing. Without one, a binding fires whenever its control is off rest;
-//! `.hold(0.4)` instead waits for the control to stay down for that long, and `.multi_tap(2, 0.3)`
-//! waits for two presses inside a window. Every duration is measured in the context's own
-//! simulated seconds, so a paused clock pauses them and a fixed-tick replay reproduces them
-//! exactly.
+//! curves, scale, negate, swizzle, clamping, and rate conversion (turning a stick's *position* into
+//! the same per-frame *delta* a mouse reports). [Conditions](condition) decide *when* a binding
+//! counts as firing. Without one, a binding fires whenever its control is away from rest;
+//! `.hold(0.4)` waits for the control to stay down that long, and `.multi_tap(2, 0.3)` waits for
+//! two presses inside the window. Durations are measured in the context's own simulated seconds, so
+//! a paused clock pauses them and a fixed-tick replay reproduces them exactly.
 //!
-//! A binding can carry several conditions. They combine in three ways: *explicit* conditions need
-//! at least one satisfied, *implicit* ones all need to be, and a *blocking* one vetoes the binding
-//! outright if satisfied. So `.press()` and `.hold(0.5)` together read as "either a press or a
-//! long hold."
+//! A binding can carry several conditions, each one of three kinds. At least one *explicit*
+//! condition must hold, every *implicit* one must, and any *blocking* one that holds vetoes the
+//! binding. So `.press()` and `.hold(0.5)` together mean "either a press or a long hold."
 //!
 //! ## Reading actions
 //!
@@ -108,49 +104,46 @@
 //! changed; observing suits a one-shot reaction, such as a UI confirm or a sound effect.
 //!
 //! Every action has an [`ActionPhase`](action::ActionPhase) each tick (`Idle`, `Started`,
-//! `Building`, `Fired`, `Firing`, `Completed`, `Canceled`), so a hold that has just begun and a
-//! hold that is still charging are never confused with each other, and a UI can show a charge
-//! meter the instant it appears rather than reconstructing that edge from a boolean. When an
-//! action does not fire and it is not obvious why,
-//! [`why_not`](context::ContextActions::why_not) answers with the specific
-//! [`ActionObstacle`](context::ActionObstacle): an inactive context, a higher-priority consumer,
-//! a longer chord winning, an unmet condition, or a device that is not this player's.
+//! `Building`, `Fired`, `Firing`, `Completed`, `Canceled`), so a hold that has just begun is never
+//! confused with one still charging, and a UI can show a charge meter from the hold's first frame
+//! instead of reconstructing that edge from a boolean. When an action does not fire and it is not
+//! obvious why, [`why_not`](context::ContextActions::why_not) answers with the specific
+//! [`ActionObstacle`](context::ActionObstacle): an inactive context, a higher-priority consumer, a
+//! longer chord winning, an unmet condition, or a device that is not this player's.
 //!
 //! ## Tick domains
 //!
-//! A context declares a [`TickDomain`](action::TickDomain), `Render` or `Fixed`, and evaluates
-//! once per tick of whichever one it picked: a camera-look context on the render tick, a gameplay
+//! A context declares a [`TickDomain`](action::TickDomain), `Render` or `Fixed`, and evaluates once
+//! per tick of whichever one it picked: a camera-look context on the render tick, a gameplay
 //! context on the fixed tick, both reading the same devices without either one guessing at the
-//! other's timing. Fixed and render ticks disagree about how often they run relative to each
-//! other, so a fixed-tick context still sees every press and release exactly once, however many
-//! times (or how few) `FixedUpdate` runs between one rendered frame and the next.
+//! other's timing. The two do not run in step, but a fixed-tick context still sees every press and
+//! release exactly once, however many times `FixedUpdate` runs between rendered frames, including
+//! none.
 //!
-//! An action needed at both rates must be declared in two contexts, one per domain — a context's
-//! tick domain is fixed at declaration time, not chosen per read.
+//! A context's domain is fixed when it is declared, so an action needed at both rates is bound in
+//! two contexts, one per domain.
 //!
 //! ## Local co-op
 //!
 //! Two players on one machine means two devices, and neither should see the other's input. A
 //! [`Paired`](player::Paired) component, sibling to the context, narrows a context instance to the
 //! devices it names; a context with no `Paired` reads every device.
-//! [`apply_overrides_for`](overrides::apply_overrides_for) reaches one paired instance's own
-//! bindings rather than every one, so two players on identical pads can rebind independently
-//! without either becoming the new default a third inherits.
+//! [`apply_overrides_for`](overrides::apply_overrides_for) applies overrides to one paired instance
+//! rather than to all of them, so two players on identical pads can rebind independently, and
+//! neither one's changes become the default a third player inherits.
 //!
-//! Getting a device into a `Paired` in the first place is a [join] gesture: declare join as an
-//! ordinary action on a listener context spawned once per available device, each `Paired` to its
-//! own. The press then arrives on an entity that already names who pressed it, so the listener's
-//! own pairing is the answer rather than anything carried on the action. See [`join`] for the
-//! worked recipe, and for the race two players pressing on the same tick can hit.
+//! A device gets into a `Paired` through a [join] gesture: declare join as an ordinary action on a
+//! listener context spawned once per available device, each `Paired` to its own. The press then
+//! arrives on an entity that already knows which device it came from. See [`join`] for the worked
+//! recipe, and for what happens when two players press on the same tick.
 //!
 //! ## Presentation
 //!
-//! The binding API above is a developer's model. Dead zones and response curves are
-//! implementation detail nobody rebinding "move forward" should have to think about. Marking a
-//! binding [`mappable`](binding::BindingBuilder::mappable) adds it to a smaller model built for
-//! presentation instead: a named [mapping] with an ordered list of slots ("Primary",
-//! "Secondary"), which a settings screen can walk without knowing anything else about your
-//! actions or bindings.
+//! The binding API above is a developer's model. Dead zones and response curves are implementation
+//! detail nobody rebinding "move forward" should have to think about. Marking a binding
+//! [`mappable`](binding::BindingBuilder::mappable) adds it to a smaller model built for
+//! presentation: a named [mapping] with an ordered list of slots ("Primary", "Secondary"), which a
+//! settings screen can walk without knowing anything else about your actions or bindings.
 //!
 //! From there the crate can list what is bound, run an interactive [capture] for a new control
 //! (with conflict detection against everything else in the context, and reserved controls a game
@@ -161,37 +154,36 @@
 //!
 //! The controls a player uses to reach that screen, and to find their way around it, have to
 //! survive whatever they rebind. Mark them [`reserved`](binding::BindingBuilder::reserved), which
-//! stops the player moving them and stops capture handing them to any other mapping. Leaving a
-//! binding out of the rebindable set does only the first, and a key that opens the screen but also
-//! fires the gun is as much a trap as one that opens nothing. Give the screen a way back to the
-//! shipped controls too, with [`reset_all`](overrides::Overrides::reset_all), for whatever
-//! reserving did not cover.
+//! stops the player moving them and stops capture handing their controls to any other mapping.
+//! Leaving a binding unmappable does only the first, and a key that opens the screen but also fires
+//! the gun is as much a trap as one that opens nothing. Give the screen a way back to the shipped
+//! controls too, with [`reset_all`](overrides::Overrides::reset_all), for whatever reserving did
+//! not cover.
 //!
 //! An on-screen [prompt](present) ("Press W") stays correct across a rebind because it is derived
-//! from the same data the settings screen edits, not typed out separately. The control half of
-//! that prompt is also a stable, storage-safe string, so a save file and a localization catalogue
-//! can both key off it without depending on any one platform's names for its buttons. Where a
-//! prompt is shown to a player rather than stored, it can name a pad's buttons the way that pad
-//! does — "Cross" on a DualSense, "A" on an Xbox pad — resolved from the device that is actually
-//! connected.
+//! from the same data the settings screen edits, not typed out separately. The control it names
+//! also has a stable, storage-safe string form, so a save file and a localization catalogue can
+//! both key off it without depending on any platform's names for its buttons. A prompt shown to the
+//! player can instead name a pad's buttons the way that pad does, resolved from the device actually
+//! connected: "Cross" on a DualSense, "A" on an Xbox pad.
 //!
-//! Not every setting on a controls screen is a control. A [tunable](mapping) is the rest of that
-//! screen: look sensitivity, invert-Y, whether crouch is a hold or a toggle. They are declared
-//! beside the bindings, travel in the same overrides, and reach a binding that reads one without
-//! the game plumbing the value through itself.
+//! Not every setting on a controls screen is a control. [Tunables](mapping) cover the rest: look
+//! sensitivity, invert-Y, whether crouch is a hold or a toggle. They are declared beside the
+//! bindings and travel in the same overrides, and a binding that reads one sees the player's
+//! current value without the game passing it along.
 //!
 //! ## Saving what a player changed
 //!
 //! [`Overrides`](overrides::Overrides) is the live set of changes sitting on top of what the game
 //! declared, and it is what a settings screen edits. To persist it, convert it to
-//! [`SavedOverrides`](overrides::SavedOverrides) — a plain, owned, reflectable shape whose field
-//! names are the file's keys, so a `Reflect`-based settings layer can write it with none of this
-//! crate's code in the path. Where the bytes go is the app's decision; the crate does no file I/O.
+//! [`SavedOverrides`](overrides::SavedOverrides), a plain, owned, reflectable type whose field
+//! names become the file's keys, so a `Reflect`-based settings layer can write it without calling
+//! into this crate. Where the bytes go is up to the app; the crate does no file I/O.
 //!
-//! Loading is pure and reports rather than drops. A saved name is resolved against what the game
-//! declares *now*, and anything that no longer resolves — a mapping that was renamed, a control
-//! this build has no feature for — comes back as a problem the game can show the player, instead of
-//! vanishing from their settings without explanation.
+//! Loading reports what it cannot restore instead of dropping it. Saved names are resolved against
+//! what the game declares *now*, and anything that no longer resolves, such as a renamed mapping or
+//! a control this build has no feature for, comes back as a problem the game can show the player
+//! rather than silently vanishing from their settings.
 //!
 //! # Feature flags
 //!
