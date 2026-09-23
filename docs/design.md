@@ -164,9 +164,11 @@ not have to match the Rust type name and should not be updated to follow one.
 
 Separator is `.`; case is `snake_case`; at least two segments, a namespace and a name. For a library
 the namespace is its crate name. `ActionId` is a dense `u32` interned at registration, stable within
-a process run; `ActionId::from_path` resolves one back, and `registered_actions()` lists them. An
-action's own value converts into its id, so a `bsn!` field holding an `ActionId` can name the action
-bare.
+a process run: it is the position of the action's entry in the registry, so `info` is a subscript
+and `from_path` a scan, and `registered_actions()` lists them. An action's own value converts into
+its id, so a `bsn!` field holding an `ActionId` can name the action bare. Such a field holds
+`ActionId::PLACEHOLDER` until it does — an id the registry never hands out, so it is bound nowhere
+and has no `info`.
 
 ---
 

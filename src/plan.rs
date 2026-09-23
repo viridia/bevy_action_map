@@ -1386,6 +1386,21 @@ mod tests {
         assert_eq!(plan.scratch_count(), 6);
     }
 
+    // A prompt spawned without an action carries `ActionId::PLACEHOLDER`, which indexes far past
+    // the end of `slot_by_action` — the same answer a plan gives for an action it does not bind.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn the_placeholder_has_no_slot() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<Jump>(KeyCode::Space);
+        let (bindings, class_bindings, _) = builder.finish();
+        let plan = Plan::from_bindings(bindings, class_bindings);
+
+        assert!(plan.slot_for_action(ActionId::PLACEHOLDER).is_none());
+    }
+
     // A player emptying a binding shrinks the bindings' scratch, and the stage has to move down
     // with it rather than keep an offset past the end.
     #[cfg(feature = "keyboard")]

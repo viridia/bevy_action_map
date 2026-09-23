@@ -69,10 +69,18 @@ use serde::{Deserialize, Serialize};
 /// Use this when you need to store or compare actions without carrying the full type.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
-#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ActionId(u32);
 
 impl ActionId {
+    /// The id that stands for no action.
+    ///
+    /// A component holding an `ActionId` needs `Default` to be spawned from a scene, and this is
+    /// what it defaults to. No action is ever registered under it, so a prompt spawned without an
+    /// action reads as one bound nowhere rather than as whichever action happened to be registered
+    /// first.
+    pub const PLACEHOLDER: Self = Self(u32::MAX - 1);
+
     /// Returns the dense numeric identifier.
     pub const fn index(self) -> u32 {
         self.0
@@ -81,31 +89,30 @@ impl ActionId {
     /// Finds an action by the path it declared.
     ///
     /// This is how a name read from a settings file becomes something you can look up. It answers
-    /// `None` for a path no action in this build declares, which is what happens to a binding
-    /// saved against an action that has since been renamed or removed — worth reporting to the
-    /// player rather than discarding in silence.
+    /// `None` for a path no action in this build declares, which is what happens to a binding saved
+    /// against an action that has since been renamed or removed — worth reporting to the player
+    /// rather than discarding in silence.
     ///
-    /// Only actions that have been used are registered, which in practice means any action bound
-    /// in a context.
+    /// Only actions that have been used are registered, which in practice means any action bound in
+    /// a context.
     pub fn from_path(path: &str) -> Option<Self> {
         with_registry(|registry| {
             registry
-                .entries
                 .iter()
-                .find(|(info, _)| info.path == path)
-                .map(|(_, id)| *id)
+                .position(|info| info.path == path)
+                .map(|index| Self(index as u32))
         })
     }
 
     /// Returns what the action declared about itself.
     pub fn info(self) -> Option<ActionInfo> {
-        with_registry(|registry| {
-            registry
-                .entries
-                .iter()
-                .find(|(_, id)| *id == self)
-                .map(|(info, _)| *info)
-        })
+        with_registry(|registry| registry.get(self.0 as usize).copied())
+    }
+}
+
+impl Default for ActionId {
+    fn default() -> Self {
+        Self::PLACEHOLDER
     }
 }
 
@@ -114,7 +121,7 @@ impl ActionId {
 /// For a screen that lists actions it was not compiled against. Note the order is the order they
 /// happened to be reached, not a declaration order anyone chose, so sort it before showing it.
 pub fn registered_actions() -> alloc::vec::Vec<ActionInfo> {
-    with_registry(|registry| registry.entries.iter().map(|(info, _)| *info).collect())
+    with_registry(|registry| registry.to_vec())
 }
 
 /// An action's value stands for its id.
@@ -653,44 +660,39 @@ impl ActionInfo {
     }
 }
 
-#[derive(Default)]
-struct ActionRegistry {
-    next_id: u32,
-    entries: Vec<(ActionInfo, ActionId)>,
-}
-
-static ACTION_REGISTRY: bevy_platform::sync::OnceLock<bevy_platform::sync::Mutex<ActionRegistry>> =
-    bevy_platform::sync::OnceLock::new();
+/// Every action interned so far, in the order they were first reached. An [`ActionId`] is the
+/// position of its entry, which is what makes [`ActionId::info`] a subscript rather than a search.
+static ACTION_REGISTRY: bevy_platform::sync::Mutex<Vec<ActionInfo>> =
+    bevy_platform::sync::Mutex::new(Vec::new());
 
 /// The index [`ActionIdCache`] uses to mean "not resolved yet", and therefore never a real id.
 const UNRESOLVED: u32 = u32::MAX;
 
 fn intern_action(info: ActionInfo) -> ActionId {
     let mut registry = ACTION_REGISTRY
-        .get_or_init(|| bevy_platform::sync::Mutex::new(ActionRegistry::default()))
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
 
-    if let Some((_, id)) = registry
-        .entries
+    if let Some(index) = registry
         .iter()
-        .find(|(registered, _)| registered.path == info.path)
+        .position(|registered| registered.path == info.path)
     {
-        return *id;
+        return ActionId(index as u32);
     }
 
-    let index = registry.next_id;
-    assert!(index < UNRESOLVED, "action registry exhausted u32 ids");
-    registry.next_id = index + 1;
-    let id = ActionId(index);
-    registry.entries.push((info, id));
-    id
+    let index = registry.len();
+    // The two ids that are not actions: the placeholder, and the cache's sentinel above it.
+    assert!(
+        index < ActionId::PLACEHOLDER.index() as usize,
+        "action registry exhausted u32 ids"
+    );
+    registry.push(info);
+    ActionId(index as u32)
 }
 
 /// Reads the registry, which is global and behind a lock.
-fn with_registry<T>(read: impl FnOnce(&ActionRegistry) -> T) -> T {
+fn with_registry<T>(read: impl FnOnce(&[ActionInfo]) -> T) -> T {
     let registry = ACTION_REGISTRY
-        .get_or_init(|| bevy_platform::sync::Mutex::new(ActionRegistry::default()))
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
     read(&registry)
@@ -698,9 +700,8 @@ fn with_registry<T>(read: impl FnOnce(&ActionRegistry) -> T) -> T {
 
 /// Remembers the [`ActionId`] for one action so it is resolved once rather than on every read.
 ///
-/// The derive generates one of these per action and you will not normally name it. Use it only
-/// if you are writing an `InputAction` impl by hand and want reads to cost the same as a derived
-/// one:
+/// The derive generates one of these per action and you will not normally name it. Use it only if
+/// you are writing an `InputAction` impl by hand and want reads to cost the same as a derived one:
 ///
 /// ```rust
 /// use bevy_action_map::action::{ActionId, ActionIdCache, InputAction, ActionIntent};
@@ -874,6 +875,22 @@ mod tests {
         assert_eq!(info.intent, ActionIntent::Directional2);
 
         assert!(registered_actions().contains(&info));
+    }
+
+    /// A component holding an `ActionId` defaults to the placeholder, so nothing the registry hands
+    /// out may equal it — a prompt spawned without an action would otherwise show the first action
+    /// registered.
+    #[test]
+    fn the_placeholder_is_the_id_of_no_action() {
+        assert_eq!(ActionId::default(), ActionId::PLACEHOLDER);
+        assert_eq!(ActionId::PLACEHOLDER.info(), None);
+
+        // Whatever the rest of the suite has registered by now, alongside one interned here.
+        let _ = Jump::id();
+        for info in registered_actions() {
+            let id = ActionId::from_path(info.path).expect("a registered action resolves");
+            assert!(id.index() < ActionId::PLACEHOLDER.index(), "{info:?}");
+        }
     }
 
     /// A path nobody declared is the shape of a binding saved against an action that has since been

@@ -2147,3 +2147,24 @@ a rebinding screen neither binds nor re-opens the screen.
 event it could ignore — and ignoring it is what `examples/disasteroids` did, which is why that
 silence was a known finding rather than a feature. A screen that wants the old silence drops the
 `Err` arm.
+
+---
+
+### D90 — The default `ActionId` is the id of no action
+
+**Decided.** `ActionId::PLACEHOLDER` is `u32::MAX - 1`, and `Default` answers it rather than
+`ActionId(0)`. The registry hands out positions from zero upward and asserts it stays below the
+placeholder, so no action is ever registered under it and every id-indexed lookup — `info`, a plan's
+slot table — answers as it would for an action nobody bound.
+
+**Rules out.** Dropping `Default` from `ActionId`, which `bsn!` needs on every component that holds
+one; and handing ids out from anywhere but the registry's own length.
+
+**Reversal.** `ActionId(0)` is the first action reached in the process, which is not a property of
+anything the game wrote, so a prompt spawned without an action showed whatever that was — a caption
+that reads as correct and names the wrong control. The failure is silent in both directions: no
+warning, and no test can pin which action it would name.
+
+**Two ids are not actions, not one.** `ActionIdCache`'s `UNRESOLVED` is `u32::MAX` and means "not
+looked up yet", which a cache must tell from a resolved id. The placeholder sits immediately below
+it so the two never collide, and the registry's exhaustion assert is against the lower of them.

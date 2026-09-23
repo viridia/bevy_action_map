@@ -205,6 +205,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 150  | A virtual gamepad                                                     |
 | 131  | A plan slot as one struct                                             |
 | 138  | A plan compiled once, not once per context                            |
+| 139  | The action registry, and what an `ActionId` can reach                 |
 
 ---
 
@@ -216,7 +217,6 @@ its identity rather than its position.
 
 * 115: A timing declared as a tunable
 * 122: The wheel as a binding source
-* 139: ActionId changes
 * 140: A mapping key derived in one place
 * 141: A binding input has one part
 * 143: One apply, for the world or for an entity
@@ -462,30 +462,6 @@ Six chunks no game asks for and no published crate can do without: an extension 
 outside has exercised, a rebinding surface that does one job, the reflection the documents promise,
 documentation that runs, documentation that is true, and the advice that keeps a player out of a
 corner.
-
-### 139. The action registry, and what an `ActionId` can reach
-
-Three small things about `ActionId`, in one review because each one's reasoning leans on the others.
-
-- **The registry holds one fact three ways.** `intern_action` only appends, so `next_id` is always
-  `entries.len()` and each entry's stored `ActionId` is always its own index — and `ActionId::info`
-  linear-scans the vector that index would subscript. `entries` becomes `Vec<ActionInfo>`: the id is
-  the position, `info` is a `get`, `from_path` a `position`. The public signatures do not change.
-- **`BindingSpec`'s comment gives a false reason** (`binding/builder.rs`). It says the plan copies
-  intent, path and category because `ActionId` "does not reach back to the type"; `ActionId::info`
-  reaches exactly those three. The copies stay — `info` takes the global registry lock, which the
-  fold must not — and the comment is rewritten to say so, against the registry as this chunk leaves
-  it rather than as it is now.
-- **`ActionId::default()` is a real action.** The derive gives `ActionId(0)`, the first action
-  registered, so a `PromptSpan` spawned without an action silently shows whatever action happened to
-  be interned first. `Default` stays — `bsn!` needs it on the components that hold one — and becomes
-  a public `ActionId::PLACEHOLDER`, `u32::MAX - 1`: clear of `ActionIdCache`'s `UNRESOLVED` at
-  `u32::MAX`, and with `intern_action`'s exhaustion assert lowered to match. Every id-indexed lookup
-  already goes through `get`, so the placeholder reads as bound nowhere, with no case of its own.
-- **Not doing: a name for the placeholder in presentation.** What a prompt shows for it is the
-  example's business, and `prompt_ui` already has a path for an action bound nowhere.
-- **Verified by:** a unit test that the placeholder has no `info`, no slot in any plan, and is never
-  handed out by `intern_action`; the existing suite otherwise unchanged; no diff in `examples/`.
 
 ### 140. A mapping key derived in one place
 

@@ -21,9 +21,9 @@ use super::modifier::{BindingModifier, CompassPoints, DeadZone, Modifier};
 #[derive(Clone)]
 pub(crate) struct BindingSpec {
     pub(crate) action: ActionId,
-    // Carried from the action type at bind time: the plan keys state by `ActionId`, which does not
-    // reach back to the type, and folding several bindings into one action needs the intent. The
-    // path is here so plan-build diagnostics can name the action a mistake is in.
+    // Carried from the action type at bind time rather than read back: `ActionId::info` knows all
+    // three, but takes the global registry lock, and plan compilation and mapping-row building walk
+    // every binding. The path also names the action in plan-build diagnostics.
     pub(crate) intent: ActionIntent,
     pub(crate) path: &'static str,
     pub(crate) category: Option<&'static str>,
