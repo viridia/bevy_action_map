@@ -206,6 +206,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 131  | A plan slot as one struct                                             |
 | 138  | A plan compiled once, not once per context                            |
 | 139  | The action registry, and what an `ActionId` can reach                 |
+| 140  | A mapping key derived in one place                                    |
 
 ---
 
@@ -458,28 +459,8 @@ the expensive part.
 
 ## The library itself
 
-Six chunks no game asks for and no published crate can do without: an extension point nothing
-outside has exercised, a rebinding surface that does one job, the reflection the documents promise,
-documentation that runs, documentation that is true, and the advice that keeps a player out of a
-corner.
-
-### 140. A mapping key derived in one place
-
-`mapped_parts` exists so that `mappings_of` and `overrides::rewrite` agree on what each row holds,
-and it is where a part's `MappingKey` is derived: the declaration's prefix or the binding's path,
-then `MappingKey::new`. `mappings_of`'s follower pass derives it a third time, from the leader's
-declaration, rather than reading it. If prefix resolution changes in one place and not the other,
-followers silently stop attaching to their leader's row.
-
-- **The follower pass reads `mapped_parts`.** Computed once at the top of `mappings_of`, and
-  filtered to `binding == leader_index` where the pass now re-resolves the prefix and walks the
-  leader's parts itself.
-- **`MappedPart::family` goes.** It is always `control.family()`, beside `control` in the same
-  struct.
-- **Not doing: dropping `MappedPart::key`.** It is not a cache but the one derivation both consumers
-  share; removing it would put the rule back in each of them.
-- **Not doing: `BindingInput::for_each_part`'s shape**, which is chunk 141.
-- **Verified by:** the existing follower tests unchanged, and no diff in `examples/`.
+Work no game asks for and no published crate can do without: the crate's internals kept consistent,
+extension points exercised, and documentation that is true and runs.
 
 ### 141. A binding input has one part
 
@@ -498,7 +479,6 @@ cannot happen, in three different ways. `plan.rs`'s two skip work silently, `map
 - **Now rather than later.** The method is public, so narrowing it breaks a caller — and there are
   none until the first publish, after which there would be.
 - **Not doing: `for_each_control`.** A stick really does read two controls there.
-- **After chunk 140**, which settles what `mapped_parts` is for before this changes how it walks.
 - **Verified by:** the existing suite unchanged, and no diff in `examples/`.
 
 ### 143. One apply, for the world or for an entity

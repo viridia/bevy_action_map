@@ -1243,7 +1243,7 @@ pub(crate) fn rewrite(
             .iter()
             .filter(|part| {
                 part.key == row.key
-                    && part.family == row.family
+                    && part.control.family() == row.family
                     && declared[part.binding].action == row.action
             })
             .collect();

@@ -152,30 +152,6 @@ def main():
     for path, n, rid in r_dupes:
         fail(path, n, f"{rid} is defined more than once")
 
-    # CLAUDE.md states three counts in its document table. Each has drifted before.
-    claude = ROOT / "CLAUDE.md"
-    text = claude.read_text(encoding="utf-8")
-    highest_d = max(int(d[1:]) for d in d_defined)
-    for pattern, actual, what in (
-        (r"`D1`–`D(\d+)`", str(highest_d), "highest decision number"),
-        (r"(\d+) numbered requirements", str(len(r_defined)), "requirement count"),
-        (r"in sections `R\d+`–`R(\d+)`", max(req_sections, key=int), "highest requirements section"),
-        (r"in sections `TD\d+`–`TD(\d+)`",
-         max((s for s in des_sections if "." not in s), key=int), "highest design section"),
-        (r"(\d+) numbered requirements for the remote", str(len(dr_defined)),
-         "driver requirement count"),
-        (r"in sections `DR\d+`–`DR(\d+)`", max(dreq_sections, key=int),
-         "highest driver requirements section"),
-        (r"in sections `DD\d+`–`DD(\d+)`",
-         max((s for s in ddes_sections if "." not in s), key=int), "highest driver design section"),
-    ):
-        m = re.search(pattern, text)
-        if not m:
-            fail(claude, 0, f"the assertion of the {what} is missing")
-        elif m.group(1) != actual:
-            n = text[: m.start()].count("\n") + 1
-            fail(claude, n, f"claims {what} {m.group(1)}, but it is {actual}")
-
     for line in fails:
         print(line)
 

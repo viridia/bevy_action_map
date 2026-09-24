@@ -468,7 +468,6 @@ pub(crate) fn leader_of(bindings: &[BindingSpec], index: usize) -> Option<usize>
 #[derive(Clone, Copy)]
 pub(crate) struct MappedPart {
     pub(crate) key: crate::mapping::MappingKey,
-    pub(crate) family: crate::device::DeviceFamily,
     /// Index into the binding list this was read from.
     pub(crate) binding: usize,
     pub(crate) part: BindingPart,
@@ -492,7 +491,6 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
         binding.input.for_each_part(|part, control| {
             parts.push(MappedPart {
                 key: crate::mapping::MappingKey::new(prefix, part),
-                family: control.family(),
                 binding: index,
                 part,
                 control,
@@ -535,8 +533,9 @@ pub(crate) fn mappings_of(
     bindings: &[BindingSpec],
     context: &'static str,
 ) -> Vec<crate::mapping::ActionMapping> {
+    let parts = mapped_parts(bindings);
     let mut mappings: Vec<crate::mapping::ActionMapping> = Vec::new();
-    for entry in mapped_parts(bindings) {
+    for entry in &parts {
         let binding = &bindings[entry.binding];
         // `mapped_parts` yields nothing for a binding without one.
         let Some(declaration) = binding.mapping else {
@@ -545,7 +544,7 @@ pub(crate) fn mappings_of(
 
         if let Some(mapping) = mappings.iter_mut().find(|mapping| {
             mapping.key == entry.key
-                && mapping.family == entry.family
+                && mapping.family == entry.control.family()
                 && mapping.action == binding.action
         }) {
             mapping.slots.push(Some(crate::mapping::BoundSlot {
@@ -569,7 +568,7 @@ pub(crate) fn mappings_of(
                 BindingPart::Whole => binding.input.channel_shape(),
                 _ => ChannelShape::Button,
             },
-            family: entry.family,
+            family: entry.control.family(),
             // An author cannot declare a gap, so a derived row is dense; only an override makes one.
             slots: alloc::vec![Some(crate::mapping::BoundSlot {
                 control: entry.control,
@@ -591,17 +590,11 @@ pub(crate) fn mappings_of(
             continue;
         };
         let leader = &bindings[leader_index];
-        // `leader_of` only returns a binding whose `mapping` is `Some`, so this always matches.
-        let Some(declaration) = leader.mapping else {
-            continue;
-        };
-        let prefix = declaration.prefix.unwrap_or(leader.path);
         let condition = crate::condition::describe(&binding.conditions);
-        leader.input.for_each_part(|part, control| {
-            let key = crate::mapping::MappingKey::new(prefix, part);
+        for part in parts.iter().filter(|part| part.binding == leader_index) {
             if let Some(mapping) = mappings.iter_mut().find(|mapping| {
-                mapping.key == key
-                    && mapping.family == control.family()
+                mapping.key == part.key
+                    && mapping.family == part.control.family()
                     && mapping.action == leader.action
             }) {
                 // A follower rides every one of its leader's bindings, and a row with two slots is
@@ -619,7 +612,7 @@ pub(crate) fn mappings_of(
                     });
                 }
             }
-        });
+        }
     }
     mappings
 }

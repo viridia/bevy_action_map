@@ -876,8 +876,8 @@ otherwise:
 | `follow::<F, L>()` | on `L`'s row, as a subordinate line | with `L`'s row |
 
 `mappable` takes no arguments. The parts of a composite name themselves, so a key derives as
-`gameplay.move.up`, and the family is inferred from the control. `mappable_as` replaces the derived
-key where one is needed.
+`gameplay.move.up`, and the family is inferred from the control. `mappable_as` replaces the action's
+path in that key where one is needed; the part is still appended.
 
 **A row has no declared width.** `slots` is however many controls the row holds, and how many cells
 to draw beside them is the screen's own decision — a table with a spare column draws one more than

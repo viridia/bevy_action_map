@@ -340,6 +340,9 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
         (crate::device::DeviceFamily, &'static str),
         (ActionId, crate::mapping::TunableValue),
     > = alloc::collections::BTreeMap::new();
+    // The keys the rows are filed under, so the collision checks below test those and not a
+    // re-derivation of them.
+    let parts = crate::mapping::mapped_parts(bindings);
     // Where the diagnostics of the current `bind` call begin.
     let mut declaration_start = 0;
 
@@ -416,12 +419,11 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
         }
 
         if let Some(declaration) = binding.mapping {
-            let prefix = declaration.prefix.unwrap_or(binding.path);
             let rebindable = declaration.rebind_policy.is_rebindable();
-            binding.input.for_each_part(|part, control| {
-                let key = crate::mapping::MappingKey::new(prefix, part);
+            for part in parts.iter().filter(|part| part.binding == index) {
+                let key = part.key;
                 let (claimant, claimed_as) = keys
-                    .entry((control.family(), key))
+                    .entry((part.control.family(), key))
                     .or_insert((binding.action, declaration.rebind_policy));
                 if *claimant != binding.action {
                     // Only where something is rebindable, because the hazard is a *saved* rebind of
@@ -434,7 +436,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
                 } else if *claimed_as != declaration.rebind_policy {
                     found.push(at(DiagnosticKind::RebindingDisagreement { key }));
                 }
-            });
+            }
         }
 
         if let Some(decl) = &binding.tunable
