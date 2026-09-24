@@ -114,14 +114,14 @@ it is actually a structural one:
 
 - a _source_ backend supplies L1 and lets our pipeline map it (a custom device, a replay, a network
   peer);
-- an _authority_ backend supplies **L2 output directly** — action values and states — bypassing our
-  bindings, modifiers, and conditions entirely. Steam Input is this case: the binding UI, the
-  conflict rules, and the glyphs all live outside the game, and `GetDigitalActionData` returns the
-  answer.
+- an _authority_ backend supplies **an action's input for one device family**, already resolved —
+  the value a binding would have read — in place of our bindings for that family. Steam Input is
+  this case: for the gamepad, the binding UI, the conflict rules, and the glyphs all live outside
+  the game, and `GetDigitalActionData` returns the answer. The keyboard is still ours.
 
-Supporting the second is the structural commitment. It means action state must be writable from
-outside the mapping pipeline, presentation must not assume our binding tables exist, and rebinding
-must be delegable to the backend's own UI.
+Supporting the second is the structural commitment. It means an action's input must be suppliable
+from outside our bindings, presentation must not assume our binding tables exist, and rebinding must
+be delegable to the backend's own UI.
 
 - **R0.1 (MUST)** Each layer is usable without the layers above it. L1 alone must be a usable
   normalized input API; L2 must be drivable from a hand-constructed L1 frame. _(R9's timing
@@ -132,16 +132,19 @@ must be delegable to the backend's own UI.
   and external binding backends all depend on it.
 - **R0.3 (MUST)** No layer may require a `World` singleton resource that prevents multiple
   independent instances (per player, per replay stream, per test).
-- **R0.4 (MUST)** A backend may act as an _authority_ for a subset of actions: their state is
-  written by the backend and our mapping pipeline must not also compute them. The split must be
-  per-action or per-context, not all-or-nothing — a game using Steam Input for gameplay may still
-  map its own debug and editor bindings.
+- **R0.4 (MUST)** _(D92)_ A backend may act as an _authority_ for a device family: for the actions
+  it drives, it supplies that family's input and our bindings for that family must not also read it.
+  The split must be per action and per family, not all-or-nothing — a game reading its pads through
+  Steam Input still binds the keyboard to the same actions, and still maps its own debug and editor
+  bindings.
 - **R0.5 (MUST)** Consumers of action state (gameplay code, prompts) must not need to know which
   backend produced it. Backend identity is queryable but never required at the call site.
 - **R0.6 (MUST)** _(D22)_ A backend that is authoritative for a device must be able to suppress that
-  device at **L0**, so its raw events never reach the input frame at all — R0.4 stops us computing
-  an action the backend owns, not sampling the hardware underneath it. The same capability lets a
-  replay backend mute live hardware while it plays.
+  device at **L0**, so its raw events never reach the input frame at all — R0.4 stops our bindings
+  reading the family the backend owns, not sampling the hardware underneath it. The same capability
+  lets a replay backend mute live hardware while it plays.
+- **R0.7 (MUST)** _(D92)_ A condition or modifier the game declares on an authority's input applies
+  to it as to any other binding's. The backend's own stick shaping is not applied again (R14.10).
 
 ### Non-goals
 
@@ -1101,7 +1104,7 @@ that assumes any of that is stable loses player data silently on the next patch.
   | --- | --- | --- |
   | **absent** | use whatever the game shipped | a mapping the player never touched |
   | **cleared** | the player deliberately removed the binding | R19.3's unbind-the-other policy, or an explicit "clear" |
-  | **not ours** | an external backend owns this action (R0.4, R19.8) | Steam Input and equivalents |
+  | **not ours** | an external backend owns this mapping (R0.4, R19.8) | Steam Input and equivalents |
 
   The distinction is easy to miss because a diff against defaults (R17.1) makes absence meaningful:
   once "missing" already says "default", clearing a binding has nothing left to say with. The third
@@ -1263,11 +1266,11 @@ and response curves ([IGA file][steam-iga]).
   _slot_ and a category per _action_ (R1.6, R19.9) for the UI to label and group by. Both are
   localization keys (R19.14).
 - **R19.7 (SHOULD)** Rebind per control scheme independently (R17.4).
-- **R19.8 (MUST)** _(D22)_ When a backend is authoritative for an action, rebinding must delegate to
+- **R19.8 (MUST)** _(D22)_ When a backend is authoritative for a binding, rebinding must delegate to
   that backend's own UI (Steam's [`ShowBindingPanel`][steam-isteaminput]) rather than presenting our
   capture flow. The rebinding API must be able to report "not rebindable here, delegate instead" as
-  a normal outcome — and R19.3's conflict detection does not apply to those actions, since we do not
-  own the rules.
+  a normal outcome — and R19.3's conflict detection does not apply to those bindings, since we do
+  not own the rules.
 
 ### The presentation model
 

@@ -76,6 +76,7 @@ here, so there is one `D`-numbering in the project.
 | **D58** | An unrecognized version refuses the set; no migration exists yet              | TD10.3    |
 | **D59** | Persistence goes through a separate, reflectable type                         | TD10.3    |
 | **D51** | An authority backend writes a value, not a state                              | —               |
+| **D92** | An authority is a binding source for one device family                        | TD5.8     |
 | **D52** | Pairing is a runtime handle, filtered at the frame                            | TD7.4     |
 | **D53** | The crate detects and reports; the app decides                                | —               |
 | **D54** | There is no pass-through action                                               | TD5.5     |
@@ -698,9 +699,9 @@ identity, which does not exist yet.
 
 **Decided.** A _source_ backend supplies the input frame and is indistinguishable from real hardware
 to everything above it — replay, a network peer, a custom device, a test all use this door. An
-_authority_ backend supplies action output directly, bypassing bindings, modifiers and conditions.
-Steam Input is the second case: the binding UI, the conflict rules and the glyphs all live outside
-the game.
+_authority_ backend supplies an action's input for one device family, already resolved, in place of
+our bindings for that family (D92). Steam Input is the second case: the binding UI, the conflict
+rules and the glyphs all live outside the game.
 
 **Rules out.** One backend trait, and scoping external bindings as a presentation concern. It is a
 structural commitment, not a display one.
@@ -840,8 +841,8 @@ a crate that today does one small thing well. A `focus` feature here is the corr
 **Related, and enforced in the tree.** Nothing under `src/` may name Steam — not a feature, not a
 variant, not a trait method. The real backend is `std`-only, `unsafe` FFI beneath, and wants the
 Steamworks redistributable at link time, where this crate is `no_std` and forbids unsafe. So it is
-someone else's crate, and the test of whether the seam is sufficient without being Steam-shaped is a
-mock authority backend living entirely in `examples/`.
+someone else's crate, and the test of whether the seam is sufficient without being Steam-shaped is
+that the Steam backend in `steam_examples/` builds against the public API alone.
 
 **Also enforced.** Nothing in the crate depends on `bevy_ui`. `bevy_ui` already depends on
 `bevy_input` and `bevy_input_focus`, so depending on it would invert that layering and foreclose
@@ -1564,8 +1565,12 @@ it is not, and there is no equivalent of one context claiming a control for a fr
 (`ActivateActionSetLayer`/`DeactivateActionSetLayer`), but the safe Rust binding exposes only the
 base set — `activate_action_set_handle` and nothing for layers. The function exists in the SDK a
 real backend links against, so this is a binding gap rather than a platform one: reachable by a
-patch upstream to that crate, or by a direct FFI call past it. Chunk 42's mock does not hit this,
-since it fakes the API the crate exposes rather than Steam's own.
+patch upstream to that crate, or by a direct FFI call past it. Chunk 151b does not need them: S20's
+single set covers one player.
+
+**Superseded in part by D92**: the value enters the fold as a binding's input rather than at the
+state machine after it, and the game's conditions and modifiers on that binding run. The
+level-to-edges half stands, and so does "no second write path".
 
 ### D69 — Netcode replication targets L2, not L1
 
@@ -1629,8 +1634,49 @@ hidden channel a `&self` call inside a system forces.
 before evaluation samples once a tick, which is what a pulled call would have done. What a trait is
 still the right shape for is the half this does not cover — origins, glyphs, whether an action is
 bound at all, and delegating a rebind to the backend's own UI (R18.8, R19.8). Those are asked on
-demand by a settings screen rather than once a tick by the evaluator, and chunk 42 is where they
-land.
+demand by a settings screen rather than once a tick by the evaluator. `Prompts` is already that
+trait for the first three; chunks 151c and 151d are where a real backend implements it and delegates
+a rebind.
+
+**Superseded in part by D92**: `delegate` and the whole-action slot it allocates. The component
+survives, and is what an authority binding reads.
+
+### D92 — An authority is a binding source for one device family
+
+**Decided.** An authority backend supplies an input, not an action. The game declares it as a
+binding in the context, naming the device family it stands in for, and its value enters the fold
+beside the context's own bindings for other families. Conditions and modifiers chained onto that
+binding run on it as on any other. Binding the authority's own family as well is the contradiction
+that remains an error.
+
+**Rules out.** An action owned whole by one source, which is what `delegate` expressed; and skipping
+the game's conditions for an authority's value.
+
+**Reversal.** Steam Input owns the gamepad and nothing else, so a Steam game's `Thrust` comes from
+the keyboard and the pad at once. Under whole-action ownership that cannot be declared: a context
+may not both bind and delegate one action, and a second context is a second type the gameplay code
+does not read. Reverting puts every Steam game back to choosing between the keyboard and the pad.
+
+**Conditions come in two kinds, and only one is the backend's.** A hold or a double-tap as a way of
+pressing is the player's, and under Steam the player sets it in Steam's layout. A rate of fire or a
+bomb's charge time is the game's rule, declared on a binding because that is where conditions go.
+D51 skipped both, so a Steam player holding fire got one shot. The crate does not tell the two
+apart; the game says per binding what the authority's input carries. What stays skipped is the stick
+shaping the backend has already applied (R14.10) — a game does not chain a deadzone onto an
+authority binding.
+
+**What survives from D51 and D71.** The value is a level sampled once a tick, and the state machine
+synthesizes the edges. It arrives through `AuthorityValues` on the context entity, written by a
+system ordered before evaluation, with no trait object.
+
+**The family is what presentation reads.** An authority binding is a mapping row whose rebind goes
+to the backend (R19.8), so a controls screen shows the keyboard rebindable here and the pad
+delegated, from the declarations alone. Prompts for that family come from the backend's `Prompts`
+(R18.8).
+
+**How it was missed.** R0.4 split authority per action and R0.6 had a backend own a device, and the
+two were never checked against each other. `pong_robot` fit the first, because its two owners are
+two players. Steam, the case both requirements were written for, is the second.
 
 ### D52 — Pairing is a runtime handle, filtered at the frame
 
@@ -1719,11 +1765,11 @@ which only `gilrs`'s plugin writes.
 **Rules out.** An app reading `GamepadConnectionEvent` directly, which `docs/issues.md` 1020 had
 already declined to endorse.
 
-**Reversal.** `docs/steam.md`'s appendix on disconnect measured that Steam emits no
-`GamepadConnectionEvent` at all; a backend already has to synthesize `RawGamepadEvent::Connection`
-to keep held-state clearing working under Steam. Reading Bevy's own event instead would leave every
-non-`gilrs` backend unable to raise either signal — the same one-backend trap D64 and D65 already
-refuse elsewhere in this group.
+**Reversal.** Under Steam no `GamepadConnectionEvent` is written at all, since only `gilrs`'s plugin
+writes one — reasoned in `docs/steam.md`'s appendix, and measured by chunk 151e; a backend already
+has to synthesize `RawGamepadEvent::Connection` to keep held-state clearing working under Steam.
+Reading Bevy's own event instead would leave every non-`gilrs` backend unable to raise either signal
+— the same one-backend trap D64 and D65 already refuse elsewhere in this group.
 
 **Note.** `DeviceDisconnected` is entity-targeted; `DeviceConnected` is not. The crate knows exactly
 which `Paired` a lost device belonged to, but not which pairing, if any, a newly connected one is
@@ -1735,8 +1781,9 @@ than a guess.
 **Decided.** `DeviceId` wraps a payload the backend defines, and the backend declares a
 `DeviceIdentity` implementation carrying `const DOMAIN: &'static str`. The domain is the save key.
 Each backend keeps whatever guarantee its own identity actually has: Bevy's gamepad backend can
-offer only `GamepadModelId`, a vendor and product id, while Steam's `InputHandle_t` already survives
-a restart without colliding.
+offer only `GamepadModelId`, a vendor and product id, while Steam's `InputHandle_t` may survive a
+restart without colliding — `docs/steam.md` S14's layout suggests it does, and nothing has measured
+it.
 
 `Clone`, `Eq` and `Hash` come from the trait's bounds and are captured as function pointers when a
 `DeviceId` is built — never from `reflect_clone`/`reflect_partial_eq`/`reflect_hash`.

@@ -446,7 +446,7 @@ the expensive part.
   the example that rewinds, and ground rule 1 says that split happens before the code, not during.
 - **Depends on chunk 95.** The visible rewind reuses its Pong base rather than a third vehicle — the
   same paddle-and-ball simulation snapshotted and re-simulated forward, with the recorded and
-  re-simulated transition logs compared. Chunk 42 will already have proven the base can host one
+  re-simulated transition logs compared. `pong_robot` has already shown the base can host one
   grafted concept without disturbing its own.
 - **Check whether `docs/issues.md` 1041 belongs here.** R9.9's pumped sampling mode (stopping
   `InputFramePlugin` from scheduling its own sampling) was floated as a fit for a rewind demo, on
@@ -519,44 +519,12 @@ per-device policy D22 assumed, so what is left is a family switch.
 - **Not doing: keyboard and mouse.** Steam emulates both alongside the pad (S1) and the family
   switch would silence them wholesale, which is wrong — a player using a pad through Steam still
   types. Whether Steam can emit keys for a pad while the game reads Steam Input natively is
-  unmeasured, and `docs/steam.md` carries the question. This chunk suppresses what a backend
-  actually owns and leaves that one open.
-- **Not doing: R0.4's per-action split**, which lives at L2 and is chunk 111's, already landed.
-
-### 42. A backend-owned row, and the rebind it delegates
-
-What is left of the authority work once chunk 111 landed injection and chunk 112 takes suppression:
-the half a controls screen asks for on demand rather than the half the evaluator reads every tick.
-Nothing here is faked — `examples/pong_robot` is already an authority resolving a real action.
-
-- **`RebindPolicy` needs a third state** — `docs/issues.md` 1022. `Here | Fixed` cannot tell a
-  backend-owned row from an ordinary fixed one, so a screen reading `mappings()` has to consult its
-  own working copy to say "not rebindable here, delegate to that backend's own UI".
-- **Rebinding reports delegation as an outcome, not a failure** (R19.8), and R19.3's conflict
-  detection does not run on those actions, because we do not own the rules they would be checked
-  against.
-- **Partial delegation is the case; total delegation is not.** `pong_robot` already has the shape:
-  `Move` delegated in the robot's context and bound in the human's, so the action keeps its row and
-  only what the row can offer changes. Steam is that shape one device family over — the keyboard
-  rebound here, the pad delegated — so the screen renders both states side by side rather than
-  hiding the action. The previous version of this chunk delegated a whole pad, which is the case no
-  real game has.
-- **The vehicle is Disasteroids, with one action delegated.** It owns the rebinding screen by a
-  division already stated in tree: `examples/pong_robot/main.rs` says Pong has no settings screen
-  because Disasteroids owns that, and building a second one there would reverse it. Delegating one
-  action leaves the presets and the saved controls intact and adds exactly the row this chunk is
-  about.
-- **Not doing: origins** (R18.8), already closed — `ControlOrigin` carries a control that is not one
-  of ours, with the same stored name and fallback label everything else renders from.
-- **Not doing: glyphs** (R18.9), which has its own deferred row and its own asset questions.
-- **Not doing: suppression at L0** (R0.6), which is chunk 112's whole subject.
-- **Not doing: a backend trait.** Earlier drafts wanted one in `src/backend.rs`, from when injection
-  was assumed to need it; chunk 111 landed injection through a component instead. Delegating a
-  rebind is a call the game makes to a backend it chose — the crate's part is saying the row is not
-  ours to capture on. A trait earns its place when a rebinding widget has to delegate without
-  knowing its backend, which is the presentation-crate row.
-- **Not doing: naming which authority produced a value** (R0.5's queryable half). One authority in a
-  build cannot motivate a name; the deferred table carries it.
+  unmeasured, and chunk 151b measures it. This chunk suppresses what a backend actually owns and
+  leaves that one open.
+- **Whether Steam needs this at all is 151b's to say.** A Steam build without `bevy_gilrs` has no
+  hardware event to suppress; if it also runs cleanly with the client absent, replay is this chunk's
+  only customer, and 151b records which here.
+- **Not doing: R0.4's per-family split**, which lives at L2 and is chunk 151a's.
 
 ### 28. Docs that run
 
@@ -618,6 +586,143 @@ rebinding is.
 - **Not doing:** raw injection, which R25.4 says needs nothing.
 - **Verified by:** a headless test of each handler, and 148's plan reaching one through `call`.
 
+## A Steam demo
+
+The authority seam has had one customer, `pong_robot`, whose authority is a robot. Several things
+are unbuildable or unverifiable without a real backend: a delegated rebind, glyphs a backend
+supplies, and prompt invalidation the backend drives. A Steam build of Disasteroids, then of Split
+Friction, is the real backend. It lives in `steam_examples/`, beside `steam_probe/`, with its own
+`Cargo.toml` outside the workspace so `steamworks-sys` never builds in `verify.sh`.
+
+151a blocks the rest. 151c and 151d are independent of each other; 151e follows 151b.
+
+Every chunk after 151a is an audit rather than a gate. It needs a running client, a pad, and a
+layout bound by hand (`docs/steam.md` S16), and no CI can run it.
+
+### 151a. An authority is a binding for one device family
+
+D92 and R0.4 as revised: `delegate` owned an action whole, and Steam owns the gamepad and nothing
+else. Nothing here touches Steam.
+
+- **An authority binding replaces `delegate`**, naming the family it stands in for and returning the
+  ordinary builder, so conditions and modifiers chain onto it (R0.7). The spelling is decided at the
+  start of the chunk.
+- **Its value is that binding's input level**, read from `AuthorityValues` once a tick, and the fold
+  combines it with the context's other bindings by intent (D15). An inactive or shadowed context
+  still does not read it.
+- **It is held state, not a pass of its own.** The fold reads every binding from state held on the
+  instance, never from the event that moved it, so the authority's values become one more such
+  store, filled from `AuthorityValues` before `apply_frame` — where `apply_authority` runs after it
+  today — and read by one arm in the fold. `apply_authority` and `delegated_slots` go.
+- **It presses no control**, so it neither claims nor is claimed, and interruption does not reach
+  it, as TD5.8 says of delegated slots today.
+- **`BoundAndDelegated` narrows** to binding the authority's own family as well.
+- **Its channel shape is taken from the action's intent** at declaration, so D7's check stays strict
+  rather than gaining a case that matches anything.
+- **A `Delta2` action refuses an authority binding**, with a diagnostic of its own. A delta has to
+  be counted once, and the level path would count it on every tick; the deferred table carries the
+  design.
+- **`part()` stays for inputs that read a control**, and each of its three callers handles an
+  authority first, because each means something different by its absence. `binding_family` asks a
+  new `BindingInput::family()`, which answers with the declared family. The prompt table skips
+  authority bindings for good, since the backend's `Prompts` answers for that family. `mapped_parts`
+  skips them until 151d, and the rewrite path relies on that: an override addressed to a delegated
+  row has no control to put in it.
+- **`pong_robot` moves to the new form**, the one diff in `examples/`, and it is an API change
+  rather than a leak.
+- **TD5.8 is rewritten** for the mechanism as built, and so is every other description of
+  `delegate`: the README's "actions driven from code", `docs/comparison.md` (three places) and
+  `docs/one-way-doors.md`.
+- **Verified by:** headless tests: a key and an authority on one action combine, a `pulse` on an
+  authority binding repeats while its level is held, and the narrowed diagnostic fires on a same
+  family binding and not on another. `pong_robot` plays as before.
+- **Not doing:** the authority binding's mapping row, which is 151d's.
+
+### 151b. Disasteroids on Steam
+
+A `disasteroids` binary in `steam_examples/`. Its `main.rs` and `actions.rs` are its own; every
+other module is `#[path]`-linked from `examples/disasteroids`, whose modules name `crate::actions`
+and so fly on whichever `actions` the including crate declares.
+
+- **`steam.rs` is the backend.** It initializes the client, activates the two sets `docs/steam.md`'s
+  appendix works out, spawns one entity per `InputHandle_t` (through
+  `get_connected_controllers_slice`, S12), and copies each action's data out of the packed struct
+  (S11) into `AuthorityValues`. Readiness is `bActive`, not a resolved handle (S5).
+- **The build takes `bevy/gamepad` without `bevy_gilrs`** (D22), so no hardware event reaches the
+  frame to be suppressed.
+- **Its README is the setup:** the dylib beside the binary (S15), the manifest into the client's
+  bundle (S4), and the layout bound by hand, every action named (S16). Whether that personal layout
+  is a file the demo could ship for copying in is measured here.
+- **Measured here:** a launch with the client absent; a pad control mapped to a key while the game
+  reads Steam Input; and what an `absolute_mouse` action's delta is measured since, from the right
+  stick bound to a test action in that mode. All three go to `docs/steam.md`, and the first goes to
+  chunk 112.
+- **`scripts/verify.sh --full` gains a `cargo check` of `steam_examples/`**, since the linked
+  modules break silently otherwise; `steamworks-sys` vendors the SDK, so a check needs neither the
+  dylib nor a client.
+- **A brief for S12's upstream fix**, for the author to post.
+- **Verified by:** flying the ship on the pad through Steam and on the keyboard, together.
+- **Not doing:** prompts (151c) or the settings screen's pad rows (151d), which show as unbound
+  until then; action set layers, which S20 makes unnecessary; Windows. `steam_probe/` stays
+  gitignored, as the bench `docs/steam.md` is measured on.
+
+### 151c. Prompts from Steam's origins
+
+R18.8, R18.9 and R18.10 against a real backend.
+
+- **A `Prompts` implementation in `steam_examples/`** answers the gamepad family with
+  `ControlOrigin::Foreign`, from the action's origins and `get_string_for_action_origin` (S17).
+- **Glyphs load through a custom `AssetSource`.** `get_glyph_for_action_origin` returns an absolute
+  path inside the client's bundle (S17), which `AssetPath::from_path_buf` carries without escaping.
+  The reader canonicalizes it and refuses anything outside that one root before reading, rather than
+  trusting an SDK's return value as a bare path. One scheme and one root: a second scheme is
+  warranted only by a second root with its own lifecycle, not by a second SDK call returning a path.
+- **The glyphs are themed.** The path carries `dark`, so the light variant is selected rather than
+  assumed.
+- **A rebind in the overlay invalidates prompts** (R18.10) through `PromptGeneration::invalidate`.
+  How the change is detected is open: a configuration-loaded callback if `steamworks` exposes one, a
+  poll of the origins otherwise.
+- **Verified by:** the Steam build's hint line prompting for the pad with Steam's glyph, and
+  changing after a rebind in the overlay.
+
+### 151d. A delegated row, and the rebind it delegates
+
+What chunk 42 was, now that the authority is a binding: the half a controls screen asks for on
+demand.
+
+- **`RebindPolicy` gains a third state** (`docs/issues.md` 1022), which an authority binding's row
+  carries. `Here | Fixed` cannot tell a backend's row from an ordinary fixed one.
+- **Rebinding reports delegation as an outcome, not a failure** (R19.8), and R19.3's conflict
+  detection does not run on those rows.
+- **`settings.rs` learns the state in place**, not in a fork: the pad row reads as the backend's,
+  and activating it triggers an event the Steam crate observes to call `show_binding_panel`. Base
+  Disasteroids never produces such a row. The `examples/` diff is a screen learning a state.
+- **Whether R17.7's saved "not ours" state is still needed** once a declared binding says the same
+  thing is decided here.
+- **Not doing: a backend trait.** Delegating a rebind is a call the game makes to a backend it
+  chose. A trait earns its place when a widget has to delegate without knowing its backend, which is
+  the presentation-crate row.
+- **Not doing: naming which authority produced a value** (R0.5's queryable half), which has its own
+  deferred row.
+- **Verified by:** the Steam build's controls screen showing a keyboard row rebindable and its pad
+  row delegated, and the panel opening from it.
+
+### 151e. Split Friction on Steam
+
+Two players are two `InputHandle_t`s, not two action sets (`docs/steam.md`'s appendix).
+
+- **One set, activated per controller**, each handle's entity `Paired` to its protagonist; join is a
+  declared action prompted by name.
+- **The backend writes `RawGamepadEvent::Connection`** when a handle appears or goes, since nothing
+  else will (D73), and an action held on a vanished pad releases (R11.4).
+- **Chunk 116's pool runs on Steam's entities**, which is the test of "backend-neutral".
+- **Brand is `InputType` mapped onto `GamepadBrand`**, or `Generic` where it has no answer (S7).
+- **Measured here:** whether a handle survives a relaunch and a client restart, which settles D74's
+  claim either way.
+- **Not doing: R15.9.** Steam has one account per machine, not one per controller.
+- **Verified by:** two pads joining, walking, and one unplugged mid-game with its held input
+  released.
+
 ---
 
 ## Deliberately deferred
@@ -627,10 +732,8 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 
 | Area | Gated on |
 | --- | --- |
-| **A real Steam backend, validated out of tree** | less than it looked. `docs/steam.md` S4 now says a borrowed app id does carry its own manifest from inside the client's bundle, and S13 answered R1.7 that way, so what is left needing an app id is only what S6 blocks: a configuration Steam actually applies. Whether that needs an app id at all, or only a windowed app Steam launches, is itself unmeasured. The shape is settled: a probe rather than a game, in its own repository, pinning `bevy_action_map` by git rev so it breaks only on a deliberate bump — and it is an audit rather than a gate, since it needs a client and a pad and cannot run in CI. `steam_probe/` is its gitignored seed and moves out when the repository exists. Nothing in this crate is blocked on it: per-family suppression is chunk 112, and the presentation half can be built against API signatures already verified to exist |
 | **Focus orchestration: guidance, and a worked example** (D87) | **community feedback, and Bevy's own direction on driving widget state from outside.** D87 keeps the mapper focus-agnostic, so the layer binding actions to whichever widget has focus sits outside the crate — `widget_focus.rs` is one, and names the role. What is deferred is telling someone how to build their own: a requirements-and-design section for an orchestrator, and the worked example of held-down visual state with the latch D87 describes. Guidance is the deliverable whether or not this project ever ships an orchestrator itself. Both gates are real rather than a delay. The first: that a game activating widgets from the keyboard and the pad wants the pressed highlight a mouse gives, and that the one-shot activation `widget_focus.rs` ships today is not already enough, are guesses about other people's UI. The second: open Bevy issues on remote control of widget state will change what an orchestrator has to do, so guidance written now would describe a shape about to move. Nothing is blocked — a game wanting the highlight has D87's rule and no crate change to wait for |
 | **Resolving a stored device identity to the connected devices that match it** | a caller asking in that direction. Written for chunk 72 and withdrawn for want of one; chunks 72d and 92 did not need it either. Devices arrive as connection events one at a time, the ones already plugged in at launch included, so every caller has one device in hand and asks the inverse question. Two identical pads never present themselves as a set to choose from |
-| **Glyphs from a backend** (R18.9) | the same asset questions from the other side. The *origin* half is closed — `ControlOrigin` already carries a control that is not one of ours, with the same stored name and fallback label everything else renders from — so what is deferred is the image rather than room for it. Measured (`docs/steam.md` S17): `get_glyph_for_action_origin` resolves to an absolute filesystem path inside the client's own app bundle — `Contents/MacOS/controller_base/images/api/dark/shared_lstick_md.png` on macOS, not the `tenfoot/resource/...` path this row previously guessed — and the `dark` component says the glyphs are themed, so a light variant has to be selected rather than assumed. A Bevy `AssetPath` can carry it natively via `from_path_buf` — no string-escaping the drive letter or backslashes. The path is not to be opened as given: a custom `AssetSource` reader must canonicalize it and reject anything outside a known root before reading, rather than trust an external SDK's return value as a bare filesystem path. One scheme, one hard-coded root is the right size while only this one root is confirmed; a second scheme is warranted only if a second root with its own lifecycle surfaces (e.g. something ephemeral, which cannot share a stable root's caching and hot-reload assumptions) — not one scheme per SDK call that happens to return a path |
 | **Proposing the driver's server methods upstream** (DD8) | **chunk 148's plan passing, and a second plan against a different example.** Four gaps: selection by name path, where a UI node is drawn, readiness as state, and a reflected `DiagnosticsStore`. The deliverable is a short brief for each, for the author to edit and post. Until two apps have used the methods, their shapes are guesses about what a test needs |
 | **Isolating an app under test from what it has saved** | **an app whose state a plan cannot reach through its own controls.** A run shares the developer's settings file: Disasteroids saves a confirmed rebind, so chunk 148's plan found its own last run's rebinding still there and failed on the second run. It now bookends itself with Reset and Confirm (DD9), which is a plan reaching a known state the way a player would — the right answer while an app offers one, and it exercises two more paths besides. What it does not cover is a plan that fails halfway, which leaves the file dirty for the next run to reset. Deleting the file first is the obvious answer and is half of one: it makes a run repeatable without stopping it writing the developer's real settings on the way out, which the bookend does handle. Isolation is the whole answer. At rc.1 it costs a platform branch — `XDG_CONFIG_HOME` on Linux, `LOCALAPPDATA` on Windows, and on macOS `HOME` itself, since `preferences_dir` is `home_dir()/Library/Preferences` with no narrower lever. [bevy#25902][], merged to main on 24 September 2026, after rc.1, makes `preferences_dir` honour an absolute `BEVY_SETTINGS_DIR` on all three, so past it isolation is one variable in `environment()` in `run.py`. Whichever is built wants a check that the throwaway directory was actually written, because a path or variable that is wrong fails silently: nothing is deleted, or the redirect does not take, and the plan passes while reading the real file. `SettingsPlugin`'s `app_name` is the directory component and is a plain `pub` field, so a per-run app id would isolate with no platform code at all — turned down because the example would have to read an env var, and a plan drives an example without the example knowing it is under test |
 | **A step of the mapper's own, or a Python helper over `call`** | **a second plan whose raw `call` steps are unreadable**, which is DD8's gate as well. Both extension points exist: BRP registration is the Rust one, and the mapper's `remote` feature adding `action_map.*` is already a plugin adding methods with no dependency either way; a Python plan is a program (DD4.2), so a helper is a module it imports. What is deferred is sugar over those, and a step registry would be a third mechanism where two already reach |
@@ -653,11 +756,12 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **A game-wide "more forgiving timings" control** (R20.4's withdrawal) | a game with enough timings that setting them one at a time is the complaint. One player-facing control across a whole game needs the crate to know which way forgiveness runs per threshold — down for `Hold` and `HoldAndRelease`'s floors, up for `Tap` and `MultiTap`'s ceilings and `Pulse`'s interval — which is the one part of this a game cannot get right without hand-checking five signs, and the reason the row exists rather than the idea being dropped with the requirement. Chunk 115's per-timing tunables come first regardless: they are what a game would expose the control *through*, and they may turn out to be all anyone wants |
 | **Auto-switching which device a player is paired to** (R15.8) | **a single-player game in tree that wants it**, which is where the value is: asked directly, LWIM's maintainer put pad-to-keyboard switching at mattering a bit, and much more in single player or networked multiplayer than in local co-op. One person pressing things makes "which device are they on now" a question with one right answer; two make it the wrong question, which is why Split Friction joins once and a player who wants the keyboard takes it the same way they took the pad. The gate stays untripped for a reason rather than for want of demand: Disasteroids is the single-player game, and it pins `PromptDevice` to the keyboard on purpose, being a desktop game whose prompts name keys with a pad plugged in. Deferred rather than withdrawn alongside R15.7, because unlike R15.7 an app cannot write it: telling a deliberate grab from a drifting stick means reading raw samples under a deadzone floor before any action fires, which an app watching `Fired` never sees. If it lands, a prompt reads the player's paired device rather than tracking one of its own, and R18.6 revives with it |
 | **Nintendo's confirm button** (what R18.7's withdrawal left) | **a game that wants confirm to follow the pad in hand**, checked first on a Nintendo pad reporting through gilrs. A Nintendo pad confirms with A, in the East position, where every other brand confirms with South. Only the gilrs path sees this, since a Steam Input backend hands over actions already mapped. Read, not run: gilrs takes SDL's `a`/`b` as `South`/`East`, and SDL_GameControllerDB maps a Nintendo pad by position (its `mapping_guide.png`), so A arrives as `East` and a game confirming on South confirms on a Nintendo player's B. A preset swapping South and East fixes that for a game that knows its player. Following the pad instead is per device rather than per family, since two brands can share one game, and `Brand` is already on the gamepad entity to read |
-| **Opaque platform-user identity** (R15.9) | a real platform SDK. Floated for Split Friction, but there is nothing to show without one, and not worth a faked stub the way chunk 42 fakes a backend |
+| **Opaque platform-user identity** (R15.9) | a real platform SDK. Floated for Split Friction, but Steam has one account per machine rather than one per controller, so even 151e has nothing to attach |
 | **Naming which authority produced a value** (R0.5's queryable half) | a build with two authorities in it. That a delegated action is indistinguishable from a bound one at the call site is the requirement's point; what has no reader is *which* authority supplied it. Chunk 111 left `AuthorityValues` unnamed rather than adding a field nothing consults, and one authority cannot motivate a name — `pong_robot`'s robot has nothing to be told apart from |
 | **An authority backend's actions in rollback** (D22's remainder) | a snapshot to fit them into. `AuthorityValues` is a plain component and clones with the entity, but what a rewind has to reproduce is what the authority *said* on the tick being re-simulated, which is not in the frame. The available answer is recording the backend's output into the frame at sample time, at the cost of a larger frame |
 | **Sub-frame event timing** (D4's remainder) | [bevy#9087][] upstream. Gamepad stays frame-quantized regardless until gilrs polling is rewritten, so mixed fidelity across sources is permanent for now rather than an artifact |
 | **Schedule enforcement for tick domains** (D9's remainder) | Bevy giving a `SystemParam` a way to know its own schedule. A plugin-time validation pass and a debug assertion stand in |
+| **An authority on a `Delta2` action** (Steam's `absolute_mouse`) | **a Steam build of a game with a look action**, most likely chunk 121's camera. Chunk 151a refuses the declaration. The design: a delta must be folded once, where a level may be read by every tick, so a context folds a `Delta2` authority value only when `AuthorityValues` has changed since that context's evaluator last ran, and zero otherwise. That is the frame cursor's rule for real mouse motion, with the component's change as the cursor; an explicit write counter is the alternative if change detection proves too implicit. What Steam's delta is measured since is 151b's measurement and decides only how a backend polls, not what the crate does |
 | **OS gestures as binding sources** (R13.7) | **a game that wants one, and can say what it should do.** Pinch, rotation, pan and double-tap arrive as `bevy_input::gestures` events — window-level, carrying no pointer and no entity — so they are the wheel's shape rather than picking's, which is why section 13 keeps them where it withdrew the rest of the pointer. What is missing is not a mechanism: the design questions are what a pinch's units are and whether it wants the modifier chain a stick does, and neither can be answered without a customer to ask |
 | **Suspend/resume** (R16.3; mobile, console) | a platform target that needs it. Nothing in this crate's supported platforms emits a suspend signal or has a device re-enumeration step to hook |
 | **Split Friction's monsters, spawners and missiles** | a mechanic that would exercise input this crate has not already proven. Kept as a row rather than deleted because the sprites, the dungeon's region aspects and a `Fire`-shaped action all exist, so changing our mind is cheap |

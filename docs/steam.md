@@ -167,8 +167,7 @@ Bluetooth mid-session; anything keyed on product id would not.
 `steamworks` 0.13.1 exposes `activate_action_set_handle` and nothing for action set layers, which
 **confirms D51's** finding. Everything the presentation half needs is present and callable:
 `get_digital_action_origins`, `get_analog_action_origins`, `get_string_for_action_origin`,
-`get_glyph_for_action_origin`, `show_binding_panel`. Chunk 42 planned to mock that surface; it can
-be developed against the real one.
+`get_glyph_for_action_origin`, `show_binding_panel`. Chunks 151c and 151d are built against it.
 
 ### S11 — The SDK's action-data structs are packed
 
@@ -181,7 +180,7 @@ inner loop.
 `get_connected_controllers` calls `Vec::shrink_to`, a capacity hint, where it means `truncate`. It
 always returns 16 handles with the tail zeroed, so a caller iterating the result processes fifteen
 phantom controllers. `get_connected_controllers_slice` returns the true count and is the workaround.
-Upstream, one line, worth reporting.
+Upstream, one line, worth reporting; chunk 151b writes the brief.
 
 ### S13 — A dotted action name survives into Steam's namespace
 
@@ -215,8 +214,10 @@ Ground rule 5 applies here as everywhere: each row names what would settle it.
 | --- | --- |
 | **Do action set *layers* stack, where base sets do not?** `S19` settled the base case; layers are D51's intended answer and `steamworks` 0.13 exposes none of the functions | a patched `steamworks`, or a direct FFI call past the safe wrapper |
 | **Does the emulated pad carry Valve's vendor id on Windows?** `S1` is a macOS measurement, and D22's original claim may have described Windows | a Windows machine with the same pad |
-| **Can a player's configuration emit keyboard and mouse events for a pad while the game reads Steam Input natively?** `S1` found `Keyboard-1` and `Mouse-1` alongside the emulated pad. They exist whether or not they emit, and only a binding that maps a pad control to a key would make them. If that combination is reachable, suppressing the gamepad family does not stop it, and the input arrives as ordinary keyboard events the game has no reason to distrust | a bound configuration, so `S6` first, then a hand-edited config that maps a pad control to a key |
-| **Does a Steam build run at all with the client absent?** D22 assumed it must, and therefore that one binary has to serve both a Steam launch and a direct one; that was never measured, and the decision now stands on replay instead. The documented pattern is `SteamAPI_RestartAppIfNecessary` relaunching through the client, or `SteamAPI_Init` failing outright, either of which would make per-channel builds the ordinary shape | `steam_probe` run with the client closed, which settles the init half without shipping anything |
+| **Can a player's configuration emit keyboard and mouse events for a pad while the game reads Steam Input natively?** `S1` found `Keyboard-1` and `Mouse-1` alongside the emulated pad. They exist whether or not they emit, and only a binding that maps a pad control to a key would make them. If that combination is reachable, suppressing the gamepad family does not stop it, and the input arrives as ordinary keyboard events the game has no reason to distrust | chunk 151b: a bound configuration, so `S6` first, then a hand-edited config that maps a pad control to a key |
+| **Does a Steam build run at all with the client absent?** D22 assumed it must, and therefore that one binary has to serve both a Steam launch and a direct one; that was never measured, and the decision now stands on replay instead. The documented pattern is `SteamAPI_RestartAppIfNecessary` relaunching through the client, or `SteamAPI_Init` failing outright, either of which would make per-channel builds the ordinary shape | chunk 151b: the demo launched with the client closed |
+| **What is an `absolute_mouse` action's delta measured since?** `S18` measured `joystick_move`, a position. `absolute_mouse` reports movement, and whether it is movement since the last `RunFrame` or since the last read of that action decides how a backend has to poll it | chunk 151b: the right stick bound to an `absolute_mouse` test action, logged across frames with and without a second read |
+| **Does an `InputHandle_t` survive a restart?** D74 leans on it for a persistent identity, while this document's appendix follows D52 in treating a handle as runtime-only. S14's layout — vendor, product, instance suffix, kept on disk — suggests it survives, from one sample | chunk 151e: the same pad's handle read across two launches, and across a client restart |
 | **A wired Xbox pad on macOS is invisible to raw IOHID enumeration, but Steam still reads it.** Plugged in over USB-C, the same pad opens macOS's own Game Center overlay on its Home button — a system-level claim — and `padprobe` (raw gilrs, `IOHIDManager`) sees nothing from it at all; the identical pad over Bluetooth is ordinary and gilrs sees it fine. Steam Input reads the wired pad regardless, so it has some access path an `IOHIDManager` consumer does not | a packet capture or Steam's own logging against the same wired pad, or confirmation from Valve on how Steam Input acquires a macOS-claimed HID device |
 
 ### S14 — Steam holds the handle-to-device mapping on disk, and the handle embeds it
