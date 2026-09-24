@@ -28,7 +28,7 @@ pad reaches the game through Steam alone and never also as an ordinary gamepad.
 
    Only one manifest can be installed for app 480 at a time, so this replaces whatever is there,
    including the probe's. Steam reads it at each launch, so the client need not restart (S23). A
-   manifest Steam cannot accept fails silently: the log's "resolved 0 of 12 actions" is the only
+   manifest Steam cannot accept fails silently: the log's "resolved 0 of 13 actions" is the only
    sign (S22).
 
 2. **Run it**, with Steam running and logged in:
@@ -43,8 +43,10 @@ pad reaches the game through Steam alone and never also as an ordinary gamepad.
 
 3. **Bind the layout.** The layout Valve publishes for app 480 binds Spacewar's actions, so against
    this manifest every binding is empty and every action reads at rest, with no error anywhere
-   (S16). Edit the layout for the game in the Steam client, which forks a personal copy, and bind
-   every action in both sets. Doing it the way the base game does:
+   (S16). With the game running, press F12 to open Steam's binding panel, which forks a personal
+   copy (S25), and bind every action in both sets. The Library's own controller configurator is the
+   wrong one: it configures whatever launched the game, not app 480. Doing it the way the base game
+   does:
 
    | Set | Action | Control |
    | --- | --- | --- |

@@ -41,7 +41,6 @@ pub struct SteamActions {
     // What was last logged, so the log says only what changed.
     resolved: Option<usize>,
     pads: Option<usize>,
-    live: Option<(&'static str, usize)>,
 }
 
 impl SteamActions {
@@ -53,7 +52,6 @@ impl SteamActions {
             activated: 0,
             resolved: None,
             pads: None,
-            live: None,
         }
     }
 }
@@ -69,8 +67,7 @@ pub struct SteamAction {
     digital: bool,
     // Zero until the manifest has loaded, which happens some frames after init.
     handle: u64,
-    // Answers whether Steam reported the action active.
-    read: fn(&Input, u64, u64, &mut AuthorityValues) -> bool,
+    read: fn(&Input, u64, u64, &mut AuthorityValues),
 }
 
 /// A digital action.
@@ -91,7 +88,6 @@ pub fn button_as<A: InputAction<Output = bool>>(name: &'static str) -> SteamActi
             if active {
                 values.set::<A>(pressed);
             }
-            active
         },
     }
 }
@@ -108,7 +104,6 @@ pub fn axis<A: InputAction<Output = f32>>() -> SteamAction {
             if active {
                 values.set::<A>(x);
             }
-            active
         },
     }
 }
@@ -125,7 +120,6 @@ pub fn stick<A: InputAction<Output = Vec2>>() -> SteamAction {
             if active {
                 values.set::<A>(Vec2::new(x, y));
             }
-            active
         },
     }
 }
@@ -249,26 +243,12 @@ fn poll(
         // still the old set's (S24), and on the next every action the player is already holding
         // arrives unsupplied-then-held, which the mapper holds over until it is released.
         let switching = core::mem::replace(&mut table.activated, set) != set;
-        let mut live = 0;
         for action in table
             .actions
             .iter()
             .filter(|action| action.handle != 0 && !switching)
         {
-            live += usize::from((action.read)(&input, pad, action.handle, &mut values));
-        }
-        if !switching && table.live != Some((table.set, live)) {
-            table.live = Some((table.set, live));
-            if live == 0 {
-                // A layout that binds none of the manifest's actions fails exactly like this, with
-                // no error anywhere else (S16).
-                warn!(
-                    "Steam reports no live action in {}; is the layout bound?",
-                    table.set
-                );
-            } else {
-                info!("Steam reports {live} live actions in {}", table.set);
-            }
+            (action.read)(&input, pad, action.handle, &mut values);
         }
     }
     // TEMPORARY, remove before landing: what the backend writes, frame by frame.

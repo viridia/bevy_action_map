@@ -98,15 +98,23 @@ delivery mechanism.
 ### S5 — A resolved action handle is not readiness
 
 `GetActionSetHandle` and `GetAnalogActionHandle` return non-zero handles for actions that are bound
-to nothing at all: every origin list was empty and `bActive` was false throughout. A backend that
-treats handle resolution as a health check reports itself working and delivers nothing. Readiness is
-`bActive`, or a non-empty origin list.
+to nothing at all. A backend that treats handle resolution as a health check reports itself working
+and delivers nothing.
+
+Nor is `bActive`, for a button. Measured with a window, in Disasteroids' two sets with only one
+button bound in each: every digital action in the live set read `bActive` true, bound or not, and
+every one in the other set false. The unbound stick and trigger read false; a stick reads true once
+bound (`S16`). So on a digital action `bActive` means "declared in the live set", and only a
+non-empty origin list says a control is bound.
+
+While `ShowBindingPanel`'s panel is open, every action reads `bActive` false, and they come back
+when it closes.
 
 ### S6 — Steam Input requires a GUI application with a window
 
-Root cause of what `S5` observes. `GetAnalogActionOrigins` and `GetDigitalActionOrigins` returned
-empty for every action of an activated set, and `bActive` was false, in **every** run — including
-the runs where a controller was present and the manifest was our own.
+`GetAnalogActionOrigins` and `GetDigitalActionOrigins` returned empty for every action of an
+activated set, and `bActive` was false, in **every** run — including the runs where a controller was
+present and the manifest was our own.
 
 Eliminated, one at a time:
 
@@ -216,8 +224,10 @@ Ground rule 5 applies here as everywhere: each row names what would settle it.
 | **Does the emulated pad carry Valve's vendor id on Windows?** `S1` is a macOS measurement, and D22's original claim may have described Windows | a Windows machine with the same pad |
 | **Can a player's configuration emit keyboard and mouse events for a pad while the game reads Steam Input natively?** `S1` found `Keyboard-1` and `Mouse-1` alongside the emulated pad. They exist whether or not they emit, and only a binding that maps a pad control to a key would make them. If that combination is reachable, suppressing the gamepad family does not stop it, and the input arrives as ordinary keyboard events the game has no reason to distrust | chunk 151b: a bound configuration, so `S6` first, then a hand-edited config that maps a pad control to a key |
 | **What is an `absolute_mouse` action's delta measured since?** `S18` measured `joystick_move`, a position. `absolute_mouse` reports movement, and whether it is movement since the last `RunFrame` or since the last read of that action decides how a backend has to poll it | chunk 151b: the right stick bound to an `absolute_mouse` test action, logged across frames with and without a second read |
+| **When a layout's copy of the manifest disagrees with the installed manifest, which does Steam use?** `S25`: the personal layout embeds the manifest it was saved against, titles included. Whether Steam refreshes the copy, prefers it, or ignores it decides whether a shipped layout must be regenerated whenever the manifest changes | chunk 151b: install the repository's manifest, which retitles `disasteroids.menu.toggle_settings`, relaunch, and read the binding panel and the layout file |
 | **Does an `InputHandle_t` survive a restart?** D74 leans on it for a persistent identity, while this document's appendix follows D52 in treating a handle as runtime-only. S14's layout — vendor, product, instance suffix, kept on disk — suggests it survives, from one sample | chunk 151e: the same pad's handle read across two launches, and across a client restart |
 | **A wired Xbox pad on macOS is invisible to raw IOHID enumeration, but Steam still reads it.** Plugged in over USB-C, the same pad opens macOS's own Game Center overlay on its Home button — a system-level claim — and `padprobe` (raw gilrs, `IOHIDManager`) sees nothing from it at all; the identical pad over Bluetooth is ordinary and gilrs sees it fine. Steam Input reads the wired pad regardless, so it has some access path an `IOHIDManager` consumer does not | a packet capture or Steam's own logging against the same wired pad, or confirmation from Valve on how Steam Input acquires a macOS-claimed HID device |
+| **Do action event callbacks carry every edge between two `RunFrame`s?** `EnableActionEventCallbacks` delivers a `SteamInputActionEvent_t` per change, from inside `RunFrame` or `RunCallbacks`, with the action's data and no timestamp. If a press and a release made between two polls arrive as two events in order, Steam Input supplies ordered edges, which is all D4 asks of a timestamp, and a backend could preserve a sub-poll tap. If only the state at the poll arrives, it is a level with extra steps. `steamworks` 0.13.1 does not wrap it; `steamworks-sys` has the raw call, and its callback takes no user data, so events go through a global queue | a probe registering the callback and running a deliberately slow frame, 100 ms, with quick taps: two events per tap or one |
 
 ### S14 — Steam holds the handle-to-device mapping on disk, and the handle embeds it
 
@@ -261,9 +271,9 @@ Valve's layout binds Spacewar's actions, our manifest replaced them, and every b
 orphaned.
 
 **A mismatched layout fails silently.** No refusal, no diagnostic — an empty layout, zero origins,
-`bActive` false. Indistinguishable at the API from having no controller at all, which is what made
-`S6` take so long to isolate. The client's own red "ERROR MESSAGES PRESENT" banner contained no
-errors.
+`bActive` false on an analog action. (A digital one reads true regardless: `S5`.) Indistinguishable
+at the API from having no controller at all, which is what made `S6` take so long to isolate. The
+client's own red "ERROR MESSAGES PRESENT" banner contained no errors.
 
 Editing the layout forks a personal copy. Binding the left stick to `Move` by hand made everything
 work at once:
@@ -390,6 +400,38 @@ That came from the API's shape, handles being global, and was never measured.
 The probe's manifest was copied over the demo's while the client was running, and the next launch of
 the probe resolved the probe's names with no client restart. `S4` said where the file is read from;
 this is when.
+
+### S25 — A personal layout is one file per account, app and controller type, and copies the manifest
+
+Binding through `ShowBindingPanel` forks the layout in force (`S16`) and writes the fork to
+
+```
+steamapps/common/Steam Controller Configs/<account id>/config/<app id>/controller_<type>.vdf
+```
+
+under the Steam data directory: `65401440/config/480/controller_xboxone.vdf` here. The account id is
+the low 32 bits of the Steam ID, and `<type>` is the pad's controller type, so a player with two
+kinds of pad has two layouts. The panel configures the app id the process initialized as. The
+Library's own configurator follows the launching entry instead, and for a non-Steam shortcut to the
+demo it offered only an emulation layout.
+
+The file is a `controller_mappings` VDF, and it is not only bindings:
+
+- **A copy of the manifest.** Its `actions` block repeats every set and action, with a
+  `"legacy_set" "0"` added to each set, and its `localization` block repeats the strings. The copy
+  matched the installed manifest exactly, and the installed one was a revision behind the
+  repository's, missing a retitle.
+- **Titles cached in the bindings.** A binding reads
+  `game_action disasteroids.menu disasteroids.menu.toggle_settings, Controls screen, , `: set,
+  action, and the action's title resolved at bind time.
+- **Provenance.** `progenitor` names the workshop layout it forked, `creator` is that layout's
+  author rather than the player, and `url` is `autosave://` plus the file's absolute path.
+
+Presets are named after the action sets and map control groups onto sources; `action_layers` is
+empty.
+
+So a layout is written against one manifest's text. A game shipping one ships a second copy of its
+manifest, and which copy Steam believes when the two disagree is under "Not measured yet".
 
 ---
 

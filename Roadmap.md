@@ -633,22 +633,20 @@ and D22 and chunk 112 updated from S21. What is left needs the author's hardware
   frame, so every action held on the next arrives unsupplied-then-held and chunk 154 holds it over;
   without that, a button meaning one action in each set closed and reopened the controls screen on
   every press. Record the rule with S24: a backend treats a change of set as a gap in supply.
-- **Settle what `bActive` means.** Before anything was bound, the live counts were 6 in gameplay and
-  3 in menu, exactly the digital actions in each set, so `bActive` may mean "declared in the live
-  set" for a button rather than "bound". S5 concluded otherwise but was measured windowless, which
-  S6 says broke everything. Bind the stick and trigger and see whether the analog actions join the
-  count. If S5 is wrong, correct it, and the backend's "is the layout bound?" warning goes too.
-- **Record where layouts live.** `show_binding_panel` configures the app the process initialized as
-  (480). The Library's own configurator follows the launching entry instead, and for the
-  "Disasteroids" shortcut it offered only an emulation layout. A personal layout is a per-account
-  file, `steamapps/common/Steam Controller Configs/<account id>/config/480/controller_xboxone.vdf`;
-  whether the demo can ship one for copying in is step 5, and that path is half of it.
+- **Which manifest a layout believes.** S25 records where a personal layout lives and that it embeds
+  the manifest it was saved against. The installed manifest is a revision behind the repository's,
+  so installing the current one before the flight test is also the measurement: relaunch, and see
+  whether the binding panel shows "Close controls screen" and whether the layout file's copy
+  updates. The answer decides whether the demo can ship a layout for copying in, or only the
+  README's table.
 - **Measured here still:** a pad control mapped to a key while the game reads Steam Input; and the
   `absolute_mouse` delta, with `steam_probe`'s `look` bin and `game_actions_look.vdf` (gitignored
   bench). Both to `docs/steam.md`.
 - **Remove the scaffolding.** The F12 `open_binding_panel` system in `steam.rs` is marked temporary
-  and goes before landing; 151d's delegated row replaces it. `target/Disasteroids.app` is an
-  untracked Library launcher and needs nothing.
+  and goes before landing; 151d's delegated row replaces it. The README's step 3 binds through it,
+  and the Library's configurator is no substitute (S25), so removing it leaves the README no way to
+  bind until 151d lands. `target/Disasteroids.app` is an untracked Library launcher and needs
+  nothing.
 - **A brief for S12's upstream fix**, for the author to post. Drafted in the session that built
   this; rewrite from S12 if lost.
 - **Not doing:** prompts (151c) or the settings screen's pad rows (151d), which show as unbound
@@ -703,6 +701,10 @@ demand.
   deferred row.
 - **Verified by:** the Steam build's controls screen showing a keyboard row rebindable and its pad
   row delegated, and the panel opening from it.
+- **The panel sometimes does not open.** Under 151b's temporary F12, about 2 launches in a dozen
+  came up with F12 doing nothing, suspected to be the Steam connection rather than the key. Not
+  investigated there. Relaunch several times against the delegated row, and read the log for whether
+  `show_binding_panel` ran and what it returned, or whether there was no pad.
 
 ### 151e. Split Friction on Steam
 
@@ -740,7 +742,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import. The crate's docs owe a game the warning `widget_focus.rs` carries today: `InputDispatchPlugin` in `DefaultPlugins` activates a focused `Button` on a key a context has consumed, so a game using both disables it |
 | **The generic tier's art** | **the presentation crate**, which is what has to ship an atlas with no holes in it. Kenney's generic set is blank, unlabeled buttons, so each generic face button needs a short text stamp authored onto it by hand: content work with a known answer, and no code. Until then an unrecognized pad's face buttons resolve to text, which is also where the fallback chain shows itself in tree, on Disasteroids' Cancel and Confirm and in the gallery's Generic brand |
 | **Netcode injection and reconciliation** | a networked target. The injection point is built: an `Authority` binding and `AuthorityValues` (chunks 111 and 151a), so a peer's resolved action already has somewhere to go (D71). Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. Injection targets L2 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs a remote player's resolved action to inject and a later correction to reconcile against it |
-| **Timestamped authority transitions** | **an authority that has edges to give**: a network peer, or a replay backend. `AuthorityValues` is a level sampled once a tick (D92), so a press and release between two of an authority's writes never reach the action and its resolution is its own poll. Steam Input reports no edges of its own, so it gains nothing here; a peer or a replay that recorded the transitions would, and what it needs is somewhere to put their times |
+| **Timestamped authority transitions** | **an authority that has edges to give**: a network peer, or a replay backend. `AuthorityValues` is a level sampled once a tick (D92), so a press and release between two of an authority's writes never reach the action and its resolution is its own poll. A peer or a replay that recorded the transitions would gain, and so might Steam Input: its action event callbacks may deliver ordered edges between polls, which `docs/steam.md` carries as an unmeasured question. Ordered is enough, since D4 has timestamps order events rather than time them. What it needs is somewhere to put them |
 | **Consumption-aware `FocusedInput` dispatch** (R8.2a) | **a game wanting `bevy_ui_widgets`' own widgets working generically, unmodified, without a context per widget kind.** A context per kind is the path to reach for first, and Disasteroids ships that way. A design for the filter was built and set aside: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline rather than a second raw-message read — keyboard only, since every keyboard-driven widget observer at 0.20 gates on `ButtonState::Pressed` and none reacts to a release |
 | **Promoting `WidgetKind` and the per-kind context into the crate** | [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native widget-kind id. Promoting a shape this crate invented first, ahead of that conversation, risks committing to the wrong one |
 | **Deleting `acquire_focus_directional`** | this crate's Bevy pin moving past [bevy#25675][], merged to main on 24 September 2026, after rc.1. `examples/common/widget_focus.rs` carries a global `AcquireFocus` observer mirroring `acquire_focus_tab_index`, with `AutoDirectionalNavigation` standing in for `TabIndex`: `bevy_input_focus`'s `click_to_focus` bubbles an `AcquireFocus` on every pointer press, a screen navigating by anything but `TabIndex` intercepts it nowhere, so it reaches the window and clears focus — and a widget whose interactive children are separate entities, like a stepper's two chevrons, blinks on every press rather than rarely. The PR separates focusability from navigation policy behind a `Focusable` component and fixes [bevy#25596][], click-to-focus under directional navigation. Read on main, it retires the observer outright, including for a scheme that is neither `TabIndex` nor one of upstream's own: `InputFocusPlugin` installs an `acquire_focus` observer that stops at the first `Focusable` ancestor whatever the scheme, and `AutoDirectionalNavigation` requires `Focusable`. What is left on the bump is the deletion, and the stepper's chevrons as its test |
