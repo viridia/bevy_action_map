@@ -13,19 +13,18 @@ then reads `Move` as a `Vec2` and never again mentions `WASD`, a stick, or a dea
 player wants to rebind `Jump` to a different key, the crate already has everything it needs to show
 them what is bound, let them change it, and keep every prompt on screen in sync.
 
-> **Status: early and public for review, not for production.** The core mapping pipeline —
-> keyboard, mouse, gamepad, modifiers, conditions, arbitration, fixed/render tick handling — is
-> built and exercised by three example games (below), and the rebinding UI works end to end for
-> them, overrides and all. Saved overrides have a documented, human-editable format; putting the
-> bytes on disk is still the app's job. This crate isn't published to crates.io, so there's no
-> docs.rs page yet. See [Roadmap.md](./Roadmap.md) for what's done and what's left.
+> **Status: early and public for review, not for production.** The core mapping pipeline
+> (keyboard, mouse, gamepad, modifiers, conditions, arbitration, fixed and render ticks) is built
+> and exercised by three example games, and the rebinding UI works end to end in them. Saved
+> overrides have a documented, human-editable format; putting the bytes on disk is still the app's
+> job. This crate isn't published to crates.io, so there's no docs.rs page yet. See
+> [Roadmap.md](./Roadmap.md) for what's done and what's left.
 
 ## Why
 
 ![settings](images/disasteroids_settings.png)
 
-Input management entails more than just "map a `KeyCode` to an enum", because a
-shipped game needs more than a mapping:
+A shipped game needs more from its input layer than a map from `KeyCode` to an enum:
 
 - **Devices disagree about what a value means.** A mouse delta and a stick deflection are both
   `Vec2`, but one already happened this frame and the other tells you which way to keep moving. The
@@ -59,7 +58,10 @@ shipped game needs more than a mapping:
   are, as "any of these" / "all of these" / "none of these must hold."
 - **Context activation and priority.** A context can be tied to a game state, a Bevy run condition,
   or driven by hand; a higher-priority context consumes a control before a lower one ever sees it,
-  and an exclusive one shuts out everything beneath it for as long as it is up.
+  and an exclusive one shuts out everything beneath it for as long as it is up. A single action can
+  be switched off without touching its bindings, such as a serve held back during a countdown.
+- **Actions driven from code.** A context can delegate an action instead of binding it, so an AI
+  opponent or a scripted sequence writes its value and the rest of the game reads it like any other.
 - **Fixed and render tick domains**, with a windowed event drain so fixed-timestep gameplay loses no
   edges and duplicates none, whatever the frame rate is doing.
 - **Read actions by polling or by observer** — `ContextActions<C>` in a system, or `On<Fired<Jump>>`
@@ -82,8 +84,7 @@ shipped game needs more than a mapping:
 - **Diagnostics that answer "why didn't this fire?"** — inactive context, a higher-priority consumer,
   a longer chord winning, an unmet condition, or a device that isn't this player's.
 
-See [Roadmap.md](./Roadmap.md)'s "Where this stands" for the precise, current line between
-built and not-yet.
+See [Roadmap.md](./Roadmap.md)'s "Where this stands" for what is not built yet.
 
 ## Quick start
 
@@ -137,9 +138,9 @@ which says what that value _means_:
 | `Delta2`       | a displacement that already happened this frame | mouse motion            |
 
 Intent matters because shape alone can't distinguish a stick from a mouse — both are `Vec2` — but
-mixing them up produces camera code that either drifts on its own or never catches up. Modifiers like
-`.per_second()` convert between the two explicitly, at the binding, instead of leaving it implicit at
-the read site.
+mixing them up produces camera code that either drifts on its own or never catches up. A modifier
+such as `.per_second()` turns a stick's position into a delta explicitly, at the binding, instead of
+leaving the conversion implicit at the read site.
 
 Every action also declares a **path** — `"gameplay.jump"` — which is the name that ends up in a
 settings file. It doesn't have to match the Rust type name, and shouldn't be updated when the type is
@@ -152,7 +153,7 @@ assign one to an entity — the player, or a bare entity for input that isn't ti
 particular — and that entity holds the live state for every action in the context. Local multiplayer
 starts here: each player's entity gets its own context instance, so nobody shares state, and pairing
 that instance to a set of devices is what stops player two's stick moving player one. A context with
-no pairing reads everything, which is why none of the above needs mentioning to stay single-player.
+no pairing reads every device, so a single-player game never has to mention any of this.
 
 A context can be always-on, tied to a `bevy_state` state, driven by any run condition, or flipped by
 hand. Contexts also have a priority: while a settings screen's context is active and consumes the
@@ -218,12 +219,12 @@ on-screen prompt ("Press W") correct across a rebind — see the `mapping` and `
 ## A fuller example
 
 Two device classes, two contexts (one on the fixed tick for gameplay, one on the render tick for
-camera look), dead zones and a stick-to-mouse-equivalent rate conversion:
+camera look), dead zones, and a rate conversion that lets a stick drive the same look action as the
+mouse:
 
 ```rust,ignore
 use bevy::prelude::*;
 use bevy_action_map::prelude::*;
-use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
 #[derive(InputAction)]
 #[action(path = "gameplay.move", output = Vec2, intent = Directional2)]
@@ -251,6 +252,8 @@ fn main() {
     app.add_context::<OnFoot>(|context| {
         context.bind::<Move>(DirectionalButtons::wasd());
         context.bind::<Move>(Stick::Left).dead_zone(DeadZone::radial(0.15));
+        // W and D together read (1, 1); clamped, a diagonal is no faster than a straight line.
+        context.combined::<Move>().clamp_magnitude();
         context.bind::<Jump>(KeyCode::Space);
         context.bind::<Jump>(GamepadButton::South);
     });
@@ -285,32 +288,35 @@ Run it: `cargo run --example move_and_jump`.
 ### Disasteroids
 
 `examples/disasteroids` is the crate's proving ground: a small, playable asteroids-like game, driven
-entirely through this crate, keyboard or gamepad. Its input layer — seven actions, two gameplay
-contexts, and every binding — lives in `examples/disasteroids/actions.rs`, and nothing else in the
-game mentions a key or a button. Its `F2`/pad-Y settings screen is a real rebinding UI, with its own
-context: it lists every binding without being told about any of them, can be navigated end to end
-from a gamepad, and applies a rebind live.
+entirely through this crate, keyboard or gamepad. Its whole input layer lives in
+`examples/disasteroids/actions.rs`: one context for flying, one for the controls that work whatever
+the game is doing, and an exclusive one for menus. Nothing else in the game mentions a key or a
+button. Its `F2`/pad-Y settings screen is a real rebinding UI: it lists every binding without being
+told about any of them, can be navigated end to end from a gamepad, and applies a rebind live.
 
 ```sh
 cargo run --features serialize --example disasteroids
 ```
 
-Fly with `W`/↑ and `A`/`D` (or ←/→), fire with `Space`, jump with `Left Shift`, pause with `Escape`.
-What you rebind is written to a settings file and applied again the next time you launch, which is
-what the `serialize` feature is for.
+Thrust with `W`/↑ (hold it for the afterburner), turn with `A`/`D` or ←/→, fire with `Space` or the
+left mouse button, double-tap `Left Shift` for hyperspace, hold `B` to charge a smart bomb, and
+pause with `Escape`. What you rebind is written to a settings file and applied again the next time
+you launch, which is what the `serialize` feature is for.
 
 ## Other examples
 
 Every example runs from a clean checkout with `cargo run --example <name>`, and between them they
 exercise every part of the crate. The three games are where it is worth starting; the rest are
-single-concept demos small enough to read in one sitting. The two that keep something between runs
-need `--features serialize` as well, marked below.
+single-concept demos small enough to read in one sitting, two of them built on Pong. The two that
+keep something between runs need `--features serialize` as well, marked below.
 
 | Example           | Shows                                                                     |
 | ----------------- | ------------------------------------------------------------------------- |
-| `disasteroids`    | A full game with a rebinding settings screen, keyboard or gamepad — `serialize` |
-| `split_friction`  | Split-screen co-op: two players, two cameras, a device paired to each — `serialize` |
+| `disasteroids`    | A full game with a rebinding settings screen, keyboard or gamepad (`serialize`) |
+| `split_friction`  | Split-screen co-op: two players, two cameras, a device paired to each (`serialize`) |
 | `pong`            | Two players on one machine, the second pad claimed the moment it appears   |
+| `pong_countdown`  | Pong with a countdown before each serve: an action switched off, not unbound |
+| `pong_robot`      | Pong against a robot paddle whose action is written by code, not a device |
 | `minimal`         | The smallest possible setup                                               |
 | `move_and_jump`   | Two device classes, two tick domains, dead zones, a rate conversion        |
 | `capture`         | Interactive rebind capture on its own, without a game around it            |
@@ -330,10 +336,10 @@ until 0.20.0 is out.
 bevy_action_map = { git = "https://github.com/viridia/bevy_action_map" }
 ```
 
-Default features are `std`, `bevy_reflect`, `keyboard`, `mouse`, `gamepad`, and `state`. `touch` and
-`focus` are opt-in; `serialize` adds `serde` support for overrides; a `no_std` build needs
-`--no-default-features --features libm` to give `glam` a math backend. See `[features]` in
-[Cargo.toml](./Cargo.toml) for the complete list.
+Default features are `std`, `bevy_reflect`, `keyboard`, `mouse`, `gamepad`, and `state`. `serialize`
+adds `serde` support for overrides. `touch` is opt-in and reserved for touch input, which is not
+implemented yet. A `no_std` build needs `--no-default-features --features libm` to give `glam` a
+math backend. See `[features]` in [Cargo.toml](./Cargo.toml) for the complete list.
 
 ## Project documents
 
@@ -342,17 +348,17 @@ rather than in an issue tracker. Each document answers one question:
 
 | Document | What it is |
 | --- | --- |
-| [docs/design.md](./docs/design.md) | How the crate works — architecture, the input frame, evaluation, state, the presentation surface, persistence |
+| [docs/design.md](./docs/design.md) | How the crate works: architecture, the input frame, evaluation, state, the presentation surface, persistence |
 | [docs/decisions.md](./docs/decisions.md) | Why it works that way: the decisions expensive to reverse, each with what it rules out and what reversing it would cost |
-| [Roadmap.md](./Roadmap.md) | What's left and what's broken — **start here to see current status** |
-| [Requirements.md](./Requirements.md) | 221 numbered requirements, with prior art surveyed from LWIM, `bevy_enhanced_input`, Unreal, Unity, Steam Input, and Godot |
+| [Roadmap.md](./Roadmap.md) | What's left and what's broken. **Start here to see current status** |
+| [Requirements.md](./Requirements.md) | The numbered requirements, with prior art surveyed from LWIM, `bevy_enhanced_input`, Unreal, Unity, Steam Input, and Godot |
 
 Two more, for readers who want the comparison rather than the specification:
 
 | Document | What it is |
 | --- | --- |
-| [docs/comparison.md](./docs/comparison.md) | How this crate differs from `bevy_enhanced_input` and `leafwing-input-manager`, claim by claim, checked against both crates' source — including which of the two you should probably use instead |
-| [docs/one-way-doors.md](./docs/one-way-doors.md) | For the `bevy_enhanced_input` upstreaming discussion: which of its design decisions stop being revisable once it is the engine's answer, what each buys, and what each forecloses |
+| [docs/comparison.md](./docs/comparison.md) | For choosing an input crate: how this one differs from `bevy_enhanced_input` and `leafwing-input-manager`, claim by claim, checked against both crates' source, and why most projects today should pick `bevy_enhanced_input` |
+| [docs/one-way-doors.md](./docs/one-way-doors.md) | For Bevy's reviewers, ahead of `bevy_enhanced_input` going upstream: which of its decisions stop being revisable once it is the engine's answer, and what is cheap to do now that would be expensive later |
 
 `archive/` holds the superseded `Design.md` and the work logs. They describe the crate as it was;
 `docs/design.md` and `docs/decisions.md` are what replaced them.
