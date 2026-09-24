@@ -210,6 +210,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 141  | A binding input has one part                                          |
 | 151a | An authority is a binding for one device family                       |
 | 152  | A follower rides its leader's authority                               |
+| 153  | A preset skips a family an authority owns                             |
 
 ---
 

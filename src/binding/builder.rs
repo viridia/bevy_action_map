@@ -1126,6 +1126,17 @@ impl<C> InputContextBuilder<C> {
         reserved
     }
 
+    /// Each action bound to an authority, with the family it stands in for.
+    pub(crate) fn delegated(&self) -> Vec<(ActionId, crate::device::DeviceFamily)> {
+        self.bindings
+            .iter()
+            .filter_map(|binding| match binding.input {
+                BindingInput::Authority(family, ..) => Some((binding.action, family)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// What [`combined`](Self::combined) declared, which `finish` leaves behind.
     pub(crate) fn take_combined(&mut self) -> Vec<CombinedSpec> {
         core::mem::take(&mut self.combined)

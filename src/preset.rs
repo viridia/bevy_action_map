@@ -19,7 +19,7 @@
 
 use bevy_ecs::world::World;
 
-use crate::action::InputAction;
+use crate::action::{ActionId, InputAction};
 use crate::device::DeviceFamily;
 use crate::mapping::{BoundSlot, TunableValue, mappings};
 use crate::overrides::Overrides;
@@ -68,6 +68,11 @@ impl PresetBuilder<'_> {
     /// Puts `slots` in whatever mapping `A` has in `family`: bare controls, or [`BoundSlot`]s for
     /// any that are held with something, bound exactly as [`Overrides::bind`] binds them.
     ///
+    /// Does nothing where `A` is bound to an [`Authority`](crate::backend::Authority) for `family`,
+    /// whose controls the player sets in the authority's own layout instead. A game that ships both
+    /// with and without one, such as a Steam build beside a plain one, can then write its presets
+    /// once.
+    ///
     /// # Panics
     ///
     /// If `A` has no mapping in `family`, or more than one. A composite has one mapping per part
@@ -79,6 +84,9 @@ impl PresetBuilder<'_> {
         family: DeviceFamily,
         slots: impl IntoIterator<Item = impl Into<BoundSlot>>,
     ) -> &mut Self {
+        if delegated(self.world, A::id(), family) {
+            return self;
+        }
         let mut found = mappings(self.world)
             .into_iter()
             .filter(|mapping| mapping.action == A::id() && mapping.family == family);
@@ -104,11 +112,11 @@ impl PresetBuilder<'_> {
 
     /// Sets a tunable to `value`, using the key it was declared with.
     ///
-    /// A preset is not only rebound controls: "Southpaw" might also want a tighter dead zone on
-    /// the stick it just moved, and this is how it says so. `key` is whatever was passed to
+    /// A preset is not only rebound controls: "Southpaw" might also want a tighter dead zone on the
+    /// stick it just moved, and this is how it says so. `key` is whatever was passed to
     /// [`tunable_dead_zone`](crate::binding::BindingBuilder::tunable_dead_zone) or
-    /// [`hold_or_toggle`](crate::binding::InputContextBuilder::hold_or_toggle) when the binding
-    /// was declared.
+    /// [`hold_or_toggle`](crate::binding::InputContextBuilder::hold_or_toggle) when the binding was
+    /// declared.
     pub fn tune(
         &mut self,
         family: DeviceFamily,
@@ -118,6 +126,18 @@ impl PresetBuilder<'_> {
         self.rows.tune(family, key, value);
         self
     }
+}
+
+/// Whether any context binds `action` to an authority standing in for `family`.
+fn delegated(world: &World, action: ActionId, family: DeviceFamily) -> bool {
+    world
+        .get_resource::<crate::inspect::DeclaredContexts>()
+        .is_some_and(|declared| {
+            declared
+                .0
+                .iter()
+                .any(|context| context.delegated.contains(&(action, family)))
+        })
 }
 
 #[cfg(all(test, feature = "keyboard"))]
@@ -165,5 +185,38 @@ mod tests {
                 .get_tunable(DeviceFamily::KeyboardMouse, HOLD_OR_TOGGLE_KEY),
             Some(TunableValue::Bool(true))
         );
+    }
+
+    /// A game built both with and without a platform's input service writes its presets once. Where
+    /// an authority owns the pad, a preset's pad half has no row to move and is left out, and the
+    /// keyboard half still lands.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_preset_skips_a_family_an_authority_owns() {
+        use crate::backend::Authority;
+        use crate::binding::Control;
+        use alloc::vec::Vec;
+        use bevy_input::gamepad::GamepadButton;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.bind::<Jump>(Authority(DeviceFamily::Gamepad));
+        });
+
+        let preset = Preset::build(app.world(), "preset_tests.swapped", |preset| {
+            preset.bind::<Jump>(
+                DeviceFamily::Gamepad,
+                [Control::GamepadButton(GamepadButton::East)],
+            );
+            preset.bind::<Jump>(
+                DeviceFamily::KeyboardMouse,
+                [Control::PhysicalKey(KeyCode::KeyJ)],
+            );
+        });
+
+        let families: Vec<_> = preset.rows.iter().map(|(family, ..)| family).collect();
+        assert_eq!(families, [DeviceFamily::KeyboardMouse]);
     }
 }

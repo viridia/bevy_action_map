@@ -107,6 +107,9 @@ pub(crate) struct DeclaredContext {
     // action. Separate because it answers about bindings rather than about rows a player edits:
     // a `private` binding is missing from one and present in the other.
     pub(crate) bindings: fn(&World) -> crate::present::ContextBindings,
+    // Each action bound to an authority, and for which family. Data rather than a reader like the
+    // fields around it, because no override rewrites an authority binding.
+    pub(crate) delegated: Vec<(crate::action::ActionId, crate::device::DeviceFamily)>,
     // Rewrites this context's bindings for an override set and swaps the result into every
     // instance. Exclusive because it writes both a resource and the components. The `Option`
     // carries a preset's rows, exempted from the rebindable-only refusal that would otherwise

@@ -838,6 +838,7 @@ fn declare_context<C: InputContext + Component>(
             mappings: read_mappings::<C>,
             tunables: read_tunables::<C>,
             bindings: read_bindings::<C>,
+            delegated: builder.delegated(),
             apply: apply_to_context::<C>,
             apply_for_entity: apply_to_entity::<C>,
         });
