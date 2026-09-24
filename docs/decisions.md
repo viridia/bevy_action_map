@@ -48,6 +48,7 @@ here, so there is one `D`-numbering in the project.
 | **D23** | Focus integrates by activation, and interception is static                    | —               |
 | **D24** | One crate, feature-gated by source                                            | TD11      |
 | **D25** | What must not move upstream                                                   | —               |
+| **D91** | Bindings and presentation are one database, keyed by one declared id          | TD3.3, TD9 |
 | **D27** | The presentation model is separate from the binding model                     | TD9       |
 | **D28** | Listing is the default; rebinding is opt-in                                   | TD9.1     |
 | **D29** | A mapping is an ordered list of slots                                         | TD9.1     |
@@ -850,6 +851,31 @@ a crate of its own.
 ---
 
 ## The presentation surface
+
+### D91 — Bindings and presentation are one database, keyed by one declared id
+
+**Decided.** An action's bindings, the rows a controls screen shows for it, their localization keys,
+the prompts that name its controls and the overrides a player saves against it all hang off one
+record, keyed by the action's declared path. The crate owns the player-facing half of input rather
+than leaving each game to build it.
+
+**Rules out.** Leaving that database to the app, which is `bevy_enhanced_input`'s position: which
+actions are bindable, what they are called, how a prompt finds a control and how a rebind is saved
+are each game's own business.
+
+**Reversal.** Everything keyed on the path comes apart: the save key (D6), the mappings (D27), the
+localization keys (D31), the reverse lookup a prompt reads (D34) and the override format (D45). A
+game would be back to maintaining a parallel table of its actions, and each screen or prompt crate
+in the ecosystem would key that table its own way.
+
+**Accepted cost.** A declared path per action, a presentation declaration per rebindable binding,
+and a crate larger than a mapper alone. The work it removes is work every game with a controls
+screen does anyway, and doing it once makes it standard.
+
+**Provenance.** An assumption rather than a choice: the LLM's first sketch of the API took it for
+granted, before the repository's first commit and probably from its survey of prior art, and the
+author went along with it. It is recorded as a decision in hindsight, because D6, D27 and D31 all
+rest on it and none of them states it.
 
 ### D27 — The presentation model is separate from the binding model
 
@@ -2081,7 +2107,7 @@ single key expresses both.
 **Reversal.** Cheap while no public API has shipped and expensive afterwards, which is the whole
 point of paying for it now: `contains` and `claimant` are public, and a third-party context that
 reasoned about a world-wide claim table breaks when the table stops being world-wide.
-`docs/one-way-doors.md` door 4 is this door seen from `bevy_enhanced_input`'s side, where it is
+`docs/one-way-doors.md` door 2 is this door seen from `bevy_enhanced_input`'s side, where it is
 still open.
 
 ### D89 — A capture reports a control on the way up, and the store judges it
