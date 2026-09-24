@@ -635,6 +635,10 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
 
     let mut prompts = alloc::vec::Vec::new();
     for binding in plan.bindings() {
+        // The authority's own prompts answer for the family it owns.
+        if matches!(binding.input, crate::binding::BindingInput::Authority(..)) {
+            continue;
+        }
         let action = plan.action_for_slot(binding.slot);
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         let chord: alloc::vec::Vec<crate::present::ControlOrigin> =
@@ -842,9 +846,8 @@ fn declare_context<C: InputContext + Component>(
     let starts_active = activation.is_none();
 
     let combined = builder.take_combined();
-    let (bindings, class_bindings, delegated) = builder.finish();
+    let (bindings, class_bindings) = builder.finish();
     let mut plan = Plan::from_bindings(bindings.clone(), class_bindings);
-    plan.delegate(delegated);
     plan.combine(combined);
     let plan = Arc::new(plan);
     app.insert_resource(InputContextPlan::<C> {

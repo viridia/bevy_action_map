@@ -5,7 +5,6 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use crate::action::{ActionId, ActionIntent, ChannelShape};
 use crate::binding::{
     BindingInput, BindingModifier, BindingSpec, ClassBindingSpec, CombinedSpec, Control,
-    DelegatedSpec,
 };
 use crate::capture::{ClassFilter, ControlClass};
 use crate::condition::BindingCondition;
@@ -56,6 +55,7 @@ impl BindingDiagnostic {
             | DiagnosticKind::DuplicateTunableKey { .. }
             | DiagnosticKind::TunableShapeDisagreement { .. }
             | DiagnosticKind::BoundAndDelegated
+            | DiagnosticKind::DeltaFromAuthority
             | DiagnosticKind::CombinedWithoutBindings => Severity::Error,
             DiagnosticKind::DuplicateBinding { .. }
             | DiagnosticKind::ConsumeDisagreement { .. }
@@ -150,8 +150,11 @@ pub enum DiagnosticKind {
         /// The declared lower bound.
         lower: f32,
     },
-    /// An action is both bound in this context and delegated to an outside authority.
+    /// An action is bound to a control of the same device family an outside authority supplies it
+    /// for.
     BoundAndDelegated,
+    /// A `Delta2` action is bound to an outside authority, whose value is a level read every tick.
+    DeltaFromAuthority,
     /// An action shapes its combined value, and has no bindings in this context to combine.
     CombinedWithoutBindings,
 }
@@ -261,9 +264,15 @@ impl core::fmt::Display for BindingDiagnostic {
             ),
             DiagnosticKind::BoundAndDelegated => write!(
                 f,
-                "`{}` is bound to a control in this context and also delegated to an outside \
-                 authority. Only one of the two can decide what the action does; drop whichever \
-                 is not the authority here",
+                "`{}` is bound to an authority for a device family, and also to a control of that \
+                 family. The authority owns the family's input; drop whichever is not the \
+                 authority here",
+                self.action
+            ),
+            DiagnosticKind::DeltaFromAuthority => write!(
+                f,
+                "`{}` is a delta, which an authority cannot drive: its value is a level read every \
+                 tick, and would count the same motion again on each one",
                 self.action
             ),
             DiagnosticKind::CombinedWithoutBindings => write!(
@@ -385,6 +394,21 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
                 found.push(at(DiagnosticKind::DeadZoneAtFullDeflection {
                     lower: dead_zone.lower,
                 }));
+            }
+        }
+
+        // R0.4: the authority owns its family's input for this action, so a control of that family
+        // here would read what the authority is already supplying. Other families are the point.
+        if let BindingInput::Authority(family, _) = binding.input {
+            if binding.intent == ActionIntent::Delta2 {
+                found.push(at(DiagnosticKind::DeltaFromAuthority));
+            }
+            if bindings.iter().any(|other| {
+                other.action == binding.action
+                    && !matches!(other.input, BindingInput::Authority(..))
+                    && other.input.family() == family
+            }) {
+                found.push(at(DiagnosticKind::BoundAndDelegated));
             }
         }
 
@@ -526,29 +550,10 @@ pub(crate) fn diagnose_classes(bindings: &[ClassBindingSpec]) -> Vec<BindingDiag
     found
 }
 
-/// Whether anything a context delegated is also bound in it.
-///
-/// The only way the two declarations can contradict each other. Everything else a binding carries —
-/// a modifier, a condition, a mapping row — has no delegated counterpart to disagree with, because
-/// `delegate` offers no way to say it.
-pub(crate) fn diagnose_delegated(
-    bindings: &[BindingSpec],
-    delegated: &[DelegatedSpec],
-) -> Vec<BindingDiagnostic> {
-    delegated
-        .iter()
-        .filter(|spec| bindings.iter().any(|binding| binding.action == spec.action))
-        .map(|spec| BindingDiagnostic {
-            action: spec.path,
-            kind: DiagnosticKind::BoundAndDelegated,
-        })
-        .collect()
-}
-
 /// Whether a `combined` declaration has anything to combine, and whether its chain rescales twice.
 ///
 /// Refused rather than ignored: a clamp that silently never runs is the mistake most worth hearing
-/// about. A delegated action lands here too, since it has no bindings.
+/// about.
 pub(crate) fn diagnose_combined(
     bindings: &[BindingSpec],
     combined: &[CombinedSpec],
@@ -693,10 +698,6 @@ pub(crate) struct Plan {
     // the context binds rather than by the registry, and held once per plan rather than per
     // instance, so the slack costs two bytes an id in one allocation.
     slot_by_action: Vec<u16>,
-    // The slots an outside authority writes rather than the fold. Held as a list rather than a bit
-    // per slot because the evaluator only ever walks it, and the overwhelmingly common plan
-    // delegates nothing.
-    delegated_slots: Vec<usize>,
     scratch_count: usize,
     // One cell per group of bindings sharing a tunable — see `CompiledBinding::tunable_shared`.
     // Most plans have none.
@@ -751,10 +752,6 @@ impl Plan {
     pub(crate) fn variant_of(template: &Self, bindings: Vec<BindingSpec>) -> Self {
         let mut plan = Self::compile(bindings, Some(template));
         plan.class_bindings.clone_from(&template.class_bindings);
-        // Carried over for the same reason class bindings are: an override rewrites which controls
-        // a binding reads, and a delegated action has none to rewrite. The slots themselves survive
-        // already, since `compile` starts from the template's slots.
-        plan.delegated_slots.clone_from(&template.delegated_slots);
         // The bindings' scratch may have changed length, and each stage's sits after it.
         plan.place_stages();
         plan
@@ -762,8 +759,7 @@ impl Plan {
 
     /// Attaches what `combined` declared to the slots its actions hold.
     ///
-    /// After compilation, as `delegate` is, and for the same reason. An action with no slot is
-    /// never reached: `diagnose_combined` refuses the context first.
+    /// An action with no slot is never reached: `diagnose_combined` refuses the context first.
     pub(crate) fn combine(&mut self, combined: Vec<CombinedSpec>) {
         for spec in combined {
             let Some(slot) = self.slot_for_action(spec.action) else {
@@ -894,45 +890,11 @@ impl Plan {
             bindings: compiled,
             slots,
             slot_by_action,
-            delegated_slots: Vec::new(),
             scratch_count,
             tunable_scratch_count,
             class_bindings: Vec::new(),
             indexed_controls,
             has_chords,
-        }
-    }
-
-    /// Gives each delegated action a state slot of its own, with no binding behind it.
-    ///
-    /// Applied after compilation rather than during it, so that the slots bindings allocated keep
-    /// the indices they already have and a variant compiled from this plan needs no rebuilding.
-    pub(crate) fn delegate(&mut self, delegated: Vec<DelegatedSpec>) {
-        for spec in delegated {
-            let id = spec.action.index() as usize;
-            if id >= self.slot_by_action.len() {
-                self.slot_by_action.resize(id + 1, UNBOUND);
-            }
-            // Never an action a binding already holds: `diagnose_delegated` reports that as an
-            // error and `add_context` refuses the context before anything is compiled.
-            let slot = match self.slot_by_action[id] {
-                UNBOUND => {
-                    self.slots.push(CompiledSlot {
-                        intent: spec.intent,
-                        dispatch: spec.dispatch,
-                        path: spec.path,
-                        action: spec.action,
-                        stage: CompiledStage::default(),
-                    });
-                    let slot = self.slots.len() - 1;
-                    self.slot_by_action[id] = encode_slot(slot);
-                    slot
-                }
-                slot => usize::from(slot),
-            };
-            if !self.delegated_slots.contains(&slot) {
-                self.delegated_slots.push(slot);
-            }
         }
     }
 
@@ -942,10 +904,6 @@ impl Plan {
 
     pub(crate) fn stage(&self, slot: usize) -> &CompiledStage {
         &self.slots[slot].stage
-    }
-
-    pub(crate) fn delegated_slots(&self) -> &[usize] {
-        &self.delegated_slots
     }
 
     pub(crate) fn slot_count(&self) -> usize {
@@ -1270,7 +1228,7 @@ mod tests {
 
         let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<Jump>(KeyCode::Space);
-        let (bindings, class_bindings, _) = builder.finish();
+        let (bindings, class_bindings) = builder.finish();
         let plan = Plan::from_bindings(bindings, class_bindings);
 
         assert!(plan.is_indexed(Control::PhysicalKey(KeyCode::Space)));
@@ -1306,13 +1264,11 @@ mod tests {
         assert_eq!(builder.diagnostics(), &[]);
     }
 
-    // A clamp that never runs is the mistake worth hearing about, whether the action was never
-    // bound here or was handed to an authority instead.
+    // A clamp that never runs is the mistake worth hearing about.
     #[test]
     fn combining_an_action_with_no_bindings_is_refused() {
         let mut builder = InputContextBuilder::<()>::default();
         builder.combined::<Move>().clamp_magnitude();
-        builder.delegate::<Jump>();
         builder.combined::<Jump>().press();
 
         let found = builder.diagnostics();
@@ -1370,7 +1326,7 @@ mod tests {
             .press();
         builder.combined::<Move>().on_change();
         let combined = builder.take_combined();
-        let (bindings, class_bindings, _) = builder.finish();
+        let (bindings, class_bindings) = builder.finish();
         let mut plan = Plan::from_bindings(bindings, class_bindings);
         plan.combine(combined);
 
@@ -1394,7 +1350,7 @@ mod tests {
 
         let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<Jump>(KeyCode::Space);
-        let (bindings, class_bindings, _) = builder.finish();
+        let (bindings, class_bindings) = builder.finish();
         let plan = Plan::from_bindings(bindings, class_bindings);
 
         assert!(plan.slot_for_action(ActionId::PLACEHOLDER).is_none());
@@ -1414,7 +1370,7 @@ mod tests {
             .press();
         builder.combined::<Move>().on_change();
         let combined = builder.take_combined();
-        let (bindings, class_bindings, _) = builder.finish();
+        let (bindings, class_bindings) = builder.finish();
         let mut template = Plan::from_bindings(bindings.clone(), class_bindings);
         template.combine(combined);
 

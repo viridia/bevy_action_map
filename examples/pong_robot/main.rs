@@ -1,11 +1,11 @@
 //! Pong against a robot, to show an action driven from outside the input map.
 //!
-//! Identical to [`pong`] but for the left paddle, which no device reaches. Its context binds
-//! nothing and delegates its one action; a system chasing the ball writes the value instead. See
-//! [`robot`] for the whole of it.
+//! Identical to [`pong`] but for the left paddle, which no device reaches. Its context binds its
+//! one action to an authority rather than to a control, and a system chasing the ball writes the
+//! value. See [`robot`] for the whole of it.
 //!
 //! You are the right paddle, on `W`/`S`, the arrow keys, or a gamepad. `F1` opens the debug panel,
-//! which lists both contexts — the delegated action reads there like any other.
+//! which lists both contexts — the robot's action reads there like any other.
 
 #![allow(missing_docs)]
 

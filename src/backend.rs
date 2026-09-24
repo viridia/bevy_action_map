@@ -1,23 +1,65 @@
-//! External backends for source input, or for supplying action values directly.
+//! External backends for source input, or for supplying one device family's input directly.
 //!
-//! A backend can provide input frames the same way a keyboard or a gamepad does, or it can bypass
-//! this crate's own bindings and supply an action's value directly, the way a platform's own input
-//! service (Steam Input, say) does. Either way, a context reading the action does not need to know
-//! which one produced the result.
+//! A backend can provide input frames the same way a keyboard or a gamepad does, or it can stand in
+//! for a whole device family and supply each action's value itself, the way a platform's own input
+//! service (Steam Input, say) does for the gamepad. Either way, a context reading the action does
+//! not need to know which one produced the result.
 
 use alloc::vec::Vec;
 
 use bevy_ecs::component::Component;
 
-use crate::action::{ActionId, ActionValue, InputAction};
+use crate::action::{ActionId, ActionValue, ChannelShape, InputAction};
+use crate::binding::{BindingInput, IntoBindingInput};
+use crate::device::DeviceFamily;
 
-/// Action values supplied by an authority outside this crate's mapping.
+/// Binds an action to the value an outside authority supplies for one device family.
 ///
-/// Put this on a context's entity to drive the actions that context
-/// [`delegate`](crate::binding::InputContextBuilder::delegate)s. Whatever owns the outside
-/// authority — a platform input service, a network peer, a scripted agent — writes the value it
-/// resolved, and the action then behaves like any other: it fires, completes and cancels on the
-/// edges of what you write.
+/// Some platforms take a device family over entirely. Under Steam Input the player binds the pad in
+/// Steam's own layout, and the game is handed a value per action rather than button presses to map.
+/// `Authority` binds an action to that value, beside the context's bindings for the families the
+/// authority does not own:
+///
+/// ```ignore
+/// app.add_context::<Flying>(|controls| {
+///     controls.bind::<Thrust>(KeyCode::KeyW);
+///     controls.bind::<Thrust>(Authority(DeviceFamily::Gamepad));
+///     controls.bind::<Fire>(KeyCode::Space).pulse(0.2);
+///     controls.bind::<Fire>(Authority(DeviceFamily::Gamepad)).pulse(0.2);
+/// });
+/// ```
+///
+/// It combines with the action's other bindings exactly as a control would, and conditions and
+/// modifiers chained onto it apply to the authority's value: the rate of fire above holds however
+/// the trigger was pulled. Stick shaping is the authority's own business, so a dead zone does not
+/// belong here.
+///
+/// The values arrive through [`AuthorityValues`] on the context's entity. Binding a control of the
+/// same family to the same action is refused, since the authority owns that family. A network peer
+/// or a scripted player works the same way, standing in for whichever family a human would have
+/// used.
+///
+/// An action with a `Delta2` intent refuses an authority binding: a delta is counted once, and a
+/// level sampled every tick would count it again on each one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Authority(pub DeviceFamily);
+
+impl IntoBindingInput for Authority {
+    type Inputs = [BindingInput; 1];
+
+    fn into_binding_inputs(self) -> Self::Inputs {
+        // A placeholder shape: `bind` replaces it with the action's own, which is the first place
+        // the action is known.
+        [BindingInput::Authority(self.0, ChannelShape::Button)]
+    }
+}
+
+/// Values supplied by an authority outside this crate's mapping.
+///
+/// Put this on a context's entity to feed the actions that context binds to an [`Authority`].
+/// Whatever owns the outside authority — a platform input service, a network peer, a scripted agent
+/// — writes the value it resolved, and the binding then contributes it like any other: the action
+/// fires, completes and cancels on the edges of what you write.
 ///
 /// Values are levels, not events. What you write stands until you write something else, so a
 /// backend polled once a tick writes what it read. An action nobody has written reads at rest.
@@ -39,15 +81,23 @@ use crate::action::{ActionId, ActionValue, InputAction};
 /// meant.
 #[derive(Component, Clone, Debug, Default)]
 pub struct AuthorityValues {
-    // Linear, because a context delegates a handful of actions at most: a `Vec` of pairs beats any
+    // Linear, because an authority drives a handful of actions at most: a `Vec` of pairs beats any
     // map at this size, and keeps the component cheap to clone for a rollback snapshot.
     values: Vec<(ActionId, ActionValue)>,
 }
 
 impl AuthorityValues {
-    /// An empty set of values, with every delegated action reading at rest.
+    /// An empty set of values, with every authority binding reading at rest.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Makes this a copy of `source`, or empty where there is none, keeping the allocation.
+    pub(crate) fn hold(&mut self, source: Option<&Self>) {
+        match source {
+            Some(source) => self.values.clone_from(&source.values),
+            None => self.values.clear(),
+        }
     }
 
     /// Supplies the value of one action.
@@ -138,7 +188,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));
         app.add_context::<Paddle>(|paddle| {
-            paddle.delegate::<Serve>();
+            paddle.bind::<Serve>(Authority(DeviceFamily::Gamepad));
         });
         app.init_resource::<Fires>();
         app.init_resource::<Held>();

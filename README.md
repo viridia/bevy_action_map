@@ -60,8 +60,10 @@ A shipped game needs more from its input layer than a map from `KeyCode` to an e
   or driven by hand; a higher-priority context consumes a control before a lower one ever sees it,
   and an exclusive one shuts out everything beneath it for as long as it is up. A single action can
   be switched off without touching its bindings, such as a serve held back during a countdown.
-- **Actions driven from code.** A context can delegate an action instead of binding it, so an AI
-  opponent or a scripted sequence writes its value and the rest of the game reads it like any other.
+- **Actions driven from code.** An action can be bound to an outside authority in place of one
+  device family's controls, so a platform input service, an AI opponent or a scripted sequence
+  writes its value and the rest of the game reads it like any other. Under Steam Input the pad comes
+  from Steam while the keyboard stays bound as usual.
 - **Fixed and render tick domains**, with a windowed event drain so fixed-timestep gameplay loses no
   edges and duplicates none, whatever the frame rate is doing.
 - **Read actions by polling or by observer** — `ContextActions<C>` in a system, or `On<Fired<Jump>>`

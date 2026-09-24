@@ -342,11 +342,11 @@ beta: active=true pressed=true
 Steam fans a control out to every action bound to it and picks no winner. Arbitration is the
 game's.
 
-**This largely retires S19's constraint.** S19 rules out a Steam action set per context wherever
-two contexts can be live together — but a set per context was never required. One set holding
-every delegated action works: activate it once, poll every action every tick, and let this crate's
-own contexts, priorities and consumption decide what a value means. `apply_authority` already does
-the gating, since an inactive or shadowed context returns before reading anything.
+**This largely retires S19's constraint.** S19 rules out a Steam action set per context wherever two
+contexts can be live together — but a set per context was never required. One set holding every
+action bound to the authority works: activate it once, poll every action every tick, and let this
+crate's own contexts, priorities and consumption decide what a value means. The evaluator already
+does the gating, since an inactive or shadowed context does not sample its authority.
 
 **The correspondence is therefore not one-to-one.** What Steam's sets must not do is split two
 contexts that can be active simultaneously. Contexts that are mutually exclusive may share Steam's

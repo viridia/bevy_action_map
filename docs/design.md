@@ -211,7 +211,7 @@ pub enum DiagnosticKind {
     ReservedAndMappable, FollowsNothing { .. }, FollowsUnlisted { .. },
     DuplicateClassBinding { .. }, DuplicateTunableKey { .. },
     TunableShapeDisagreement { .. }, DeadZoneAtFullDeflection { .. },
-    BoundAndDelegated, CombinedWithoutBindings,
+    BoundAndDelegated, DeltaFromAuthority, CombinedWithoutBindings,
 }
 ```
 
@@ -374,8 +374,8 @@ nothing costs one emptiness check, and it sits after every binding in the scratc
 variant whose bindings shrank moves it down rather than rebuilding it. Its conditions replace the
 bindings' combined state, with one exception: a binding still `Building` keeps the action there when
 the stage alone would read `Idle`, since a hold in progress contributes rest to the fold. A stage on
-an action with no bindings in the context, delegated ones included, is refused, and a rescale in it
-counts against the most any one of the action's bindings already did.
+an action with no bindings in the context is refused, and a rescale in it counts against the most
+any one of the action's bindings already did.
 
 ### 5.6 Transitions and observers
 
@@ -410,29 +410,34 @@ A window losing focus (`RawEvent::FocusLost`) or a gamepad disconnecting cancels
 flight on that source — `Canceled`, not the `Completed` an ordinary release produces. A binding on
 an unaffected device is untouched.
 
-### 5.8 Delegated actions
+### 5.8 Authority bindings
 
-`controls.delegate::<A>()` gives an action a slot with no binding behind it, and an
-`AuthorityValues` component on the context entity supplies its value. Whatever owns the outside
-authority — a platform input service, a network peer — writes into that component from a system
-ordered before evaluation, and the evaluator substitutes what it finds for the value the fold would
-have produced.
+`controls.bind::<A>(Authority(family))` binds an action to the value an outside authority supplies
+in place of one device family's controls. Whatever owns the authority — a platform input service, a
+network peer — writes into an `AuthorityValues` component on the context entity from a system
+ordered before evaluation.
 
-Substitution happens at the state machine, so the same code that turns a bound control's level into
-`Fired`, `Firing` and `Completed` turns the authority's level into the same phases. An authority
-reporting only a level, sampled when asked, is what this is shaped for; nothing on the wire or in
-the platform API needs to carry an edge.
+The binding holds no control. Its input is `BindingInput::Authority(family, shape)`, and the shape
+is the action's own, stamped by `push_binding` because `Authority` is written before the action it
+binds is known; D7's check runs on it unchanged. A `Delta2` action refuses one
+(`DeltaFromAuthority`), since a delta is counted once and a level is read on every fold.
 
-The rest of the pipeline is skipped, because there is nothing to run it against: no control, no
-modifier chain, no conditions, no consumption, and no mapping row on a rebinding screen. `delegate`
-offers no way to declare any of them, which is what makes attaching one unrepresentable rather than
-a mistake to catch. Binding an action the same context delegates is the one contradiction the two
-declarations can express, and is a plan-build error.
+The value is held state, as a control's is. Once a tick, before `apply_frame`, an active instance
+copies the entity's `AuthorityValues` into its own, and the fold's `Authority` arm reads the slot's
+action from that copy, or rest where nothing was written. From there it is an ordinary binding: its
+modifiers and conditions run, it folds with the action's other bindings by intent (TD5.5), and
+`commit_slot` turns its level into `Fired`, `Firing` and `Completed`. An authority reporting only a
+level, sampled when asked, is what this is shaped for; nothing on the wire or in the platform API
+needs to carry an edge.
 
-Delegated slots are read once per tick, not once per event: the authority is sampled rather than
-replayed. An inactive context stops reading it — there is no held state to keep current, unlike a
-bound control's. Interruption does not reach them either; a window losing focus is this crate's
+Holding no control, it claims nothing and cannot be claimed, has no mapping row, and has no prompt
+of its own, since the backend's `Prompts` answer for its family. An inactive or shadowed context
+does not sample it. Interruption does not reach it either: a window losing focus is this crate's
 device going away, and the authority's has not.
+
+The one contradiction is a control of the authority's own family bound to the same action, which is
+`BoundAndDelegated` and a plan-build error. Controls of other families beside it are what the split
+is for.
 
 ---
 
@@ -1281,7 +1286,7 @@ src/
   capture.rs         capture sessions, reserved controls, conflict detection
   present.rs         control naming, prompts, prompt scope and staleness
   inspect.rs         the type-erased read of contexts and actions
-  backend.rs         AuthorityValues, the component a delegated action reads its value from
+  backend.rs         Authority, and AuthorityValues, the component an authority binding reads
 bevy_action_map_macros/   #[derive(InputAction)], #[derive(InputContext)]
 ```
 

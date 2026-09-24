@@ -50,19 +50,6 @@ pub(crate) struct BindingSpec {
     pub(crate) chord: Vec<ChordEntry>,
 }
 
-/// One action as [`InputContextBuilder::delegate`] declared it: named, and left to an authority
-/// outside this crate.
-///
-/// Deliberately not a `BindingSpec`: with no input to modify, condition, consume or list, attaching
-/// any of those to a delegated action is unrepresentable rather than a mistake to diagnose.
-#[derive(Clone)]
-pub(crate) struct DelegatedSpec {
-    pub(crate) action: ActionId,
-    pub(crate) intent: ActionIntent,
-    pub(crate) path: &'static str,
-    pub(crate) dispatch: Dispatch,
-}
-
 /// What [`InputContextBuilder::combined`] declared for one action: a chain run on the value its
 /// bindings fold to, rather than on any one binding's.
 ///
@@ -744,7 +731,6 @@ impl<C> CombinedBuilder<'_, C> {
 pub struct InputContextBuilder<C> {
     bindings: Vec<BindingSpec>,
     class_bindings: Vec<ClassBindingSpec>,
-    delegated: Vec<DelegatedSpec>,
     combined: Vec<CombinedSpec>,
     // Installed against the `App` once the context has been declared. `None` leaves the context
     // live from the moment an entity carries it; see `active_if`, which lives in `context` because
@@ -758,7 +744,6 @@ impl<C> Default for InputContextBuilder<C> {
         Self {
             bindings: Vec::new(),
             class_bindings: Vec::new(),
-            delegated: Vec::new(),
             combined: Vec::new(),
             activation: None,
             _marker: PhantomData,
@@ -768,6 +753,14 @@ impl<C> Default for InputContextBuilder<C> {
 
 impl<C> InputContextBuilder<C> {
     fn push_binding<A: InputAction>(&mut self, input: BindingInput) {
+        // An authority's value is the action's own, so its shape is too. Taken here because
+        // `Authority` cannot know which action it will be bound to.
+        let input = match input {
+            BindingInput::Authority(family, _) => {
+                BindingInput::Authority(family, A::INTENT.native_shape())
+            }
+            input => input,
+        };
         self.bindings.push(BindingSpec {
             action: A::id(),
             intent: A::INTENT,
@@ -996,8 +989,7 @@ impl<C> InputContextBuilder<C> {
     ///
     /// Calling this again for the same action adds to what was declared before. It may come before
     /// or after the bindings. An action declared here must have at least one binding in the same
-    /// context, and one handed to [`delegate`](Self::delegate) cannot have any, so both are refused
-    /// when the context is declared.
+    /// context, or it is refused when the context is declared.
     pub fn combined<A: InputAction>(&mut self) -> CombinedBuilder<'_, C> {
         let index = match self.combined.iter().position(|spec| spec.action == A::id()) {
             Some(index) => index,
@@ -1067,39 +1059,6 @@ impl<C> InputContextBuilder<C> {
         self.push_class_binding::<A>(crate::capture::ClassFilter::Characters)
     }
 
-    /// Hands one action to an authority outside this crate, instead of binding controls to it.
-    ///
-    /// A platform's own input service is the usual reason: Steam Input owns the binding screen, the
-    /// conflict rules and the glyphs, and hands the game a value per action rather than a control to
-    /// map. A network peer's actions and a scripted agent's arrive the same way.
-    ///
-    /// The action still fires, completes and cancels on the edges of the value it is given, so
-    /// gameplay code and observers read it exactly as they read a bound one. What it does not have
-    /// is controls: no modifiers, no conditions, no consumption, and no row on your own rebinding
-    /// screen — all of which belong to whoever owns the action now. Binding the same action in the
-    /// same context is refused, since only one of the two can be the authority.
-    ///
-    /// Values arrive through [`AuthorityValues`](crate::backend::AuthorityValues) on the context's
-    /// entity.
-    ///
-    /// ```ignore
-    /// app.add_context::<Paddle>(|paddle| {
-    ///     paddle.bind::<Move>(Stick::Left);
-    ///     paddle.delegate::<Serve>();
-    /// });
-    /// ```
-    pub fn delegate<A: InputAction>(&mut self) {
-        if self.delegated.iter().any(|spec| spec.action == A::id()) {
-            return;
-        }
-        self.delegated.push(DelegatedSpec {
-            action: A::id(),
-            intent: A::INTENT,
-            path: A::PATH,
-            dispatch: dispatch_for::<A>,
-        });
-    }
-
     fn push_class_binding<A: crate::event::ClassBinding>(
         &mut self,
         filter: crate::capture::ClassFilter,
@@ -1127,10 +1086,6 @@ impl<C> InputContextBuilder<C> {
     pub fn diagnostics(&self) -> Vec<crate::plan::BindingDiagnostic> {
         let mut found = crate::plan::diagnose(&self.bindings);
         found.extend(crate::plan::diagnose_classes(&self.class_bindings));
-        found.extend(crate::plan::diagnose_delegated(
-            &self.bindings,
-            &self.delegated,
-        ));
         found.extend(crate::plan::diagnose_combined(
             &self.bindings,
             &self.combined,
@@ -1174,8 +1129,8 @@ impl<C> InputContextBuilder<C> {
         core::mem::take(&mut self.combined)
     }
 
-    pub(crate) fn finish(self) -> (Vec<BindingSpec>, Vec<ClassBindingSpec>, Vec<DelegatedSpec>) {
-        (self.bindings, self.class_bindings, self.delegated)
+    pub(crate) fn finish(self) -> (Vec<BindingSpec>, Vec<ClassBindingSpec>) {
+        (self.bindings, self.class_bindings)
     }
 }
 
@@ -1185,6 +1140,7 @@ mod tests {
 
     use crate::action::ChannelShape;
     use crate::binding::*;
+    use crate::device::DeviceFamily;
     #[cfg(feature = "gamepad")]
     use bevy_input::gamepad::GamepadButton;
     #[cfg(feature = "keyboard")]
@@ -1478,20 +1434,26 @@ mod tests {
 
         let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<Thrust>(GamepadButton::LeftTrigger2);
-        let (bindings, class_bindings, _) = builder.finish();
+        let (bindings, class_bindings) = builder.finish();
         crate::plan::Plan::from_bindings(bindings, class_bindings);
     }
 
-    /// Only one of the two can decide what the action does, and a context that says both has not
-    /// said which. Nothing else a binding carries can contradict a delegated action, because
-    /// `delegate` offers no way to declare it in the first place.
-    #[cfg(feature = "keyboard")]
+    /// An authority owns its family, so a control of that family on the same action contradicts it.
+    /// A control of another family is the point of the split: the keyboard beside a pad that Steam
+    /// drives.
+    #[cfg(all(feature = "keyboard", feature = "gamepad"))]
     #[test]
-    fn binding_an_action_this_context_delegates_is_refused() {
+    fn an_authority_refuses_a_control_of_its_own_family_only() {
         let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<DummyButton>(KeyCode::Space);
-        builder.delegate::<DummyButton>();
+        builder.bind::<DummyButton>(crate::backend::Authority(DeviceFamily::Gamepad));
+        assert!(
+            builder.diagnostics().is_empty(),
+            "{:?}",
+            builder.diagnostics()
+        );
 
+        builder.bind::<DummyButton>(GamepadButton::South);
         let found = builder.diagnostics();
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(
@@ -1501,17 +1463,26 @@ mod tests {
         assert_eq!(found[0].severity(), crate::plan::Severity::Error);
     }
 
-    /// Declaring the same delegation twice is the same declaration, not two of them: an action has
-    /// one state slot however many times a context names it.
+    /// Takes the action's shape rather than one of its own, so the intent check passes for every
+    /// intent — and a delta is refused on its own grounds instead.
     #[test]
-    fn delegating_one_action_twice_says_it_once() {
+    fn an_authority_takes_the_actions_shape_and_refuses_a_delta() {
         let mut builder = InputContextBuilder::<()>::default();
-        builder.delegate::<DummyButton>();
-        builder.delegate::<DummyButton>();
+        builder.bind::<DummyVec2>(crate::backend::Authority(DeviceFamily::Gamepad));
+        assert!(
+            builder.diagnostics().is_empty(),
+            "{:?}",
+            builder.diagnostics()
+        );
 
-        assert!(builder.diagnostics().is_empty());
-        let (_, _, delegated) = builder.finish();
-        assert_eq!(delegated.len(), 1);
+        builder.bind::<DummyDelta2>(crate::backend::Authority(DeviceFamily::KeyboardMouse));
+        let found = builder.diagnostics();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(
+            found[0].kind,
+            crate::plan::DiagnosticKind::DeltaFromAuthority
+        );
+        assert_eq!(found[0].severity(), crate::plan::Severity::Error);
     }
 
     #[cfg(feature = "keyboard")]

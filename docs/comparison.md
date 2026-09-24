@@ -409,8 +409,8 @@ default is right: a refactor is free, and breaking a player's settings takes a d
 The input frame is built, and is what this crate's own tests drive; a recorder and replay backend on
 top of it are not. The network half is **designed and not proven**: there is no testbed in tree that
 sends anything over a wire, and Roadmap.md's deferred table says so, gated on a networked target.
-The injection point it would use is built: `delegate` and `AuthorityValues`, through which
-`examples/pong_robot` drives a paddle.
+The injection point it would use is built: an `Authority` binding and `AuthorityValues`, through
+which `examples/pong_robot` drives a paddle.
 
 Mocking at the action level (BEI, LWIM) and replaying at the frame level (this crate, for local
 determinism) are not the same test. The first tests your game logic; the second also tests your
@@ -429,13 +429,16 @@ read the gamepad Steam emulates. What it leaves to the game is the rest of the i
 for the actions in Steam's manifest, prompts built from Steam's origins, and controls-screen rows
 that Steam rather than the game rebinds.
 
-**This crate** has the same value path, `delegate` and `AuthorityValues`: the backend writes a value
-and the crate's own lifecycle turns it into events. It also answers the questions BEI leaves to the
-game. An action's declared path is the manifest name, and a dotted path was measured to be a valid
-Steam action name; the prompt lookup returns a `ControlOrigin`, which can be one of Steam's rather
-than one of ours. Not built: suppressing a device family at the frame, which is how this crate would
-keep Steam's emulated pad from being read twice, and a Steam backend run end to end. What a running
-Steam client actually does is recorded in [steam.md](./steam.md).
+**This crate** has the same value path, an `Authority` binding and `AuthorityValues`: the backend
+writes a value and the crate's own lifecycle turns it into events. It differs in scope. The
+authority stands in for one device family rather than owning the action, so the keyboard stays bound
+beside a pad Steam drives, and the game's own conditions, such as a rate of fire, run on Steam's
+value as on any other. It also answers the questions BEI leaves to the game. An action's declared
+path is the manifest name, and a dotted path was measured to be a valid Steam action name; the
+prompt lookup returns a `ControlOrigin`, which can be one of Steam's rather than one of ours. Not
+built: suppressing a device family at the frame, which is how this crate would keep Steam's emulated
+pad from being read twice, and a Steam backend run end to end. What a running Steam client actually
+does is recorded in [steam.md](./steam.md).
 
 So both can be driven by Steam, this crate also covers naming and prompts, and neither has shipped a
 Steam game. Do not choose on this axis unless you are actually shipping on Steam Input, in which
@@ -479,12 +482,13 @@ the first, so `WASD` keeps its shape on an AZERTY board, and a shortcut wants th
 
 *Before the game runs*, this crate checks each context whole when it is declared. `add_context`
 refuses one that cannot work: an action bound to a control that cannot drive it (a stick on a mouse
-look), two stages that both rescale a value, an action both bound and delegated to a backend, two
-rebindable rows under one key. It warns about one that is only suspicious: the same control bound
-twice, a dead zone that swallows full deflection. The same pass runs on bindings the game has no
-intention of installing, which is how a controls screen checks unconfirmed choices for conflicts.
-BEI's bindings are entities that can be spawned at any time, so there is no whole context to check;
-a dimension mismatch is converted rather than refused, and a mistake shows up in play.
+look), two stages that both rescale a value, an action bound both to a backend and to a control of
+the family the backend owns, two rebindable rows under one key. It warns about one that is only
+suspicious: the same control bound twice, a dead zone that swallows full deflection. The same pass
+runs on bindings the game has no intention of installing, which is how a controls screen checks
+unconfirmed choices for conflicts. BEI's bindings are entities that can be spawned at any time, so
+there is no whole context to check; a dimension mismatch is converted rather than refused, and a
+mistake shows up in play.
 
 *While it runs*, this crate has `why_not::<A>()`, which answers "why didn't this fire?" with a named
 obstacle: inactive context, a higher-priority consumer, a longer chord winning, an unmet condition,

@@ -208,6 +208,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 139  | The action registry, and what an `ActionId` can reach                 |
 | 140  | A mapping key derived in one place                                    |
 | 141  | A binding input has one part                                          |
+| 151a | An authority is a binding for one device family                       |
 
 ---
 
@@ -524,7 +525,7 @@ per-device policy D22 assumed, so what is left is a family switch.
 - **Whether Steam needs this at all is 151b's to say.** A Steam build without `bevy_gilrs` has no
   hardware event to suppress; if it also runs cleanly with the client absent, replay is this chunk's
   only customer, and 151b records which here.
-- **Not doing: R0.4's per-family split**, which lives at L2 and is chunk 151a's.
+- **Not doing: R0.4's per-family split**, which lives at L2 and landed as chunk 151a.
 
 ### 28. Docs that run
 
@@ -594,49 +595,10 @@ supplies, and prompt invalidation the backend drives. A Steam build of Disastero
 Friction, is the real backend. It lives in `steam_examples/`, beside `steam_probe/`, with its own
 `Cargo.toml` outside the workspace so `steamworks-sys` never builds in `verify.sh`.
 
-151a blocks the rest. 151c and 151d are independent of each other; 151e follows 151b.
+151c and 151d are independent of each other; 151e follows 151b.
 
-Every chunk after 151a is an audit rather than a gate. It needs a running client, a pad, and a
-layout bound by hand (`docs/steam.md` S16), and no CI can run it.
-
-### 151a. An authority is a binding for one device family
-
-D92 and R0.4 as revised: `delegate` owned an action whole, and Steam owns the gamepad and nothing
-else. Nothing here touches Steam.
-
-- **An authority binding replaces `delegate`**, naming the family it stands in for and returning the
-  ordinary builder, so conditions and modifiers chain onto it (R0.7). The spelling is decided at the
-  start of the chunk.
-- **Its value is that binding's input level**, read from `AuthorityValues` once a tick, and the fold
-  combines it with the context's other bindings by intent (D15). An inactive or shadowed context
-  still does not read it.
-- **It is held state, not a pass of its own.** The fold reads every binding from state held on the
-  instance, never from the event that moved it, so the authority's values become one more such
-  store, filled from `AuthorityValues` before `apply_frame` — where `apply_authority` runs after it
-  today — and read by one arm in the fold. `apply_authority` and `delegated_slots` go.
-- **It presses no control**, so it neither claims nor is claimed, and interruption does not reach
-  it, as TD5.8 says of delegated slots today.
-- **`BoundAndDelegated` narrows** to binding the authority's own family as well.
-- **Its channel shape is taken from the action's intent** at declaration, so D7's check stays strict
-  rather than gaining a case that matches anything.
-- **A `Delta2` action refuses an authority binding**, with a diagnostic of its own. A delta has to
-  be counted once, and the level path would count it on every tick; the deferred table carries the
-  design.
-- **`part()` stays for inputs that read a control**, and each of its three callers handles an
-  authority first, because each means something different by its absence. `binding_family` asks a
-  new `BindingInput::family()`, which answers with the declared family. The prompt table skips
-  authority bindings for good, since the backend's `Prompts` answers for that family. `mapped_parts`
-  skips them until 151d, and the rewrite path relies on that: an override addressed to a delegated
-  row has no control to put in it.
-- **`pong_robot` moves to the new form**, the one diff in `examples/`, and it is an API change
-  rather than a leak.
-- **TD5.8 is rewritten** for the mechanism as built, and so is every other description of
-  `delegate`: the README's "actions driven from code", `docs/comparison.md` (three places) and
-  `docs/one-way-doors.md`.
-- **Verified by:** headless tests: a key and an authority on one action combine, a `pulse` on an
-  authority binding repeats while its level is held, and the narrowed diagnostic fires on a same
-  family binding and not on another. `pong_robot` plays as before.
-- **Not doing:** the authority binding's mapping row, which is 151d's.
+Every chunk here is an audit rather than a gate. It needs a running client, a pad, and a layout
+bound by hand (`docs/steam.md` S16), and no CI can run it.
 
 ### 151b. Disasteroids on Steam
 
@@ -694,6 +656,9 @@ demand.
   carries. `Here | Fixed` cannot tell a backend's row from an ordinary fixed one.
 - **Rebinding reports delegation as an outcome, not a failure** (R19.8), and R19.3's conflict
   detection does not run on those rows.
+- **`mapped_parts` stops skipping authority bindings.** 151a skipped them so the override path could
+  never address a row with no control in it; once the row exists, the rewrite has to refuse such an
+  override itself.
 - **`settings.rs` learns the state in place**, not in a fork: the pad row reads as the backend's,
   and activating it triggers an event the Steam crate observes to call `show_binding_panel`. Base
   Disasteroids never produces such a row. The `examples/` diff is a screen learning a state.
@@ -742,7 +707,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **A second virtual pad, and disconnecting one** | **a plan driving Split Friction, or one whose subject is a pad going away.** The client holds one pad's entity and connects it on first use, so a second is another entity and a `pad` step that says which; a disconnect is one more message on the one it already has. Neither is hard and neither has a caller: Disasteroids is one player who never unplugs anything, so nothing in tree can tell a pad from the pad |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import. The crate's docs owe a game the warning `widget_focus.rs` carries today: `InputDispatchPlugin` in `DefaultPlugins` activates a focused `Button` on a key a context has consumed, so a game using both disables it |
 | **The generic tier's art** | **the presentation crate**, which is what has to ship an atlas with no holes in it. Kenney's generic set is blank, unlabeled buttons, so each generic face button needs a short text stamp authored onto it by hand: content work with a known answer, and no code. Until then an unrecognized pad's face buttons resolve to text, which is also where the fallback chain shows itself in tree, on Disasteroids' Cancel and Confirm and in the gallery's Generic brand |
-| **Netcode injection and reconciliation** | a networked target. The injection point is built: chunk 111 landed `delegate` and `AuthorityValues`, so a peer's resolved action already has somewhere to go (D71). Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. Injection targets L2 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs a remote player's resolved action to inject and a later correction to reconcile against it |
+| **Netcode injection and reconciliation** | a networked target. The injection point is built: an `Authority` binding and `AuthorityValues` (chunks 111 and 151a), so a peer's resolved action already has somewhere to go (D71). Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. Injection targets L2 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs a remote player's resolved action to inject and a later correction to reconcile against it |
 | **Consumption-aware `FocusedInput` dispatch** (R8.2a) | **a game wanting `bevy_ui_widgets`' own widgets working generically, unmodified, without a context per widget kind.** A context per kind is the path to reach for first, and Disasteroids ships that way. A design for the filter was built and set aside: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline rather than a second raw-message read — keyboard only, since every keyboard-driven widget observer at 0.20 gates on `ButtonState::Pressed` and none reacts to a release |
 | **Promoting `WidgetKind` and the per-kind context into the crate** | [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native widget-kind id. Promoting a shape this crate invented first, ahead of that conversation, risks committing to the wrong one |
 | **Deleting `acquire_focus_directional`** | this crate's Bevy pin moving past [bevy#25675][], merged to main on 24 September 2026, after rc.1. `examples/common/widget_focus.rs` carries a global `AcquireFocus` observer mirroring `acquire_focus_tab_index`, with `AutoDirectionalNavigation` standing in for `TabIndex`: `bevy_input_focus`'s `click_to_focus` bubbles an `AcquireFocus` on every pointer press, a screen navigating by anything but `TabIndex` intercepts it nowhere, so it reaches the window and clears focus — and a widget whose interactive children are separate entities, like a stepper's two chevrons, blinks on every press rather than rarely. The PR separates focusability from navigation policy behind a `Focusable` component and fixes [bevy#25596][], click-to-focus under directional navigation. Read on main, it retires the observer outright, including for a scheme that is neither `TabIndex` nor one of upstream's own: `InputFocusPlugin` installs an `acquire_focus` observer that stops at the first `Focusable` ancestor whatever the scheme, and `AutoDirectionalNavigation` requires `Focusable`. What is left on the bump is the deletion, and the stepper's chevrons as its test |

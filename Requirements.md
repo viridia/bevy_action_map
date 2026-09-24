@@ -1659,15 +1659,15 @@ to produce APIs in which the simplest case stops being simple.
 ## 25. Remote control
 
 **Problem.** A test driving a running game from outside, over Bevy's remote protocol, can already
-send it device input. What it cannot do is ask what the mapper made of that input, or supply a value
-to an action that delegates to an outside authority.
+send it device input. What it cannot do is ask what the mapper made of that input, or supply the
+value an outside authority would.
 
 - **R25.1 (MUST)** Remote control is behind a `remote` feature, off by default. Without it the crate
   does not depend on `bevy_remote`.
 - **R25.2 (MUST)** A remote client can read, by context and action path, each context instance's
   action state: what a type-erased dump of the input map reports.
-- **R25.3 (MUST)** A remote client can supply a delegated action's value on a context entity, naming
-  the action by path, with the same effect as setting it in-process.
+- **R25.3 (MUST)** A remote client can supply the value an authority binding reads on a context
+  entity, naming the action by path, with the same effect as setting it in-process.
 - **R25.4 (MUST)** A device message written through the remote protocol is sampled as the device's
   own. Sending device input remotely needs nothing from this crate.
 

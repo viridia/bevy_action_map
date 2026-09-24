@@ -202,9 +202,9 @@ Steam integration crate does, that crate is a backend and nothing else. If they 
 carry its own action names and its own prompt path, and every game using it inherits both.
 
 **This crate** was designed around this case. The declared path is the manifest name; a prompt
-returns a `ControlOrigin`, which can be Steam's; and a context can delegate an action to a backend,
-which writes a value that the crate's own lifecycle turns into events. Each part has been measured
-against a running Steam client. A Steam backend has not yet been run end to end.
+returns a `ControlOrigin`, which can be Steam's; and an action can be bound to a backend in place of
+one device family, which writes a value that the crate's own lifecycle turns into events. Each part
+has been measured against a running Steam client. A Steam backend has not yet been run end to end.
 
 ---
 

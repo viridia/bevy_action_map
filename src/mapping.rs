@@ -487,6 +487,11 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
         let Some(declaration) = binding.mapping else {
             continue;
         };
+        // No control to show or rewrite. The override path relies on this: a player's override
+        // addressed to the authority's row would have nowhere to go.
+        if matches!(binding.input, BindingInput::Authority(..)) {
+            continue;
+        }
         let prefix = declaration.prefix.unwrap_or(binding.path);
         let (part, control) = binding.input.part();
         parts.push(MappedPart {
@@ -656,7 +661,7 @@ pub(crate) fn tunables_of(
 
 /// The family a binding's input belongs to.
 pub(crate) fn binding_family(input: &BindingInput) -> crate::device::DeviceFamily {
-    input.part().1.family()
+    input.family()
 }
 
 /// Whether this binding's raw value is always a plain press — `ActionValue::Bool` every tick, never

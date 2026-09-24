@@ -8,6 +8,7 @@ use bevy_input::keyboard::KeyCode;
 use bevy_input::mouse::MouseButton;
 
 use crate::action::ChannelShape;
+use crate::device::DeviceFamily;
 
 #[cfg(feature = "bevy_reflect")]
 use bevy_ecs::reflect::ReflectResource;
@@ -605,6 +606,9 @@ pub enum BindingInput {
     /// A left or right gamepad stick.
     #[cfg(feature = "gamepad")]
     GamepadStick(Stick),
+    /// The value an outside authority supplies in place of one device family's controls, shaped
+    /// as the action it is bound to. Declared through [`Authority`](crate::backend::Authority).
+    Authority(DeviceFamily, ChannelShape),
 }
 
 impl BindingInput {
@@ -637,6 +641,7 @@ impl BindingInput {
                 visit(Control::GamepadAxis(x));
                 visit(Control::GamepadAxis(y));
             }
+            Self::Authority(..) => {}
         }
     }
 
@@ -645,6 +650,10 @@ impl BindingInput {
     /// A stick answers with [`Control::GamepadStick`] as one [`Whole`](BindingPart::Whole) part,
     /// unlike [`for_each_control`](Self::for_each_control), which visits its two axes: a player
     /// rebinds the stick, not one axis of it.
+    ///
+    /// # Panics
+    ///
+    /// On an [`Authority`](Self::Authority), which holds no control.
     pub fn part(&self) -> (BindingPart, Control) {
         match self {
             #[cfg(feature = "keyboard")]
@@ -665,6 +674,16 @@ impl BindingInput {
             Self::GamepadAxis(axis) => (BindingPart::Whole, Control::GamepadAxis(*axis)),
             #[cfg(feature = "gamepad")]
             Self::GamepadStick(stick) => (BindingPart::Whole, Control::GamepadStick(*stick)),
+            Self::Authority(..) => panic!("an authority binding holds no control"),
+        }
+    }
+
+    /// The device family this input belongs to: the one its control is on, or the one an authority
+    /// stands in for.
+    pub fn family(&self) -> DeviceFamily {
+        match self {
+            Self::Authority(family, _) => *family,
+            _ => self.part().1.family(),
         }
     }
 
@@ -737,6 +756,7 @@ impl BindingInput {
             Self::GamepadAxis(_) => ChannelShape::Axis1,
             #[cfg(feature = "gamepad")]
             Self::GamepadStick(_) => ChannelShape::Axis2,
+            Self::Authority(_, shape) => *shape,
         }
     }
 }

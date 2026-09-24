@@ -1,15 +1,15 @@
 //! The left paddle, and the authority that drives it.
 //!
-//! An authority is anything outside this crate that resolves an action itself — a platform's own
-//! input service, a network peer, or, here, twenty lines of ball-chasing. It writes an
-//! [`AuthorityValues`] component on the context's entity, and the action it writes fires, completes
-//! and cancels on the edges of that value exactly as a bound one does. [`super::pong::paddle::walk`]
-//! is the proof: the same system moves both paddles and asks nothing about where either value
-//! came from.
+//! An authority is anything outside this crate that supplies an action's value in place of a device
+//! family — a platform's own input service, a network peer, or, here, twenty lines of ball-chasing.
+//! It writes an [`AuthorityValues`] component on the context's entity, and the action bound to it
+//! fires, completes and cancels on the edges of that value exactly as one bound to a control does.
+//! [`super::pong::paddle::walk`] is the proof: the same system moves both paddles and asks nothing
+//! about where either value came from.
 //!
-//! Two contexts rather than one, because a context that binds an action may not also delegate it —
-//! declaring both is a plan-build error. [`Robot`] binds nothing at all; Pong's own `Paddle` keeps
-//! its full control list for the human on the right.
+//! Two contexts rather than one, because an authority stands in for a family its context may not
+//! also bind, and Pong's own `Paddle` binds the pad for the human on the right. [`Robot`] binds the
+//! authority and nothing else.
 //!
 //! No device pairing here, unlike the base. Pairing exists to keep two humans on one machine out of
 //! each other's controls, and the robot reads no device to be kept out of.
@@ -21,7 +21,7 @@ use crate::pong::ball::Ball;
 use crate::pong::court::HALF_EXTENT;
 use crate::pong::paddle::{HEIGHT, INSET, Move, Paddle, Side, paddle, walk};
 
-/// The left paddle's context: one action, no controls, and an authority to supply it.
+/// The left paddle's context: one action, bound to an authority in place of a pad.
 #[derive(InputContext)]
 #[context(path = "pong_robot.robot", tick = Fixed)]
 pub struct Robot;
@@ -29,7 +29,7 @@ pub struct Robot;
 pub fn plugin(app: &mut App) {
     app.add_context::<Paddle>(crate::pong::paddle::bindings);
     app.add_context::<Robot>(|controls| {
-        controls.delegate::<Move>();
+        controls.bind::<Move>(Authority(DeviceFamily::Gamepad));
     });
 
     app.add_systems(Startup, spawn);

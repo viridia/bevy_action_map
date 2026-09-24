@@ -378,7 +378,7 @@ pub mod prelude {
     #[cfg(feature = "keyboard")]
     pub use bevy_input::keyboard::KeyCode;
     // `MouseMove` is ungated because `BindingInput::MouseMotion` is.
-    pub use crate::backend::AuthorityValues;
+    pub use crate::backend::{Authority, AuthorityValues};
     pub use crate::binding::{
         BindingPart, ButtonThreshold, CompassPoints, Control, DeadZone, MouseMove,
     };

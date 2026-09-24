@@ -104,6 +104,10 @@ pub struct InputContextState<C> {
     pub(crate) held_gamepad_buttons: HashMap<bevy_input::gamepad::GamepadButton, ButtonReading>,
     #[cfg(feature = "gamepad")]
     pub(crate) held_gamepad_axes: HashMap<bevy_input::gamepad::GamepadAxis, f32>,
+    // What the entity's `AuthorityValues` said at the start of this tick, for authority bindings to
+    // read. Held like a control's state so the fold reads every binding the same way; refreshed
+    // only while active, since nothing reads it otherwise.
+    pub(crate) authority: crate::backend::AuthorityValues,
     _marker: PhantomData<C>,
 }
 
@@ -138,6 +142,7 @@ impl<C: InputContext> InputContextState<C> {
             held_gamepad_buttons: HashMap::default(),
             #[cfg(feature = "gamepad")]
             held_gamepad_axes: HashMap::default(),
+            authority: crate::backend::AuthorityValues::new(),
             _marker: PhantomData,
         }
     }

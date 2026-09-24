@@ -23,7 +23,7 @@ pub use control::{AxisButtons, ButtonControl, ChordEntry, DirectionalButtons};
 #[cfg(feature = "keyboard")]
 pub use control::{LogicalKey, ModifierKey};
 
-pub(crate) use builder::{BindingSpec, ClassBindingSpec, CombinedSpec, DelegatedSpec};
+pub(crate) use builder::{BindingSpec, ClassBindingSpec, CombinedSpec};
 pub(crate) use modifier::{toggle_active, toggle_latch};
 
 // Both read a control, so neither exists in a build with no device to read one from.

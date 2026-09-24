@@ -222,6 +222,16 @@ impl ActionIntent {
         false
     }
 
+    /// The shape a control reporting exactly this intent's value would have.
+    pub(crate) const fn native_shape(self) -> ChannelShape {
+        match self {
+            ActionIntent::Button => ChannelShape::Button,
+            ActionIntent::Analog1 => ChannelShape::Axis1,
+            ActionIntent::Directional2 => ChannelShape::Axis2,
+            ActionIntent::Delta2 => ChannelShape::Delta2,
+        }
+    }
+
     /// Returns whether a control reporting on `shape` can serve this intent.
     ///
     /// Binding an action to a control it cannot serve is refused when the context is declared,
