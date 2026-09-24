@@ -326,8 +326,8 @@ fn tier_str(tier: GlyphTier) -> &'static str {
 /// Where a resolved glyph's art lives, for `AssetServer::load`: full size for a block prompt, which
 /// scales it to the height it is given, and pre-scaled for an inline one.
 ///
-/// Bevy's `InlineImage` sizes itself from the loaded image's own pixel dimensions with no resize
-/// hook (bevyengine/bevy#25710), so an inline glyph needs art already small enough to sit in a line
+/// At 0.20.0-rc.1, Bevy's `InlineImage` sizes itself from the loaded image's own pixel dimensions
+/// with no resize hook (bevyengine/bevy#25767 adds one on `main`), so an inline glyph needs art already small enough to sit in a line
 /// of text rather than tower over it.
 ///
 /// A Mac takes `macos/` first where it has an entry, for the keys it labels differently: Option

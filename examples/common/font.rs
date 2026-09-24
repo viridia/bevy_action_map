@@ -4,9 +4,10 @@
 //! all draw as boxes. This replaces it with FiraSans, the face `bevy_feathers` ships, at the default
 //! font's own id: every span that names no `font` of its own draws in that one, so no span changes.
 //!
-//! This keeps the example screens legible and is not a technique to copy. Bevy has no supported way
-//! to set an app-wide font (bevyengine/bevy#25842), so this overwrites the slot the `default_font`
-//! feature fills. A game should set its font the way its own UI theme does.
+//! This keeps the example screens legible and is not a technique to copy. Bevy 0.20.0-rc.1 has no
+//! supported way to set an app-wide font (bevyengine/bevy#25842, answered on `main` by
+//! bevyengine/bevy#25847), so this overwrites the slot the `default_font` feature fills. A game
+//! should set its font the way its own UI theme does.
 
 use bevy::asset::AssetId;
 use bevy::prelude::*;

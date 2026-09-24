@@ -104,8 +104,9 @@ fn install(app: &mut App, port: u16) {
 // for every app that leaves that feature on. The `register_type` calls are for the app that turns
 // it off; registering a type twice is harmless.
 //
-// bevyengine/bevy#25904 would add the attribute upstream, after which all of this is redundant —
-// silently, since registering data a type already carries overwrites rather than fails.
+// bevyengine/bevy#25904 adds the attribute upstream, merged after 0.20.0-rc.1; once the pin passes
+// it, all of this is redundant — silently, since registering data a type already carries overwrites
+// rather than fails.
 fn register_gamepad_messages(app: &mut App) {
     app.register_type::<GamepadConnectionEvent>()
         .register_type_data::<GamepadConnectionEvent, ReflectMessage>()
