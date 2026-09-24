@@ -640,41 +640,40 @@ impl BindingInput {
         }
     }
 
-    /// Calls `visit` with every control this input reads, and the [part](BindingPart) of the input
-    /// it is.
-    pub fn for_each_part(&self, mut visit: impl FnMut(BindingPart, Control)) {
+    /// The control this input holds, and the [part](BindingPart) of it that control is.
+    ///
+    /// A stick answers with [`Control::GamepadStick`] as one [`Whole`](BindingPart::Whole) part,
+    /// unlike [`for_each_control`](Self::for_each_control), which visits its two axes: a player
+    /// rebinds the stick, not one axis of it.
+    pub fn part(&self) -> (BindingPart, Control) {
         match self {
             #[cfg(feature = "keyboard")]
-            Self::Button(key) => visit(BindingPart::Whole, Control::PhysicalKey(*key)),
+            Self::Button(key) => (BindingPart::Whole, Control::PhysicalKey(*key)),
             #[cfg(feature = "keyboard")]
-            Self::LogicalKey(character) => {
-                visit(BindingPart::Whole, Control::LogicalKey(*character))
-            }
+            Self::LogicalKey(character) => (BindingPart::Whole, Control::LogicalKey(*character)),
             #[cfg(feature = "mouse")]
-            Self::MouseButton(button) => visit(BindingPart::Whole, Control::MouseButton(*button)),
+            Self::MouseButton(button) => (BindingPart::Whole, Control::MouseButton(*button)),
             #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-            Self::Part(button, part) => visit(*part, (*button).into()),
+            Self::Part(button, part) => (*part, (*button).into()),
             // A stick and a mouse have no parts a player would rebind one of. They are one thing
             // as far as the presentation model is concerned, and what they get instead of
             // per-part rebinding is a tunable.
-            Self::MouseMotion => visit(BindingPart::Whole, Control::MouseMotion),
+            Self::MouseMotion => (BindingPart::Whole, Control::MouseMotion),
             #[cfg(feature = "gamepad")]
-            Self::GamepadButton(button) => {
-                visit(BindingPart::Whole, Control::GamepadButton(*button))
-            }
+            Self::GamepadButton(button) => (BindingPart::Whole, Control::GamepadButton(*button)),
             #[cfg(feature = "gamepad")]
-            Self::GamepadAxis(axis) => visit(BindingPart::Whole, Control::GamepadAxis(*axis)),
+            Self::GamepadAxis(axis) => (BindingPart::Whole, Control::GamepadAxis(*axis)),
             #[cfg(feature = "gamepad")]
-            Self::GamepadStick(stick) => visit(BindingPart::Whole, Control::GamepadStick(*stick)),
+            Self::GamepadStick(stick) => (BindingPart::Whole, Control::GamepadStick(*stick)),
         }
     }
 
     /// Puts a different control in one part of this input, which is what a rebind does.
     ///
-    /// The exact inverse of [`for_each_part`](Self::for_each_part): a part this input does not have
-    /// is refused, and so is a control that cannot serve the part it was offered for. Both refusals
-    /// are `false` rather than a panic, because the caller is applying a saved override and a saved
-    /// override can say anything.
+    /// The exact inverse of [`part`](Self::part): a part this input does not have is refused, and
+    /// so is a control that cannot serve the part it was offered for. Both refusals are `false`
+    /// rather than a panic, because the caller is applying a saved override and a saved override
+    /// can say anything.
     ///
     /// **The input's channel shape is invariant.** A whole binding on a key takes another button
     /// and not a stick axis, so applying an override can never turn a plan that compiled into one

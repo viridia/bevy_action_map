@@ -439,9 +439,8 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
             }
         }
 
-        if let Some(decl) = &binding.tunable
-            && let Some(family) = crate::mapping::binding_family(&binding.input)
-        {
+        if let Some(decl) = &binding.tunable {
+            let family = crate::mapping::binding_family(&binding.input);
             match tunable_keys.entry((family, decl.key)) {
                 alloc::collections::btree_map::Entry::Vacant(entry) => {
                     entry.insert((binding.action, decl.default));
@@ -811,9 +810,7 @@ impl Plan {
             if !matches!(decl.default, crate::mapping::TunableValue::Bool(_)) {
                 continue;
             }
-            let Some(family) = crate::mapping::binding_family(&binding.input) else {
-                continue;
-            };
+            let family = crate::mapping::binding_family(&binding.input);
             tunable_groups
                 .entry((family, decl.key))
                 .or_default()

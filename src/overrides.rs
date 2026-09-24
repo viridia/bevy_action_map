@@ -1328,7 +1328,7 @@ pub(crate) fn rewrite(
             // keyboard row shares nothing with a same-named gamepad tunable), and a key match alone
             // would move a keyboard override onto a gamepad binding that only happens to share text.
             if decl.key != tunable.key
-                || crate::mapping::binding_family(&binding.input) != Some(tunable.family)
+                || crate::mapping::binding_family(&binding.input) != tunable.family
             {
                 continue;
             }

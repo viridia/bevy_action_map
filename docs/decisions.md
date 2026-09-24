@@ -1917,11 +1917,11 @@ having had a complaint.
 
 ### D61 — A gamepad stick is a `Control`, named whole
 
-**Decided.** `Control` gains `GamepadStick(Stick)`, reporting `ChannelShape::Axis2` on the same terms
-`MouseMotion` already reports `Delta2`. `ControlClass::of` becomes total — `AnyStick` fills the one
-gap `Axis2` used to leave — so a stick is admissible, capturable and rebindable exactly as the mouse
-already was: `for_each_part`, `set_part` and `arrival` all resolve a stick push to this one control,
-never to one of its two axes.
+**Decided.** `Control` gains `GamepadStick(Stick)`, reporting `ChannelShape::Axis2` on the same
+terms `MouseMotion` already reports `Delta2`. `ControlClass::of` becomes total — `AnyStick` fills
+the one gap `Axis2` used to leave — so a stick is admissible, capturable and rebindable exactly as
+the mouse already was: `part`, `set_part` and `arrival` all resolve a stick push to this one
+control, never to one of its two axes.
 
 **Rules out.** R19.12 as first written, which named sticks as the paradigm case of a device class
 with no per-mapping rebinding, presets the only way to move one. That premise is what left

@@ -645,14 +645,13 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
 
         // By part rather than by control, so that a stick answers once rather than twice — the same
         // view the presentation model takes.
-        binding.input.for_each_part(|part, control| {
-            prompts.push(BoundControl {
-                action,
-                part,
-                control,
-                chord: chord.clone(),
-                condition,
-            });
+        let (part, control) = binding.input.part();
+        prompts.push(BoundControl {
+            action,
+            part,
+            control,
+            chord,
+            condition,
         });
     }
 

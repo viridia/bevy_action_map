@@ -488,13 +488,12 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
             continue;
         };
         let prefix = declaration.prefix.unwrap_or(binding.path);
-        binding.input.for_each_part(|part, control| {
-            parts.push(MappedPart {
-                key: crate::mapping::MappingKey::new(prefix, part),
-                binding: index,
-                part,
-                control,
-            });
+        let (part, control) = binding.input.part();
+        parts.push(MappedPart {
+            key: crate::mapping::MappingKey::new(prefix, part),
+            binding: index,
+            part,
+            control,
         });
     }
     parts
@@ -631,8 +630,7 @@ pub(crate) fn tunables_of(
         let Some(decl) = &binding.tunable else {
             continue;
         };
-        let family = binding_family(&binding.input)
-            .expect("a tunable's binding must resolve to at least one control");
+        let family = binding_family(&binding.input);
         // Several bindings may declare the same key — `hold_or_toggle` reaching a primary and a
         // secondary key is the ordinary case — and they are one row to the player, not two. Every
         // sharer's value is kept in step by `rewrite` (below), so the first one found stands for
@@ -657,10 +655,8 @@ pub(crate) fn tunables_of(
 }
 
 /// The family a binding's input belongs to.
-pub(crate) fn binding_family(input: &BindingInput) -> Option<crate::device::DeviceFamily> {
-    let mut family = None;
-    input.for_each_part(|_, control| family = Some(control.family()));
-    family
+pub(crate) fn binding_family(input: &BindingInput) -> crate::device::DeviceFamily {
+    input.part().1.family()
 }
 
 /// Whether this binding's raw value is always a plain press — `ActionValue::Bool` every tick, never

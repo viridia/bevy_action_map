@@ -207,6 +207,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 138  | A plan compiled once, not once per context                            |
 | 139  | The action registry, and what an `ActionId` can reach                 |
 | 140  | A mapping key derived in one place                                    |
+| 141  | A binding input has one part                                          |
 
 ---
 
@@ -218,8 +219,6 @@ its identity rather than its position.
 
 * 115: A timing declared as a tunable
 * 122: The wheel as a binding source
-* 140: A mapping key derived in one place
-* 141: A binding input has one part
 * 143: One apply, for the world or for an entity
 * 144: One rule for what counts as a character
 * 28: Docs that run
@@ -461,25 +460,6 @@ the expensive part.
 
 Work no game asks for and no published crate can do without: the crate's internals kept consistent,
 extension points exercised, and documentation that is true and runs.
-
-### 141. A binding input has one part
-
-`BindingInput::for_each_part` calls its visitor exactly once in every arm — a stick is one `Whole`
-part, unlike `for_each_control`, which visits its two axes — and the no-devices build still has
-`MouseMotion`, so no input yields none. Every caller is written for a generality that does not
-exist, and `binding_family`'s `Option` is where it shows: its four callers guard a `None` that
-cannot happen, in three different ways. `plan.rs`'s two skip work silently, `mapping.rs`'s
-`tunables_of` panics, and `overrides.rs` compares against `Some`.
-
-- **`for_each_part` becomes `part(&self) -> (BindingPart, Control)`.** Its callers in `plan.rs`,
-  `mapping.rs` and `context/declare.rs` lose their closures, and `mapped_parts` yields at most one
-  entry per binding.
-- **`binding_family` returns `DeviceFamily`**, and the four guards go. It stays a function rather
-  than being inlined, since chunk 135 names it.
-- **Now rather than later.** The method is public, so narrowing it breaks a caller — and there are
-  none until the first publish, after which there would be.
-- **Not doing: `for_each_control`.** A stick really does read two controls there.
-- **Verified by:** the existing suite unchanged, and no diff in `examples/`.
 
 ### 143. One apply, for the world or for an entity
 
