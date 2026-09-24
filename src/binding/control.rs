@@ -7,7 +7,7 @@ use bevy_input::keyboard::KeyCode;
 #[cfg(feature = "mouse")]
 use bevy_input::mouse::MouseButton;
 
-use crate::action::ChannelShape;
+use crate::action::{ActionId, ChannelShape};
 use crate::device::DeviceFamily;
 
 #[cfg(feature = "bevy_reflect")]
@@ -606,9 +606,10 @@ pub enum BindingInput {
     /// A left or right gamepad stick.
     #[cfg(feature = "gamepad")]
     GamepadStick(Stick),
-    /// The value an outside authority supplies in place of one device family's controls, shaped
-    /// as the action it is bound to. Declared through [`Authority`](crate::backend::Authority).
-    Authority(DeviceFamily, ChannelShape),
+    /// The value an outside authority supplies in place of one device family's controls, and the
+    /// action whose value it is: the action bound to it, or the one it follows. Shaped as that
+    /// action. Declared through [`Authority`](crate::backend::Authority).
+    Authority(DeviceFamily, ChannelShape, ActionId),
 }
 
 impl BindingInput {
@@ -682,7 +683,7 @@ impl BindingInput {
     /// stands in for.
     pub fn family(&self) -> DeviceFamily {
         match self {
-            Self::Authority(family, _) => *family,
+            Self::Authority(family, ..) => *family,
             _ => self.part().1.family(),
         }
     }
@@ -756,7 +757,7 @@ impl BindingInput {
             Self::GamepadAxis(_) => ChannelShape::Axis1,
             #[cfg(feature = "gamepad")]
             Self::GamepadStick(_) => ChannelShape::Axis2,
-            Self::Authority(_, shape) => *shape,
+            Self::Authority(_, shape, _) => *shape,
         }
     }
 }

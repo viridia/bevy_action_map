@@ -417,18 +417,21 @@ in place of one device family's controls. Whatever owns the authority — a plat
 network peer — writes into an `AuthorityValues` component on the context entity from a system
 ordered before evaluation.
 
-The binding holds no control. Its input is `BindingInput::Authority(family, shape)`, and the shape
-is the action's own, stamped by `push_binding` because `Authority` is written before the action it
-binds is known; D7's check runs on it unchanged. A `Delta2` action refuses one
-(`DeltaFromAuthority`), since a delta is counted once and a level is read on every fold.
+The binding holds no control. Its input is `BindingInput::Authority(family, shape, source)`, where
+`source` is the action whose value it reads and the shape is that action's own. `Authority` is
+written before the action it binds is known, so it carries placeholders and `push_binding` stamps
+both; D7's check runs on the shape unchanged. A follower copies its leader's input already stamped
+and keeps it, so it reads the leader's value, and `leader_of` matches the two by input as it would
+two bindings of one control. A `Delta2` action refuses one (`DeltaFromAuthority`), since a delta is
+counted once and a level is read on every fold.
 
 The value is held state, as a control's is. Once a tick, before `apply_frame`, an active instance
-copies the entity's `AuthorityValues` into its own, and the fold's `Authority` arm reads the slot's
-action from that copy, or rest where nothing was written. From there it is an ordinary binding: its
-modifiers and conditions run, it folds with the action's other bindings by intent (TD5.5), and
-`commit_slot` turns its level into `Fired`, `Firing` and `Completed`. An authority reporting only a
-level, sampled when asked, is what this is shaped for; nothing on the wire or in the platform API
-needs to carry an edge.
+copies the entity's `AuthorityValues` into its own, and the fold's `Authority` arm reads the
+binding's source from that copy, or rest where nothing was written. From there it is an ordinary
+binding: its modifiers and conditions run, it folds with the action's other bindings by intent
+(TD5.5), and `commit_slot` turns its level into `Fired`, `Firing` and `Completed`. An authority
+reporting only a level, sampled when asked, is what this is shaped for; nothing on the wire or in
+the platform API needs to carry an edge.
 
 Holding no control, it claims nothing and cannot be claimed, has no mapping row, and has no prompt
 of its own, since the backend's `Prompts` answer for its family. An inactive or shadowed context

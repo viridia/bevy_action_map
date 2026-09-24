@@ -399,7 +399,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
 
         // R0.4: the authority owns its family's input for this action, so a control of that family
         // here would read what the authority is already supplying. Other families are the point.
-        if let BindingInput::Authority(family, _) = binding.input {
+        if let BindingInput::Authority(family, ..) = binding.input {
             if binding.intent == ActionIntent::Delta2 {
                 found.push(at(DiagnosticKind::DeltaFromAuthority));
             }

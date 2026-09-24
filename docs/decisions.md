@@ -1669,6 +1669,13 @@ authority binding.
 synthesizes the edges. It arrives through `AuthorityValues` on the context entity, written by a
 system ordered before evaluation, with no trait object.
 
+**A follower rides its leader's value.** An authority binding is an input, so `follow` copies it as
+it copies a control: the follower reads the value the backend wrote for the leader, and its own
+conditions run on that. Reading the follower's own id instead would make the backend write every
+follower separately, break `follow`'s promise that a rebind of the leader carries its followers, and
+have a network peer send an already-held value that the follower's hold then runs over again (chunk
+152).
+
 **The family is what presentation reads.** An authority binding is a mapping row whose rebind goes
 to the backend (R19.8), so a controls screen shows the keyboard rebindable here and the pad
 delegated, from the declarations alone. Prompts for that family come from the backend's `Prompts`

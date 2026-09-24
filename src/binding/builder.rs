@@ -754,10 +754,12 @@ impl<C> Default for InputContextBuilder<C> {
 impl<C> InputContextBuilder<C> {
     fn push_binding<A: InputAction>(&mut self, input: BindingInput) {
         // An authority's value is the action's own, so its shape is too. Taken here because
-        // `Authority` cannot know which action it will be bound to.
+        // `Authority` cannot know which action it will be bound to. A follower arrives with its
+        // leader's already stamped and keeps it: it rides the leader's value, and `leader_of`
+        // matches the two by input.
         let input = match input {
-            BindingInput::Authority(family, _) => {
-                BindingInput::Authority(family, A::INTENT.native_shape())
+            BindingInput::Authority(family, _, ActionId::PLACEHOLDER) => {
+                BindingInput::Authority(family, A::INTENT.native_shape(), A::id())
             }
             input => input,
         };

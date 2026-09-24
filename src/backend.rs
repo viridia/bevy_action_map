@@ -34,6 +34,10 @@ use crate::device::DeviceFamily;
 /// the trigger was pulled. Stick shaping is the authority's own business, so a dead zone does not
 /// belong here.
 ///
+/// An action that [`follow`](crate::binding::InputContextBuilder::follow)s one bound here reads the
+/// same value, so the authority writes it once: an afterburner riding `Thrust` needs nothing
+/// written for itself.
+///
 /// The values arrive through [`AuthorityValues`] on the context's entity. Binding a control of the
 /// same family to the same action is refused, since the authority owns that family. A network peer
 /// or a scripted player works the same way, standing in for whichever family a human would have
@@ -48,9 +52,13 @@ impl IntoBindingInput for Authority {
     type Inputs = [BindingInput; 1];
 
     fn into_binding_inputs(self) -> Self::Inputs {
-        // A placeholder shape: `bind` replaces it with the action's own, which is the first place
-        // the action is known.
-        [BindingInput::Authority(self.0, ChannelShape::Button)]
+        // Placeholders: `bind` stamps the action and its shape, which is the first place the action
+        // is known.
+        [BindingInput::Authority(
+            self.0,
+            ChannelShape::Button,
+            ActionId::PLACEHOLDER,
+        )]
     }
 }
 

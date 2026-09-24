@@ -209,6 +209,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 140  | A mapping key derived in one place                                    |
 | 141  | A binding input has one part                                          |
 | 151a | An authority is a binding for one device family                       |
+| 152  | A follower rides its leader's authority                               |
 
 ---
 

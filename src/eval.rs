@@ -865,8 +865,9 @@ impl<C: InputContext> InputContextState<C> {
                         BindingInput::GamepadStick(stick) => ActionValue::Axis2(
                             gamepad_stick_value(held_gamepad_axes, stick, consumed, devices),
                         ),
-                        BindingInput::Authority(..) => authority
-                            .value_of(plan.action_for_slot(slot))
+                        // A follower's source is its leader, not the slot's own action.
+                        BindingInput::Authority(_, _, source) => authority
+                            .value_of(source)
                             .unwrap_or_else(|| at_rest(intent)),
                     };
 
@@ -1416,6 +1417,35 @@ mod tests {
 
         press(&mut state, &mut frame, key(ButtonState::Released));
         assert_eq!(state.phase::<Jump>(), ActionPhase::Completed);
+    }
+
+    #[derive(crate::InputAction)]
+    #[action(path = "eval_tests.throttle", output = f32, intent = Analog1)]
+    struct Throttle;
+
+    /// A follower rides its leader's authority as it rides a leader's control: the backend writes
+    /// `Throttle` once, and `Serve` presses from that same value rather than waiting for one of
+    /// its own.
+    #[test]
+    fn a_follower_reads_its_leaders_authority_value() {
+        let mut state = context_declaring(|controls| {
+            controls.bind::<Throttle>(Authority(DeviceFamily::Gamepad));
+            controls.follow::<Serve, Throttle>(|binding| binding);
+            assert!(
+                controls.diagnostics().is_empty(),
+                "{:?}",
+                controls.diagnostics()
+            );
+        });
+        let mut values = AuthorityValues::new();
+
+        values.set::<Throttle>(1.0);
+        tick(&mut state, Some(&values));
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Fired);
+
+        values.set::<Throttle>(0.0);
+        tick(&mut state, Some(&values));
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Completed);
     }
 
     /// A condition the game declares runs on the authority's value like any other: a rate of fire
