@@ -43,6 +43,12 @@ use crate::device::DeviceFamily;
 /// or a scripted player works the same way, standing in for whichever family a human would have
 /// used.
 ///
+/// An authority reports a level rather than a stream of presses, so a press and release between two
+/// of its writes never reach the action; under Steam Input, that is a tap shorter than a frame.
+/// Each change it does report is one edge, however many fixed ticks read it. A button already held
+/// when the context is spawned or activated waits for a release, as a key would, so a menu opened
+/// by that button does not close on the same press.
+///
 /// An action with a `Delta2` intent refuses an authority binding: a delta is counted once, and a
 /// level sampled every tick would count it again on each one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,7 +76,10 @@ impl IntoBindingInput for Authority {
 /// fires, completes and cancels on the edges of what you write.
 ///
 /// Values are levels, not events. What you write stands until you write something else, so a
-/// backend polled once a tick writes what it read. An action nobody has written reads at rest.
+/// backend polled once a tick writes what it read, at rest included. An action nobody has written
+/// reads at rest, but is not yet supplied: if the first value you write for a button is already
+/// held, it waits for a release before it fires, just as a key held down while a menu opens does
+/// not press anything in the menu.
 ///
 /// ```ignore
 /// // Poll the outside authority once a tick, before the input map evaluates.
@@ -122,8 +131,9 @@ impl AuthorityValues {
 
     /// Stops supplying one action, which then reads at rest.
     ///
-    /// What a backend says when it loses the device behind an action, rather than writing a zero
-    /// that claims the player is holding it at centre.
+    /// What a backend says when it loses the device behind an action, or stops reporting it, rather
+    /// than writing a zero that claims the player is holding it at centre. Supplying it again while
+    /// it is held waits for a release.
     pub fn clear<A: InputAction>(&mut self) -> &mut Self {
         self.values.retain(|(action, _)| *action != A::id());
         self

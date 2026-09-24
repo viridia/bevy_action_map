@@ -1,0 +1,90 @@
+// Steam Input action manifest for the Steam build of Disasteroids, under the borrowed app id 480.
+//
+// Installed inside the Steam client's app bundle, not the outer data folder (docs/steam.md S4); the
+// README gives the path. Action names are the crate's own action paths, dots included (S13).
+//
+// Two sets, because only one is live per pad (S19). Flying and Shell are live together, so they
+// share `disasteroids.gameplay`; Menu is exclusive and has `disasteroids.menu` to itself. The
+// settings toggle is wanted in both, and an action declared in two sets makes Steam discard the
+// whole file (S22), so the menu's copy has a name of its own.
+//
+// No afterburner action: the game derives it from thrust.
+
+"In Game Actions"
+{
+	"actions"
+	{
+		"disasteroids.gameplay"
+		{
+			"title"		"#Set_Gameplay"
+
+			"AnalogTrigger"
+			{
+				"disasteroids.thrust"	"#Action_Thrust"
+			}
+
+			"StickPadGyro"
+			{
+				"disasteroids.turn"
+				{
+					"title"			"#Action_Turn"
+					"input_mode"	"joystick_move"
+				}
+			}
+
+			"Button"
+			{
+				"disasteroids.fire"				"#Action_Fire"
+				"disasteroids.smart_bomb"		"#Action_SmartBomb"
+				"disasteroids.hyperspace"		"#Action_Hyperspace"
+				"disasteroids.pause"			"#Action_Pause"
+				"disasteroids.toggle_overlay"	"#Action_ToggleOverlay"
+				"disasteroids.toggle_settings"	"#Action_ToggleSettings"
+			}
+		}
+
+		"disasteroids.menu"
+		{
+			"title"		"#Set_Menu"
+
+			"StickPadGyro"
+			{
+				"disasteroids.navigate"
+				{
+					"title"			"#Action_Navigate"
+					"input_mode"	"joystick_move"
+				}
+			}
+
+			"Button"
+			{
+				"disasteroids.confirm"			"#Action_Confirm"
+				"disasteroids.back"				"#Action_Back"
+				"disasteroids.clear"			"#Action_Clear"
+				"disasteroids.menu.toggle_settings"	"#Action_CloseSettings"
+			}
+		}
+	}
+
+	"localization"
+	{
+		"english"
+		{
+			"Set_Gameplay"			"Flying"
+			"Set_Menu"				"Controls screen"
+			"Action_Thrust"			"Thrust"
+			"Action_Turn"			"Turn"
+			"Action_Fire"			"Fire"
+			"Action_SmartBomb"		"Smart bomb"
+			"Action_Hyperspace"		"Hyperspace (double-tap)"
+			"Action_Pause"			"Pause"
+			"Action_ToggleOverlay"	"Debug overlay"
+			"Action_ToggleSettings"	"Controls screen"
+			"Action_CloseSettings"	"Close controls screen"
+			"Action_Navigate"		"Move selection"
+			"Action_Confirm"		"Apply and close"
+			"Action_Back"			"Back"
+			"Action_Clear"			"Clear cell"
+		}
+	}
+}

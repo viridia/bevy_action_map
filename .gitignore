@@ -1,5 +1,6 @@
 /target
 /tools/*/target
+/steam_examples/target
 /mutants.out*
 
 # The Steam Input validation probe. Temporary, and moves to its own repo once it has

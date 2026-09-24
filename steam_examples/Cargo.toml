@@ -1,0 +1,49 @@
+# The examples that need a running Steam client. Its own workspace root, so `steamworks-sys` never
+# builds as part of the crate's own workspace, and nothing in the tracked root manifest has to know
+# this directory exists.
+[workspace]
+
+[package]
+name = "steam_examples"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[[bin]]
+name = "disasteroids"
+path = "disasteroids/main.rs"
+
+[dependencies]
+bevy_action_map = { path = "..", features = ["serialize"] }
+bevy_input = { version = "0.20.0-rc.1", default-features = false }
+# Bevy's `2d` and `ui` profiles spelled out without `bevy_gilrs`, which both pull in through
+# `default_platform`. Steam owns the pad, so no hardware gamepad event may reach the frame (D22).
+# `gamepad` stays: the mapper's gamepad bindings are what `Authority(DeviceFamily::Gamepad)` stands
+# in for.
+bevy = { version = "0.20.0-rc.1", default-features = false, features = [
+  "default_app",
+  "std",
+  "bevy_winit",
+  "bevy_clipboard",
+  "default_font",
+  "multi_threaded",
+  "custom_cursor",
+  "sysinfo_plugin",
+  "2d_bevy_render",
+  "ui_bevy_render",
+  "scene",
+  "picking",
+  "bevy_ui_widgets",
+  "bevy_settings",
+  "keyboard",
+  "mouse",
+  "gamepad",
+] }
+steamworks = "0.13"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

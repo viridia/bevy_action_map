@@ -113,6 +113,11 @@ one `ActionPhase` per read, so a sub-tick tap polls as `Completed`. The two tran
 recoverable through the observer path (`On<Fired<A>>` / `On<Completed<A>>`) or the transition log,
 not by polling.
 
+Steam Input, on the largest store, does not report edges at all: it is polled once a frame, and an
+action bound to it here gets the frame's resolution and no finer. That does not make the queue moot.
+It still buys fixed-tick correctness at any frame rate, keyboard and mouse never pass through Steam
+Input, and the queue is the frame that replay and device routing are built on.
+
 Reading edges is also what makes sections 6 (dead zones), 7 (device routing) and 10 (replay)
 possible in the shape they take here; it is one decision paying for three features, which is why it
 is worth its cost.

@@ -35,8 +35,11 @@ A shipped game needs more from its input layer than a map from `KeyCode` to an e
   higher-priority context can claim a control without the lower one ever knowing it happened.
 - **Fixed-timestep gameplay drops input if you're not careful.** A press-and-release inside one
   render frame is invisible to `FixedUpdate` unless something remembers it happened. The crate
-  queues timestamped events and drains them by time window, so a fixed tick sees every edge transition exactly
-  once, however many (or few) times it runs between renders.
+  queues timestamped events and drains them by time window, so a fixed tick sees every edge
+  transition exactly once, however many (or few) times it runs between renders. An action bound to
+  an outside authority such as Steam Input is the exception: the authority reports a level once a
+  frame, so two edges inside one frame are lost, though the fixed tick still sees each edge that
+  arrives.
 - **Players expect to rebind things, and that's usually bolted on later.** The same
   binding declarations that drive gameplay also generate the list a settings screen shows, which
   controls are changeable, and visible prompts ("Press W") that stay correct after a rebind.

@@ -346,7 +346,7 @@ pub(crate) fn evaluate_context<
         // Sampled once a tick, before the frame, so every fold in it reads the same level: the
         // authority is polled rather than replayed.
         if instance.is_active() {
-            instance.authority.hold(authority);
+            instance.sample_authority(authority);
         }
         let mut claims = Vec::new();
         instance.apply_frame(&frame, &threshold, delta, &consumed, &mut claims, devices);
@@ -1281,7 +1281,7 @@ mod tests {
     /// sampled first, then the frame folds.
     fn tick(state: &mut InputContextState<Flying>, values: Option<&AuthorityValues>) {
         if state.is_active() {
-            state.authority.hold(values);
+            state.sample_authority(values);
         }
         state.apply_frame(
             &InputFrame::default(),
@@ -1301,6 +1301,7 @@ mod tests {
     fn an_authority_supplies_a_level_and_the_state_machine_makes_the_edges() {
         let mut state = authority_context();
         let mut values = AuthorityValues::new();
+        values.set::<Serve>(false);
 
         tick(&mut state, Some(&values));
         assert!(state.transitions.is_empty(), "rest is not an edge");
@@ -1335,6 +1336,8 @@ mod tests {
         assert!(!state.value::<Serve>());
         assert!(state.transitions.is_empty());
 
+        values.set::<Serve>(false);
+        tick(&mut state, Some(&values));
         values.set::<Serve>(true);
         tick(&mut state, Some(&values));
         state.transitions.clear();
@@ -1419,6 +1422,56 @@ mod tests {
         assert_eq!(state.phase::<Jump>(), ActionPhase::Completed);
     }
 
+    /// A menu opened by a button spawns its context while the button is still down. A control
+    /// pressed before the instance existed never reaches it as a press, and an authority's level
+    /// is held over the same way: the new instance waits for a release before it fires, rather than
+    /// closing the menu the press just opened.
+    #[test]
+    fn a_new_instance_holds_over_an_authority_already_held() {
+        let mut state = authority_context();
+        let mut values = AuthorityValues::new();
+
+        values.set::<Serve>(true);
+        tick(&mut state, Some(&values));
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Idle);
+
+        values.set::<Serve>(false);
+        tick(&mut state, Some(&values));
+        values.set::<Serve>(true);
+        tick(&mut state, Some(&values));
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Fired);
+    }
+
+    /// Steam switching action sets is the everyday case: a button that opened a menu means
+    /// something else in the menu's set, and it arrives there already held. An action the authority
+    /// starts supplying while held is held over, exactly as at an instance's first sample.
+    #[test]
+    fn an_authority_resuming_a_held_action_holds_it_over() {
+        let mut state = authority_context();
+        let mut values = AuthorityValues::new();
+        values.set::<Serve>(false);
+        tick(&mut state, Some(&values));
+
+        values.set::<Serve>(true);
+        tick(&mut state, Some(&values));
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Fired);
+        values.set::<Serve>(false);
+        tick(&mut state, Some(&values));
+
+        // Not supplied for a tick, then supplied held.
+        values.clear::<Serve>();
+        tick(&mut state, Some(&values));
+        values.set::<Serve>(true);
+        tick(&mut state, Some(&values));
+        assert_ne!(state.phase::<Serve>(), ActionPhase::Fired);
+
+        values.set::<Serve>(false);
+        tick(&mut state, Some(&values));
+        values.set::<Serve>(true);
+        tick(&mut state, Some(&values));
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Fired);
+    }
+
     #[derive(crate::InputAction)]
     #[action(path = "eval_tests.throttle", output = f32, intent = Analog1)]
     struct Throttle;
@@ -1438,6 +1491,8 @@ mod tests {
             );
         });
         let mut values = AuthorityValues::new();
+        values.set::<Throttle>(0.0);
+        tick(&mut state, Some(&values));
 
         values.set::<Throttle>(1.0);
         tick(&mut state, Some(&values));
@@ -1458,6 +1513,8 @@ mod tests {
                 .pulse(TICK * 4.0);
         });
         let mut values = AuthorityValues::new();
+        values.set::<Serve>(false);
+        tick(&mut state, Some(&values));
         values.set::<Serve>(true);
 
         let mut fired = 0;

@@ -755,9 +755,10 @@ dependency asking for the driver turns it back on for the whole graph — which 
 rather than a rule violation, and `cargo tree` shows it.
 
 **One reason here was assumed, not measured.** This decision argued that a Steam build launched with
-the client absent must still read its pads, and therefore that one binary has to serve both. Nothing
-established that, unlike S1 and S3 beside it, and `docs/steam.md` now carries the question. Recorded
-so it is not re-derived: the switch stands on replay, which does not depend on the answer.
+the client absent must still read its pads, and therefore that one binary has to serve both. Since
+measured (S21): init fails, the game runs on, and one binary does serve both. It needs no switch to
+do so, because a Steam build without `bevy_gilrs` has no hardware pad event to mute, and without the
+client its pad is simply dead. The switch stands on replay, which never depended on the answer.
 
 **The gap this leaves** is keyboard and mouse. Steam creates emulated devices for both alongside the
 pad (S1), and suppressing the gamepad family does not touch them. Whether a configuration can emit
@@ -1667,7 +1668,14 @@ authority binding.
 
 **What survives from D51 and D71.** The value is a level sampled once a tick, and the state machine
 synthesizes the edges. It arrives through `AuthorityValues` on the context entity, written by a
-system ordered before evaluation, with no trait object.
+system ordered before evaluation, with no trait object. So an authority's resolution is its own
+poll: R9.3's press and release inside one frame stops at the queue, and D51's "timing is
+unsatisfiable" holds here unchanged. R9.4 survives, since the state machine makes one edge where the
+level changes. A level has no event for a new instance to miss, so R7.5's hold-over is applied where
+the authority starts supplying an action while it is held: an instance's first sample, and an action
+resuming after going unsupplied, as Steam's do across a change of action set. Absence is therefore
+"not supplied", distinct from rest, and a backend writes every action it supplies every tick, at
+rest included; a first write that is already held waits for a release (chunk 154).
 
 **A follower rides its leader's value.** An authority binding is an input, so `follow` copies it as
 it copies a control: the follower reads the value the backend wrote for the leader, and its own

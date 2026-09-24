@@ -6,9 +6,10 @@
 # CLAUDE.md's convention is that this tree is warning-free in every configuration below.
 #
 # Usage: scripts/verify.sh [--full] [--doc]
-#   --full   also builds all eight device-feature combinations. Only needed when a `cfg` group
-#            changed — see CLAUDE.md's "Context, and what not to economize on" — so it is not
-#            part of the default run.
+#   --full   also builds all eight device-feature combinations, and the Steam examples. Only
+#            needed when a `cfg` group changed — see CLAUDE.md's "Context, and what not to
+#            economize on" — or when `examples/disasteroids` did, so it is not part of the
+#            default run.
 #   --doc    also runs the doctests. Out of the default run because the doc examples are stable
 #            and the step pays for a separate compile of the merged doctest binary.
 
@@ -124,6 +125,12 @@ if [[ ${full} -eq 1 ]]; then
         fi
     done
     echo
+
+    # Outside the workspace, so nothing above builds it, and its modules are the base Disasteroids'
+    # linked by path: a change there breaks this crate without touching a file in it. A check needs
+    # neither Steam nor its library, since `steamworks-sys` vendors the SDK.
+    run_step "cargo clippy (steam_examples)" \
+        cargo clippy --manifest-path steam_examples/Cargo.toml
 fi
 
 echo "=================================="

@@ -23,13 +23,13 @@ nothing about another, and Steam ships client updates continuously.
 
 | | |
 | --- | --- |
-| Measured | 2026-09-09, corrected and extended 2026-09-10 |
+| Measured | 2026-09-09, corrected and extended 2026-09-10, extended 2026-09-24 |
 | OS | macOS 15.7.4 (24G517), Apple M1 Pro |
 | Steam client | stable channel; exact build not recorded |
 | `steamworks` crate | 0.13.1 (`steamworks-sys` 0.13.0) |
 | Controller | Xbox Series X, wired USB-C |
 | App id | 480 (Spacewar), borrowed — see `S4` for what that does and does not allow |
-| Instrument | `steam_probe`, a console binary calling `ISteamInput` directly |
+| Instrument | `steam_probe`, a console binary calling `ISteamInput` directly; from `S21`, also the Steam build of Disasteroids |
 
 ---
 
@@ -215,7 +215,6 @@ Ground rule 5 applies here as everywhere: each row names what would settle it.
 | **Do action set *layers* stack, where base sets do not?** `S19` settled the base case; layers are D51's intended answer and `steamworks` 0.13 exposes none of the functions | a patched `steamworks`, or a direct FFI call past the safe wrapper |
 | **Does the emulated pad carry Valve's vendor id on Windows?** `S1` is a macOS measurement, and D22's original claim may have described Windows | a Windows machine with the same pad |
 | **Can a player's configuration emit keyboard and mouse events for a pad while the game reads Steam Input natively?** `S1` found `Keyboard-1` and `Mouse-1` alongside the emulated pad. They exist whether or not they emit, and only a binding that maps a pad control to a key would make them. If that combination is reachable, suppressing the gamepad family does not stop it, and the input arrives as ordinary keyboard events the game has no reason to distrust | chunk 151b: a bound configuration, so `S6` first, then a hand-edited config that maps a pad control to a key |
-| **Does a Steam build run at all with the client absent?** D22 assumed it must, and therefore that one binary has to serve both a Steam launch and a direct one; that was never measured, and the decision now stands on replay instead. The documented pattern is `SteamAPI_RestartAppIfNecessary` relaunching through the client, or `SteamAPI_Init` failing outright, either of which would make per-channel builds the ordinary shape | chunk 151b: the demo launched with the client closed |
 | **What is an `absolute_mouse` action's delta measured since?** `S18` measured `joystick_move`, a position. `absolute_mouse` reports movement, and whether it is movement since the last `RunFrame` or since the last read of that action decides how a backend has to poll it | chunk 151b: the right stick bound to an `absolute_mouse` test action, logged across frames with and without a second read |
 | **Does an `InputHandle_t` survive a restart?** D74 leans on it for a persistent identity, while this document's appendix follows D52 in treating a handle as runtime-only. S14's layout — vendor, product, instance suffix, kept on disk — suggests it survives, from one sample | chunk 151e: the same pad's handle read across two launches, and across a client restart |
 | **A wired Xbox pad on macOS is invisible to raw IOHID enumeration, but Steam still reads it.** Plugged in over USB-C, the same pad opens macOS's own Game Center overlay on its Home button — a system-level claim — and `padprobe` (raw gilrs, `IOHIDManager`) sees nothing from it at all; the identical pad over Bluetooth is ordinary and gilrs sees it fine. Steam Input reads the wired pad regardless, so it has some access path an `IOHIDManager` consumer does not | a packet capture or Steam's own logging against the same wired pad, or confirmation from Valve on how Steam Input acquires a macOS-claimed HID device |
@@ -358,6 +357,40 @@ bound to several actions, and no indication that context decides which applies. 
 mutually-exclusive group keeps Steam's own tabbed binding UI meaningful, so it remains the better
 shape wherever the exclusivity is real.
 
+### S21 — With the client absent, init fails and the game runs on
+
+Closed Steam, launched the Steam build of Disasteroids. `SteamAPI_Init` printed its own diagnosis
+and returned an error, which `steamworks` reports as `Some other failure`:
+
+```
+[S_API FAIL] SteamAPI_Init() failed; ipcserver GetSteamPath failed.
+[S_API] SteamAPI_Init(): SteamAPI_IsSteamRunning() did not locate a running instance of Steam.
+```
+
+No relaunch, no exit. The game carried on and the keyboard played it. `RestartAppIfNecessary` was
+not called, so nothing asked for a relaunch; that is the game's choice to make. **One binary serves
+a Steam launch and a direct one**, which is what D22 assumed and never measured.
+
+### S22 — An action declared in two sets makes Steam discard the whole manifest
+
+A manifest declaring `disasteroids.toggle_settings` in both of its sets resolved nothing: all twelve
+action handles came back `0`, and `GetConnectedControllers` reported no pad, across four launches,
+from Cargo and from the library, with and without a client restart. Removing the one duplicate line,
+and nothing else, made all twelve resolve and the pad appear on the next launch.
+
+Silent, like `S16`: no error from the API, and a count of zero is the only symptom. An action a game
+needs live in two sets is therefore two Steam actions, each with its own name, feeding one action of
+the game's.
+
+**Corrects this document's appendix**, which called declaring one action in several sets natural.
+That came from the API's shape, handles being global, and was never measured.
+
+### S23 — The bundle manifest is read at each launch
+
+The probe's manifest was copied over the demo's while the client was running, and the next launch of
+the probe resolved the probe's names with no client restart. `S4` said where the file is read from;
+this is when.
+
 ---
 
 ## Appendix: what the two examples would encode
@@ -367,9 +400,9 @@ The rule from `S19` and `S20` is that a Steam action set may not split two conte
 live at the same time; beyond that the mapping is free.
 
 One thing to know first: **action handles are global, not per set.** `GetDigitalActionHandle` takes
-a name and no set, and the same handle comes back whatever is active. A set scopes which actions
-are *live* and what they are bound to, so declaring one action in several sets is natural rather
-than a duplication problem.
+a name and no set, and the same handle comes back whatever is active. A set scopes which actions are
+*live* and what they are bound to. It does not follow that one action may be declared in several
+sets: `S22` measured that a duplicate discards the whole manifest.
 
 ### Disasteroids — three contexts, two sets
 
@@ -394,9 +427,9 @@ menu       Navigate, Confirm, Back (Menu)
 
 Three contexts, two sets, and the split falls exactly where `exclusive` already put it. Note what
 follows: while `menu` is active nothing in `gameplay` reports, so `Pause` goes quiet under a
-settings screen — correct here, since `Menu` has its own way out, but a game wanting a
-still-live global action under a modal would declare it in both sets rather than reaching for
-layers.
+settings screen — correct here, since `Menu` has its own way out, but a game wanting a still-live
+global action under a modal would declare a second action under its own name in the modal's set
+(`S22`), and feed both to the one action, rather than reaching for layers.
 
 ### Split Friction — three contexts, one set, two controllers
 

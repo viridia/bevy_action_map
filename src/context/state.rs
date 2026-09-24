@@ -433,6 +433,27 @@ impl<C: InputContext> InputContextState<C> {
         self.activate_with_reset(true);
     }
 
+    /// Takes this tick's authority values.
+    ///
+    /// An action the authority starts supplying while it is held is held over (R7.5): at the
+    /// instance's first sample, or when it resumes after going unsupplied, as Steam's actions do
+    /// across a change of action set. A control gets this for free, since a press made before the
+    /// context could see it never reaches it as an event; a level has no event to miss.
+    pub(crate) fn sample_authority(&mut self, source: Option<&crate::backend::AuthorityValues>) {
+        // Every intent is marked; `commit_slot` applies the latch to `Button` alone.
+        for binding in self.plan.bindings() {
+            if let crate::binding::BindingInput::Authority(_, _, action) = binding.input
+                && self.authority.value_of(action).is_none()
+                && source
+                    .and_then(|values| values.value_of(action))
+                    .is_some_and(|value| value.to_bool())
+            {
+                self.require_reset.set(binding.slot, true);
+            }
+        }
+        self.authority.hold(source);
+    }
+
     /// Starts driving actions again, letting controls already held fire immediately.
     ///
     /// Right when a context takes over from another that was driving the same controls — swapping

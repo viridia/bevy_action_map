@@ -199,6 +199,10 @@ for f in "" keyboard mouse gamepad keyboard,mouse keyboard,gamepad mouse,gamepad
 done
 ```
 
+`--full` also runs clippy on `steam_examples/`, which is outside the workspace and links the base
+Disasteroids' modules by path, so a change under `examples/disasteroids` can break it without
+touching a file in it. Run `--full` when that directory changes.
+
 Doctests are out of the default run, because the doc examples are stable and the step pays for a
 separate compile of the merged doctest binary. `scripts/verify.sh --doc` adds it; run that when a
 `///` example changes. By hand it needs the dyld workaround, since `dynamic_linking` on the `bevy`
