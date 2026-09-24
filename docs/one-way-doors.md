@@ -10,9 +10,8 @@ For each one: what it commits to, what that buys, what it forecloses, and whethe
 hedge that keeps the option open without paying for it now.
 
 Written against `bevy_enhanced_input` 0.26.0 (Bevy 0.19), read from source on 2026-08-31. Written by
-the author of a different input crate, so read it as an interested party's list. Doors 4 and 7 are
-ones **this crate has not got through either**, and say so where they stand — a list that only found
-faults in someone else's design would not be worth reading.
+the author of a different input crate, so read it as an interested party's list. Where this crate
+stands on a door is stated with it.
 
 ## The list, most expensive to reverse first
 
@@ -40,7 +39,7 @@ windowing, no timestamps to get wrong, no decision about how long an event lives
   the same thing: an input record you can save, ship over a wire, and re-derive action state from.
   With level sampling the only replayable artifact is the *output* — action values and states — so a
   replay bypasses bindings, conditions, chords and consumption rather than exercising them.
-  `ActionMock` and `ExternallyMocked` are that output-level seam and they work; what is foreclosed
+  `ActionMock` and `ExternallyMocked` are that output-level hook and they work; what is foreclosed
   is the input-level one.
 - *Anything that must happen below the mapper, per device unit.* Stick calibration is the concrete
   case: drift is a wear characteristic of one physical pad, so the correction has to be applied
@@ -57,7 +56,7 @@ against a synchronous `value(binding)` call. Converting to edges later means eit
 that call returns (silently changing behaviour) or running both paths (two sources of truth, and
 every condition rewritten).
 
-**The cheap hedge.** Make the reader a public, substitutable seam rather than a private system
+**The cheap hedge.** Make the reader a public, substitutable layer rather than a private system
 param. BEI already has most of this: `CustomInput` / `CustomInputs` is a public resource that
 bindings read from, and `Binding::Custom` is a first-class variant. Widening that from "inputs Bevy
 does not model" to "the layer all input arrives through" costs little now and is the whole
@@ -77,8 +76,8 @@ not an implementation detail — `actions!` and `bindings!` are how you declare 
 
 - Input maps are **authorable from a scene**, which for an engine is close to decisive.
 - A third-party crate can add an action to a context **it does not own**, with no cooperation from
-  the owner and no registration API. This is the thing a closed, compile-time model genuinely cannot
-  do, and it is the strongest single argument for the shape.
+  the owner and no registration API. This is the thing a closed, compile-time model cannot do, and
+  it is the strongest single argument for the shape.
 - Change detection, inspectors, and editor tooling all work with no extra machinery.
 - No parallel registry to keep in sync with the world.
 
@@ -119,7 +118,7 @@ relationship, persisting an input configuration means reflect or scene serializa
 
 **What it buys.** Nothing to declare, nothing to keep in sync, and no second name that can disagree
 with the first. `#[derive(InputAction)] #[action_output(bool)] struct Jump;` is the whole
-declaration, which is genuinely nice.
+declaration.
 
 **What it forecloses.** A refactor that is free. Renaming `Jump` to `Leap`, or moving it from
 `actions.rs` into `actions/movement.rs`, orphans every binding every player has saved against it —
@@ -148,9 +147,9 @@ struct Jump;
 ```
 
 Nothing changes for anyone who does not use it, and a game that does gets a name a refactor cannot
-touch. It is worth noting that the string wants to do a second job — a controls screen needs a
-localization key for the row's label, and the same declared name serves — which is an argument for
-making it a real declaration rather than a serialization-only annotation.
+touch. The string also has a second job: a controls screen needs a localization key for the row's
+label, and the same declared name serves. That argues for making it a real declaration rather than a
+serialization-only annotation.
 
 *(This crate requires it rather than offering it: `#[action(path = "gameplay.jump")]`, with a
 `<namespace>.<name>` convention and the rule that a path does not follow the type. Requiring it is a
@@ -177,11 +176,10 @@ nothing in the consumed set says the claim belonged to player 1. The same applie
 existing consumption, and any third-party context that reasoned about the global set breaks. Adding
 it now is a field.
 
-**This crate had the same defect and has fixed it**, which is what the asymmetry above is about: it
-was cheap here because no public API had shipped. A claim in `ConsumedControls` and an entry in the
-exclusion ceiling each carry the devices of the instance that made them, and reach only a reader
-sharing one; `contains` and `claimant` take the reader's devices as a parameter. That is the one
-field this door says to add, paid for before the door shuts rather than after.
+**This crate scopes both by device.** A claim in `ConsumedControls` and an entry in the exclusion
+ceiling each carry the devices of the instance that made them, and reach only a reader sharing one;
+`contains` and `claimant` take the reader's devices as a parameter. That is the field this door asks
+for.
 
 ---
 
@@ -209,9 +207,9 @@ and the other is a displacement that already happened. Consequences:
 **Why it is one-way.** Adding a required associated const to `InputAction` breaks every action type
 in the ecosystem, and there will be a lot of them.
 
-**The honest counterweight.** This may be a door worth walking through deliberately. The concept is
-another thing to declare, it makes the both-a-mouse-and-a-stick-on-one-action case *harder* rather
-than easier (this crate refuses it outright pending an explicit rate conversion), and `DeltaScale`
+**The counterweight.** This may be a door worth walking through deliberately. The concept is another
+thing to declare, it makes the both-a-mouse-and-a-stick-on-one-action case *harder* rather than
+easier (this crate refuses the stick unless its binding converts position to rate), and `DeltaScale`
 plus `SmoothNudge` covers what most games actually need. The argument for having it is that the
 error it prevents is one that ships.
 
@@ -281,9 +279,9 @@ binding entities and call `Display`", then:
   same shape the built-in path does, so prompts cannot be written once.
 
 **Why it is one-way.** The layering is. Once a rebinding crate exists above the engine's input crate
-and is written against whatever surface was there, that surface is load-bearing.
+and is written against whatever surface was there, that surface cannot change without breaking it.
 
-**The cheap hedge, and it is genuinely cheap.** Two things, neither of which requires building a UI:
+**The cheap hedge.** Two things, neither of which requires building a UI:
 
 1. A **reverse lookup behind a trait** — action → the controls it is bound to — so an external
    authority can answer it instead. This crate's version returns an origin that need not be one of
@@ -291,14 +289,14 @@ and is written against whatever surface was there, that surface is load-bearing.
 2. A **structured name for a control**, separable into a localization key plus a fallback string,
    rather than only a `Display` impl.
 
-**This crate does not get to be smug here either**, though the reason is worth stating precisely.
-Its presentation layer and its `bevy_ui_widgets` bridge both live in `examples/common/` rather than
-in the crate, hitting exactly this constraint from the other side. Both are built, and both were
-written against the public API without anything being added to the crate for them — which is the
-evidence that the seam holds. What has not happened is *packaging*: giving them a crate of their own
-means splitting this repository into sub-crates, and until that happens they are a `#[path]` import.
-"Exercised but not packaged" is a weaker claim than "shipped", and the distinction is the whole
-reason to design the query surface before there is a crate that needs it.
+**This crate builds the query surface in and keeps the UI above it.** The three bullets above are
+answered inside the crate: a mapping model says which bindings a player sees, which they may rebind,
+and what the slots are; capture, conflict detection, overrides and presets act on that model; and a
+control has a stable string form to key a localization catalogue, alongside the name a connected pad
+uses for its own buttons. What sits above, in `examples/common/`, is the part an input crate cannot
+own: drawing prompts, and a `bevy_ui_widgets` bridge for a controls screen. Both are written against
+the public API with nothing added to the crate for them. Giving them a crate of their own is a
+matter of splitting this repository, not of anything missing from the surface below.
 
 ---
 
@@ -331,8 +329,8 @@ event's scaled value. The ownership question is the same either way.)*
 
 Worth stating, because a list of concerns is only useful if it excludes the ordinary:
 
-- **Which conditions and modifiers ship.** `Flick`, `Cooldown`, `Toggle` — all additive, all
-  reversible, none load-bearing.
+- **Which conditions and modifiers ship.** `Flick`, `Cooldown`, `Toggle`: all additive, all
+  reversible.
 - **The default `Accumulation`.** A default is a major-version change, not a door.
 - **Naming.** `TriggerState` vs `ActionState`, `Fire` vs `Fired`. BEI has already done this
   migration once with deprecations, which is the proof it is survivable.
@@ -356,20 +354,19 @@ Ranked by (cost of reversing later) ÷ (cost of hedging now):
    declaration for the bindings, and an optional `#[action_path = "…"]` defaulting to today's
    behaviour. The second is the cheapest item on this whole list.
 2. **Put an owner on a consumption claim** (door 4). One field, and the alternative is local
-   multiplayer that quietly cross-talks. This crate has done it.
-3. **Make the input reader a public, substitutable seam** (door 1), by widening `CustomInputs`
-   rather than inventing anything. It does not commit to event-based input; it just stops
-   foreclosing it.
+   multiplayer that quietly cross-talks.
+3. **Make the input reader a public, substitutable layer** (door 1), by widening `CustomInputs`
+   rather than inventing anything. It does not commit to event-based input; it stops foreclosing it.
 
-Doors 5 and 7 both have hedges that cost roughly one line and one trait respectively — a defaulted
-associated const, and a reverse lookup behind a trait — and are worth the line.
+Doors 5 and 7 have hedges nearly as cheap: a defaulted associated const, and a reverse lookup behind
+a trait.
 
 ---
 
 For this crate's own reasoning behind each position: [Requirements.md](../Requirements.md) (R0 for
 the layer seams, R9 for timing, R14 for dead zones, R15 for pairing, R18–19 for presentation),
-[design.md](./design.md) (TD1, TD5, TD6, TD8.4), [decisions.md](./decisions.md) (D1, D20, D51), and
-[Roadmap.md](../Roadmap.md)'s deferred table for what it has not built. A user-facing comparison of
-the three crates is in [comparison.md](./comparison.md).
+[design.md](./design.md) (TD1, TD5, TD6, TD8.4), [decisions.md](./decisions.md) (D1, D20, D51, D88),
+and [Roadmap.md](../Roadmap.md)'s deferred table for what it has not built. A user-facing comparison
+of the three crates is in [comparison.md](./comparison.md).
 
 [bei]: https://github.com/simgine/bevy_enhanced_input
