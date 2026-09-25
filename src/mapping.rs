@@ -158,6 +158,13 @@ pub enum RebindPolicy {
     /// What a binding gets by saying nothing. Where the player *does* change it is the game's
     /// business to explain and its screen's to offer.
     Fixed,
+    /// Owned by an outside authority, such as Steam Input, and changed in that authority's own
+    /// binding screen.
+    ///
+    /// Every [`Authority`](crate::backend::Authority) binding's row carries this, and it holds no
+    /// slots: the authority decides which control drives the action, and does not say. A screen
+    /// draws the row as a way into the authority's own screen, which is the game's to open.
+    Delegated,
 }
 
 impl RebindPolicy {
@@ -471,7 +478,9 @@ pub(crate) struct MappedPart {
     /// Index into the binding list this was read from.
     pub(crate) binding: usize,
     pub(crate) part: BindingPart,
-    pub(crate) control: Control,
+    pub(crate) family: DeviceFamily,
+    /// `None` for an authority binding, whose row is listed with no slots.
+    pub(crate) control: Option<Control>,
 }
 
 /// Every mapped part of every listed binding, in slot order.
@@ -487,17 +496,19 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
         let Some(declaration) = binding.mapping else {
             continue;
         };
-        // No control to show or rewrite. The override path relies on this: a player's override
-        // addressed to the authority's row would have nowhere to go.
-        if matches!(binding.input, BindingInput::Authority(..)) {
-            continue;
-        }
         let prefix = declaration.prefix.unwrap_or(binding.path);
-        let (part, control) = binding.input.part();
+        let (part, control) = match binding.input {
+            BindingInput::Authority(..) => (BindingPart::Whole, None),
+            input => {
+                let (part, control) = input.part();
+                (part, Some(control))
+            }
+        };
         parts.push(MappedPart {
             key: crate::mapping::MappingKey::new(prefix, part),
             binding: index,
             part,
+            family: binding.input.family(),
             control,
         });
     }
@@ -546,15 +557,17 @@ pub(crate) fn mappings_of(
             continue;
         };
 
+        let slot = entry.control.map(|control| crate::mapping::BoundSlot {
+            control,
+            with: chord_of(binding),
+        });
+
         if let Some(mapping) = mappings.iter_mut().find(|mapping| {
             mapping.key == entry.key
-                && mapping.family == entry.control.family()
+                && mapping.family == entry.family
                 && mapping.action == binding.action
         }) {
-            mapping.slots.push(Some(crate::mapping::BoundSlot {
-                control: entry.control,
-                with: chord_of(binding),
-            }));
+            mapping.slots.extend(slot.map(Some));
             // Bindings that disagree about whether the player may change the row are a plan-build
             // error, so the first one's `rebind_policy` wins here only so that the value is
             // deterministic while the context is being refused.
@@ -572,12 +585,9 @@ pub(crate) fn mappings_of(
                 BindingPart::Whole => binding.input.channel_shape(),
                 _ => ChannelShape::Button,
             },
-            family: entry.control.family(),
+            family: entry.family,
             // An author cannot declare a gap, so a derived row is dense; only an override makes one.
-            slots: alloc::vec![Some(crate::mapping::BoundSlot {
-                control: entry.control,
-                with: chord_of(binding),
-            })],
+            slots: slot.map(Some).into_iter().collect(),
             rebind_policy: declaration.rebind_policy,
             context,
             followers: Vec::new(),
@@ -598,7 +608,7 @@ pub(crate) fn mappings_of(
         for part in parts.iter().filter(|part| part.binding == leader_index) {
             if let Some(mapping) = mappings.iter_mut().find(|mapping| {
                 mapping.key == part.key
-                    && mapping.family == part.control.family()
+                    && mapping.family == part.family
                     && mapping.action == leader.action
             }) {
                 // A follower rides every one of its leader's bindings, and a row with two slots is
@@ -1360,6 +1370,71 @@ mod tests {
         app.add_context::<OwningAndRiding>(|controls| {
             controls.bind::<Jump>(KeyCode::Space).mappable();
             controls.follow::<Lunge, Jump>(|binding| binding.mappable());
+        });
+    }
+
+    /// An authority's row is listed like any other, so a screen can show the pad beside the
+    /// keyboard, and holds nothing: the authority chooses the control and does not say which.
+    #[test]
+    fn an_authority_binding_is_a_delegated_row_with_no_slots() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.split", tick = Fixed)]
+        struct Split;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<Split>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.bind::<Jump>(crate::backend::Authority(DeviceFamily::Gamepad));
+            controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));
+        });
+
+        let mappings = mappings(app.world());
+        assert_eq!(mappings.len(), 2);
+        let pad = mappings
+            .iter()
+            .find(|mapping| mapping.family == DeviceFamily::Gamepad)
+            .unwrap();
+        assert_eq!(pad.key.to_string(), "mapping_tests.jump");
+        assert_eq!(pad.rebind_policy, RebindPolicy::Delegated);
+        assert!(pad.slots.is_empty());
+        assert_eq!(pad.accepts, ChannelShape::Button);
+        // The follower rides the authority as it rides the key, so both rows carry it.
+        assert_eq!(pad.followers.len(), 1);
+        assert!(mappings.iter().all(|mapping| mapping.followers.len() == 1));
+    }
+
+    #[test]
+    fn a_private_authority_binding_is_not_listed() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.split_private", tick = Fixed)]
+        struct SplitPrivate;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<SplitPrivate>(|controls| {
+            controls
+                .bind::<Jump>(crate::backend::Authority(DeviceFamily::Gamepad))
+                .private();
+        });
+
+        assert!(mappings(app.world()).is_empty());
+    }
+
+    /// The authority owns what drives the binding, so this game's screen has nothing to offer.
+    #[test]
+    #[should_panic(expected = "an `Authority` binding cannot be `mappable`")]
+    fn an_authority_binding_cannot_be_mappable() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.split_mappable", tick = Fixed)]
+        struct SplitMappable;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<SplitMappable>(|controls| {
+            controls
+                .bind::<Jump>(crate::backend::Authority(DeviceFamily::Gamepad))
+                .mappable();
         });
     }
 

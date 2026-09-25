@@ -175,7 +175,7 @@ Bluetooth mid-session; anything keyed on product id would not.
 `steamworks` 0.13.1 exposes `activate_action_set_handle` and nothing for action set layers, which
 **confirms D51's** finding. Everything the presentation half needs is present and callable:
 `get_digital_action_origins`, `get_analog_action_origins`, `get_string_for_action_origin`,
-`get_glyph_for_action_origin`, `show_binding_panel`. Chunks 151c and 151d are built against it.
+`get_glyph_for_action_origin`, `show_binding_panel`. Chunks 151c and 151f are built against it.
 
 ### S11 — The SDK's action-data structs are packed
 

@@ -73,9 +73,9 @@ pad reaches the game through Steam alone and never also as an ordinary gamepad.
 
 - **Prompts name only keys.** The hint line asks for the keyboard, as it does in the base game.
   Steam's own glyphs are chunk 151c.
-- **The controls screen's pad rows are empty.** An authority binding has no row yet; chunk 151d adds
-  one that opens Steam's binding panel.
+- **The controls screen's pad rows are blank.** Each is listed, with nothing to press; chunk 151f
+  makes one open Steam's binding panel.
 - **The pad cannot press a focused button or step a stepper on the controls screen.** Those are
   `common::widget_focus`'s own contexts, which bind the pad's buttons directly, and nothing reaches
-  them without `bevy_gilrs`. The keyboard still does both. Chunk 151d.
+  them without `bevy_gilrs`. The keyboard still does both. Chunk 151f.
 - **One pad.** The first pad Steam lists flies the ship; a second does nothing.

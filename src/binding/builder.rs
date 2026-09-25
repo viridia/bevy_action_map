@@ -122,6 +122,14 @@ impl MappingDecl {
             rebind_policy: crate::mapping::RebindPolicy::Fixed,
         }
     }
+
+    /// What an authority binding gets: listed, and changed only in the authority's own screen.
+    const fn delegated() -> Self {
+        Self {
+            prefix: None,
+            rebind_policy: crate::mapping::RebindPolicy::Delegated,
+        }
+    }
 }
 
 /// Configures the binding that was just declared, one chained call at a time.
@@ -349,6 +357,12 @@ impl<'a, C> BindingBuilder<'a, C> {
     /// controls.bind::<Jump>(KeyCode::Space).mappable();
     /// controls.bind::<Jump>(KeyCode::KeyJ).mappable();   // the same row, second slot
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// If the binding is `private` or `follow`s another action's row, or is an
+    /// [`Authority`](crate::backend::Authority). An authority's row is already listed, as one the
+    /// player changes in the authority's own screen rather than this game's.
     pub fn mappable(self) -> Self {
         self.declare_mapping(None)
     }
@@ -403,6 +417,11 @@ impl<'a, C> BindingBuilder<'a, C> {
                 binding.follows.is_none(),
                 "a binding cannot be both `follows` and `mappable`: one rides another action's \
                  mapping, the other gives it one of its own"
+            );
+            assert!(
+                !matches!(binding.input, BindingInput::Authority(..)),
+                "an `Authority` binding cannot be `mappable`: the authority owns what drives it, \
+                 and its row is already listed as delegated to the authority's own screen"
             );
             assert!(
                 existing.is_some(),
@@ -774,7 +793,10 @@ impl<C> InputContextBuilder<C> {
             conditions: Vec::new(),
             // The action's default, which a binding can then make an exception of either way.
             consume: A::CONSUMES,
-            mapping: Some(MappingDecl::listed()),
+            mapping: Some(match input {
+                BindingInput::Authority(..) => MappingDecl::delegated(),
+                _ => MappingDecl::listed(),
+            }),
             follows: None,
             tunable: None,
             reserved: false,

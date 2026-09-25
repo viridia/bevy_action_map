@@ -418,9 +418,6 @@ pub fn conflicts(
 /// `pending` is laid over it: a row `pending` names reads as that row says, and everything else
 /// reads as `mappings` already has it.
 ///
-/// A backend-owned row (`Override::NotOurs` in `pending`) reads as `mappings` already has it
-/// (unaffected, not cleared), matching how [`crate::overrides::apply_overrides`] treats it.
-///
 /// Resolving a conflict this finds is the caller's decision, made with [`Overrides::bind`] and
 /// [`Overrides::get`] directly rather than through another crate API: refuse the conflict by not
 /// writing the candidate row, allow the duplicate by writing it regardless, or rewrite the
@@ -474,8 +471,7 @@ fn conflicts_in(
 /// Whether a mapping currently holds a slot clashing with `candidate`: in `pending`'s row for it if
 /// there is one, else in its own slots.
 ///
-/// A row absent from `pending` means untouched, and a `NotOurs` row means the same, since something
-/// else owns it and this crate neither fills it in nor reads it as cleared.
+/// A row absent from `pending` means untouched.
 ///
 /// An empty slot holds nothing rather than holding "no control", so two rows with a gap apiece are
 /// not a clash.
@@ -483,7 +479,7 @@ fn holds(mapping: &ActionMapping, pending: Option<&Overrides>, candidate: &Bound
     let slots = match pending.and_then(|pending| pending.get(mapping.family, mapping.key)) {
         Some(Override::Slots(slots)) => slots,
         Some(Override::Cleared) => return false,
-        Some(Override::NotOurs) | None => &mapping.slots,
+        None => &mapping.slots,
     };
     slots
         .iter()
@@ -1517,8 +1513,8 @@ mod tests {
     }
 
     /// A screen's own unconfirmed choice has to be able to clash with another one, and `conflicts`
-    /// alone cannot see it because nothing has been applied. A row someone else owns is read the
-    /// way applying reads it: neither cleared nor free.
+    /// alone cannot see it because nothing has been applied. A row the player emptied frees what it
+    /// held.
     #[test]
     fn conflicts_pending_sees_what_has_not_been_confirmed() {
         let app = app();
@@ -1551,21 +1547,8 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].action_path, "capture_tests.jump");
 
+        // `Cleared` frees the control.
         let mut pending = Overrides::new();
-        pending.set(DeviceFamily::KeyboardMouse, jump, Override::NotOurs);
-        assert_eq!(
-            conflicts_pending(
-                &mappings,
-                &pending,
-                &Control::PhysicalKey(KeyCode::Space).into(),
-                Some(up)
-            )
-            .len(),
-            1,
-            "NotOurs leaves the row reading as it did"
-        );
-
-        // Contrast with `Cleared`, which does free the control.
         pending.set(DeviceFamily::KeyboardMouse, jump, Override::Cleared);
         assert!(
             conflicts_pending(

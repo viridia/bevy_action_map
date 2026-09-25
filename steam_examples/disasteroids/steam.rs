@@ -146,7 +146,7 @@ pub fn plugin(app: &mut App) {
     app.add_systems(Update, open_binding_panel);
 }
 
-/// TEMPORARY, removed by chunk 151d: F12 opens Steam's binding panel for the first pad, until the
+/// TEMPORARY, removed by chunk 151f: F12 opens Steam's binding panel for the first pad, until the
 /// controls screen's delegated row does it properly.
 fn open_binding_panel(
     keys: Res<ButtonInput<KeyCode>>,

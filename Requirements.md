@@ -1097,19 +1097,20 @@ that assumes any of that is stable loses player data silently on the next patch.
 - **R17.5 (SHOULD)** Serialization must go through `Reflect` + the type registry so third-party
   modifiers/conditions (R5.6) round-trip.
 - **R17.6 (MAY)** Bindings as a hot-reloadable asset, for iteration without recompiling.
-- **R17.7 (MUST)** A saved override set distinguishes three states per mapping, and a format with
-  only two loses one of them:
+- **R17.7 (MUST)** A saved override set distinguishes an absent row from a cleared one:
 
   | | Means | Produced by |
   | --- | --- | --- |
   | **absent** | use whatever the game shipped | a mapping the player never touched |
   | **cleared** | the player deliberately removed the binding | R19.3's unbind-the-other policy, or an explicit "clear" |
-  | **not ours** | an external backend owns this mapping (R0.4, R19.8) | Steam Input and equivalents |
 
   The distinction is easy to miss because a diff against defaults (R17.1) makes absence meaningful:
-  once "missing" already says "default", clearing a binding has nothing left to say with. The third
-  state matters for the same reason — a backend-owned action must not read as one the player
-  cleared, and saving must not invent rows for actions we do not own.
+  once "missing" already says "default", clearing a binding has nothing left to say with.
+
+  _Withdrawn: a third saved state, **not ours**, for a mapping an external backend owns. The
+  declaration says it instead: an authority binding's row is delegated (R19.8), so nothing is left
+  to write one, and a row saved by the player cannot say anything the game's own declaration does
+  not._
 - **R17.8 (MUST)** Binding overrides must not carry device identity. What a player bound is a
   control on a device *class*; which physical unit drives which player is pairing state (R15.6), and
   how a particular stick rests is calibration state (R11.7). Three stores, keyed differently, and
@@ -1299,12 +1300,14 @@ and response curves ([IGA file][steam-iga]).
   row. Re-proposing a per-mapping capacity would need a screen that reads it, rather than one that
   could already have its number from the list._
 - **R19.10 (MUST)** _(D28)_ A binding is **listed by default and rebindable only when declared**.
-  Three states, and every binding is in exactly one:
+  Four states, and every binding is in exactly one:
 
   - **Listed and fixed**, which is the default: the player reads it on a controls screen and cannot
-    change it. This is the whole of the gamepad story on a console, and most of it on Steam.
+    change it. This is the whole of the gamepad story on a console.
   - **Listed and rebindable**, which is a declared mapping. Rebindability is the presence or absence
     of a mapping rather than a flag on the binding, which is R4.7.
+  - **Listed and delegated**, which is every authority binding: the player reads it here and changes
+    it in the authority's own screen (R19.8).
   - **Unlisted**, which must be asked for. Reserved for a binding that is another binding's
     implementation detail — a second reading of a control that already appears under a different
     name — rather than a control the player operates.

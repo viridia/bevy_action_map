@@ -53,15 +53,15 @@ use crate::action::ChannelShape;
 use crate::binding::{BindingSpec, Control};
 use crate::capture::{ControlClass, RefusedReason, admissible};
 use crate::device::DeviceFamily;
-use crate::mapping::{ActionMapping, BoundSlot, MappingKey, Tunable, TunableValue};
+use crate::mapping::{ActionMapping, BoundSlot, MappingKey, RebindPolicy, Tunable, TunableValue};
 use crate::mapping::{apply_tunable_value, mapped_parts};
 use crate::present::ControlOrigin;
 
 /// What a player did to one mapping.
 ///
-/// Three states rather than two, because a diff against defaults makes *absence* meaningful: once a
-/// missing row already says "use the default", a player who deliberately emptied a row has nothing
-/// left to say with unless emptying has a value of its own.
+/// Emptying a row has a value of its own, because a diff against defaults makes *absence*
+/// meaningful: once a missing row already says "use the default", a player who deliberately emptied
+/// a row would have nothing left to say it with.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Override {
     /// What the player put in the mapping, in slot order.
@@ -84,11 +84,6 @@ pub enum Override {
     /// The action stays declared and stays readable; nothing fires it. Distinct from a missing row,
     /// which means the game's own default still applies.
     Cleared,
-    /// Something outside this crate owns this mapping.
-    ///
-    /// A backend authoritative for the action owns its bindings and its own rebinding UI, so this
-    /// crate neither applies a control here nor treats the row as one the player emptied.
-    NotOurs,
 }
 
 /// Everything a player has changed, as a diff against what the game declared.
@@ -201,10 +196,8 @@ impl Overrides {
     /// What this set makes of one row: its own slots where it has changed the row, and the
     /// declared ones where it has not.
     ///
-    /// The three states read the way applying reads them, so a screen showing an unconfirmed
-    /// working copy shows what confirming it would produce. [`NotOurs`](Override::NotOurs) reads as
-    /// untouched, since something else owns that row and this set neither fills it in nor treats it
-    /// as emptied.
+    /// Rows read the way applying reads them, so a screen showing an unconfirmed working copy shows
+    /// what confirming it would produce.
     ///
     /// This is the list to edit and hand back to [`bind`](Self::bind). An untouched row comes back
     /// exactly as [`slots`](ActionMapping::slots) holds it, chords and all, so writing it back after
@@ -213,7 +206,7 @@ impl Overrides {
         match self.get(mapping.family, mapping.key) {
             Some(Override::Slots(slots)) => slots.clone(),
             Some(Override::Cleared) => Vec::new(),
-            Some(Override::NotOurs) | None => mapping.slots.clone(),
+            None => mapping.slots.clone(),
         }
     }
 
@@ -391,6 +384,12 @@ pub enum OverrideProblemKind {
     NoSuchMapping,
     /// The mapping exists and the player may not change it.
     NotRebindable,
+    /// The mapping belongs to an outside authority, and is changed in that authority's own screen.
+    ///
+    /// A screen never meets this if it reads [`RebindPolicy::Delegated`] off the row first. A file
+    /// written before the authority took the row over is the usual way to reach it, and a preset
+    /// does not exempt it.
+    Delegated,
     /// A control belongs to the other device family.
     ///
     /// A mapping is rebound within its own family, so a gamepad button cannot fill a keyboard row.
@@ -448,13 +447,9 @@ const FORMAT_VERSION: u32 = 1;
 /// The word a saved file uses for an emptied row, and for an emptied slot inside one.
 ///
 /// One word at both levels because it means the same thing at both: nothing is bound here. Every
-/// real control name carries a `/`, so neither this nor [`EXTERNAL`] can collide with one.
+/// real control name carries a `/`, so this cannot collide with one.
 #[cfg(feature = "serialize")]
 const CLEARED: &str = "cleared";
-
-/// The word a saved file uses for a row something outside this crate owns.
-#[cfg(feature = "serialize")]
-const EXTERNAL: &str = "external";
 
 /// The name a saved file uses for a device family, stable independent of [`DeviceFamily`]'s own
 /// variant names.
@@ -536,7 +531,7 @@ fn origin_from_name(name: &str) -> Option<ControlOrigin> {
 /// A row's saved value: the portable counterpart to [`Override`].
 ///
 /// Written only as a value inside [`SavedOverrides::bindings`]'s nested map, never as a document's
-/// own top level. That placement is what keeps the wire form the three compact shapes below rather
+/// own top level. That placement is what keeps the wire form the two compact shapes below rather
 /// than bevy_reflect's generic enum representation, `{"Slots": [...]}` and the like.
 #[cfg(feature = "serialize")]
 #[derive(Reflect, Clone, Debug, PartialEq)]
@@ -549,18 +544,15 @@ pub enum SavedRow {
     Slots(Vec<String>),
     /// The player deliberately emptied the mapping. Written and read as `"cleared"`.
     Cleared,
-    /// Something outside this crate owns this mapping. Written and read as `"external"`.
-    NotOurs,
 }
 
 #[cfg(feature = "serialize")]
 impl serde::Serialize for SavedRow {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            // Bare words a person reads as neither a control nor a mistake — every real control
-            // name carries a `/`, so the two can never collide with one (R17.7).
+            // A bare word a person reads as neither a control nor a mistake — every real control
+            // name carries a `/`, so the two can never collide (R17.7).
             SavedRow::Cleared => serializer.serialize_str(CLEARED),
-            SavedRow::NotOurs => serializer.serialize_str(EXTERNAL),
             // A scalar is the same thing as a one-element list, and most rows hold one — a player
             // editing this by hand should not have to type brackets to say so (TD10.3).
             SavedRow::Slots(names) if names.len() == 1 => serializer.serialize_str(&names[0]),
@@ -578,13 +570,12 @@ impl<'de> serde::Deserialize<'de> for SavedRow {
             type Value = SavedRow;
 
             fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_str("a control name, a list of them, \"cleared\", or \"external\"")
+                f.write_str("a control name, a list of them, or \"cleared\"")
             }
 
             fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
                 Ok(match v {
                     CLEARED => SavedRow::Cleared,
-                    EXTERNAL => SavedRow::NotOurs,
                     other => SavedRow::Slots(alloc::vec![String::from(other)]),
                 })
             }
@@ -718,7 +709,6 @@ pub fn save_overrides(overrides: &Overrides) -> SavedOverrides {
                     .collect(),
             ),
             Override::Cleared => SavedRow::Cleared,
-            Override::NotOurs => SavedRow::NotOurs,
         };
         bindings
             .entry(family_name(family).to_string())
@@ -854,10 +844,6 @@ pub fn resolve_saved(
             let names = match row {
                 SavedRow::Cleared => {
                     overrides.set(family, mapping.key, Override::Cleared);
-                    continue;
-                }
-                SavedRow::NotOurs => {
-                    overrides.set(family, mapping.key, Override::NotOurs);
                     continue;
                 }
                 SavedRow::Slots(names) => names,
@@ -1232,9 +1218,6 @@ pub(crate) fn rewrite(
             continue;
         };
         let wanted: &[Option<BoundSlot>] = match over {
-            // The defaults stand, and deliberately are not read as an empty row: nobody cleared
-            // this, somebody else owns it.
-            Override::NotOurs => continue,
             Override::Cleared => &[],
             Override::Slots(slots) => slots,
         };
@@ -1243,7 +1226,7 @@ pub(crate) fn rewrite(
             .iter()
             .filter(|part| {
                 part.key == row.key
-                    && part.control.family() == row.family
+                    && part.family == row.family
                     && declared[part.binding].action == row.action
             })
             .collect();
@@ -1352,6 +1335,11 @@ fn refusal(
     limits: &Limits<'_>,
     preset_authorized: bool,
 ) -> Option<OverrideProblemKind> {
+    // Ahead of the preset exemption, and relied on by `rewrite`: a delegated row has no binding
+    // with a control in it for an override to rewrite.
+    if row.rebind_policy == RebindPolicy::Delegated {
+        return Some(OverrideProblemKind::Delegated);
+    }
     if !row.rebind_policy.is_rebindable() && !preset_authorized {
         return Some(OverrideProblemKind::NotRebindable);
     }
@@ -2383,22 +2371,60 @@ mod tests {
         );
     }
 
-    /// A backend owning an action is neither a row the player cleared nor a row they never touched,
-    /// which is exactly why there are three states and not two.
+    /// A row an authority owns takes nothing from this crate, whether it arrives from a screen, a
+    /// preset or a file, and the answer says why rather than calling it fixed.
     #[test]
-    fn a_row_someone_else_owns_is_left_alone() {
-        let mut app = app();
-        let target = row(&app, "override_tests.jump");
-        let mut overrides = Overrides::new();
-        overrides.set(target.family, target.key, Override::NotOurs);
+    fn a_delegated_row_refuses_every_write() {
+        #[derive(InputContext)]
+        #[context(path = "override_tests.split", tick = Render)]
+        struct Split;
 
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<Split>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).mappable();
+            controls.bind::<Jump>(crate::backend::Authority(DeviceFamily::Gamepad));
+        });
+        let pad = mappings(app.world())
+            .into_iter()
+            .find(|mapping| mapping.family == DeviceFamily::Gamepad)
+            .unwrap();
+        assert_eq!(pad.rebind_policy, RebindPolicy::Delegated);
+        // The family is checked after delegation, so a key is refused for the same reason a pad
+        // button would be.
+        let key = || alloc::vec![Some(BoundSlot::from(Control::PhysicalKey(KeyCode::KeyJ)))];
+
+        let refused = Rebind::checked(app.world(), &pad, key());
+        assert_eq!(refused.unwrap_err(), OverrideProblemKind::Delegated);
+
+        // A preset does not exempt it, as it would a fixed row.
+        let mut preset = Overrides::new();
+        preset.bind(pad.family, pad.key, [Control::PhysicalKey(KeyCode::KeyJ)]);
+        let refused = Rebind::checked_with_preset(app.world(), &preset, &pad, key());
+        assert_eq!(refused.unwrap_err(), OverrideProblemKind::Delegated);
+
+        // Clearing is a write too.
+        let mut overrides = Overrides::new();
+        overrides.set(pad.family, pad.key, Override::Cleared);
         let problems = apply_overrides(app.world_mut(), &overrides);
-        assert!(problems.is_empty());
         assert_eq!(
-            slots(&app, "override_tests.jump"),
-            filled([Control::PhysicalKey(KeyCode::Space)]),
-            "not ours is not cleared"
+            problems
+                .iter()
+                .map(|problem| problem.kind.clone())
+                .collect::<Vec<_>>(),
+            [OverrideProblemKind::Delegated]
         );
+        assert!(mappings(app.world()).contains(&pad));
+
+        // Holding nothing, it is never what a capture clashes with, whichever button the authority
+        // happens to have put it on.
+        #[cfg(feature = "gamepad")]
+        {
+            let south = BoundSlot::from(Control::GamepadButton(
+                bevy_input::gamepad::GamepadButton::South,
+            ));
+            assert!(crate::capture::conflicts(app.world(), &south, None).is_empty());
+        }
     }
 
     /// The point of the whole container: emptying the primary of a two-control row leaves the gap
@@ -3123,16 +3149,12 @@ mod tests {
         #[action(path = "persist_tests.jump", output = bool, intent = Button)]
         struct Jump;
 
-        #[derive(InputAction)]
-        #[action(path = "persist_tests.settings", output = bool, intent = Button)]
-        struct OpenSettings;
-
         #[derive(InputContext)]
         #[context(path = "persist_tests.playing", tick = Render)]
         struct Playing;
 
         /// `Move` on WASD (four keyboard rows, none of them overridden below), `Jump` on Space and
-        /// on the pad's South button, and a settings key an external backend will claim.
+        /// on the pad's South button.
         fn declared() -> Vec<ActionMapping> {
             let mut app = App::new();
             app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
@@ -3140,7 +3162,6 @@ mod tests {
                 controls.bind::<Move>(DirectionalButtons::wasd()).mappable();
                 controls.bind::<Jump>(KeyCode::Space).mappable();
                 controls.bind::<Jump>(GamepadButton::South).mappable();
-                controls.bind::<OpenSettings>(KeyCode::F1).mappable();
             });
             declared_mappings(app.world())
         }
@@ -3177,15 +3198,14 @@ mod tests {
             [bindings.keyboard_mouse]\n\
             \"persist_tests.jump\" = [\"key/Space\", \"key/KeyJ\"]\n\
             \"persist_tests.move.up\" = \"key/KeyI\"\n\
-            \"persist_tests.settings\" = \"external\"\n\
             \n\
             [tunables]\n";
 
         /// What [`save_overrides`] writes is a document a person would be willing to write by hand,
         /// and reading it back through `bevy_reflect` — the way a `Reflect`-based settings layer
         /// actually would — produces the identical value: a scalar for the row that holds one
-        /// control, a list for the row that holds two, and the two three-state words neither of
-        /// which could ever be mistaken for a control name.
+        /// control, a list for the row that holds two, and a word for an emptied row that could
+        /// never be mistaken for a control name.
         #[test]
         fn a_saved_override_set_round_trips_through_reflect() {
             let declared = declared();
@@ -3208,15 +3228,6 @@ mod tests {
                     Control::PhysicalKey(KeyCode::Space),
                     Control::PhysicalKey(KeyCode::KeyJ),
                 ],
-            );
-            overrides.set(
-                DeviceFamily::KeyboardMouse,
-                mapping_key(
-                    &declared,
-                    DeviceFamily::KeyboardMouse,
-                    "persist_tests.settings",
-                ),
-                Override::NotOurs,
             );
             overrides.set(
                 DeviceFamily::Gamepad,

@@ -447,7 +447,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
             for part in parts.iter().filter(|part| part.binding == index) {
                 let key = part.key;
                 let (claimant, claimed_as) = keys
-                    .entry((part.control.family(), key))
+                    .entry((part.family, key))
                     .or_insert((binding.action, declaration.rebind_policy));
                 if *claimant != binding.action {
                     // Only where something is rebindable, because the hazard is a *saved* rebind of
@@ -457,7 +457,10 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
                     if rebindable || claimed_as.is_rebindable() {
                         found.push(at(DiagnosticKind::DuplicateMappingKey { key }));
                     }
-                } else if *claimed_as != declaration.rebind_policy {
+                } else if *claimed_as != declaration.rebind_policy
+                    // A control beside its family's authority is `BoundAndDelegated` already.
+                    && ![*claimed_as, declaration.rebind_policy].contains(&crate::mapping::RebindPolicy::Delegated)
+                {
                     found.push(at(DiagnosticKind::RebindingDisagreement { key }));
                 }
             }

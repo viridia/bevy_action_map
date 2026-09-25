@@ -440,10 +440,10 @@ run, it folds with the action's other bindings by intent (TD5.5), and `commit_sl
 into `Fired`, `Firing` and `Completed`. An authority reporting only a level, sampled when asked, is
 what this is shaped for; nothing on the wire or in the platform API needs to carry an edge.
 
-Holding no control, it claims nothing and cannot be claimed, has no mapping row, and has no prompt
-of its own, since the backend's `Prompts` answer for its family. An inactive or shadowed context
-does not sample it. Interruption does not reach it either: a window losing focus is this crate's
-device going away, and the authority's has not.
+Holding no control, it claims nothing and cannot be claimed, and has no prompt of its own, since the
+backend's `Prompts` answer for its family. Its mapping row is `Delegated` and holds no slots
+(TD9.1). An inactive or shadowed context does not sample it. Interruption does not reach it either:
+a window losing focus is this crate's device going away, and the authority's has not.
 
 The one contradiction is a control of the authority's own family bound to the same action, which is
 `BoundAndDelegated` and a plan-build error. Controls of other families beside it are what the split
@@ -856,7 +856,7 @@ pub struct ActionMapping {
     pub family: DeviceFamily,          // KeyboardMouse | Gamepad
     pub accepts: ChannelShape,
     pub slots: Vec<Option<BoundSlot>>, // ordered; slot 0 is the primary, None is an emptied cell
-    pub rebind_policy: RebindPolicy,   // Here | Fixed
+    pub rebind_policy: RebindPolicy,   // Here | Fixed | Delegated
     pub context: &'static str,
     pub followers: Vec<Follower>,
 }
@@ -880,8 +880,8 @@ fresh `BoundSlot::from(control)` drops it. A grown slot takes its chord from the
 the primary it was cloned from. A chord entry must be something a player can hold — a modifier or a
 button of ours — and anything else is refused as `NotChordable`.
 
-**Three listing states, plus a fourth for followers.** A binding is listed and fixed unless it says
-otherwise:
+**Four listing states, plus followers.** A binding is listed and fixed unless it says otherwise, or
+binds an authority:
 
 | declaration | listed | rebindable |
 | --- | --- | --- |
@@ -889,6 +889,16 @@ otherwise:
 | `mappable` | yes | yes |
 | `private` | no | no |
 | `follow::<F, L>()` | on `L`'s row, as a subordinate line | with `L`'s row |
+| `Authority(family)` | yes, with no slots | in the authority's own screen |
+
+**A delegated row** is the authority binding's. `mapped_parts` lists it under the action's key with
+`BindingPart::Whole` and no control, so it merges with nothing and holds no slots, and its followers
+attach to it as to any row. A screen reads `Delegated` as the answer to "rebind this": the call to
+the backend's own screen is the game's. A write that reaches the row anyway is refused ahead of the
+preset exemption (TD10.1), which is also what keeps `rewrite` from addressing a part with no
+control. `mappable` on an authority binding panics, and `private` hides it as it hides any row.
+Conflicts cannot land on it, having no slots. A control of the authority's family on the same action
+shares its key, and the policy mismatch is left to `BoundAndDelegated` rather than reported twice.
 
 `mappable` takes no arguments. The parts of a composite name themselves, so a key derives as
 `gameplay.move.up`, and the family is inferred from the control. `mappable_as` replaces the action's
@@ -1086,7 +1096,6 @@ nothing about where it ends up.
 pub enum Override {
     Slots(Vec<Option<BoundSlot>>), // in slot order; None is an emptied cell, trailing ones dropped
     Cleared,                       // deliberately emptied — distinct from a missing row
-    NotOurs,                       // an external authority owns this mapping
 }
 ```
 
@@ -1139,7 +1148,7 @@ apply and persist independently, with the world-wide plan untouched.
 
 ```rust
 pub enum OverrideProblemKind {
-    NoSuchMapping, NotRebindable, WrongFamily { .. }, WrongShape { .. },
+    NoSuchMapping, NotRebindable, Delegated, WrongFamily { .. }, WrongShape { .. },
     Reserved { .. }, NotChordable { .. }, TooManyControls { .. }, UnknownControl { .. },
 }
 ```
@@ -1203,7 +1212,7 @@ pub struct SavedOverrides {
     pub tunables: BTreeMap<String, BTreeMap<String, SavedTunableValue>>,
 }
 
-pub enum SavedRow { Slots(Vec<String>), Cleared, NotOurs }
+pub enum SavedRow { Slots(Vec<String>), Cleared }
 pub enum SavedTunableValue { Number(f32), Bool(bool) }
 ```
 
@@ -1225,7 +1234,6 @@ action_map_version = 1
 "gameplay.fire"    = ["cleared", "key/KeyF"]     # primary emptied; the secondary stays second
 "gameplay.move.up" = "key/KeyI"                  # a scalar is a one-element list
 "editor.save"      = "mod/ctrl+key/KeyS"         # held first, then the control
-"ui.settings"      = "external"
 
 [tunables]
 ```
@@ -1234,13 +1242,13 @@ A row holding one control writes as a bare scalar and reads back from either for
 list is which slot, so a cleared middle slot needs `"cleared"` rather than a shortened list — the
 same word a whole emptied row uses, meaning the same thing one level down. Trailing empties are not
 written, so a short list read back means the rest are empty, and a list of nothing but the word
-reads as a cleared row. The two state words cannot collide with a control name, because the control
-encoding is a format this crate owns rather than `Debug` or serde on Bevy's own types — an upstream
-rename becomes a compile error in an exhaustive match while the stored string stays what it was. A
-logical key writes as `char/` and the character, `char/z`; the remainder is taken whole, so the
-separator needs no escape, and a name carrying anything but one character reads back as no control
-at all. `bindings`/`gamepad` sorts ahead of `bindings`/`keyboard_mouse` alphabetically rather than
-in `DeviceFamily`'s own declared order, and an empty `tunables` still gets a header — both accepted
+reads as a cleared row. The word cannot collide with a control name, because the control encoding is
+a format this crate owns rather than `Debug` or serde on Bevy's own types — an upstream rename
+becomes a compile error in an exhaustive match while the stored string stays what it was. A logical
+key writes as `char/` and the character, `char/z`; the remainder is taken whole, so the separator
+needs no escape, and a name carrying anything but one character reads back as no control at all.
+`bindings`/`gamepad` sorts ahead of `bindings`/`keyboard_mouse` alphabetically rather than in
+`DeviceFamily`'s own declared order, and an empty `tunables` still gets a header — both accepted
 costs of a plain, structurally reflected type over a hand-rolled one.
 
 A slot's chord rides the string the slot already has: each entry under the name a catalogue looks it

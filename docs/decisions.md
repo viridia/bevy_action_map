@@ -1374,16 +1374,20 @@ player is pairing state and which stick rests where is calibration state, both k
 device identity rather than by profile. That separation is what lets two players with identical
 controllers and identical mappings share one override table and differ only in pairing.
 
-### D46 — Three row states, not two
+### D46 — A cleared row is a state of its own
 
-**Decided.** A row is `Controls`, `Cleared`, or `NotOurs`. The loader knows all three and the
-writer never invents a row for the third.
+**Decided.** A row is `Slots` or `Cleared`, and absence is the third answer: use the default.
 
 **Rules out.** Absence as the only way to say nothing.
 
 **Reversal.** Absence already means "use the default", so a player who deliberately empties a row
-has nothing left to say with unless clearing has its own value. And an action an external backend
-owns must read as neither — writing a control there or treating it as emptied are both wrong.
+has nothing left to say with unless clearing has its own value.
+
+**Revised by chunk 151d**, which withdrew a third saved state, `NotOurs`, for a row an external
+backend owns. Once an authority is a binding (D92), its row is `Delegated` by declaration and holds
+no slots, so a screen has nothing to write there and nothing produced the state. A saved marker also
+answered the wrong question: whether a backend owns a row is the build's, not the player's. A file
+still carrying the old word reads it as an unknown control, and the row keeps its default.
 
 ### D47 — Applying is the only path in, and overrides do not compose
 
@@ -1436,7 +1440,7 @@ knows where the holes are.
 
 **Decided.** `key/Space`, `pad/South`, `key/ControlLeft+key/KeyS`. Written by hand rather than
 derived, with one table per family, a scalar accepted and written where a row holds one control, and
-the three row states spelled as words no control name could collide with.
+an emptied row spelled as a word no control name could collide with.
 
 **Rules out.** Deriving the wire format from Bevy's type names, and a shape that is unpleasant to
 edit by hand.
@@ -1636,7 +1640,7 @@ before evaluation samples once a tick, which is what a pulled call would have do
 still the right shape for is the half this does not cover — origins, glyphs, whether an action is
 bound at all, and delegating a rebind to the backend's own UI (R18.8, R19.8). Those are asked on
 demand by a settings screen rather than once a tick by the evaluator. `Prompts` is already that
-trait for the first three; chunks 151c and 151d are where a real backend implements it and delegates
+trait for the first three; chunks 151c and 151f are where a real backend implements it and delegates
 a rebind.
 
 **Superseded in part by D92**: `delegate` and the whole-action slot it allocates. The component

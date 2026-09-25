@@ -493,8 +493,8 @@ three `Fold` kinds partition correctly. R7.5's default half holds for a newly sp
 empty held-state map rather than by the require-reset latch. R24.4's app-build / runtime split is
 honoured at both panics.
 
-**Overrides and presentation.** R17.1 holds by construction, which is also D47. R17.7's three states
-round-trip and the two bare words cannot collide with a control name. R17.8 holds by construction.
+**Overrides and presentation.** R17.1 holds by construction, which is also D47. R17.7's two states
+round-trip and the bare word cannot collide with a control name. R17.8 holds by construction.
 R17.2's tolerance holds on both axes. R19.4's four resets exist. R19.16 holds in both directions.
 R19.9 holds at declaration — it is only the rewrite that lowers it, and that finding has landed. The
 tunable pass runs after the control rewrite and matches family as well as key. R18.1's context sort

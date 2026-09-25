@@ -163,11 +163,12 @@ fn redraw(world: &mut World) {
             .join(", ");
         let _ = writeln!(
             rebindable,
-            "    {:<22} {:<9} {bound}",
+            "    {:<22} {:<11} {bound}",
             mapping.key.fallback_label(),
             match mapping.rebind_policy {
                 RebindPolicy::Here => "[rebind]",
                 RebindPolicy::Fixed => "[fixed]",
+                RebindPolicy::Delegated => "[delegated]",
             },
         );
     }

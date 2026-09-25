@@ -214,6 +214,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 154  | An authority held at spawn is held over                               |
 | 151b | Disasteroids on Steam                                                 |
 | 155  | An authority that stops supplying a held action cancels it            |
+| 151d | A delegated row                                                       |
 
 ---
 
@@ -611,7 +612,7 @@ supplies, and prompt invalidation the backend drives. A Steam build of Disastero
 Friction, is the real backend. It lives in `steam_examples/`, beside `steam_probe/`, with its own
 `Cargo.toml` outside the workspace so `steamworks-sys` never builds in `verify.sh`.
 
-151c, 151d and 151e are independent of each other.
+151c, 151e and 151f are independent of each other.
 
 Every chunk here is an audit rather than a gate. It needs a running client, a pad, and a layout
 bound by hand (`docs/steam.md` S16), and no CI can run it.
@@ -659,38 +660,19 @@ R18.8, R18.9 and R18.10 against a real backend.
 - **Verified by:** the Steam build's hint line prompting for the pad with Steam's glyph, and
   changing after a rebind in the overlay.
 
-### 151d. A delegated row, and the rebind it delegates
+### 151f. The delegated row on the Steam controls screen
 
-What chunk 42 was, now that the authority is a binding: the half a controls screen asks for on
-demand.
+151d's row, drawn and activated.
 
-- **`RebindPolicy` gains a third state** (`docs/issues.md` 1022), which an authority binding's row
-  carries. `Here | Fixed` cannot tell a backend's row from an ordinary fixed one.
-- **Rebinding reports delegation as an outcome, not a failure** (R19.8), and R19.3's conflict
-  detection does not run on those rows.
-- **`mapped_parts` stops skipping authority bindings.** 151a skipped them so the override path could
-  never address a row with no control in it; once the row exists, the rewrite has to refuse such an
-  override itself.
 - **`settings.rs` learns the state in place**, not in a fork: the pad row reads as the backend's,
   and activating it triggers an event the Steam crate observes to call `show_binding_panel`. Base
   Disasteroids never produces such a row. The `examples/` diff is a screen learning a state.
-- **Whether R17.7's saved "not ours" state is still needed** once a declared binding says the same
-  thing is decided here.
 - **`common::widget_focus` answers the pad under Steam.** Its `ButtonFocused` and `StepperFocused`
   contexts bind the pad's buttons directly, and without `bevy_gilrs` nothing reaches them, so the
   Steam build's pad can move the selection but not press a focused button or step a stepper. Its
-  actions are private to the module, so the Steam crate cannot add an authority binding for them
-  from outside. Also an `examples/` diff, and the screen this chunk is already changing.
-- **Not doing: a backend trait.** Delegating a rebind is a call the game makes to a backend it
-  chose. A trait earns its place when a widget has to delegate without knowing its backend, which is
-  the presentation-crate row.
-- **Not doing: a game-wide "no pad" notice.** It would teach Steam's controller list, not this
-  crate; the delegated row already shows an authority's readiness where it changes what the player
-  can do.
-- **Not doing: naming which authority produced a value** (R0.5's queryable half), which has its own
-  deferred row.
-- **Verified by:** the Steam build's controls screen showing a keyboard row rebindable and its pad
-  row delegated, and the panel opening from it.
+  actions are private to the module, and a context is declared once, so the Steam crate cannot add
+  an authority binding for them from outside. Also an `examples/` diff, and the screen this chunk is
+  already changing.
 - **F12 goes.** `steam.rs`'s `open_binding_panel` is 151b's stand-in for the delegated row, kept so
   the demo could be bound in the meantime. It is deleted here, and the Steam README's step 3 binds
   through the row instead.
@@ -700,6 +682,14 @@ demand.
   S21) rather than accept a press it cannot honour. R19.8 names delegation as an outcome but not its
   failure, so a clause lands there too. How the row learns readiness is decided here: the screen may
   not reach into the backend (views redraw from state), so the backend publishes it.
+- **Not doing: a backend trait.** Delegating a rebind is a call the game makes to a backend it
+  chose. A trait earns its place when a widget has to delegate without knowing its backend, which is
+  the presentation-crate row.
+- **Not doing: a game-wide "no pad" notice.** It would teach Steam's controller list, not this
+  crate; the delegated row already shows an authority's readiness where it changes what the player
+  can do.
+- **Verified by:** the Steam build's controls screen showing a keyboard row rebindable and its pad
+  row delegated, and the panel opening from it.
 
 ### 151e. Split Friction on Steam
 
