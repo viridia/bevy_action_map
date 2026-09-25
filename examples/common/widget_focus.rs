@@ -44,7 +44,7 @@ impl WidgetKind {
 }
 
 /// True while the focused entity is tagged `kind`.
-fn focus_is(kind: WidgetKind) -> impl Fn(Res<InputFocus>, Query<&WidgetKind>) -> bool {
+pub fn focus_is(kind: WidgetKind) -> impl Fn(Res<InputFocus>, Query<&WidgetKind>) -> bool {
     move |focus, kinds| {
         focus
             .get()
@@ -56,13 +56,13 @@ fn focus_is(kind: WidgetKind) -> impl Fn(Res<InputFocus>, Query<&WidgetKind>) ->
 /// Presses whatever button is focused, whichever device asked.
 #[derive(InputAction)]
 #[action(path = "common.widget_focus.activate", output = bool, intent = Button)]
-struct Activate;
+pub struct Activate;
 
-/// Live only while a button has focus. Priority 20 rather than the default: the one screen in
-/// this game where a button is ever focused is [`Menu`](crate::actions::Menu), which is
-/// `exclusive` at priority 10 — exclusivity shadows a context at or below its own priority, so
-/// this has to outrank it to answer at all. Nothing else in the game binds `Enter`, `Space` or the
-/// pad's accept button, so nothing here needs `.consume()`.
+/// Live only while a button has focus. Priority 20 rather than the default: the one screen in this
+/// game where a button is ever focused is [`Menu`](crate::actions::Menu), which is `exclusive` at
+/// priority 10 — exclusivity shadows a context at or below its own priority, so this has to outrank
+/// it to answer at all. Nothing else in the game binds `Enter`, `Space` or the pad's accept button,
+/// so nothing here needs `.consume()`.
 #[derive(InputContext)]
 #[context(path = "common.widget_focus.button_focused", tick = Render, priority = 20)]
 pub struct ButtonFocused;
@@ -107,11 +107,11 @@ pub struct Adjusted {
 /// Moves whatever stepper is focused, whichever device or chevron asked.
 #[derive(InputAction)]
 #[action(path = "common.widget_focus.adjust", output = f32, intent = Analog1)]
-struct Adjust;
+pub struct Adjust;
 
 /// How long a held `Adjust` binding waits between repeats — the stepper's own equivalent of a
 /// menu's `MENU_REPEAT`, kept local rather than shared: the two have no reason to move together.
-const ADJUST_REPEAT: f32 = 0.2;
+pub const ADJUST_REPEAT: f32 = 0.2;
 
 /// Live only while a stepper has focus, at the same priority as [`ButtonFocused`] and for the same
 /// reason: it has to outrank `Menu` (priority 10, exclusive) to answer at all.
@@ -242,14 +242,10 @@ fn acquire_focus_directional(
     }
 }
 
-/// Wires up [`ButtonFocused`] and [`StepperFocused`], and spawns their one, permanent instance
-/// each.
+/// Wires up [`ButtonFocused`] and [`StepperFocused`], binds them, and spawns their one, permanent
+/// instance each.
 pub fn plugin(app: &mut App) {
-    // Required components, the same way `bevy_ui_widgets` itself handles `Pressed`,
-    // `InteractionDisabled` and the rest.
-    app.register_required_components_with::<Button, WidgetKind>(|| WidgetKind::BUTTON);
-    app.register_required_components_with::<Stepper, WidgetKind>(|| WidgetKind::STEPPER);
-    app.add_observer(acquire_focus_directional);
+    prepare_widgets(app);
 
     app.add_context::<ButtonFocused>(|controls| {
         controls.active_if(focus_is(WidgetKind::BUTTON));
@@ -273,5 +269,20 @@ pub fn plugin(app: &mut App) {
             .consume()
             .private();
     });
+}
+
+/// Everything [`plugin`] does except declare the two contexts, for a game whose pad does not reach
+/// the mapper as buttons.
+///
+/// Under a backend that owns the pad, `Activate` and `Adjust` come from an [`Authority`] rather
+/// than from `GamepadButton::South` and the D-pad, so the game declares [`ButtonFocused`] and
+/// [`StepperFocused`] itself, with [`focus_is`] as each one's activation condition. A context left
+/// undeclared still spawns, and warns.
+pub fn prepare_widgets(app: &mut App) {
+    // Required components, the same way `bevy_ui_widgets` itself handles `Pressed`,
+    // `InteractionDisabled` and the rest.
+    app.register_required_components_with::<Button, WidgetKind>(|| WidgetKind::BUTTON);
+    app.register_required_components_with::<Stepper, WidgetKind>(|| WidgetKind::STEPPER);
+    app.add_observer(acquire_focus_directional);
     app.add_systems(Startup, (button_focused.spawn(), stepper_focused.spawn()));
 }

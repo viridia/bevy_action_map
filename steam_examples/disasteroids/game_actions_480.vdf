@@ -62,6 +62,7 @@
 				"disasteroids.back"				"#Action_Back"
 				"disasteroids.clear"			"#Action_Clear"
 				"disasteroids.menu.toggle_settings"	"#Action_CloseSettings"
+				"common.widget_focus.activate"		"#Action_Activate"
 			}
 		}
 	}
@@ -85,6 +86,7 @@
 			"Action_Confirm"		"Apply and close"
 			"Action_Back"			"Back"
 			"Action_Clear"			"Clear cell"
+			"Action_Activate"		"Press selected button"
 		}
 	}
 }

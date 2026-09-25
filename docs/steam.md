@@ -452,6 +452,11 @@ So a layout is written against one manifest's text, and the player sees that tex
 layout's titles are whatever they were when it was bound, until the player rebinds that control;
 retitling an action means rebinding it in the shipped layout too.
 
+An added action behaved differently from a retitle. After a new action was installed in the
+manifest, the panel listed it on first opening, with no binding edited. The Steam client had been
+restarted in between, so whether the restart or the addition is what differs from the retitle is not
+measured.
+
 The overlay offers no file route in or out. Its "Export Layout" menu has "New Personal Save" and
 "New Sharable Personal Save", neither of which produces a file, and there is no import.
 
@@ -502,6 +507,17 @@ With the client a non-send resource, every system using it runs on the main thre
 showed one thread for the whole run. No dropout was seen in the runs that followed, each of which
 used the panel. The dropout never reproduced on demand, so the thread is its likely cause, not a
 proven one.
+
+### S29 — On macOS the demo has no overlay, and the guide button opens Game Center
+
+The guide button on an Xbox pad opened macOS's Game Center, not Steam's overlay. Shift+Tab, the
+overlay's configured shortcut, did nothing, whether the demo was started by `cargo run` or from a
+non-Steam Library shortcut; the game's other keys worked as usual in both. Why the overlay never
+appears is not known. `ShowBindingPanel` opened in every case.
+
+So a player who unbinds the controls screen's pad actions in the panel cannot reach a configurator
+from the pad; the keyboard is the way back. Not measured: whether macOS's controller settings can
+give the guide button back to Steam.
 
 ---
 

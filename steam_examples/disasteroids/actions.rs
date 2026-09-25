@@ -10,6 +10,9 @@ use bevy::prelude::*;
 use bevy_action_map::prelude::*;
 use bevy_input::{keyboard::KeyCode, mouse::MouseButton};
 
+use crate::common::widget_focus::{
+    ADJUST_REPEAT, Activate, Adjust, ButtonFocused, StepperFocused, WidgetKind, focus_is,
+};
 use crate::pause::{self, Game};
 use crate::ship::{BOMB_CHARGE, RELOAD};
 use crate::steam::{self, SteamActions};
@@ -182,11 +185,29 @@ pub fn plugin(app: &mut App) {
         controls.bind::<ToggleSettings>(PAD);
     });
 
+    // `widget_focus::plugin`'s two contexts, with the pad's button an authority. The pad has no
+    // stepper to adjust here: the dead-zone stepper is not on this build's screen.
+    app.add_context::<ButtonFocused>(|controls| {
+        controls.active_if(focus_is(WidgetKind::BUTTON));
+        controls.bind::<Activate>(KeyCode::Enter).press();
+        controls.bind::<Activate>(KeyCode::Space).press();
+        controls.bind::<Activate>(PAD).press();
+    });
+    app.add_context::<StepperFocused>(|controls| {
+        controls.active_if(focus_is(WidgetKind::STEPPER));
+        controls
+            .bind::<Adjust>(AxisButtons::new(KeyCode::Minus, KeyCode::Equal))
+            .pulse(ADJUST_REPEAT)
+            .consume()
+            .private();
+    });
+
     // Every context entity is where the backend writes, and the linked modules that spawn them know
     // nothing of Steam.
     app.register_required_components::<Flying, AuthorityValues>();
     app.register_required_components::<Shell, AuthorityValues>();
     app.register_required_components::<Menu, AuthorityValues>();
+    app.register_required_components::<ButtonFocused, AuthorityValues>();
 
     // Afterburner is absent: it follows Thrust, so Steam has nothing to supply for it.
     app.insert_resource(SteamActions::new(
@@ -205,6 +226,7 @@ pub fn plugin(app: &mut App) {
             steam::button::<Confirm>(),
             steam::button::<Clear>(),
             steam::button_as::<ToggleSettings>("disasteroids.menu.toggle_settings"),
+            steam::button::<Activate>(),
         ],
     ));
     app.add_systems(Update, choose_set);

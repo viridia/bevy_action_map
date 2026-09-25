@@ -216,6 +216,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 155  | An authority that stops supplying a held action cancels it            |
 | 151d | A delegated row                                                       |
 | 157  | The controls screen as a template with a slot                         |
+| 151f | The delegated row on the Steam controls screen                        |
 
 ---
 
@@ -510,6 +511,22 @@ name is only good if a key event can produce the same character — and nothing 
 - **Verified by:** a unit test on `single_character` (empty, one, two, uppercase), `from_name`'s
   existing `char/` tests unchanged, and no diff in `examples/`.
 
+### 158. Reserving an authority is an error
+
+`.reserved()` on an `Authority` binding reserves nothing: an authority has no controls, so
+`reserved` in `binding/builder.rs` collects none, and the declaration succeeds without a word. R4.8
+forbids a build that silently does nothing. Found in 151f, where the Steam build's pad reaches the
+controls screen only through authorities.
+
+- **`DiagnosticKind::ReservedAuthority`, an error**, found in `plan.rs` beside `ReservedAndMappable`
+  and `DeltaFromAuthority`, and listed in TD4's enum. Its message says the authority's own screen is
+  where its bindings are recovered (TD9.3).
+- **A clause in R4.8** names the case, since it is the requirement the silence breaks.
+- **Not doing: reserving through the backend.** Whether Steam can pin an action to a control is a
+  question about Steam, and the crate has nothing to ask it with.
+- **Verified by:** a unit test declaring `.reserved()` on an authority and finding the diagnostic,
+  and no diff in `examples/`, since no example reserves an authority.
+
 ### 112. A backend suppresses a device family at L0
 
 R0.6's other half, and the smallest it will ever be: `docs/steam.md` S1 and S3 killed the
@@ -613,7 +630,7 @@ supplies, and prompt invalidation the backend drives. A Steam build of Disastero
 Friction, is the real backend. It lives in `steam_examples/`, beside `steam_probe/`, with its own
 `Cargo.toml` outside the workspace so `steamworks-sys` never builds in `verify.sh`.
 
-151c, 151e and 151f are independent of each other.
+151c and 151e are independent of each other.
 
 Every chunk here is an audit rather than a gate. It needs a running client, a pad, and a layout
 bound by hand (`docs/steam.md` S16), and no CI can run it.
@@ -661,48 +678,6 @@ R18.8, R18.9 and R18.10 against a real backend.
 - **Verified by:** the Steam build's hint line prompting for the pad with Steam's glyph, and
   changing after a rebind in the overlay.
 
-### 151f. The delegated row on the Steam controls screen
-
-151d's rows, and a way into the screen that owns them.
-
-- **The Steam build's gamepad column has one button `below` its table**, which opens
-  `show_binding_panel`, observed in `steam.rs`. The pad rows stay listed as text. The presets and
-  the dead-zone stepper are not passed in: under Steam they could only be refused. `settings.rs`
-  never learns that delegation exists.
-- **`common::widget_focus` answers the pad under Steam.** Its `ButtonFocused` and `StepperFocused`
-  contexts bind the pad's buttons directly, and without `bevy_gilrs` nothing reaches them, so the
-  Steam build's pad can move the selection but not press a focused button or step a stepper. Its
-  actions are private to the module, and a context is declared once, so the Steam crate cannot add
-  an authority binding for them from outside. A second entry point binds `Authority(Gamepad)`
-  instead, the actions become public for the Steam table to name, and the manifest's menu set gains
-  them: Activate on A, Adjust as an analog on the D-pad in joystick mode, which the flight test
-  measures.
-- **F12 goes.** `steam.rs`'s `open_binding_panel` is 151b's stand-in for the delegated row, kept so
-  the demo could be bound in the meantime. It is deleted here, and the Steam README's step 3 binds
-  through the button instead.
-- **The button says when it cannot delegate.** Under 151b's F12, a pad asleep at launch meant Steam
-  reported no pad, `show_binding_panel` had none to open for, and the only sign was a log line: to
-  the player the key did nothing. The caption shows that state (no pad, or no Steam per S21) and a
-  press is ignored while it holds. The button is `steam.rs`'s own, so it redraws from Steam's state
-  without the screen reaching into the backend. R19.8 names delegation as an outcome but not its
-  failure, so a clause lands there too.
-- **What the game cannot reserve, the authority's recovery path covers.** Since 151b the pad's Back,
-  Navigate, Confirm and ToggleSettings are authority bindings, and this chunk adds Activate and
-  Adjust: a Steam player can unbind the way into and out of the controls screen, and `reserved`
-  cannot protect a control the crate never sees. What remains is the keyboard, and the guide button,
-  which a layout cannot take and which opens the overlay's configurator. A clause beside R19.8 says
-  so. **Measured here:** whether the overlay's configurator edits app 480's layout under the
-  borrowed id, where the README says the Library's does not; the answer is an S-entry, and if it
-  does not, the README says the keyboard is the demo's only way back.
-- **Not doing: a backend trait.** Delegating a rebind is a call the game makes to a backend it
-  chose. A trait earns its place when a widget has to delegate without knowing its backend, which is
-  the presentation-crate row.
-- **Not doing: a game-wide "no pad" notice.** It would teach Steam's controller list, not this
-  crate; the button already shows an authority's readiness where it changes what the player can do.
-- **Verified by:** the Steam build's controls screen showing a keyboard row rebindable, its pad rows
-  listed without cells, and the panel opening from the button; the button's caption with the pad
-  asleep and with Steam closed.
-
 ### 151e. Split Friction on Steam
 
 Two players are two `InputHandle_t`s, not two action sets (`docs/steam.md`'s appendix).
@@ -715,6 +690,9 @@ Two players are two `InputHandle_t`s, not two action sets (`docs/steam.md`'s app
 - **Brand is `InputType` mapped onto `GamepadBrand`**, or `Generic` where it has no answer (S7).
 - **Measured here:** whether a handle survives a relaunch and a client restart, which settles D74's
   claim either way.
+- **Measured here:** how Steam orders its connected pads with two awake, whether that order is
+  stable, and which pad `show_binding_panel` opens for. 151f's flight test saw Steam hesitate to
+  switch between the PS5 and Xbox layouts with both awake, cause unknown.
 - **Not doing: R15.9.** Steam has one account per machine, not one per controller.
 - **Verified by:** two pads joining, walking, and one unplugged mid-game with its held input
   released.
@@ -738,6 +716,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **A second virtual pad, and disconnecting one** | **a plan driving Split Friction, or one whose subject is a pad going away.** The client holds one pad's entity and connects it on first use, so a second is another entity and a `pad` step that says which; a disconnect is one more message on the one it already has. Neither is hard and neither has a caller: Disasteroids is one player who never unplugs anything, so nothing in tree can tell a pad from the pad |
 | **A presentation crate** (`bevy_action_map_ui`) | **Bevy deciding to take this crate upstream**, which is when the workspace has to be arranged properly regardless. Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written against the public API with nothing added to the crate for them. What is deferred is packaging, not work; the cost of waiting is a `#[path]` import. The crate's docs owe a game the warning `widget_focus.rs` carries today: `InputDispatchPlugin` in `DefaultPlugins` activates a focused `Button` on a key a context has consumed, so a game using both disables it |
 | **The generic tier's art** | **the presentation crate**, which is what has to ship an atlas with no holes in it. Kenney's generic set is blank, unlabeled buttons, so each generic face button needs a short text stamp authored onto it by hand: content work with a known answer, and no code. Until then an unrecognized pad's face buttons resolve to text, which is also where the fallback chain shows itself in tree, on Disasteroids' Cancel and Confirm and in the gallery's Generic brand |
+| **A stepper adjusted by a pad Steam owns** | **a Steam build whose screen has a stepper.** Chunk 151f binds `Activate` to an authority and leaves `Adjust` on the keyboard, because no stepper remains on the Steam controls screen. The base game gives Adjust only the D-pad's left and right, and only while a stepper has focus, so up and down still navigate. A Steam set gives an input to one action, so the faithful counterpart is an action-set layer switched on while a stepper has focus, not the D-pad in joystick mode for the whole menu. `adjust_focused_stepper` also passes an analog value through as the step, so it would need a sign taken first |
 | **Netcode injection and reconciliation** | a networked target. The injection point is built: an `Authority` binding and `AuthorityValues` (chunks 111 and 151a), so a peer's resolved action already has somewhere to go (D71). Rollback's local half — snapshot, restore, re-simulate — is chunk 83, which also takes the held-state containers. Injection targets L2 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs a remote player's resolved action to inject and a later correction to reconcile against it |
 | **Timestamped authority transitions** | **an authority that has edges to give**: a network peer, or a replay backend. `AuthorityValues` is a level sampled once a tick (D92), so a press and release between two of an authority's writes never reach the action and its resolution is its own poll. A peer or a replay that recorded the transitions would gain, and so might Steam Input: its action event callbacks may deliver ordered edges between polls, which `docs/steam.md` carries as an unmeasured question. Ordered is enough, since D4 has timestamps order events rather than time them. What it needs is somewhere to put them |
 | **Consumption-aware `FocusedInput` dispatch** (R8.2a) | **a game wanting `bevy_ui_widgets`' own widgets working generically, unmodified, without a context per widget kind.** A context per kind is the path to reach for first, and Disasteroids ships that way. A design for the filter was built and set aside: a lowest-priority, non-consuming context binding `ControlClass::AnyButton`, feeding dispatch through the existing class-binding pipeline rather than a second raw-message read — keyboard only, since every keyboard-driven widget observer at 0.20 gates on `ButtonState::Pressed` and none reacts to a release |

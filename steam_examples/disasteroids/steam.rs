@@ -7,8 +7,13 @@
 //! names and how to read each one, and the game fills it in.
 
 use bevy::prelude::*;
+use bevy::scene::SceneList;
+use bevy::ui_widgets::{Activate, Button};
 use bevy_action_map::prelude::*;
 use steamworks::{Client, Input};
+
+use crate::common::widget_focus::focusable;
+use crate::settings::{CHANGEABLE, FIXED, TITLE};
 
 /// Spacewar's, borrowed. `docs/steam.md` S4 covers what that does and does not allow.
 const APP_ID: u32 = 480;
@@ -128,6 +133,12 @@ pub fn stick<A: InputAction<Output = Vec2>>() -> SteamAction {
 
 /// Connects to Steam, or leaves the pad dead and the keyboard working if there is no client.
 pub fn plugin(app: &mut App) {
+    // Ahead of the client, since the button has to say when there is none.
+    app.add_systems(
+        Update,
+        caption.run_if(any_with_component::<BindingPanelButton>),
+    );
+
     let client = match Client::init_app(APP_ID) {
         Ok(client) => client,
         Err(error) => {
@@ -143,25 +154,69 @@ pub fn plugin(app: &mut App) {
     }
     app.insert_non_send(Steam(client));
     app.add_systems(PreUpdate, poll.before(ActionMapSystems::Evaluate));
-    app.add_systems(Update, open_binding_panel);
 }
 
-/// TEMPORARY, removed by chunk 151f: F12 opens Steam's binding panel for the first pad, until the
-/// controls screen's delegated row does it properly.
-fn open_binding_panel(
-    keys: Res<ButtonInput<KeyCode>>,
-    steam: NonSend<Steam>,
-    controllers: Query<&SteamController>,
-) {
-    if !keys.just_pressed(KeyCode::F12) {
+/// The button under the pad's table on the controls screen, which opens Steam's binding panel.
+///
+/// The pad's rows are Steam's to change, so the screen lists them and this is the way to change
+/// them. Its caption says when Steam cannot open the panel, and a press is ignored while that
+/// holds.
+pub fn binding_panel() -> Box<dyn SceneList> {
+    Box::new(bsn_list! {
+        BindingPanelButton
+        Button
+        on(open_binding_panel)
+        @focusable()
+        Text::new("")
+        TextFont { font_size: 14.0_f32 }
+        TextColor(TITLE)
+        BorderColor::all(FIXED)
+        Node {
+            align_self: AlignSelf::Start,
+            border: {UiRect::all(Val::Px(1.0))},
+            border_radius: {BorderRadius::all(Val::Px(4.0))},
+            padding: {UiRect::axes(Val::Px(12.0), Val::Px(3.0))},
+        }
+    })
+}
+
+#[derive(Component, Default, Clone, Copy)]
+struct BindingPanelButton;
+
+/// Opens the panel for the pad that flies the ship.
+///
+/// `NonSend` in an observer relies on commands being applied on the main thread, which the
+/// executors do but do not document. Were that to change, this panics rather than misbehaves.
+fn open_binding_panel(_: On<Activate>, steam: Option<NonSend<Steam>>) {
+    let Some(steam) = steam else {
         return;
+    };
+    let input = steam.0.input();
+    if let Some(&pad) = connected(&input).first()
+        && !input.show_binding_panel(pad)
+    {
+        warn!("Steam did not open its binding panel");
     }
-    match controllers.iter().next() {
-        Some(pad) => info!(
-            "show_binding_panel -> {}",
-            steam.0.input().show_binding_panel(pad.0)
-        ),
-        None => warn!("show_binding_panel: no pad"),
+}
+
+/// Says whether a press will open the panel, and why not.
+fn caption(
+    steam: Option<NonSend<Steam>>,
+    controllers: Query<(), With<SteamController>>,
+    mut buttons: Query<(&mut Text, &mut BorderColor), With<BindingPanelButton>>,
+) {
+    let (caption, border) = if steam.is_none() {
+        ("Steam is not available", FIXED)
+    } else if controllers.is_empty() {
+        ("Steam sees no pad", FIXED)
+    } else {
+        ("Change in Steam", CHANGEABLE)
+    };
+    for (mut text, mut color) in &mut buttons {
+        if text.0 != caption {
+            text.0 = caption.into();
+        }
+        color.set_if_neq(BorderColor::all(border));
     }
 }
 

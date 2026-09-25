@@ -1271,7 +1271,9 @@ and response curves ([IGA file][steam-iga]).
   that backend's own UI (Steam's [`ShowBindingPanel`][steam-isteaminput]) rather than presenting our
   capture flow. The rebinding API must be able to report "not rebindable here, delegate instead" as
   a normal outcome — and R19.3's conflict detection does not apply to those bindings, since we do
-  not own the rules.
+  not own the rules. Delegation can be unavailable: the backend may be absent, or hold no device to
+  open its screen for. A screen offering delegation must show that, and must not accept a press that
+  does nothing.
 
 ### The presentation model
 

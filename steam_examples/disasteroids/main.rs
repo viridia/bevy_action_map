@@ -18,8 +18,6 @@ mod asteroids;
 mod field;
 #[path = "../../examples/disasteroids/overlay.rs"]
 mod overlay;
-#[path = "../../examples/disasteroids/pad_presets.rs"]
-mod pad_presets;
 #[path = "../../examples/disasteroids/pause.rs"]
 mod pause;
 #[path = "../../examples/disasteroids/saved_controls.rs"]
@@ -72,10 +70,9 @@ fn main() {
             pause::plugin,
             overlay::plugin,
             settings::plugin,
-            pad_presets::plugin,
             saved_controls::plugin,
             prompt_ui::plugin,
-            widget_focus::plugin,
+            widget_focus::prepare_widgets,
         ))
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))
         .insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)))
@@ -91,8 +88,9 @@ fn camera() -> impl Scene {
     bsn! { Camera2d }
 }
 
-/// Both families' tables, with the base game's presets under the pad's until this build has a way
-/// into Steam's own screen to put there instead.
+/// Both families' tables, with the way into Steam's binding panel under the pad's. The base game's
+/// presets and dead-zone stepper are left out: every pad row is Steam's, so they could only be
+/// refused.
 fn controls_screen() -> impl Scene {
     use settings::{ControlsScreen, MappingColumn};
 
@@ -103,7 +101,7 @@ fn controls_screen() -> impl Scene {
                 --
                 @MappingColumn {
                     @family: DeviceFamily::Gamepad,
-                    @below: {pad_presets::remapping()},
+                    @below: {steam::binding_panel()},
                 }
             },
         }
