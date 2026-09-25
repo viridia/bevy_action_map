@@ -612,10 +612,35 @@ supplies, and prompt invalidation the backend drives. A Steam build of Disastero
 Friction, is the real backend. It lives in `steam_examples/`, beside `steam_probe/`, with its own
 `Cargo.toml` outside the workspace so `steamworks-sys` never builds in `verify.sh`.
 
-151c, 151e and 151f are independent of each other.
+151c, 151e and 151f are independent of each other; 151f follows 157.
 
-Every chunk here is an audit rather than a gate. It needs a running client, a pad, and a layout
-bound by hand (`docs/steam.md` S16), and no CI can run it.
+Every chunk here but 157 is an audit rather than a gate. It needs a running client, a pad, and a
+layout bound by hand (`docs/steam.md` S16), and no CI can run it.
+
+### 157. The controls screen as a template with a slot
+
+Base Disasteroids' controls screen, restructured so a build can say how its pad is remapped. The
+presets, the dead-zone stepper and the hold/toggle switch are one strategy for that, and the Steam
+build's is another: a way into Steam's own screen. Today the first is written into `settings.rs`, so
+the second has nowhere to go but a fork. An internal change: the game does not change.
+
+- **`ControlsScreen` is a `SceneComponent`** whose props are one slot,
+  `gamepad_remapping: Box<dyn SceneList>`, on the model of `FeathersDialogProps`. The slot is named
+  for what fills it, the controls that remap the pad besides its cells, not for where it sits. Its
+  scene function is layout: the title, the two tables with their headings, the slot under the pad
+  table, the three buttons, the help line and the refusal line.
+- **A `MappingTable(DeviceFamily)` fills itself** from `mappings` in an `On<Ready>` observer, so the
+  props carry no snapshot of the world. `Ready` rather than `Add`: it fires once the table's own
+  children exist, so the rows land after the heading.
+- **The presets, the stepper and the switch move to `pad_presets.rs`**, with their observers and
+  their share of `redraw_pending`. `PendingOverrides` and `working_copy` become visible to it.
+- **Each build spawns the screen**, ordered after `seed_pending`, passing its slot's contents. The
+  Steam build passes `pad_presets` too until 151f.
+- **Not doing: a slot for the keyboard.** Its cells are its remapping, and nothing yet wants to put
+  anything beside them.
+- **Verified by:** `disasteroids/rebind.py` passing unchanged, which selects cells and preset
+  buttons by `Name` and so checks the selectors survived the move; and the Steam build still
+  compiling (`verify.sh --full`).
 
 ### 156. Navigating from no focus
 
@@ -662,34 +687,44 @@ R18.8, R18.9 and R18.10 against a real backend.
 
 ### 151f. The delegated row on the Steam controls screen
 
-151d's row, drawn and activated.
+151d's rows, and a way into the screen that owns them.
 
-- **`settings.rs` learns the state in place**, not in a fork: the pad row reads as the backend's,
-  and activating it triggers an event the Steam crate observes to call `show_binding_panel`. Base
-  Disasteroids never produces such a row. The `examples/` diff is a screen learning a state.
+- **The Steam build fills 157's slot with one button** that opens `show_binding_panel`, observed in
+  `steam.rs`. The pad rows stay listed as text. The presets and the dead-zone stepper are not passed
+  in: under Steam they could only be refused. `settings.rs` never learns that delegation exists.
 - **`common::widget_focus` answers the pad under Steam.** Its `ButtonFocused` and `StepperFocused`
   contexts bind the pad's buttons directly, and without `bevy_gilrs` nothing reaches them, so the
   Steam build's pad can move the selection but not press a focused button or step a stepper. Its
   actions are private to the module, and a context is declared once, so the Steam crate cannot add
-  an authority binding for them from outside. Also an `examples/` diff, and the screen this chunk is
-  already changing.
+  an authority binding for them from outside. A second entry point binds `Authority(Gamepad)`
+  instead, the actions become public for the Steam table to name, and the manifest's menu set gains
+  them: Activate on A, Adjust as an analog on the D-pad in joystick mode, which the flight test
+  measures.
 - **F12 goes.** `steam.rs`'s `open_binding_panel` is 151b's stand-in for the delegated row, kept so
   the demo could be bound in the meantime. It is deleted here, and the Steam README's step 3 binds
-  through the row instead.
-- **A delegated row says when it cannot delegate.** Under 151b's F12, a pad asleep at launch meant
-  Steam reported no pad, `show_binding_panel` had none to open for, and the only sign was a log
-  line: to the player the key did nothing. The row has to show that state (no pad, or no Steam per
-  S21) rather than accept a press it cannot honour. R19.8 names delegation as an outcome but not its
-  failure, so a clause lands there too. How the row learns readiness is decided here: the screen may
-  not reach into the backend (views redraw from state), so the backend publishes it.
+  through the button instead.
+- **The button says when it cannot delegate.** Under 151b's F12, a pad asleep at launch meant Steam
+  reported no pad, `show_binding_panel` had none to open for, and the only sign was a log line: to
+  the player the key did nothing. The caption shows that state (no pad, or no Steam per S21) and a
+  press is ignored while it holds. The button is `steam.rs`'s own, so it redraws from Steam's state
+  without the screen reaching into the backend. R19.8 names delegation as an outcome but not its
+  failure, so a clause lands there too.
+- **What the game cannot reserve, the authority's recovery path covers.** Since 151b the pad's Back,
+  Navigate, Confirm and ToggleSettings are authority bindings, and this chunk adds Activate and
+  Adjust: a Steam player can unbind the way into and out of the controls screen, and `reserved`
+  cannot protect a control the crate never sees. What remains is the keyboard, and the guide button,
+  which a layout cannot take and which opens the overlay's configurator. A clause beside R19.8 says
+  so. **Measured here:** whether the overlay's configurator edits app 480's layout under the
+  borrowed id, where the README says the Library's does not; the answer is an S-entry, and if it
+  does not, the README says the keyboard is the demo's only way back.
 - **Not doing: a backend trait.** Delegating a rebind is a call the game makes to a backend it
   chose. A trait earns its place when a widget has to delegate without knowing its backend, which is
   the presentation-crate row.
 - **Not doing: a game-wide "no pad" notice.** It would teach Steam's controller list, not this
-  crate; the delegated row already shows an authority's readiness where it changes what the player
-  can do.
-- **Verified by:** the Steam build's controls screen showing a keyboard row rebindable and its pad
-  row delegated, and the panel opening from it.
+  crate; the button already shows an authority's readiness where it changes what the player can do.
+- **Verified by:** the Steam build's controls screen showing a keyboard row rebindable, its pad rows
+  listed without cells, and the panel opening from the button; the button's caption with the pad
+  asleep and with Steam closed.
 
 ### 151e. Split Friction on Steam
 
