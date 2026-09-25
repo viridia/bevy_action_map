@@ -212,6 +212,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 152  | A follower rides its leader's authority                               |
 | 153  | A preset skips a family an authority owns                             |
 | 154  | An authority held at spawn is held over                               |
+| 151b | Disasteroids on Steam                                                 |
 
 ---
 
@@ -522,13 +523,13 @@ per-device policy D22 assumed, so what is left is a family switch.
   `cfg` interaction, since suppression has to compile with each family absent.
 - **Not doing: keyboard and mouse.** Steam emulates both alongside the pad (S1) and the family
   switch would silence them wholesale, which is wrong — a player using a pad through Steam still
-  types. Whether Steam can emit keys for a pad while the game reads Steam Input natively is
-  unmeasured, and chunk 151b measures it. This chunk suppresses what a backend actually owns and
-  leaves that one open.
+  types. Steam does emit keys and mouse motion for a pad while the game reads Steam Input natively
+  (S27), as events nothing can tell from the real devices', so no family switch reaches them. This
+  chunk suppresses what a backend actually owns.
 - **Steam does not need this for the pad.** A Steam build without `bevy_gilrs` has no hardware event
   to suppress, and it runs cleanly with the client absent (`docs/steam.md` S21), so one binary
   serves both launches without switching anything off. Replay is this chunk's only customer for the
-  gamepad family. Whether Steam can inject keys for a pad is still open, below.
+  gamepad family.
 - **Not doing: R0.4's per-family split**, which lives at L2 and landed as chunk 151a.
 
 ### 28. Docs that run
@@ -599,7 +600,7 @@ supplies, and prompt invalidation the backend drives. A Steam build of Disastero
 Friction, is the real backend. It lives in `steam_examples/`, beside `steam_probe/`, with its own
 `Cargo.toml` outside the workspace so `steamworks-sys` never builds in `verify.sh`.
 
-154 lands before 151b's flight test. 151c and 151d are independent of each other; 151e follows 151b.
+151c, 151d and 151e are independent of each other.
 
 Every chunk here is an audit rather than a gate. It needs a running client, a pad, and a layout
 bound by hand (`docs/steam.md` S16), and no CI can run it.
@@ -642,41 +643,6 @@ flight test, cause unknown; the route found in the code is a pointer press on em
   hold it, and it would undo a deliberate click-away.
 - **Verified by:** a `disasteroids/pad.py` step that clears `InputFocus` and navigates, if the
   driver can clear it; by hand otherwise.
-
-### 151b. Disasteroids on Steam
-
-Built and running: `steam_examples/` (its own workspace; `main.rs`, `actions.rs`, `steam.rs`, the
-manifest and a README), `verify.sh --full` running clippy on it, `.gitignore`. S21–S23 are recorded,
-and D22 and chunk 112 updated from S21. What is left needs the author's hardware, and follows 154.
-
-- **Flight test: passed**, every action in both sets, and a held control surviving the switch (chunk
-  154). Nothing left.
-- **Record S24: `ActivateActionSet` takes effect one frame late.** Measured in the flicker log: the
-  frame after a switch still reads the old set. `steam.rs` therefore supplies nothing on a switch
-  frame, so every action held on the next arrives unsupplied-then-held and chunk 154 holds it over;
-  without that, a button meaning one action in each set closed and reopened the controls screen on
-  every press. Record the rule with S24: a backend treats a change of set as a gap in supply.
-- **Measured here still:** a pad control mapped to a key while the game reads Steam Input; and the
-  `absolute_mouse` delta, with `steam_probe`'s `look` bin and `game_actions_look.vdf` (gitignored
-  bench). Both to `docs/steam.md`.
-- **The pad drops out after the binding panel.** Twice, shortly after the panel closed, every action
-  went inactive with the pad still connected; once it stayed so for 70 s, then Steam reported the
-  pad gone though it was awake and paired, and only a restart recovered it. Not reproducible on
-  demand. Steam expects `run_callbacks` from one thread, and a temporary log showed `poll` moving
-  across four workers nearly every frame, so `Steam` is now non-send and polled on the main thread.
-  The first run so built printed one, `ThreadId(1)`. If the dropout recurs anyway, the cause is
-  elsewhere and it goes to `docs/issues.md` with what is known; if the rest of 151b's runs are
-  clean, the fix stands and the rule goes into `docs/steam.md`.
-- **Remove the scaffolding.** The F12 `open_binding_panel` system and the two diagnostic logs in
-  `poll` (what is written, and the thread) are marked temporary and go before landing; 151d's
-  delegated row replaces F12. The README's step 3 binds through it, and the Library's configurator
-  is no substitute (S25), so removing it leaves the README no way to bind until 151d lands.
-  `target/Disasteroids.app` is an untracked Library launcher and needs nothing.
-- **A brief for S12's upstream fix**, for the author to post. Drafted in the session that built
-  this; rewrite from S12 if lost.
-- **Not doing:** prompts (151c) or the settings screen's pad rows (151d), which show as unbound
-  until then; action set layers, which S20 makes unnecessary; Windows. `steam_probe/` stays
-  gitignored, as the bench `docs/steam.md` is measured on.
 
 ### 151c. Prompts from Steam's origins
 
@@ -729,6 +695,9 @@ demand.
   deferred row.
 - **Verified by:** the Steam build's controls screen showing a keyboard row rebindable and its pad
   row delegated, and the panel opening from it.
+- **F12 goes.** `steam.rs`'s `open_binding_panel` is 151b's stand-in for the delegated row, kept so
+  the demo could be bound in the meantime. It is deleted here, and the Steam README's step 3 binds
+  through the row instead.
 - **A delegated row says when it cannot delegate.** Under 151b's F12, a pad asleep at launch meant
   Steam reported no pad, `show_binding_panel` had none to open for, and the only sign was a log
   line: to the player the key did nothing. The row has to show that state (no pad, or no Steam per
@@ -791,7 +760,7 @@ Every row states its gate. A row with no gate is an item that will be dropped, w
 | **An authority backend's actions in rollback** (D22's remainder) | a snapshot to fit them into. `AuthorityValues` is a plain component and clones with the entity, but what a rewind has to reproduce is what the authority *said* on the tick being re-simulated, which is not in the frame. The available answer is recording the backend's output into the frame at sample time, at the cost of a larger frame |
 | **Sub-frame event timing** (D4's remainder) | [bevy#9087][] upstream. Gamepad stays frame-quantized regardless until gilrs polling is rewritten, so mixed fidelity across sources is permanent for now rather than an artifact |
 | **Schedule enforcement for tick domains** (D9's remainder) | Bevy giving a `SystemParam` a way to know its own schedule. A plugin-time validation pass and a debug assertion stand in |
-| **An authority on a `Delta2` action** (Steam's `absolute_mouse`) | **a Steam build of a game with a look action**, most likely chunk 121's camera. Chunk 151a refuses the declaration. The design: a delta must be folded once, where a level may be read by every tick, so a context folds a `Delta2` authority value only when `AuthorityValues` has changed since that context's evaluator last ran, and zero otherwise. That is the frame cursor's rule for real mouse motion, with the component's change as the cursor; an explicit write counter is the alternative if change detection proves too implicit. What Steam's delta is measured since is 151b's measurement and decides only how a backend polls, not what the crate does |
+| **An authority on a `Delta2` action** (Steam's `absolute_mouse`) | **a Steam build of a game with a look action**, most likely chunk 121's camera. Chunk 151a refuses the declaration. The design: a delta must be folded once, where a level may be read by every tick, so a context folds a `Delta2` authority value only when `AuthorityValues` has changed since that context's evaluator last ran, and zero otherwise. That is the frame cursor's rule for real mouse motion, with the component's change as the cursor; an explicit write counter is the alternative if change detection proves too implicit. Steam's delta accumulates since the last read and the read consumes it (S26), so a backend reads it once per frame; that decides how a backend polls, not what the crate does |
 | **OS gestures as binding sources** (R13.7) | **a game that wants one, and can say what it should do.** Pinch, rotation, pan and double-tap arrive as `bevy_input::gestures` events — window-level, carrying no pointer and no entity — so they are the wheel's shape rather than picking's, which is why section 13 keeps them where it withdrew the rest of the pointer. What is missing is not a mechanism: the design questions are what a pinch's units are and whether it wants the modifier chain a stick does, and neither can be answered without a customer to ask |
 | **Suspend/resume** (R16.3; mobile, console) | a platform target that needs it. Nothing in this crate's supported platforms emits a suspend signal or has a device re-enumeration step to hook |
 | **Split Friction's monsters, spawners and missiles** | a mechanic that would exercise input this crate has not already proven. Kept as a row rather than deleted because the sprites, the dungeon's region aspects and a `Fire`-shaped action all exist, so changing our mind is cheap |

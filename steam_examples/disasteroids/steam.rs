@@ -20,7 +20,7 @@ const MAX_CONTROLLERS: usize = 16;
 /// The Steam client, kept for as long as the app runs.
 ///
 /// Non-send, so every system using it runs on the main thread. Steam expects `run_callbacks` from
-/// one thread, and a system left to the scheduler moves between workers from frame to frame.
+/// one thread (S28), and a system left to the scheduler moves between workers from frame to frame.
 struct Steam(Client);
 
 /// One pad as Steam sees it.
@@ -146,8 +146,8 @@ pub fn plugin(app: &mut App) {
     app.add_systems(Update, open_binding_panel);
 }
 
-/// TEMPORARY, remove before landing: F12 opens Steam's binding panel for the first pad, until chunk
-/// 151d's delegated row does it properly.
+/// TEMPORARY, removed by chunk 151d: F12 opens Steam's binding panel for the first pad, until the
+/// controls screen's delegated row does it properly.
 fn open_binding_panel(
     keys: Res<ButtonInput<KeyCode>>,
     steam: NonSend<Steam>,
@@ -175,16 +175,7 @@ fn poll(
     controllers: Query<(Entity, &SteamController)>,
     mut contexts: Query<&mut AuthorityValues>,
     mut commands: Commands,
-    mut last_written: Local<String>,
-    mut last_thread: Local<Option<std::thread::ThreadId>>,
 ) {
-    // TEMPORARY, remove before landing: whether this runs on one thread, which Steam expects of
-    // `run_callbacks`.
-    let thread = std::thread::current().id();
-    if *last_thread != Some(thread) {
-        info!("Steam polled from {thread:?}");
-        *last_thread = Some(thread);
-    }
     steam.0.run_callbacks();
     let input = steam.0.input();
     input.run_frame();
@@ -260,12 +251,6 @@ fn poll(
         {
             (action.read)(&input, pad, action.handle, &mut values);
         }
-    }
-    // TEMPORARY, remove before landing: what the backend writes, frame by frame.
-    let written = format!("{values:?}");
-    if *last_written != written {
-        info!("Steam writes {written}");
-        *last_written = written;
     }
     for mut context in &mut contexts {
         context.clone_from(&values);

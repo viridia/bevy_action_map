@@ -188,7 +188,8 @@ inner loop.
 `get_connected_controllers` calls `Vec::shrink_to`, a capacity hint, where it means `truncate`. It
 always returns 16 handles with the tail zeroed, so a caller iterating the result processes fifteen
 phantom controllers. `get_connected_controllers_slice` returns the true count and is the workaround.
-Upstream, one line, worth reporting; chunk 151b writes the brief.
+Reported upstream as [steamworks-rs#345](https://github.com/Noxime/steamworks-rs/issues/345), with
+the one-line fix.
 
 ### S13 — A dotted action name survives into Steam's namespace
 
@@ -222,8 +223,6 @@ Ground rule 5 applies here as everywhere: each row names what would settle it.
 | --- | --- |
 | **Do action set *layers* stack, where base sets do not?** `S19` settled the base case; layers are D51's intended answer and `steamworks` 0.13 exposes none of the functions | a patched `steamworks`, or a direct FFI call past the safe wrapper |
 | **Does the emulated pad carry Valve's vendor id on Windows?** `S1` is a macOS measurement, and D22's original claim may have described Windows | a Windows machine with the same pad |
-| **Can a player's configuration emit keyboard and mouse events for a pad while the game reads Steam Input natively?** `S1` found `Keyboard-1` and `Mouse-1` alongside the emulated pad. They exist whether or not they emit, and only a binding that maps a pad control to a key would make them. If that combination is reachable, suppressing the gamepad family does not stop it, and the input arrives as ordinary keyboard events the game has no reason to distrust | chunk 151b: a bound configuration, so `S6` first, then a hand-edited config that maps a pad control to a key |
-| **What is an `absolute_mouse` action's delta measured since?** `S18` measured `joystick_move`, a position. `absolute_mouse` reports movement, and whether it is movement since the last `RunFrame` or since the last read of that action decides how a backend has to poll it | chunk 151b: the right stick bound to an `absolute_mouse` test action, logged across frames with and without a second read |
 | **Does an `InputHandle_t` survive a restart?** D74 leans on it for a persistent identity, while this document's appendix follows D52 in treating a handle as runtime-only. S14's layout — vendor, product, instance suffix, kept on disk — suggests it survives, from one sample | chunk 151e: the same pad's handle read across two launches, and across a client restart |
 | **A wired Xbox pad on macOS is invisible to raw IOHID enumeration, but Steam still reads it.** Plugged in over USB-C, the same pad opens macOS's own Game Center overlay on its Home button — a system-level claim — and `padprobe` (raw gilrs, `IOHIDManager`) sees nothing from it at all; the identical pad over Bluetooth is ordinary and gilrs sees it fine. Steam Input reads the wired pad regardless, so it has some access path an `IOHIDManager` consumer does not | a packet capture or Steam's own logging against the same wired pad, or confirmation from Valve on how Steam Input acquires a macOS-claimed HID device |
 | **Do action event callbacks carry every edge between two `RunFrame`s?** `EnableActionEventCallbacks` delivers a `SteamInputActionEvent_t` per change, from inside `RunFrame` or `RunCallbacks`, with the action's data and no timestamp. If a press and a release made between two polls arrive as two events in order, Steam Input supplies ordered edges, which is all D4 asks of a timestamp, and a backend could preserve a sub-poll tap. If only the state at the poll arrives, it is a level with extra steps. `steamworks` 0.13.1 does not wrap it; `steamworks-sys` has the raw call, and its callback takes no user data, so events go through a global queue | a probe registering the callback and running a deliberately slow frame, 100 ms, with quick taps: two events per tap or one |
@@ -400,6 +399,20 @@ The probe's manifest was copied over the demo's while the client was running, an
 the probe resolved the probe's names with no client restart. `S4` said where the file is read from;
 this is when.
 
+### S24 — An action set switch takes effect at the next `RunFrame`
+
+The demo polls in the order `RunFrame`, `ActivateActionSet`, then the action reads. On the frame a
+switch is made, every read still returns the old set's data: its actions active, the new set's
+inactive. The new set reads from the next frame on.
+
+Measured as a flicker. Disasteroids binds Y in both sets, to open the controls screen in one and
+close it in the other. Read straight through the switch, the Y still held from opening reached the
+screen as a press of the other set's Y, and the screen closed and reopened on every press.
+
+So a backend treats a change of set as a gap in supply: on the switch frame it supplies nothing. An
+action still held on the next frame then arrives unsupplied-then-held, which the mapper holds over
+until release rather than reading it as a fresh press.
+
 ### S25 — A personal layout is one file per account, app and controller type, and copies the manifest
 
 Binding through `ShowBindingPanel` forks the layout in force (`S16`) and writes the fork to
@@ -441,6 +454,54 @@ retitling an action means rebinding it in the shipped layout too.
 
 The overlay offers no file route in or out. Its "Export Layout" menu has "New Personal Save" and
 "New Sharable Personal Save", neither of which produces a file, and there is no import.
+
+### S26 — An `absolute_mouse` delta accumulates since the last read, and the read consumes it
+
+`steam_probe`'s `look` bin, the right stick bound to one `absolute_mouse` action and held at one
+steady deflection through three phases:
+
+| Phase | Frame | First read, `x` | Second read, same frame |
+| --- | --- | --- | --- |
+| 0 | 51 ms | about 233 | — |
+| 1 | 51 ms | about 233 | `0.000`, every frame |
+| 2 | 17 ms | about 75 | — |
+
+The second read is always zero, so the delta is movement since the last read, not since `RunFrame`.
+Phase 2 against phase 0 is 0.32 against a frame-time ratio of 0.33, so the value is displacement
+accumulated over the interval rather than a rate. `eMode` reads `AbsoluteMouse`; the units are
+Steam's own and unscaled to ±1.0, unlike `S18`'s position.
+
+So a backend reads an `absolute_mouse` action exactly once per frame and hands that one value to
+every consumer. A second read anywhere, a second context polling Steam on its own, gets nothing.
+
+### S27 — Steam's emulated keyboard and mouse reach a game reading Steam Input natively
+
+In Disasteroids, with the pad read through Steam Input, the left stick's click was bound to the
+keyboard key F1 in the binding panel. The panel offers a key only for an input with a behavior: the
+stick's own behavior menu lists modes and game actions, and a Click row, which takes a key, appears
+once the behavior is set. Clicking the stick toggled the debug overlay, which the game binds to F1
+on the keyboard.
+
+The key arrives as an ordinary Bevy keyboard event. At the OS it comes from Steam's `Keyboard-1`
+under Valve's vendor id (`S1`), but Bevy's keyboard events carry no device, so nothing in the game
+can tell it from the keyboard. Suppressing the gamepad family does not reach it, and suppressing the
+keyboard would silence the real one.
+
+The mouse behaves the same way. With the left stick's behavior set to Joystick Mouse, the stick
+moved the pointer over the game's window.
+
+### S28 — Steam is polled from one thread
+
+The Steamworks SDK asks for `RunCallbacks` from one thread. A Bevy system taking the client as an
+ordinary resource does not get that: a logged run showed the polling system on four worker threads,
+changing nearly every frame. In that build the pad twice went dead shortly after the binding panel
+closed, every action inactive with the pad still connected, and once Steam then reported it
+disconnected though it was awake and paired; only a restart recovered it.
+
+With the client a non-send resource, every system using it runs on the main thread, and the log
+showed one thread for the whole run. No dropout was seen in the runs that followed, each of which
+used the panel. The dropout never reproduced on demand, so the thread is its likely cause, not a
+proven one.
 
 ---
 
