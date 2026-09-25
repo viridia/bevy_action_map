@@ -844,9 +844,9 @@ that ships no catalogue.
 
 ### 9.1 Mappings
 
-A **mapping** is the named thing a player rebinds; a **slot** is one position in it, holding one
-control and whatever that control's binding requires held alongside it. A screen draws one cell per
-slot.
+A **mapping** is a row a player rebinds: one action, in one device family. A **slot** is one
+position in the row, holding a control and whatever that control's binding requires held alongside
+it. A screen draws one cell per slot.
 
 ```rust
 pub struct ActionMapping {
@@ -868,21 +868,22 @@ pub struct BoundSlot {
 }
 ```
 
-**A slot carries its chord**, in the same `ControlOrigin` terms `Prompt::with` uses and for the same
-reason: a modifier stands for either key of its pair, and `Control` can only name one of the two. A
-row that dropped it would list `Ctrl+N` as "N" while the caption built from the same binding went on
-reading `Ctrl+N`. `ActionMapping::controls()` is the bare-control view, for reading only.
+**Reading the list.** `mappings(world)` returns the rows as bound now, and
+`declared_mappings(world)` the defaults, for a reset preview. The list is flat across every context
+and names no action type or context type, so a screen written against it works for a game it was not
+compiled with. Grouping is the caller's: by `category` for headings, by `family` for which device's
+rows to show.
 
-**The slot is also what an override writes**, and it says everything about what is bound there. A
-screen edits the slots it read and hands them back to `Overrides::bind`; `rewrite` gives the binding
-at that position the slot's control *and* its chord. Whether a new control keeps the old modifier is
-therefore the screen's choice, made by which it writes: assigning `slot.control` keeps the chord, a
-fresh `BoundSlot::from(control)` drops it. A grown slot takes its chord from the slot too, not from
-the primary it was cloned from. A chord entry must be something a player can hold — a modifier or a
-button of ours — and anything else is refused as `NotChordable`.
+**Keys.** A row's key is the action's path, with a composite part's name appended:
+`gameplay.move.up`. `mappable_as` replaces the path and still appends the part. `mappable` itself
+takes no arguments, and the row's family comes from its control.
 
-**Four listing states, plus followers.** A binding is listed and fixed unless it says otherwise, or
-binds an authority:
+Bindings that derive the same key, in the same family, for the same action merge into one row, which
+is how a game ships a default primary and secondary. An action's keyboard and gamepad rows stay
+separate, and two different actions deriving one key are reported as a collision.
+
+**Which bindings are listed.** A binding is listed and fixed unless it says otherwise, or binds an
+authority:
 
 | declaration | listed | rebindable |
 | --- | --- | --- |
@@ -892,49 +893,50 @@ binds an authority:
 | `follow::<F, L>()` | on `L`'s row, as a subordinate line | with `L`'s row |
 | `Authority(family)` | yes, with no slots | in the authority's own screen |
 
-**A delegated row** is the authority binding's. `mapped_parts` lists it under the action's key with
-`BindingPart::Whole` and no control, so it merges with nothing and holds no slots, and its followers
-attach to it as to any row. A screen reads `Delegated` as the answer to "rebind this": the call to
-the backend's own screen is the game's. A write that reaches the row anyway is refused ahead of the
-preset exemption (TD10.1), which is also what keeps `rewrite` from addressing a part with no
-control. `mappable` on an authority binding panics, and `private` hides it as it hides any row.
-Conflicts cannot land on it, having no slots. A control of the authority's family on the same action
-shares its key, and the policy mismatch is left to `BoundAndDelegated` rather than reported twice.
+**Slots.** A slot carries its chord as `ControlOrigin`s, the terms `Prompt::with` uses, because a
+modifier stands for either key of its pair and a `Control` names only one. Without it, a row would
+list `Ctrl+N` as "N" while the caption built from the same binding read `Ctrl+N`.
+`ActionMapping::controls()` gives the bare controls, for reading only.
 
-`mappable` takes no arguments. The parts of a composite name themselves, so a key derives as
-`gameplay.move.up`, and the family is inferred from the control. `mappable_as` replaces the action's
-path in that key where one is needed; the part is still appended.
+A slot is `None` when the player cleared it and a later slot is still bound. Clearing a primary
+leaves the secondary in the second column, because position is what primary and secondary mean. Only
+an override makes a gap, so a row derived from declared bindings is always dense. Trailing empties
+are dropped, and a row with nothing left is `Override::Cleared`.
 
-**A row has no declared width.** `slots` is however many controls the row holds, and how many cells
-to draw beside them is the screen's own decision — a table with a spare column draws one more than
-the row holds and a capture fills it. Declaring two mappable bindings of one action in one family is
-how a game ships a default primary *and* secondary: they merge into one row with two slots, not two
-rows.
+A row has no declared width. `slots` holds as many controls as the row has, and how many cells to
+draw is the screen's decision: a table with a spare column draws one more, for a capture to fill.
 
-**A slot may be empty.** `None` is a cell the player cleared with something still bound after it, so
-clearing a primary leaves the secondary in the second column rather than promoting it — position is
-what primary and secondary mean. Only an override makes a gap; an author cannot declare one, so a
-row derived from bindings alone is always dense. Trailing empties are not kept: a row is as long as
-its last filled slot, and a row with nothing left is `Override::Cleared` rather than a list of
-`None`s.
+**Writing a slot.** A screen edits the slots it read and hands them to `Overrides::bind`. `rewrite`
+gives the binding at each position the slot's control and its chord, so what the screen writes
+decides whether a new control keeps the old modifier: assigning `slot.control` keeps the chord, and
+a fresh `BoundSlot::from(control)` drops it. A grown slot takes its chord from the slot, not from
+the primary it was cloned from. A chord entry must be a modifier or a button; a stick, mouse motion,
+or a control only a backend knows has no pressed state to hold, and is refused as `NotChordable`.
 
-Because a binding list records what is bound and never in which column, a gap cannot be recovered by
-re-deriving rows from the rewritten bindings. `rewrite` therefore carries the accepted override's
-own list through to the presentation rows — the derivation stays the authority on *which* controls,
-and the override on where the holes are.
+The gaps live in the override, as `None` in `Override::Slots` or the whole row as
+`Override::Cleared`. The bindings `rewrite` produces from it have no columns: a cleared primary is
+an absent binding, so a row derived from them would promote the secondary. `rewrite` therefore
+carries the override's list through to the rows: the bindings decide which controls, and the
+override where the gaps are.
 
-**`MaxSlots` is the one length the crate has an opinion about**, and only on the apply path: a game
-that reads override sets it did not write inserts the resource, and a row naming more controls than
-that comes back as `TooManyControls` rather than being applied. Without the resource there is no
-limit, which is what a game whose save files are its own already assumes.
+**A delegated row** stands for an authority binding. `mapped_parts` lists it under the action's key
+with `BindingPart::Whole` and no control, so it merges with nothing and has no slots; its followers
+attach as to any row. Its policy is `Delegated`, which a screen answers by offering the backend's
+own binding screen, and opening that screen is the game's job.
 
-A capture can reach past it, because a capture fills the cell the player pressed and a screen may
-draw more columns than the game's own ceiling allows. That is the app disagreeing with itself about
-two numbers it owns both of, so the crate warns once when a session opens for a slot at or past the
-ceiling rather than refusing the session: `slot >= limit` settles it without looking the row up, and
-the apply path is still what turns the row down.
+Having no slots, a delegated row cannot take part in a conflict. A write that reaches it anyway is
+refused ahead of the preset exemption (TD10.1), which also keeps `rewrite` from addressing a part
+with no control. `mappable` on an authority binding panics, and `private` hides it like any row. A
+control of the authority's family on the same action shares its key, and the mismatch is reported
+once, as `BoundAndDelegated`.
 
-Uniqueness is per family, and two mappable bindings collide only when they name different actions.
+**`MaxSlots`** is the only length limit the crate enforces, and only when applying overrides. A game
+that loads override sets it did not write inserts the resource, and a row naming more controls comes
+back as `TooManyControls` instead of being applied. Without the resource there is no limit.
+
+A capture can reach past the limit, since it fills whichever cell the player pressed. The crate
+warns once when a session opens for a slot at or past the limit, deciding by `slot >= limit` without
+looking the row up, and lets the session run: applying the row is what refuses it.
 
 **Tunables** are named, typed values a player adjusts:
 
@@ -943,14 +945,9 @@ pub enum TunableValue { Range { value: f32, min: f32, max: f32 }, Bool(bool) }
 ```
 
 A tunable overwrites one field of one modifier already on a binding, and is applied by the same
-variant-plan recompile a rebind uses. `Tunable` carries its key and value; the type is what lets a
-UI render a slider or a checkbox without knowing what it drives.
-
-**Reading the list.** `mappings(world)` returns what is bound *now*; `declared_mappings(world)` the
-defaults, for a reset preview. `tunables` and `declared_tunables` are the same pair. Both lists are
-flat across every context, and nothing in them names an action type or a context type, so a screen
-written against them works for a game it was not compiled with. Grouping is the caller's: by
-`category` for headings, by `family` for which device's worth to show.
+variant-plan recompile a rebind uses. `Tunable` carries its key and value; the value's type is what
+lets a UI draw a slider or a checkbox without knowing what it drives. `tunables` and
+`declared_tunables` list them as `mappings` and `declared_mappings` list rows.
 
 ### 9.2 Prompts
 

@@ -139,7 +139,7 @@ be delegable to the backend's own UI.
   bindings.
 - **R0.5 (MUST)** Consumers of action state (gameplay code, prompts) must not need to know which
   backend produced it. Backend identity is queryable but never required at the call site.
-- **R0.6 (MUST)** _(D22)_ A backend that is authoritative for a device must be able to suppress that
+- **R0.6 (MUST)** _(D93)_ A backend that is authoritative for a device must be able to suppress that
   device at **L0**, so its raw events never reach the input frame at all — R0.4 stops our bindings
   reading the family the backend owns, not sampling the hardware underneath it. The same capability
   lets a replay backend mute live hardware while it plays.

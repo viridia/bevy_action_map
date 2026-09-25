@@ -516,8 +516,8 @@ name is only good if a key event can produce the same character — and nothing 
 
 ### 112. A backend suppresses a device family at L0
 
-R0.6's other half, and the smallest it will ever be: `docs/steam.md` S1 and S3 killed the
-per-device policy D22 assumed, so what is left is a family switch.
+R0.6's other half, and the smallest it will ever be: `docs/steam.md` S1 and S3 rule out suppressing
+one device, so what is left is a family switch (D93).
 
 - **A resource naming the suppressed families**, read by `sample_input` (`frame.rs:304`) as a guard
   around each family's own `MessageReader` loop. Nothing above L1 changes, because a suppressed
@@ -527,9 +527,8 @@ per-device policy D22 assumed, so what is left is a family switch.
   succeeds.
 - **Replay is what justifies this, not Steam.** A replay backend mutes live hardware in a build that
   compiled the driver in (R0.6, R10.8), which no build configuration expresses. A Steam build can
-  instead take `bevy/gamepad` without `bevy_gilrs` and produce no hardware event to suppress; D22
-  records why the chunk stands anyway, and which of its old reasons was assumed rather than
-  measured.
+  instead take `bevy/gamepad` without `bevy_gilrs` and produce no hardware event to suppress, which
+  is why D93 rests on replay.
 - **Not a Cargo feature on this crate**, because a feature that removes behaviour is not additive.
 - **Per family rather than per device** because per device is not implementable, not because it is
   cheaper. S3: Steam hands out an `InputHandle_t` and nothing relates it to an OS device. If Valve
@@ -662,6 +661,56 @@ Two players are two `InputHandle_t`s, not two action sets (`docs/steam.md`'s app
 - **Not doing: R15.9.** Steam has one account per machine, not one per controller.
 - **Verified by:** two pads joining, walking, and one unplugged mid-game with its held input
   released.
+
+## Sweeps
+
+Each of these passes over a whole document or module, and runs on a Tuesday: the weekly token budget
+refreshes Tuesday at 10pm, so that is when a sweep spends budget that would otherwise lapse. A sweep
+lands a unit at a time, as a lettered chunk (159a, 159b, …) small enough to finish in one session,
+and a unit is never left half done. A unit starts and ends with `scripts/growth.py`, so its effect
+is measured rather than asserted, and its section's **Done** line records it.
+
+### 159. Compressing `docs/decisions.md`
+
+The preamble's "What an entry keeps", applied to every entry: each keeps what going back would cost
+and the facts that make a rejected alternative worse, and loses the argument for a choice between
+equals and the story of how a revised entry got where it is.
+
+- **A unit is one topical section**, or ten entries where a section is longer.
+- **An entry holding two decisions is split**, and every citation of it is re-pointed in the same
+  unit. A fact about an external system moves to `docs/steam.md` if it is not already there.
+- **Not doing:** changing a decision. An entry whose reasons no longer hold goes to
+  `docs/issues.md`, not into a rewrite.
+- **Verified by:** `scripts/xref.py`, and the unit's `growth.py` numbers.
+- **Done:** D22, the sample, which halved and became D22 and D93.
+
+### 160. An editorial pass on `docs/design.md`
+
+For order and clarity, not length: TD9.1, the sample, lost a tenth of its words. Most of the
+document was written by an earlier model and has not been edited as a whole.
+
+- **A unit is one section, and makes three checks:** the order follows a reader; every claim the
+  pass rewords is checked against the source; and every name and term is one this reader has already
+  met, with the layer named where two could answer. TD9.1 needed all three: its "binding list" meant
+  the bindings `rewrite` produces, beside prose about the override's list.
+- **Largest sections first**, from `growth.py`.
+- **Not doing:** changing the mechanism. A claim the source contradicts goes to `docs/issues.md`.
+- **Verified by:** `scripts/xref.py`, and the unit's `growth.py` numbers.
+- **Done:** TD9.1.
+
+### 161. Public items nothing outside `src/` names
+
+`growth.py --api` lists public items that no example or integration test names; the ones outside the
+prelude are the candidates, 48 at the first run.
+
+- **Each gets one of three answers:** made `pub(crate)`, where it is public only because its module
+  is (`Scratch`, `run_captures` and `sample_input` look like that); kept, with an example or test
+  made to use it, where it is API nothing has exercised; or left alone, where it is reached without
+  being named, as a builder a closure receives or an extension trait the prelude brings in.
+- **A unit is one module**, and folds in any tier-5 finding in `docs/issues.md` about the same
+  items.
+- **Narrowing visibility breaks the public API**, which costs nothing until the first publish.
+- **Verified by:** `scripts/verify.sh`, since this one changes code, and the examples do not change.
 
 ---
 

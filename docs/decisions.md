@@ -11,6 +11,13 @@ Each entry says what was decided, what it rules out, and what reversing it would
 decision has an accepted price or an unresolved remainder, that is stated rather than left for a
 reader to discover.
 
+**What an entry keeps.** An entry is read by someone weighing whether to reverse it, so it keeps
+what would change their mind: what going back would cost, and each fact that makes a rejected
+alternative worse, cited so that its expiry can be noticed. A choice between alternatives that were
+equally good needs no argument; saying it was arbitrary is enough, and tells the reader nothing is
+waiting down the other path. An entry that has been revised states the decision as it now stands,
+not how the argument got there.
+
 Numbers are identities, and an entry is never renumbered — a withdrawn one is struck and kept.
 
 `Requirements.md` tags requirements with these numbers, and is the only other document that cites
@@ -45,6 +52,7 @@ here, so there is one `D`-numbering in the project.
 | **D20** | We own the whole dead-zone chain, in three stages, with one rescaling         | TD8.4     |
 | **D21** | Calibration is measured by an explicit step, never detected                   | TD8.4     |
 | **D22** | Backends enter at two seams, not one                                          | —               |
+| **D93** | A backend suppresses a whole device family, and the game declares it         | —               |
 | **D23** | Focus integrates by activation, and interception is static                    | —               |
 | **D24** | One crate, feature-gated by source                                            | TD11      |
 | **D25** | What must not move upstream                                                   | —               |
@@ -710,60 +718,30 @@ structural commitment, not a display one.
 assume our binding tables exist, and rebinding must be delegable to someone else's UI. A design that
 assumes our tables are always the authority cannot be retrofitted with any of those.
 
-**Still open.** An authority backend's actions may not be able to participate in rollback at all,
-since their state is not reproducible from our frames. The available answer is to record the
-backend's output into the frame at sample time, at the cost of a larger frame.
+**Still open.** Whether an authority's actions can take part in rollback, which is X23.
 
-**Also.** A backend authoritative for a device must be able to suppress that device at the source
-layer, so its raw events never reach the frame. Preventing us from _computing_ an action the backend
-owns does not stop us _sampling_ the hardware underneath it — and Steam presents a pad it is driving
-as an emulated gamepad, which the platform enumerates and we sample, so every input arrives twice.
-The same capability is what lets a replay backend mute live hardware.
+### D93 — A backend suppresses a whole device family, and the game declares it
 
-**Checked against `steamworks` 0.13, the Rust binding of the Steamworks SDK.** ISteamInput has no
-call that suppresses the emulated pad — that emulation is a per-title setting the player controls in
-the Steam client, not something a game can query or toggle.
+**Decided.** A backend authoritative for a device family can have this crate stop sampling that
+family at L0, so its raw events never reach the frame (R0.6). The game declares it, through the
+backend's plugin. Replay is what needs it: a replay mutes live hardware at runtime, in a build that
+compiled the driver in, and no build configuration expresses that (R10.8). A Steam build needs none:
+without `bevy_gilrs` it has no hardware pad event to suppress (`docs/steam.md` S21).
 
-**Device-identity filtering was the plan, and it does not work.** This decision proposed dropping
-raw events from a Valve-vendor device while a Steam authority was active for that family, on the
-theory that an emulated pad enumerates under Valve's own vendor id and so needs no mechanism beyond
-the one D64 built for `GamepadBrand`. It asked for that id to be confirmed against a running client
-before a real backend shipped. Measured, it is wrong: the emulated pad carries Microsoft's vendor id
-and the Xbox 360 product id, sharing a vendor with the hardware underneath it (`docs/steam.md` S1),
-and nothing in the API relates Steam's controller handle to an OS device (S3). There is no way to
-identify *which* device is the emulation.
+**Rules out.**
 
-**What replaces it: suppression is per family, declared by the game.** A game that ships a Steam
-build knows it does; it tells this crate to stop recording a whole device family at L0, and the
-sampler skips that family's events. Wholesale rather than per device because per device is not
-implementable, not because it is cheaper — if Valve ever exposes a handle-to-device mapping the
-policy narrows and nothing above L0 notices. Declared rather than detected, because a suppression
-that silently turns itself on and off between runs is the worst kind of input bug to diagnose.
+- **Suppressing one device.** Steam's emulated pad carries the vendor and product id of the hardware
+  under it (`docs/steam.md` S1), and nothing relates Steam's controller handle to an OS device (S3),
+  so the emulation cannot be told apart. If Valve exposes that mapping, the policy can narrow with
+  nothing above L0 noticing.
+- **Detecting when to suppress.** A suppression that switches itself on and off between runs is the
+  worst kind of input bug to diagnose.
+- **A Cargo feature on this crate.** A feature that removes behaviour breaks Cargo's additive rule:
+  one crate in the graph enabling it would silence gamepads for every other.
 
-**Replay is what the switch is for; Steam is the contingent case.** A replay backend mutes live
-hardware in a build that compiled the driver in, switching at runtime, and no build configuration
-expresses that (R0.6, R10.8). Steam may need nothing here: Bevy's `gamepad` and `bevy_gilrs` are
-separate features and `bevy_gilrs` enables `gamepad` rather than the reverse, so a Steam build can
-take the types and the connection systems without the driver — and then no hardware event is
-produced to suppress. Per-channel builds are the expected shape, a storefront SDK being a coupled
-integration that already ships a dylib another channel's build does not.
-
-**Not a Cargo feature on this crate.** A feature that *removes* behaviour breaks Cargo's additive
-rule: one crate in the graph enabling it would silence gamepads for every other. A game declining
-`bevy/bevy_gilrs` is the opposite shape and is fine. What that costs is feature unification — any
-dependency asking for the driver turns it back on for the whole graph — which is build discipline
-rather than a rule violation, and `cargo tree` shows it.
-
-**One reason here was assumed, not measured.** This decision argued that a Steam build launched with
-the client absent must still read its pads, and therefore that one binary has to serve both. Since
-measured (S21): init fails, the game runs on, and one binary does serve both. It needs no switch to
-do so, because a Steam build without `bevy_gilrs` has no hardware pad event to mute, and without the
-client its pad is simply dead. The switch stands on replay, which never depended on the answer.
-
-**The gap this leaves** is keyboard and mouse. Steam creates emulated devices for both alongside the
-pad (S1), and suppressing the gamepad family does not touch them. Whether a configuration can emit
-keys for a pad while the game reads Steam Input natively is unmeasured, and `docs/steam.md` carries
-the question.
+**Reversal.** Narrowing to one device changes nothing above L0. Detection or a feature would take
+the declaration out of every backend's plugin, and the replay case would lose the runtime switch it
+exists for.
 
 ### D23 — Focus integrates by activation, and interception is static
 

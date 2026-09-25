@@ -49,11 +49,11 @@ With Steam Input enabled for Xbox controllers, four HID devices are present:
 The emulated *pad* enumerates under Microsoft's vendor id with the Xbox 360 controller's product
 id. Valve's own vendor id appears only on the emulated keyboard and mouse.
 
-**Contradicts D22**, which proposed dropping raw events from a Valve-vendor device while a Steam
-authority is active, and closed by asking for exactly this measurement before a real backend ships.
-Vendor id cannot separate the emulated pad from the hardware underneath it, because they share one.
-Product id can here, but `0x028e` is also what a genuine Xbox 360 pad reports, so it identifies a
-model rather than an emulation.
+**Contradicts D22 as first written**, which proposed dropping raw events from a Valve-vendor device
+while a Steam authority is active, and closed by asking for exactly this measurement before a real
+backend ships. D93 is what replaced that proposal. Vendor id cannot separate the emulated pad from
+the hardware underneath it, because they share one. Product id can here, but `0x028e` is also what a
+genuine Xbox 360 pad reports, so it identifies a model rather than an emulation.
 
 ### S2 — The double-read is real
 
@@ -223,7 +223,7 @@ Ground rule 5 applies here as everywhere: each row names what would settle it.
 | --- | --- |
 | **Why does a rebind show only when the game's window gains focus?** `S30`: the origins are asked every frame, and the panel losing focus is ruled out. Either Steam answers the old origins until the game has focus, or the game stopped asking while unfocused. Which one decides whether a panel docked beside the game can ever update it live | a log line per frame from the origin poll while the game is unfocused after a rebind: lines with the old origins point at Steam, no lines at the game |
 | **Do action set *layers* stack, where base sets do not?** `S19` settled the base case; layers are D51's intended answer and `steamworks` 0.13 exposes none of the functions | a patched `steamworks`, or a direct FFI call past the safe wrapper |
-| **Does the emulated pad carry Valve's vendor id on Windows?** `S1` is a macOS measurement, and D22's original claim may have described Windows | a Windows machine with the same pad |
+| **Does the emulated pad carry Valve's vendor id on Windows?** `S1` is a macOS measurement, and the Valve-vendor claim D93 replaced may have described Windows | a Windows machine with the same pad |
 | **Does an `InputHandle_t` survive a restart?** D74 leans on it for a persistent identity, while this document's appendix follows D52 in treating a handle as runtime-only. S14's layout — vendor, product, instance suffix, kept on disk — suggests it survives, from one sample | chunk 151e: the same pad's handle read across two launches, and across a client restart |
 | **A wired Xbox pad on macOS is invisible to raw IOHID enumeration, but Steam still reads it.** Plugged in over USB-C, the same pad opens macOS's own Game Center overlay on its Home button — a system-level claim — and `padprobe` (raw gilrs, `IOHIDManager`) sees nothing from it at all; the identical pad over Bluetooth is ordinary and gilrs sees it fine. Steam Input reads the wired pad regardless, so it has some access path an `IOHIDManager` consumer does not | a packet capture or Steam's own logging against the same wired pad, or confirmation from Valve on how Steam Input acquires a macOS-claimed HID device |
 | **Do action event callbacks carry every edge between two `RunFrame`s?** `EnableActionEventCallbacks` delivers a `SteamInputActionEvent_t` per change, from inside `RunFrame` or `RunCallbacks`, with the action's data and no timestamp. If a press and a release made between two polls arrive as two events in order, Steam Input supplies ordered edges, which is all D4 asks of a timestamp, and a backend could preserve a sub-poll tap. If only the state at the poll arrives, it is a level with extra steps. `steamworks` 0.13.1 does not wrap it; `steamworks-sys` has the raw call, and its callback takes no user data, so events go through a global queue | a probe registering the callback and running a deliberately slow frame, 100 ms, with quick taps: two events per tap or one |
@@ -617,13 +617,12 @@ per device, so a Steam backend writes `AuthorityValues` on the instance belongin
 the path asks for a raw button state, which is what makes it work here at all.
 
 **Pairing lives in Steam's namespace, and `DeviceHandle` extends to say so.** `Paired` holds a
-`DeviceHandle` naming a Bevy gamepad, where Steam offers an `InputHandle_t`, and `S3` and `S14`
-say the two cannot be joined. That would be a problem only if both device sources were live at
-once — and they are not: suppression is per family and wholesale (D22), so gamepads are Steam's or
-`gilrs`'s and never both. With no gilrs gamepad to reconcile against, a third `DeviceHandle`
-variant carrying the backend's own handle is the whole of it, and D52 already frames a handle as a
-runtime value no save file may compare across a restart, which is exactly what an `InputHandle_t`
-is.
+`DeviceHandle` naming a Bevy gamepad, where Steam offers an `InputHandle_t`, and `S3` and `S14` say
+the two cannot be joined. That would be a problem only if both device sources were live at once —
+and they are not: suppression is per family and wholesale (D93), so gamepads are Steam's or
+`gilrs`'s and never both. With no gilrs gamepad to reconcile against, a third `DeviceHandle` variant
+carrying the backend's own handle is the whole of it, and D52 already frames a handle as a runtime
+value no save file may compare across a restart, which is exactly what an `InputHandle_t` is.
 
 **And no new variant is needed.** `DeviceHandle::Gamepad` already holds a bare `Entity` and the
 crate never looks inside it: nothing in `src/` queries Bevy's `Gamepad` component, and the crate's
