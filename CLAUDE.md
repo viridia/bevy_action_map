@@ -29,6 +29,7 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 | `docs/comparison.md` | how this crate differs from BEI and LWIM | someone asks why this exists |
 | `docs/one-way-doors.md` | what stops being revisable if an input crate goes upstream | upstreaming comes up |
 | `docs/issues.md` | findings awaiting routing, in five tiers by severity | a finding needs routing, or you are about to re-find one |
+| `docs/deferred.md` | work decided against for now, in entries `X<n>`, each with its gate | a gate may have fired (a Bevy bump is the first group), or you are about to defer something |
 | `docs/steam.md` | what a running Steam client actually does, in entries `S<n>` | a decision rests on how an external backend behaves |
 | `bevy_remote_driver/docs/requirements.md` | numbered requirements for the remote test driver, `DR<section>.<n>` | a chunk touches the driver, or cites a DR-number |
 | `bevy_remote_driver/docs/design.md` | how the driver works, in sections `DD<n>` | you are writing or running an end-to-end test against a live example — see "Verification" for the command |
@@ -62,7 +63,7 @@ not positions.
   deleted from the sequence. What it taught, if durable, becomes an entry in `docs/decisions.md`.
 - **Ground rule 5 is the one that bites:** nothing outstanding may be left without a destination. An
   item with no chunk number is an item that will be dropped. "Later" and "its own decision" are not
-  destinations — the deferred table with a stated gate is.
+  destinations — an entry in `docs/deferred.md` with a stated gate is.
 
 ## Ground rules
 
@@ -91,6 +92,7 @@ Each document admits one kind of thing, and the test is what distinguishes them.
 | `Requirements.md` | normative statements | Can it be violated? If nothing could violate it, it is design. |
 | `Roadmap.md` | work not done, and gaps | Does it name something that will change? If it describes the present, it is design. |
 | `docs/issues.md` | findings not yet routed | Is something wrong, and has no chunk taken it? A finding with a chunk belongs to the chunk. |
+| `docs/deferred.md` | work decided against for now | Has the decision been made, and is it "not yet"? Name the event that reopens it; with no event, it is dropped. |
 | `CLAUDE.md` | process | Is it about the work rather than about the crate? |
 
 **What has been built is described in exactly one place, `docs/design.md`.** Four documents used to

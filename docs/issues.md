@@ -1,9 +1,10 @@
 # Findings awaiting triage
 
 The triage queue: things known to be wrong, missing, or out of proportion that the author has not
-yet decided what to do about. An entry leaves when that decision is made — given a chunk, a deferred
-row in `Roadmap.md`, a decision in `docs/decisions.md`, or dropped — and whatever it knew goes with
-it to that destination. Nothing here describes what the crate does, which is `docs/design.md`'s job.
+yet decided what to do about. An entry leaves when that decision is made — given a chunk, an entry
+in `docs/deferred.md`, a decision in `docs/decisions.md`, or dropped — and whatever it knew goes
+with it to that destination. Nothing here describes what the crate does, which is `docs/design.md`'s
+job.
 
 **How to read an entry.** Each says where the problem is, what someone would actually observe, and
 whether it was confirmed by running something or only by reading. Many were found by a model asked
@@ -239,7 +240,7 @@ R23.6 · `InputContextState::new` and `apply_frame` are both `pub(crate)`
 TD6 says "a test or replay harness can drive one directly." From outside, the only way to get an
 instance is to spawn an entity and the only way to advance one is `App::update`. The struct's
 freedom from ECS references is real and unreachable, and R23.6's standalone half has no citation
-anywhere. The netcode deferred row is where this plausibly already belongs.
+anywhere. X35, netcode injection, is where this plausibly already belongs.
 
 ### 1027 Two documentation requirements with no document
 
@@ -308,8 +309,8 @@ a rule rather than a coin flip.
 - **Serializing whole binding definitions (R17.6, R22.16) has no destination at all.** The scan
   found it called "deferred" inside a bullet of chunk 17c — no row, no gate, which is what ground
   rule 5 forbids in as many words. 17c has since landed, so that bullet went with its section, and
-  what is left is a parenthetical inside the physical-binding-label row saying the serialization is
-  "still deferred" while gating something else. Both are MAYs, so the stakes are small and the
+  what is left is a parenthetical inside X12, the physical-binding label, saying the serialization
+  is "still deferred" while gating something else. Both are MAYs, so the stakes are small and the
   omission is not.
 - **The R7.5 opt-out is exercised by a test and nothing else.** `activate_including_held` now has a
   caller — a unit test in `src/eval.rs` — where at the time of the scan it had none. What is still
@@ -429,13 +430,13 @@ accepts an rc. What stops a publish now is a judgement — that nothing ships wh
 a release candidate — and 0.20.0 has no stable release yet.
 
 That makes the finding sharper rather than smaller. The thing that was guaranteeing nobody published
-by accident is gone, and `Roadmap.md` still has no release chunk, no deferred row gated on the 0.20
-release, and no checklist of what must be true before the first publish — which by ground rule 5 is
-an item that will be dropped. The work that is release-shaped is scattered through chunks whose
+by accident is gone, and `Roadmap.md` still has no release chunk, no deferred entry gated on the
+0.20 release, and no checklist of what must be true before the first publish — which by ground rule
+5 is an item that will be dropped. The work that is release-shaped is scattered through chunks whose
 descriptions do not mention it: 151a replaced `delegate`, public API that is "cheap now, breaking
 later", and nothing said that was a publishing deadline rather than a preference.
 
-_Fix:_ a deferred row gated on the Bevy 0.20 release would be the smallest thing that stops this
+_Fix:_ a deferred entry gated on the Bevy 0.20 release would be the smallest thing that stops this
 being forgotten. What belongs in it is the ordering question rather than the date.
 
 ### 1054 Deriving a pane's persistent identity is boilerplate every game rewrites
@@ -507,8 +508,8 @@ press that opened the session, and a refused press is claimed so it does not als
 nor `is_claimed` enforces exclusivity, which is what lets two players share one keyboard.
 
 **Excluded rather than missed**, both already recorded: `apply_overrides_for` discards the rewritten
-rows, which is the per-entity presentation deferred row; and `Override::NotOurs` leaves the crate's
-binding live rather than silencing it, which is R0.6 and chunk 112's.
+rows, which is chunk 143's; and `Override::NotOurs` leaves the crate's binding live rather than
+silencing it, which is R0.6 and chunk 112's.
 
 **Plausible and wrong**, from a later scan that read these as defects. `chord_claims` on
 `InputContextState` is written every fold: `fold` destructures `self`, so the name there is the

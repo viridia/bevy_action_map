@@ -413,9 +413,9 @@ default is right: a refactor is free, and breaking a player's settings takes a d
 
 The input frame is built, and is what this crate's own tests drive; a recorder and replay backend on
 top of it are not. The network half is **designed and not proven**: there is no testbed in tree that
-sends anything over a wire, and Roadmap.md's deferred table says so, gated on a networked target.
-The injection point it would use is built: an `Authority` binding and `AuthorityValues`, through
-which `examples/pong_robot` drives a paddle.
+sends anything over a wire, and deferred.md's X35 says so, gated on a networked target. The
+injection point it would use is built: an `Authority` binding and `AuthorityValues`, through which
+`examples/pong_robot` drives a paddle.
 
 Mocking at the action level (BEI, LWIM) and replaying at the frame level (this crate, for local
 determinism) are not the same test. The first tests your game logic; the second also tests your
@@ -516,7 +516,7 @@ upstream inclusion.
 **Touch.** None of the three has touch bindings. This crate has a `touch` feature flag that is
 currently a stub.
 
-**Mouse wheel.** BEI and LWIM have it. This crate does not (Roadmap.md's deferred table).
+**Mouse wheel.** BEI and LWIM have it. This crate does not yet (chunk 122 in Roadmap.md).
 
 ---
 

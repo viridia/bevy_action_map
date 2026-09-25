@@ -642,7 +642,7 @@ dispatch level. Unity: no arbitration for PassThrough actions, first-match for o
 - **R8.2a (MUST)** Consumption governs what reaches other _contexts_, and cannot govern what reaches
   a consumer outside this crate that reads device events directly — `bevy_ui_widgets` activating a
   button on `Space` while a menu context consumes it is R8.2 met on paper and unmet in the game. See
-  Roadmap.md's deferred table for the fix under consideration and why it is not yet built.
+  X14 in docs/deferred.md for the fix under consideration and why it is not yet built.
 - **R8.3 (MUST)** Consumption must be resolvable in one deterministic pass with no ordering
   ambiguity between systems.
 - **R8.4 (MUST)** Interop with focus/UI: per D23 (R22), a focused widget claims controls by
@@ -1153,8 +1153,8 @@ the game. Unity `ToDisplayString` + `InputBinding.MaskByGroup`. Unreal's
   hide that. Filtering the prompt removes the control and leaves the sentence ("— new game"), and
   players read a binding as what a control does in its mode, not as a claim about this frame. One
   binding of several being consumed by another context is a clash between bindings, which R19.3
-  reports. What would revive this is a live predicate an app's hint can follow, which is deferred in
-  the Roadmap rather than a filter on this lookup._
+  reports. What would revive this is a live predicate an app's hint can follow, which is deferred as
+  X9 rather than a filter on this lookup._
 - **R18.3 (MUST)** Display strings must be produced without hard-coding English: return a structured
   descriptor (control identity + composite structure, e.g. "hold", "chord of A and B") that a
   localization layer renders, with a reasonable built-in fallback renderer.
@@ -1192,8 +1192,8 @@ the game. Unity `ToDisplayString` + `InputBinding.MaskByGroup`. Unreal's
   Japan included, and Xbox and Nintendo never varied by region. A game that still wants East to
   confirm ships a gamepad preset that swaps the two, which already moves fixed pad rows and redraws
   the prompts. Nintendo's A-on-East is a question about the device rather than the region, and is
-  deferred on its own. What would revive this is a platform whose system setting still chooses the
-  confirm button._
+  deferred on its own as X21. What would revive this is a platform whose system setting still
+  chooses the confirm button._
 - **R18.8 (MUST)** _(D22)_ An external binding backend may be the source of truth for origins and
   glyphs; presentation must not assume our own binding tables are authoritative. Reverse lookup
   (R18.1) is therefore a trait method with our binding table as one implementation, not a concrete
@@ -1465,9 +1465,8 @@ surface.
   rounds a stick to a compass point, `.on_change()` narrows a held control to the ticks it moved on,
   and `.pulse()` beside them is the repeat. Two clauses are short of the letter. **Delay and rate
   are one number**, because the pulse's clock starts on the same tick the change fires — an
-  independent initial delay is deferred with a stated gate. And **"rather than as a parallel input
-  path" is not yet true of the widget side**, which is R8.2a — deferred with its own gate, see
-  Roadmap.md._
+  independent initial delay is deferred as X17. And **"rather than as a parallel input path" is not
+  yet true of the widget side**, which is R8.2a — deferred as X14._
 - **R22.6 (SHOULD)** A documented migration path from LWIM and bevy_enhanced_input, since the
   ecosystem will ask.
 
@@ -1507,7 +1506,7 @@ character keys.
   a despawned focus both make the lookup miss, and a widget-kind tag is a required component of the
   widget it names, so one entity never carries two. Two independent widget kinds built the same way
   is the pattern holding, not a coincidence of the first one. Still example-side rather than crate
-  API, since R22.9's own mechanism question is still open — see Roadmap.md's deferred table._
+  API, since R22.9's own mechanism question is still open — deferred as X8._
 - **R22.9 (MUST)** **Neither crate may depend on the other.** A widget library must not gain a
   dependency on this crate, and this crate must not require a widget library — using widgets without
   input mapping, and input mapping without widgets, are both first-class. This rules out any

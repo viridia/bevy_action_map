@@ -388,7 +388,7 @@ For this crate's own reasoning behind each position: [Requirements.md](../Requir
 the layer seams, R9 for timing, R14 for dead zones, R15 for pairing, R18–19 for presentation),
 [design.md](./design.md) (TD1, TD5, TD6, TD8.4), [decisions.md](./decisions.md) (D1, D20, D34, D51,
 D88, D91), [steam.md](./steam.md) for what a running Steam client was measured to do, and
-[Roadmap.md](../Roadmap.md)'s deferred table for what it has not built. A user-facing comparison of
+[deferred.md](./deferred.md) for what it has decided not to build yet. A user-facing comparison of
 the three crates is in [comparison.md](./comparison.md).
 
 [bei]: https://github.com/simgine/bevy_enhanced_input

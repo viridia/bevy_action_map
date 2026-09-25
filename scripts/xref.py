@@ -11,8 +11,8 @@ stay correct only because people are careful. This reports every reference that 
 
 Each numbered document owns a prefix, so a reference resolves without knowing where it is written:
 `R19` is a section of `Requirements.md` and `R19.14` a requirement inside it, `TD5.3` a subsection of
-`docs/design.md`. The remote driver's two documents own `DR` and `DD` the same way. The section sign
-these replaced is retired, and finding one is an error.
+`docs/design.md`, `X12` an entry in `docs/deferred.md`. The remote driver's two documents own `DR`
+and `DD` the same way. The section sign these replaced is retired, and finding one is an error.
 """
 
 import argparse
@@ -27,6 +27,8 @@ R_CITE = re.compile(r"\bR\d+\.\d+[a-z]?\b")
 R_STAR = re.compile(r"\*\*R\d+\.\d+[a-z]?")
 D_DEF = re.compile(r"^### (D\d+)\b")
 D_CITE = re.compile(r"\bD\d+\b")
+X_DEF = re.compile(r"^### (X\d+)\b")
+X_CITE = re.compile(r"\bX\d+\b")
 R_SECTION = re.compile(r"\bR(\d+)\b(?!\.\d)")
 TD_SECTION = re.compile(r"\bTD(\d+(?:\.\d+)?)\b")
 DR_DEF = re.compile(r"^\s*- \*\*(DR\d+\.\d+[a-z]?) \((?:MUST|SHOULD|MAY|WITHDRAWN)\)\*\*")
@@ -85,6 +87,7 @@ def main():
                 r_dupes.append((req, n, m.group(1)))
             r_defined.setdefault(m.group(1), n)
     d_defined = headings(dec, D_DEF)
+    x_defined = headings(ROOT / "docs/deferred.md", X_DEF)
 
     req_sections = headings(req, H2_NUM)
     des_sections = headings(des, H2_NUM) | headings(des, H3_NUM)
@@ -116,6 +119,10 @@ def main():
             for m in D_CITE.finditer(line):
                 if m.group() not in d_defined:
                     fail(path, n, f"{m.group()} has no entry in docs/decisions.md")
+
+            for m in X_CITE.finditer(line):
+                if m.group() not in x_defined:
+                    fail(path, n, f"{m.group()} has no entry in docs/deferred.md")
 
             for m in R_STAR.finditer(line):
                 if not R_DEF.match(line):
@@ -163,7 +170,7 @@ def main():
     if not args.quiet:
         print(
             f"\n{len(md)} documents, {len(rs)} Rust files | "
-            f"{len(r_defined)} requirements, {len(d_defined)} decisions, "
+            f"{len(r_defined)} requirements, {len(d_defined)} decisions, {len(x_defined)} deferred, "
             f"{len(req_sections) + len(des_sections)} sections | "
             f"{len(fails)} problem(s)"
         )

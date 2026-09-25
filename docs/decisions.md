@@ -1217,7 +1217,7 @@ method, and a liveness field on `Prompt`.
   and J beside it made the filtered answer "J". That is two actions on one control, which is a clash
   for the bindings to resolve and `conflicts` to report (R19.3), not for a prompt to hide.
 
-A liveness predicate a hint can follow, for an app that wants one, is a deferred row gated on
+A liveness predicate a hint can follow, for an app that wants one, is deferred as X9, gated on
 reactive UI, rather than a filter on this lookup.
 
 ### D85 — An inline icon prompt and a block one are two components
