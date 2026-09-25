@@ -211,7 +211,8 @@ pub enum DiagnosticKind {
     ReservedAndMappable, FollowsNothing { .. }, FollowsUnlisted { .. },
     DuplicateClassBinding { .. }, DuplicateTunableKey { .. },
     TunableShapeDisagreement { .. }, DeadZoneAtFullDeflection { .. },
-    BoundAndDelegated, DeltaFromAuthority, CombinedWithoutBindings,
+    BoundAndDelegated, DeltaFromAuthority, ReservedAuthority,
+    CombinedWithoutBindings,
 }
 ```
 
@@ -1075,8 +1076,9 @@ A session listening for that class takes such a reading, because for a stick row
 the answer. Everything a capture does take is claimed, so a control pressed at a rebinding screen
 never also plays the game — which is what makes reserving work: the settings key neither binds nor
 re-opens the screen. Declaring a binding both `reserved` and `mappable` is a plan-build error.
-Reserving reaches only controls the crate reads. An authority binding has none, so a control the
-player unbinds in the authority's own screen is recovered there or not at all.
+Reserving reaches only controls the crate reads. An authority binding has none, so reserving one is
+a plan-build error too (`ReservedAuthority`), and a control the player unbinds in the authority's
+own screen is recovered there or not at all.
 
 **Conflicts are detected, not resolved.** `conflicts(world, candidate, target)` is a pure query over
 the mapping list, answerable before anything is committed; `conflicts_pending` asks the same of a

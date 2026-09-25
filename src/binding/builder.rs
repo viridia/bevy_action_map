@@ -467,7 +467,9 @@ impl<'a, C> BindingBuilder<'a, C> {
     /// control is busy doing its normal job.
     ///
     /// Reserving and [`mappable`](Self::mappable) contradict each other, and declaring both is
-    /// refused when the context is declared.
+    /// refused when the context is declared. So is reserving an
+    /// [`Authority`](crate::backend::Authority) binding: the backend reads its controls, not this
+    /// crate, so there is no control here to withhold.
     pub fn reserved(mut self) -> Self {
         for binding in self.bindings() {
             binding.reserved = true;
@@ -1516,6 +1518,21 @@ mod tests {
         assert_eq!(
             found[0].kind,
             crate::plan::DiagnosticKind::DeltaFromAuthority
+        );
+        assert_eq!(found[0].severity(), crate::plan::Severity::Error);
+    }
+
+    #[test]
+    fn reserving_an_authority_is_refused() {
+        let mut builder = InputContextBuilder::<()>::default();
+        builder
+            .bind::<DummyVec2>(crate::backend::Authority(DeviceFamily::Gamepad))
+            .reserved();
+        let found = builder.diagnostics();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(
+            found[0].kind,
+            crate::plan::DiagnosticKind::ReservedAuthority
         );
         assert_eq!(found[0].severity(), crate::plan::Severity::Error);
     }

@@ -218,6 +218,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 157  | The controls screen as a template with a slot                         |
 | 151f | The delegated row on the Steam controls screen                        |
 | 151c | Prompts from Steam's origins                                          |
+| 158  | Reserving an authority is an error                                    |
 
 ---
 
@@ -511,22 +512,6 @@ name is only good if a key event can produce the same character — and nothing 
   one-for-one, which is a different question.
 - **Verified by:** a unit test on `single_character` (empty, one, two, uppercase), `from_name`'s
   existing `char/` tests unchanged, and no diff in `examples/`.
-
-### 158. Reserving an authority is an error
-
-`.reserved()` on an `Authority` binding reserves nothing: an authority has no controls, so
-`reserved` in `binding/builder.rs` collects none, and the declaration succeeds without a word. R4.8
-forbids a build that silently does nothing. Found in 151f, where the Steam build's pad reaches the
-controls screen only through authorities.
-
-- **`DiagnosticKind::ReservedAuthority`, an error**, found in `plan.rs` beside `ReservedAndMappable`
-  and `DeltaFromAuthority`, and listed in TD4's enum. Its message says the authority's own screen is
-  where its bindings are recovered (TD9.3).
-- **A clause in R4.8** names the case, since it is the requirement the silence breaks.
-- **Not doing: reserving through the backend.** Whether Steam can pin an action to a control is a
-  question about Steam, and the crate has nothing to ask it with.
-- **Verified by:** a unit test declaring `.reserved()` on an authority and finding the diagnostic,
-  and no diff in `examples/`, since no example reserves an authority.
 
 ### 112. A backend suppresses a device family at L0
 

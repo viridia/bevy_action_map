@@ -17,12 +17,12 @@ use crate::event::{ClassDispatch, Dispatch};
 fn mismatch_hint(intent: ActionIntent, shape: ChannelShape) -> &'static str {
     match (intent, shape) {
         (ActionIntent::Directional2, ChannelShape::Button | ChannelShape::Axis1) => {
-            ". A single control carries no direction — bind a directional composite, whose parts \
+            ". A single control carries no direction; bind a directional composite, whose parts \
              can be keyboard keys or D-pad buttons"
         }
         (ActionIntent::Delta2, _) | (_, ChannelShape::Delta2) => {
-            ". A delta is a displacement that has already happened and a position is a rate, so \
-             one cannot stand in for the other without an explicit conversion"
+            ". A delta is motion since the last tick and every other shape is a level, so one \
+             cannot stand in for the other without an explicit conversion"
         }
         _ => "",
     }
@@ -56,6 +56,7 @@ impl BindingDiagnostic {
             | DiagnosticKind::TunableShapeDisagreement { .. }
             | DiagnosticKind::BoundAndDelegated
             | DiagnosticKind::DeltaFromAuthority
+            | DiagnosticKind::ReservedAuthority
             | DiagnosticKind::CombinedWithoutBindings => Severity::Error,
             DiagnosticKind::DuplicateBinding { .. }
             | DiagnosticKind::ConsumeDisagreement { .. }
@@ -155,6 +156,8 @@ pub enum DiagnosticKind {
     BoundAndDelegated,
     /// A `Delta2` action is bound to an outside authority, whose value is a level read every tick.
     DeltaFromAuthority,
+    /// An authority binding is declared reserved, and has no control to reserve.
+    ReservedAuthority,
     /// An action shapes its combined value, and has no bindings in this context to combine.
     CombinedWithoutBindings,
 }
@@ -172,8 +175,8 @@ impl core::fmt::Display for BindingDiagnostic {
             ),
             DiagnosticKind::RateFromDelta { shape } => write!(
                 f,
-                "`{}` reads a control as a rate, but a {:?} channel already reports a displacement \
-                 — there is no rate here to integrate",
+                "`{}` has a modifier that integrates a rate, but a {:?} channel already reports a \
+                 displacement, so there is no rate to integrate",
                 self.action, shape
             ),
             DiagnosticKind::ChainedRescaling { count } => write!(
@@ -184,13 +187,13 @@ impl core::fmt::Display for BindingDiagnostic {
             ),
             DiagnosticKind::DuplicateBinding { control } => write!(
                 f,
-                "`{}` reads {:?} twice in this context. Both contribute, which for a delta action \
-                 doubles it and for the rest is one binding doing nothing",
+                "`{}` reads {:?} twice in this context. Both contribute: a delta action counts \
+                 every movement twice, and any other action gains nothing from the second",
                 self.action, control
             ),
             DiagnosticKind::ConsumeDisagreement { control, other } => write!(
                 f,
-                "`{}` and `{other}` both read {control:?}, but only one of them consumes it — so \
+                "`{}` and `{other}` both read {control:?}, but only one of them consumes it, so \
                  whether a lower-priority context sees that control depends on which of the two \
                  fired",
                 self.action
@@ -204,30 +207,29 @@ impl core::fmt::Display for BindingDiagnostic {
             ),
             DiagnosticKind::RebindingDisagreement { key } => write!(
                 f,
-                "`{}` feeds the mapping `{key}` from two bindings that disagree about whether the \
-                 player may change it — one is `mappable` and the other is not. One row cannot be \
-                 both; say the same thing on every binding that feeds it",
+                "`{}` feeds the mapping `{key}` from two bindings, one `mappable` and one not. A \
+                 row is either rebindable or fixed; declare the same on every binding that feeds \
+                 it",
                 self.action
             ),
             DiagnosticKind::ReservedAndMappable => write!(
                 f,
-                "`{}` is declared both mappable and reserved. Reserving withholds a control from \
-                 capture so that it cannot be rebound; a mapping exists so that it can. Keep whichever \
-                 one you meant",
+                "`{}` is declared both mappable and reserved. Reserving keeps a control from being \
+                 rebound, and a mappable binding exists to be rebound; keep whichever you meant",
                 self.action
             ),
             DiagnosticKind::FollowsNothing { target } => write!(
                 f,
                 "`{}` follows `{target}`, but no binding of `{target}` in this context reads the \
-                 same controls. A binding rides the one it reads alongside, so the two must read \
-                 the same thing — check the spelling, and check that both devices are bound",
+                 same controls. A follower takes its mapping from the binding that reads what it \
+                 reads; check the spelling, and that both are bound for the same device",
                 self.action
             ),
             DiagnosticKind::FollowsUnlisted { target } => write!(
                 f,
                 "`{}` follows `{target}`, which is itself off the controls screen, so there is no \
-                 mapping to ride. Take `private` off the binding it follows, or make this one \
-                 `private` too and accept that rebinding will not move it",
+                 mapping to follow. Take `private` off the binding it follows, or make this one \
+                 `private` too, in which case rebinding will not move it",
                 self.action
             ),
             DiagnosticKind::DuplicateClassBinding { class } => {
@@ -251,28 +253,35 @@ impl core::fmt::Display for BindingDiagnostic {
             DiagnosticKind::TunableShapeDisagreement { key } => write!(
                 f,
                 "`{}` shares the tunable `{key}` with another binding, but they disagree about \
-                 its shape — a switch on one side and a range on the other, or two ranges with \
-                 different bounds. Every binding sharing a tunable must agree",
+                 its shape: a switch against a range, or two ranges with different bounds. Every \
+                 binding sharing a tunable must declare the same shape",
                 self.action
             ),
             DiagnosticKind::DeadZoneAtFullDeflection { lower } => write!(
                 f,
                 "`{}` declares a deadzone at {lower}, at or beyond full deflection. Ordinary \
-                 input never escapes it — only a control whose magnitude overshoots 1.0, such as \
+                 input never escapes it; only a control whose magnitude can exceed 1.0, such as \
                  mouse motion, produces anything",
                 self.action
             ),
             DiagnosticKind::BoundAndDelegated => write!(
                 f,
                 "`{}` is bound to an authority for a device family, and also to a control of that \
-                 family. The authority owns the family's input; drop whichever is not the \
-                 authority here",
+                 family. The authority already supplies that family's input, so drop one of the \
+                 two",
                 self.action
             ),
             DiagnosticKind::DeltaFromAuthority => write!(
                 f,
-                "`{}` is a delta, which an authority cannot drive: its value is a level read every \
-                 tick, and would count the same motion again on each one",
+                "`{}` is a delta, which an authority cannot drive: an authority's value is a level \
+                 read every tick, so the same motion would count again on each one",
+                self.action
+            ),
+            DiagnosticKind::ReservedAuthority => write!(
+                f,
+                "`{}` is reserved on an authority binding, whose controls the backend reads rather \
+                 than this crate, so there is nothing to withhold. Drop `reserved`; a control the \
+                 player unbinds there is recovered in the backend's own configuration screen",
                 self.action
             ),
             DiagnosticKind::CombinedWithoutBindings => write!(
@@ -402,6 +411,10 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
         if let BindingInput::Authority(family, ..) = binding.input {
             if binding.intent == ActionIntent::Delta2 {
                 found.push(at(DiagnosticKind::DeltaFromAuthority));
+            }
+            // R4.8: `reserved` collects controls, and an authority reads none of its own.
+            if binding.reserved {
+                found.push(at(DiagnosticKind::ReservedAuthority));
             }
             if bindings.iter().any(|other| {
                 other.action == binding.action

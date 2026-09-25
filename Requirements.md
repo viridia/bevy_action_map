@@ -430,7 +430,8 @@ Unreal maps context→key→(triggers, modifiers). Steam moves the whole binding
   with the opposite default (R19.10): a binding is shown to players unless it asks not to be, and
   only rebinding waits to be declared.
 - **R4.8 (MUST)** Building or mutating bindings must produce actionable errors (unknown control,
-  shape mismatch, duplicate) rather than silently doing nothing.
+  shape mismatch, duplicate, a reservation with no control to reserve) rather than silently doing
+  nothing.
 - **R4.9 (MUST)** A binding may target a **control class** — a named set of controls — as well as a
   single control or a composite. R8.4 and R12.6 both require a focused text field to claim
   character-producing keys "as a class, without the app author enumerating them"; this is the
