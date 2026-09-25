@@ -43,10 +43,12 @@ pad reaches the game through Steam alone and never also as an ordinary gamepad.
 
 3. **Bind the layout.** The layout Valve publishes for app 480 binds Spacewar's actions, so against
    this manifest every binding is empty and every action reads at rest, with no error anywhere
-   (S16). With the game running, press F12 to open Steam's binding panel, which forks a personal
-   copy (S25), and bind every action in both sets. The Library's own controller configurator is the
-   wrong one: it configures whatever launched the game, not app 480. Doing it the way the base game
-   does:
+   (S16). A real game publishes a default layout for its own app id, so its players never do this
+   step; a borrowed id cannot, and the demo ships no layout file in its place, because one would go
+   stale with every retitled action (S25). With the game running, press F12 to open Steam's binding
+   panel, which forks a personal copy (S25), and bind every action in both sets. The Library's own
+   controller configurator is the wrong one: it configures whatever launched the game, not app 480.
+   Doing it the way the base game does:
 
    | Set | Action | Control |
    | --- | --- | --- |

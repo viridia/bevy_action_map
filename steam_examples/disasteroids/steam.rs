@@ -18,7 +18,9 @@ const APP_ID: u32 = 480;
 const MAX_CONTROLLERS: usize = 16;
 
 /// The Steam client, kept for as long as the app runs.
-#[derive(Resource)]
+///
+/// Non-send, so every system using it runs on the main thread. Steam expects `run_callbacks` from
+/// one thread, and a system left to the scheduler moves between workers from frame to frame.
 struct Steam(Client);
 
 /// One pad as Steam sees it.
@@ -139,7 +141,7 @@ pub fn plugin(app: &mut App) {
         warn!("Steam Input did not initialize; the pad will not respond");
         return;
     }
-    app.insert_resource(Steam(client));
+    app.insert_non_send(Steam(client));
     app.add_systems(PreUpdate, poll.before(ActionMapSystems::Evaluate));
     app.add_systems(Update, open_binding_panel);
 }
@@ -148,7 +150,7 @@ pub fn plugin(app: &mut App) {
 /// 151d's delegated row does it properly.
 fn open_binding_panel(
     keys: Res<ButtonInput<KeyCode>>,
-    steam: Res<Steam>,
+    steam: NonSend<Steam>,
     controllers: Query<&SteamController>,
 ) {
     if !keys.just_pressed(KeyCode::F12) {
@@ -168,13 +170,21 @@ fn open_binding_panel(
 /// Every context entity gets the same values. A context ignores an action it does not bind, and
 /// which one is live is already the mapper's business.
 fn poll(
-    steam: Res<Steam>,
+    steam: NonSend<Steam>,
     mut table: ResMut<SteamActions>,
     controllers: Query<(Entity, &SteamController)>,
     mut contexts: Query<&mut AuthorityValues>,
     mut commands: Commands,
     mut last_written: Local<String>,
+    mut last_thread: Local<Option<std::thread::ThreadId>>,
 ) {
+    // TEMPORARY, remove before landing: whether this runs on one thread, which Steam expects of
+    // `run_callbacks`.
+    let thread = std::thread::current().id();
+    if *last_thread != Some(thread) {
+        info!("Steam polled from {thread:?}");
+        *last_thread = Some(thread);
+    }
     steam.0.run_callbacks();
     let input = steam.0.input();
     input.run_frame();

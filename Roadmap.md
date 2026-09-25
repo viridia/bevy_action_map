@@ -619,34 +619,59 @@ Steam action set switching under it, currently reads as a release: `Completed`.
 - **Verified by:** a headless eval test, held then cleared reports `Canceled`, and the same with a
   key also held leaves the action held by the key.
 
+### 156. Navigating from no focus
+
+Disasteroids' controls screen can lose focus with the screen still open, and a player with only a
+pad then has no way back: `navigate` discards `DirectionalNavigationError::NoFocus`, so the stick
+does nothing, and only closing and reopening the screen lets `AutoFocus` restore it. Seen in 151b's
+flight test, cause unknown; the route found in the code is a pointer press on empty space, which
+`click_to_focus` bubbles to the window and `acquire_focus_directional` does not catch.
+
+- **First, reproduce the loss.** It followed a fat-fingered `ToggleSettings`; the stick held while
+  pressing it is the other suspect. Reading the code found neither clearing focus: close and reopen
+  cannot share a frame, and `Navigate` is evaluated before the transition that spawns the screen.
+  Drive base Disasteroids' virtual pad over the remote driver (`pad.py`) with Y pressed twice a
+  frame or two apart, and with Y pressed on a held stick, reading `InputFocus` after each. A cause
+  found here is fixed here, alongside the fallback below.
+- **On `NoFocus`, focus the screen's `AutoFocus` entity**, so the first direction selects instead of
+  moving, as a console menu does. Clicking away still clears focus, which is what a mouse user
+  expects.
+- **Whether `press_focused_button` takes the same fallback**, for a player who presses South before
+  a direction, is decided here.
+- **Not doing: an always-focused invariant.** It needs the same default, a system or observer to
+  hold it, and it would undo a deliberate click-away.
+- **Verified by:** a `disasteroids/pad.py` step that clears `InputFocus` and navigates, if the
+  driver can clear it; by hand otherwise.
+
 ### 151b. Disasteroids on Steam
 
 Built and running: `steam_examples/` (its own workspace; `main.rs`, `actions.rs`, `steam.rs`, the
 manifest and a README), `verify.sh --full` running clippy on it, `.gitignore`. S21–S23 are recorded,
 and D22 and chunk 112 updated from S21. What is left needs the author's hardware, and follows 154.
 
-- **Flight test.** Pad and keyboard together, the layout bound per the README through F12 (below).
-  Afterburner (follows Thrust, chunk 152), fire rate, bomb charge, hyperspace double-tap, Y opening
-  and closing the controls screen, the stick moving its selection.
+- **Flight test: passed**, every action in both sets, and a held control surviving the switch (chunk
+  154). Nothing left.
 - **Record S24: `ActivateActionSet` takes effect one frame late.** Measured in the flicker log: the
   frame after a switch still reads the old set. `steam.rs` therefore supplies nothing on a switch
   frame, so every action held on the next arrives unsupplied-then-held and chunk 154 holds it over;
   without that, a button meaning one action in each set closed and reopened the controls screen on
   every press. Record the rule with S24: a backend treats a change of set as a gap in supply.
-- **Which manifest a layout believes.** S25 records where a personal layout lives and that it embeds
-  the manifest it was saved against. The installed manifest is a revision behind the repository's,
-  so installing the current one before the flight test is also the measurement: relaunch, and see
-  whether the binding panel shows "Close controls screen" and whether the layout file's copy
-  updates. The answer decides whether the demo can ship a layout for copying in, or only the
-  README's table.
 - **Measured here still:** a pad control mapped to a key while the game reads Steam Input; and the
   `absolute_mouse` delta, with `steam_probe`'s `look` bin and `game_actions_look.vdf` (gitignored
   bench). Both to `docs/steam.md`.
-- **Remove the scaffolding.** The F12 `open_binding_panel` system in `steam.rs` is marked temporary
-  and goes before landing; 151d's delegated row replaces it. The README's step 3 binds through it,
-  and the Library's configurator is no substitute (S25), so removing it leaves the README no way to
-  bind until 151d lands. `target/Disasteroids.app` is an untracked Library launcher and needs
-  nothing.
+- **The pad drops out after the binding panel.** Twice, shortly after the panel closed, every action
+  went inactive with the pad still connected; once it stayed so for 70 s, then Steam reported the
+  pad gone though it was awake and paired, and only a restart recovered it. Not reproducible on
+  demand. Steam expects `run_callbacks` from one thread, and a temporary log showed `poll` moving
+  across four workers nearly every frame, so `Steam` is now non-send and polled on the main thread.
+  The first run so built printed one, `ThreadId(1)`. If the dropout recurs anyway, the cause is
+  elsewhere and it goes to `docs/issues.md` with what is known; if the rest of 151b's runs are
+  clean, the fix stands and the rule goes into `docs/steam.md`.
+- **Remove the scaffolding.** The F12 `open_binding_panel` system and the two diagnostic logs in
+  `poll` (what is written, and the thread) are marked temporary and go before landing; 151d's
+  delegated row replaces F12. The README's step 3 binds through it, and the Library's configurator
+  is no substitute (S25), so removing it leaves the README no way to bind until 151d lands.
+  `target/Disasteroids.app` is an untracked Library launcher and needs nothing.
 - **A brief for S12's upstream fix**, for the author to post. Drafted in the session that built
   this; rewrite from S12 if lost.
 - **Not doing:** prompts (151c) or the settings screen's pad rows (151d), which show as unbound
@@ -697,14 +722,19 @@ demand.
 - **Not doing: a backend trait.** Delegating a rebind is a call the game makes to a backend it
   chose. A trait earns its place when a widget has to delegate without knowing its backend, which is
   the presentation-crate row.
+- **Not doing: a game-wide "no pad" notice.** It would teach Steam's controller list, not this
+  crate; the delegated row already shows an authority's readiness where it changes what the player
+  can do.
 - **Not doing: naming which authority produced a value** (R0.5's queryable half), which has its own
   deferred row.
 - **Verified by:** the Steam build's controls screen showing a keyboard row rebindable and its pad
   row delegated, and the panel opening from it.
-- **The panel sometimes does not open.** Under 151b's temporary F12, about 2 launches in a dozen
-  came up with F12 doing nothing, suspected to be the Steam connection rather than the key. Not
-  investigated there. Relaunch several times against the delegated row, and read the log for whether
-  `show_binding_panel` ran and what it returned, or whether there was no pad.
+- **A delegated row says when it cannot delegate.** Under 151b's F12, a pad asleep at launch meant
+  Steam reported no pad, `show_binding_panel` had none to open for, and the only sign was a log
+  line: to the player the key did nothing. The row has to show that state (no pad, or no Steam per
+  S21) rather than accept a press it cannot honour. R19.8 names delegation as an outcome but not its
+  failure, so a clause lands there too. How the row learns readiness is decided here: the screen may
+  not reach into the backend (views redraw from state), so the backend publishes it.
 
 ### 151e. Split Friction on Steam
 
