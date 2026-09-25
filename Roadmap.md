@@ -250,8 +250,18 @@ explicit player-facing step. `DeviceId` is the identity to key it by, and it exi
 - **The calibration step has no in-tree caller.** `CalibrationSampling` is driven end to end by
   tests and by no screen. A calibration a player performs and then loses on quit is worth little, so
   the screen and the persistence are one feature.
+- **Sampling learns the deflection as rest.** `CalibrationSampling`'s doc tells the player to move
+  the sticks and let go, and `observe` takes every reading while the resource exists, so a step that
+  follows the instruction sees values near ±1.0 and finishes with a rest envelope wider than the
+  stick's range: the axis goes dead. The tests feed only rest values, and no screen has run it. The
+  options: two game-driven phases, sampling only after the player lets go, which still catches the
+  spring-back and needs a settle wait; restarting an axis's min and max whenever a reading jumps
+  well outside any drift, around 0.5, which keeps the instruction and the API as they are; or
+  recording each settled position and taking the envelope across those. The second is the lean.
 - **Verified by:** calibrating a drifting stick, quitting, relaunching, and finding the stick still
-  corrected.
+  corrected. The in-house fixture is a DualSense whose left stick is noisy at rest and settles at a
+  different point after each release, varying the drift's speed and direction; one release is not a
+  calibration of it, so the step has to widen across several.
 
 ---
 
