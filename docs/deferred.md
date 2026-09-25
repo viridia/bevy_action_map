@@ -346,6 +346,8 @@ takes focus. Measured here: whether Steam's overlay toast appears in a game Stea
 
 ## 5. The remote driver
 
+These leave with the driver, into its own documents, when it moves out of this repository.
+
 ### X30 — Proposing the driver's server methods upstream (DD8)
 
 **Gate:** chunk 148's plan passing, and a second plan against a different example.
