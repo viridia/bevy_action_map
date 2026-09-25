@@ -664,11 +664,10 @@ Two players are two `InputHandle_t`s, not two action sets (`docs/steam.md`'s app
 
 ## Sweeps
 
-Each of these passes over a whole document or module, and runs on a Tuesday: the weekly token budget
-refreshes Tuesday at 10pm, so that is when a sweep spends budget that would otherwise lapse. A sweep
-lands a unit at a time, as a lettered chunk (159a, 159b, …) small enough to finish in one session,
-and a unit is never left half done. A unit starts and ends with `scripts/growth.py`, so its effect
-is measured rather than asserted, and its section's **Done** line records it.
+Each of these passes over a whole document or module. A sweep lands a unit at a time, as a lettered
+chunk (159a, 159b, …) small enough to finish in one session, and a unit is never left half done. A
+unit starts and ends with `scripts/growth.py`, so its effect is measured rather than asserted, and
+its section's **Done** line records it.
 
 ### 159. Compressing `docs/decisions.md`
 

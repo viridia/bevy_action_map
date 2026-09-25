@@ -29,6 +29,7 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 | `docs/comparison.md` | how this crate differs from BEI and LWIM | someone asks why this exists |
 | `docs/one-way-doors.md` | what stops being revisable if an input crate goes upstream | upstreaming comes up |
 | `docs/issues.md` | findings awaiting routing, in five tiers by severity | a finding needs routing, or you are about to re-find one |
+| `docs/guidelines.md` | how this project judges scope and shapes code, in entries `G<n>` | you are about to scope a chunk or write code |
 | `docs/deferred.md` | work decided against for now, in entries `X<n>`, each with its gate | a gate may have fired (a Bevy bump is the first group), or you are about to defer something |
 | `docs/steam.md` | what a running Steam client actually does, in entries `S<n>` | a decision rests on how an external backend behaves |
 | `bevy_remote_driver/docs/requirements.md` | numbered requirements for the remote test driver, `DR<section>.<n>` | a chunk touches the driver, or cites a DR-number |
@@ -50,7 +51,8 @@ retired, and `scripts/xref.py` fails on one: any that survives is a reference no
 
 A requirement is defined once, as a list item reading `- **R<section>.<n> (MUST)**`, and is cited
 bare everywhere else. So to reach a definition, search for `**` followed by the number: the `**`
-prefix appears nowhere but the definition.
+prefix appears nowhere but the definition. Read it to the next `- **R` line: indented sub-bullets
+are part of the requirement, and a fixed `grep -A` cuts them off.
 
 ## Workflow
 
@@ -64,12 +66,20 @@ not positions.
 - **Ground rule 5 is the one that bites:** nothing outstanding may be left without a destination. An
   item with no chunk number is an item that will be dropped. "Later" and "its own decision" are not
   destinations — an entry in `docs/deferred.md` with a stated gate is.
+- **A new chunk gets a `###` section** and nothing else. The "Next" list is the author's shortlist.
+- **A structural idiom is proposed before it is built.** A new kind of function, module dependency
+  or wrapper arrives as options with a recommendation, not in a diff.
+- **A plan opens with what changes**, in sentences that assume nothing, and answers a question about
+  scope or complexity with counts rather than assurance.
+- **Never post publicly.** No issue, PR or comment on a public forum, through `gh` or anything else,
+  even when asked to "file an issue": write a short brief for the author to edit and post. Bevy's AI
+  policy is why.
 
 ## Ground rules
 
 1. **One chunk, one reviewable change.** Each chunk is a single branch: code, its tests, and any doc
    changes it forces. If a chunk turns out to be more than roughly a day's reading, it gets split
-   before it gets written.
+   before it gets written. Two items that could share a chunk default to two, with an ordering note.
 2. **Every chunk is verifiable on its own.** Pure-data chunks get unit tests; chunks that touch ECS
    get either a headless `App` test or a runnable example. No chunk lands whose only justification
    is "the next one needs it".
@@ -92,6 +102,7 @@ Each document admits one kind of thing, and the test is what distinguishes them.
 | `Requirements.md` | normative statements | Can it be violated? If nothing could violate it, it is design. |
 | `Roadmap.md` | work not done, and gaps | Does it name something that will change? If it describes the present, it is design. |
 | `docs/issues.md` | findings not yet routed | Is something wrong, and has no chunk taken it? A finding with a chunk belongs to the chunk. |
+| `docs/guidelines.md` | judgement a maintainer would otherwise learn by correction | Would someone new choose differently with it? If it cannot be departed from with a reason, it is a requirement. |
 | `docs/deferred.md` | work decided against for now | Has the decision been made, and is it "not yet"? Name the event that reopens it; with no event, it is dropped. |
 | `CLAUDE.md` | process | Is it about the work rather than about the crate? |
 
@@ -131,7 +142,21 @@ not a paragraph defending the choice. A **withdrawn** requirement is the excepti
 to stop the idea being re-proposed, which is the only argument in the document with a job to do.
 
 **Avoid the tells:** restating what the code says, hedging, enumerating the obvious, unusual
-punctuation or phrasing.
+punctuation or phrasing. "Nothing" as an agent ("nothing reports it") is the commonest; prefer a
+first-class antonym ("unranked", "dead") or name what is absent.
+
+**More room is not more words.** Turning prose into bullets, a table or a new section keeps one line
+per item; a longer explanation points at the document that owns it.
+
+**Every term is introduced for this document's reader.** A word familiar where it was written is
+used only once this reader has met it: a crates.io reader gets "the `disasteroids` example", and a
+sentence beside two lists says which one it means.
+
+**Name a rejected alternative only where a reader would reach for it**, in one clause. Once the code
+exists the argument is won, and a paragraph against a ruled-out option is the dead horse.
+
+**An introduction defines a category by kind**, not by listing or counting its members, which go
+stale every chunk. Keep a number only where its change is itself a signal.
 
 **Prefer sketches over applied refactors.** Small, staged, individually reviewable edits — ground
 rule 1 applied within a chunk.
@@ -143,6 +168,10 @@ parses; for defending anything; for manufactured significance ("Crucially,", "It
 that"); for project history; for hedges that gate no real exception; and for a constant diet of
 em-dash asides, which reads as a fingerprint once noticed. Concise is not thin — cut the padding
 around every parameter, panic and edge case, not the content.
+
+The crate docs in `src/lib.rs` are an overview, with a ceiling of about 250 `//!` lines. An addition
+there is a paragraph linking the item; a worked example goes on the item's own doc comment. Raising
+the ceiling is the author's call, asked before writing.
 
 Prose in the markdown documents wraps at 100 columns; tables are exempt. The same limit applies to
 Rust comments, `///`/`//!`/`//` alike.
@@ -159,6 +188,9 @@ changed, so pre-existing debt elsewhere in the file is left alone — add `--pre
 exactly what it would rewrite, or `--check` for just the list of files. A paragraph it reaches is
 refilled whether or not its lines already fit, since an edit shortens a line as often as it
 lengthens one; a scope flag is therefore required, and `--sweep <path>` is the deliberate one.
+
+Do the style pass on edited comments before `cargo fmt`, so formatting runs once. devfmt is the only
+authority on width: `awk` and `wc` count bytes, and an em-dash is three of them.
 
 ## Commit messages
 
@@ -238,6 +270,11 @@ in the no-devices configuration, so `tests/no_devices.rs` is run on its own rath
 the full suite. Everything else is warning-free in every configuration above, so a warning is a
 regression — treat one as such rather than assuming it was already there.
 
+**Launch every example a chunk touched** before calling it done: `cargo run --example <x>` in the
+background for a minute, with the log grepped for `panicked|ERROR` (Disasteroids needs
+`--features serialize`). It catches what the recipe cannot, such as a system running before the
+entities it expects exist.
+
 ## Context, and what not to economize on
 
 Sessions run out before the work does. But the value of working this way is noticing that two widely
@@ -249,6 +286,12 @@ separated things disagree, and that is not free — so cut waste, not reading. D
   and left a stale copy behind, a requirement the change quietly contradicts, a `cfg` group that now
   spans a configuration nobody has built. This costs context and is worth it, and it has repeatedly
   found things no diff would have shown.
+- **A scan**: a script finds a signature, and only its hits are read. Validate it against a known
+  positive first; a clean result from an unvalidated scan is worth nothing. Prefer a scan to a sweep
+  wherever the thing sought has a signature.
+
+Before a tree-wide mechanical change, run it on one file of each kind and read the output. Tests
+prove it correct, not legible.
 
 What to scope down is **tool output**: `| head`, `| wc -l`, `git diff` rather than a sweep over four
 files dumped into the transcript to find five long lines. `scripts/verify.sh` already does this for

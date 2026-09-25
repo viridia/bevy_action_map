@@ -420,25 +420,6 @@ it: the field was renamed to `input`, not removed. Which is the finding. Violati
 by reading, and then a reading finds them absent with equal confidence — "a rule with no tooling
 behind it," as the register puts it, does not only fail to prevent them.
 
-### 1053 The release itself has no destination
-
-`Roadmap.md` · `Cargo.toml`
-
-Chunk 119 moved every Bevy dependency to crates.io at `0.20.0-rc.1`, which removes the mechanical
-barrier this finding was filed against: crates.io rejected the git dependencies outright, and it
-accepts an rc. What stops a publish now is a judgement — that nothing ships while the dependency is
-a release candidate — and 0.20.0 has no stable release yet.
-
-That makes the finding sharper rather than smaller. The thing that was guaranteeing nobody published
-by accident is gone, and `Roadmap.md` still has no release chunk, no deferred entry gated on the
-0.20 release, and no checklist of what must be true before the first publish — which by ground rule
-5 is an item that will be dropped. The work that is release-shaped is scattered through chunks whose
-descriptions do not mention it: 151a replaced `delegate`, public API that is "cheap now, breaking
-later", and nothing said that was a publishing deadline rather than a preference.
-
-_Fix:_ a deferred entry gated on the Bevy 0.20 release would be the smallest thing that stops this
-being forgotten. What belongs in it is the ordering question rather than the date.
-
 ### 1054 Deriving a pane's persistent identity is boilerplate every game rewrites
 
 `reconnect.rs`'s `remember_identity` and `KnownDevice`

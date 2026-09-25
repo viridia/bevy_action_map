@@ -12,6 +12,11 @@ is discovered late. It is a requirements document: it states what the system mus
 defers *how* to a design phase — where it does record a decision, that decision constrains the
 design space rather than describing an implementation.
 
+**Where a requirement came from is not recorded.** The first draft arrived whole, from a survey of
+the systems above, and nothing marks which requirements the author set and which the survey
+proposed. That is not recoverable and will not be retrofitted; where one requirement's origin
+matters, trace that one (G4).
+
 ## Scope
 
 Boundaries set before drafting, which explain why some obvious topics are absent and some

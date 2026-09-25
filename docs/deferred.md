@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 43.**
+**Next: 44.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -76,6 +76,18 @@ loads inline glyphs from a second, pre-scaled `input_prompts_inline/` tree. With
 component, the inline prompt can load the block art and set its height from the line. Steam's art is
 the same case: its smallest glyph is 32 pixels against the in-tree inline art's 25, so the Steam
 build's inline prompts stand taller than the line until then.
+
+### X43 — Publishing to crates.io
+
+**Gate:** Bevy 0.20.0 final. The dependency requirement `^0.20.0-rc.1` already admits it, so the
+move is a `cargo update` and a lockfile commit.
+
+crates.io would accept a publish against a release candidate, so the gate is a judgement, not a
+limit: a crate published against an rc pins its users to a version about to be superseded. What this
+entry holds is the order. A change that breaks the public API is free until the first publish and
+costly after it, so those land first: chunk 161's narrowing of public items is one, and so is any
+reshaping of the extensibility mechanism. The README's "Not on crates.io yet" section changes with
+the publish.
 
 ## 2. An upstream decision still open
 

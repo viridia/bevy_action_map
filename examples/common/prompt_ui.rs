@@ -10,6 +10,9 @@
 //! its own. The gate on promoting it is Bevy deciding to take the crate upstream, which is the
 //! point at which the workspace has to be arranged properly anyway.
 //!
+//! It shows a game how, rather than covering every case, and a game adapts it. Where it takes the
+//! simple route over the exact one, that is a choice for an example, not a limit of the crate.
+//!
 //! # What is here
 //!
 //! [`PromptSpan`] names an action and fills in its own string. The companions beside it narrow the

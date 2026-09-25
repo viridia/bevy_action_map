@@ -93,9 +93,9 @@ const GAMEPAD_COLUMNS: usize = 1;
 /// How far a follower's line sits under the row it rides.
 const FOLLOWER_INDENT: f32 = 20.0;
 
-// A row's own text size, and the gaps and padding sized against it. Named so that fitting one
-// more row is a one-line change here rather than a hunt through `table` and `cell` for the
-// numbers that add up to a row's height.
+// A row's own text size, and the gaps and padding sized against it. The screen is one unscrolled
+// page, so a new row that does not fit is made room for here, not with scrolling or collapsing
+// sections; named so that is a one-line change rather than a hunt through `table` and `cell`.
 const ROW_FONT_SIZE: f32 = 13.0;
 /// The vertical gap between one row and the next within a table.
 const ROW_GAP: f32 = 4.0;
