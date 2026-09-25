@@ -379,8 +379,8 @@ enum Fold {
     /// Controls with no value at an instant, only a total over an interval — mouse motion. Summed
     /// across the whole window and read once, because half of a movement is not a position.
     Delta,
-    /// A level pass triggered by a source disappearing — focus loss or a device disconnect — rather
-    /// than a player releasing a control. Reads like `Level`, except that a binding which was firing
+    /// A level pass triggered by a source disappearing — focus loss, a device disconnect, or an
+    /// authority no longer supplying an action — rather than a player releasing a control. Reads like `Level`, except that a binding which was firing
     /// and reads at rest this pass reports `Canceled` rather than `Completed`, since nothing was let
     /// go. A binding on an unaffected device is untouched.
     Interrupted,
@@ -457,6 +457,21 @@ impl<C: InputContext> InputContextState<C> {
 
         let mut mouse_delta = Vec2::ZERO;
         let mut level_changes = 0usize;
+
+        // Folded as a disconnect event would be, and before the events, so a key this tick
+        // releases still holds its action here.
+        if core::mem::take(&mut self.authority_lost) {
+            self.fold(
+                threshold,
+                Vec2::ZERO,
+                delta,
+                Fold::Interrupted,
+                consumed,
+                claims,
+                devices,
+            );
+            level_changes += 1;
+        }
 
         // Replayed one at a time rather than collapsed: a press and a release inside one window
         // cancel in the held state, and a single fold afterwards sees neither (R9.3).
@@ -1340,11 +1355,48 @@ mod tests {
         tick(&mut state, Some(&values));
         values.set::<Serve>(true);
         tick(&mut state, Some(&values));
+        values.set::<Serve>(false);
+        tick(&mut state, Some(&values));
+
+        values.clear::<Serve>();
+        tick(&mut state, Some(&values));
+        assert!(!state.value::<Serve>());
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Idle);
+    }
+
+    /// Clearing an action the player is holding is the backend losing the device, not the player
+    /// letting go, and ends it as a pad disconnecting does: `Canceled` rather than `Completed`. So
+    /// does the component going away.
+    #[test]
+    fn an_authority_that_stops_supplying_a_held_action_cancels_it() {
+        let mut state = authority_context();
+        let mut values = AuthorityValues::new();
+        values.set::<Serve>(false);
+        tick(&mut state, Some(&values));
+        values.set::<Serve>(true);
+        tick(&mut state, Some(&values));
+        tick(&mut state, Some(&values));
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Firing);
         state.transitions.clear();
 
         values.clear::<Serve>();
         tick(&mut state, Some(&values));
-        assert_eq!(state.phase::<Serve>(), ActionPhase::Completed);
+        let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
+        assert_eq!(phases, [ActionPhase::Canceled]);
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Canceled);
+
+        values.set::<Serve>(false);
+        tick(&mut state, Some(&values));
+        values.set::<Serve>(true);
+        tick(&mut state, Some(&values));
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Fired);
+
+        state.transitions.clear();
+
+        tick(&mut state, None);
+        let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
+        assert_eq!(phases, [ActionPhase::Canceled]);
+        assert_eq!(state.phase::<Serve>(), ActionPhase::Canceled);
     }
 
     /// The same guard a bound action gets (R7.5), on the authority's values: a menu closing while
@@ -1417,6 +1469,35 @@ mod tests {
         values.set::<Jump>(false);
         tick(&mut state, Some(&values));
         assert!(state.value::<Jump>(), "the key still holds it");
+
+        press(&mut state, &mut frame, key(ButtonState::Released));
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Completed);
+    }
+
+    /// The authority losing its device leaves the keyboard alone, as a pad disconnecting does: the
+    /// key still holds the action, and releasing it later is an ordinary `Completed`.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn an_authority_going_unsupplied_leaves_a_held_key_holding() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut state = context_declaring(|controls| {
+            controls.bind::<Jump>(KeyCode::Space);
+            controls.bind::<Jump>(Authority(DeviceFamily::Gamepad));
+        });
+        let mut values = AuthorityValues::new();
+        let mut frame = InputFrame::default();
+
+        values.set::<Jump>(true);
+        state.authority.hold(Some(&values));
+        press(&mut state, &mut frame, key(ButtonState::Pressed));
+        state.transitions.clear();
+
+        values.clear::<Jump>();
+        tick(&mut state, Some(&values));
+        assert!(state.value::<Jump>(), "the key still holds it");
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Firing);
+        assert!(state.transitions.is_empty());
 
         press(&mut state, &mut frame, key(ButtonState::Released));
         assert_eq!(state.phase::<Jump>(), ActionPhase::Completed);

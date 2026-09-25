@@ -133,7 +133,10 @@ impl AuthorityValues {
     ///
     /// What a backend says when it loses the device behind an action, or stops reporting it, rather
     /// than writing a zero that claims the player is holding it at centre. Supplying it again while
-    /// it is held waits for a release.
+    /// it is held waits for a release. An action cleared while it is held ends as
+    /// [`Canceled`](crate::action::ActionPhase::Canceled) rather than
+    /// [`Completed`](crate::action::ActionPhase::Completed), as it would if a pad driving it
+    /// disconnected, since the player did not let go.
     pub fn clear<A: InputAction>(&mut self) -> &mut Self {
         self.values.retain(|(action, _)| *action != A::id());
         self

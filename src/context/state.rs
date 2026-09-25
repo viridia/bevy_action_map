@@ -108,6 +108,9 @@ pub struct InputContextState<C> {
     // read. Held like a control's state so the fold reads every binding the same way; refreshed
     // only while active, since nothing reads it otherwise.
     pub(crate) authority: crate::backend::AuthorityValues,
+    // Set by `sample_authority` when a source it was supplying goes absent, and taken by the next
+    // `apply_frame`, which folds once as an interruption before replaying the tick's events.
+    pub(crate) authority_lost: bool,
     _marker: PhantomData<C>,
 }
 
@@ -143,6 +146,7 @@ impl<C: InputContext> InputContextState<C> {
             #[cfg(feature = "gamepad")]
             held_gamepad_axes: HashMap::default(),
             authority: crate::backend::AuthorityValues::new(),
+            authority_lost: false,
             _marker: PhantomData,
         }
     }
@@ -439,16 +443,23 @@ impl<C: InputContext> InputContextState<C> {
     /// instance's first sample, or when it resumes after going unsupplied, as Steam's actions do
     /// across a change of action set. A control gets this for free, since a press made before the
     /// context could see it never reaches it as an event; a level has no event to miss.
+    ///
+    /// The mirror image is a source that stops being supplied, which is the authority's device
+    /// going away rather than the player letting go: what it held is canceled (R11.4), as a
+    /// disconnect cancels what a pad held.
     pub(crate) fn sample_authority(&mut self, source: Option<&crate::backend::AuthorityValues>) {
-        // Every intent is marked; `commit_slot` applies the latch to `Button` alone.
         for binding in self.plan.bindings() {
-            if let crate::binding::BindingInput::Authority(_, _, action) = binding.input
-                && self.authority.value_of(action).is_none()
-                && source
-                    .and_then(|values| values.value_of(action))
-                    .is_some_and(|value| value.to_bool())
-            {
+            let crate::binding::BindingInput::Authority(_, _, action) = binding.input else {
+                continue;
+            };
+            let was = self.authority.value_of(action);
+            let now = source.and_then(|values| values.value_of(action));
+            // Every intent is marked; `commit_slot` applies the latch to `Button` alone.
+            if was.is_none() && now.is_some_and(|value| value.to_bool()) {
                 self.require_reset.set(binding.slot, true);
+            }
+            if was.is_some() && now.is_none() {
+                self.authority_lost = true;
             }
         }
         self.authority.hold(source);

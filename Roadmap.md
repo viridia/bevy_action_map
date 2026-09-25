@@ -213,6 +213,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 153  | A preset skips a family an authority owns                             |
 | 154  | An authority held at spawn is held over                               |
 | 151b | Disasteroids on Steam                                                 |
+| 155  | An authority that stops supplying a held action cancels it            |
 
 ---
 
@@ -614,21 +615,6 @@ Friction, is the real backend. It lives in `steam_examples/`, beside `steam_prob
 
 Every chunk here is an audit rather than a gate. It needs a running client, a pad, and a layout
 bound by hand (`docs/steam.md` S16), and no CI can run it.
-
-### 155. An authority that stops supplying a held action cancels it
-
-TD5.7's promise for a device, extended to an authority. A pad disconnecting cancels what it was
-driving, reporting `Canceled` rather than `Completed`, and leaves a binding on another device alone.
-An authority going unsupplied while an action is held, whether `clear` after losing a device or a
-Steam action set switching under it, currently reads as a release: `Completed`.
-
-- **Find how the device path cancels one binding.** The disconnect path clears held state; confirm
-  where `Canceled` comes from and whether it is per binding, since `cancel_slot` cancels the whole
-  slot and would cancel a key held on the same action.
-- **Then apply it where `sample_authority` sees a source go from held to absent**, which is the
-  mirror of 154's absent-to-held.
-- **Verified by:** a headless eval test, held then cleared reports `Canceled`, and the same with a
-  key also held leaves the action held by the key.
 
 ### 156. Navigating from no focus
 

@@ -408,7 +408,8 @@ bsn! {
 
 A window losing focus (`RawEvent::FocusLost`) or a gamepad disconnecting cancels whatever was in
 flight on that source — `Canceled`, not the `Completed` an ordinary release produces. A binding on
-an unaffected device is untouched.
+an unaffected device is untouched. An authority that stops supplying an action is the same case
+(TD5.8).
 
 ### 5.8 Authority bindings
 
@@ -430,11 +431,14 @@ copies the entity's `AuthorityValues` into its own (`sample_authority`), and the
 arm reads the binding's source from that copy, or rest where nothing was written. Before copying, a
 binding whose source was absent from the old copy and is held in the new one is marked
 `require_reset`, which gives R7.5's hold-over to an instance's first sample and to an action the
-authority resumes supplying, a Steam action set changing under a held button among them. From there
-it is an ordinary binding: its modifiers and conditions run, it folds with the action's other
-bindings by intent (TD5.5), and `commit_slot` turns its level into `Fired`, `Firing` and
-`Completed`. An authority reporting only a level, sampled when asked, is what this is shaped for;
-nothing on the wire or in the platform API needs to carry an edge.
+authority resumes supplying, a Steam action set changing under a held button among them. The mirror
+case, a source present in the old copy and absent from the new, sets `authority_lost`, and the next
+`apply_frame` folds once as `Fold::Interrupted` before replaying its events, as a disconnect event
+would be folded: an action that was firing and now reads at rest is `Canceled`, and one another
+binding still holds is untouched. From there it is an ordinary binding: its modifiers and conditions
+run, it folds with the action's other bindings by intent (TD5.5), and `commit_slot` turns its level
+into `Fired`, `Firing` and `Completed`. An authority reporting only a level, sampled when asked, is
+what this is shaped for; nothing on the wire or in the platform API needs to carry an edge.
 
 Holding no control, it claims nothing and cannot be claimed, has no mapping row, and has no prompt
 of its own, since the backend's `Prompts` answer for its family. An inactive or shadowed context
