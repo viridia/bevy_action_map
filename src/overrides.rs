@@ -2182,6 +2182,7 @@ mod tests {
             label: "Left Grip".to_string(),
             family: None,
             class: None,
+            glyph: None,
         };
 
         for entry in [ControlOrigin::Ours(Control::MouseMotion), foreign] {

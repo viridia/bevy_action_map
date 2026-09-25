@@ -221,6 +221,7 @@ Ground rule 5 applies here as everywhere: each row names what would settle it.
 
 | Question | Gate |
 | --- | --- |
+| **Why does a rebind show only when the game's window gains focus?** `S30`: the origins are asked every frame, and the panel losing focus is ruled out. Either Steam answers the old origins until the game has focus, or the game stopped asking while unfocused. Which one decides whether a panel docked beside the game can ever update it live | a log line per frame from the origin poll while the game is unfocused after a rebind: lines with the old origins point at Steam, no lines at the game |
 | **Do action set *layers* stack, where base sets do not?** `S19` settled the base case; layers are D51's intended answer and `steamworks` 0.13 exposes none of the functions | a patched `steamworks`, or a direct FFI call past the safe wrapper |
 | **Does the emulated pad carry Valve's vendor id on Windows?** `S1` is a macOS measurement, and D22's original claim may have described Windows | a Windows machine with the same pad |
 | **Does an `InputHandle_t` survive a restart?** D74 leans on it for a persistent identity, while this document's appendix follows D52 in treating a handle as runtime-only. S14's layout — vendor, product, instance suffix, kept on disk — suggests it survives, from one sample | chunk 151e: the same pad's handle read across two launches, and across a client restart |
@@ -518,6 +519,30 @@ appears is not known. `ShowBindingPanel` opened in every case.
 So a player who unbinds the controls screen's pad actions in the panel cannot reach a configurator
 from the pad; the keyboard is the way back. Not measured: whether macOS's controller settings can
 give the guide button back to Steam.
+
+### S30 — Glyphs come in three themes and three sizes, and a rebind is found only by asking
+
+Measured in chunk 151c, with an Xbox pad:
+
+- **The glyph directory holds `dark/`, `light/` and `knockout/`**, and each has every glyph as
+  `_sm`, `_md` and `_lg` PNGs, 32, 128 and 256 pixels tall, beside an SVG.
+  `GetGlyphForActionOrigin_Legacy`, the only glyph call `steamworks` 0.13 wraps, always answers
+  `dark` and `_md`. `dark` draws a control in black, for a light background: on a dark one an
+  outline-only glyph such as View vanishes, and RB shows only its letters. `light` draws it in
+  white, and `knockout` in white with the detail cut out. The `shared_color_*` face buttons are
+  coloured in every theme.
+- **The asset server refuses the absolute path** under its default `UnapprovedPathMode::Forbid`,
+  whatever source it names. A path relative to the source's root, `light/<name>_sm.png`, is
+  accepted.
+- **`steamworks` 0.13 has no safe callback for a layout change.** `SteamInputConfigurationLoaded_t`
+  is in `steamworks-sys`, and receiving it takes an `unsafe impl Callback`. Asking every action's
+  origins each frame and comparing finds a rebind made in the binding panel, and a pad connecting or
+  going.
+- **The origin enum is private** unless the `raw-bindings` feature is on, though the safe API takes
+  and returns it.
+- **A rebind shows when the game's window gains focus**, not when the panel's control changes, and
+  not when the panel loses focus: moving focus from the panel to Finder left the prompt as it was.
+  Why is not known; see "Not measured yet".
 
 ---
 

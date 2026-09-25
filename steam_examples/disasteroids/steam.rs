@@ -10,8 +10,9 @@ use bevy::prelude::*;
 use bevy::scene::SceneList;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_action_map::prelude::*;
-use steamworks::{Client, Input};
+use steamworks::{Client, Input, sys::EInputActionOrigin};
 
+use crate::common::prompt_ui::PromptSource;
 use crate::common::widget_focus::focusable;
 use crate::settings::{CHANGEABLE, FIXED, TITLE};
 
@@ -42,6 +43,8 @@ pub struct SteamActions {
     /// it when a screen takes the controls away from the game underneath.
     pub set: &'static str,
     actions: Vec<SteamAction>,
+    // Every set's handle, not only the live one's: an action's controls are asked for in the set
+    // that declares it.
     set_handles: Vec<(&'static str, u64)>,
     // The set last activated, so the frame of a switch is known.
     activated: u64,
@@ -51,7 +54,17 @@ pub struct SteamActions {
 }
 
 impl SteamActions {
-    pub fn new(set: &'static str, actions: Vec<SteamAction>) -> Self {
+    /// Every set in the manifest with the actions it declares, starting in `set`.
+    pub fn new(set: &'static str, sets: Vec<(&'static str, Vec<SteamAction>)>) -> Self {
+        let actions = sets
+            .into_iter()
+            .flat_map(|(name, actions)| {
+                actions.into_iter().map(move |action| SteamAction {
+                    set: name,
+                    ..action
+                })
+            })
+            .collect();
         Self {
             set,
             actions,
@@ -71,9 +84,16 @@ impl SteamActions {
 /// action writes.
 pub struct SteamAction {
     name: &'static str,
+    set: &'static str,
+    action: ActionId,
     digital: bool,
+    // What its controls are, where Steam says. An analog action does not: it may be a stick read on
+    // one axis or a trigger.
+    class: Option<ControlClass>,
     // Zero until the manifest has loaded, which happens some frames after init.
     handle: u64,
+    // The controls it was bound to when last asked, so a change in the layout is noticed.
+    origins: Vec<EInputActionOrigin>,
     read: fn(&Input, u64, u64, &mut AuthorityValues),
 }
 
@@ -86,8 +106,12 @@ pub fn button<A: InputAction<Output = bool>>() -> SteamAction {
 pub fn button_as<A: InputAction<Output = bool>>(name: &'static str) -> SteamAction {
     SteamAction {
         name,
+        set: "",
+        action: A::id(),
         digital: true,
+        class: Some(ControlClass::AnyButton),
         handle: 0,
+        origins: Vec::new(),
         read: |input, pad, action, values| {
             let data = input.get_digital_action_data(pad, action);
             // Packed (S11): copy the fields out rather than borrowing them.
@@ -103,8 +127,12 @@ pub fn button_as<A: InputAction<Output = bool>>(name: &'static str) -> SteamActi
 pub fn axis<A: InputAction<Output = f32>>() -> SteamAction {
     SteamAction {
         name: A::PATH,
+        set: "",
+        action: A::id(),
         digital: false,
+        class: None,
         handle: 0,
+        origins: Vec::new(),
         read: |input, pad, action, values| {
             let data = input.get_analog_action_data(pad, action);
             let (active, x) = (data.bActive, data.x);
@@ -119,8 +147,12 @@ pub fn axis<A: InputAction<Output = f32>>() -> SteamAction {
 pub fn stick<A: InputAction<Output = Vec2>>() -> SteamAction {
     SteamAction {
         name: A::PATH,
+        set: "",
+        action: A::id(),
         digital: false,
+        class: Some(ControlClass::AnyStick),
         handle: 0,
+        origins: Vec::new(),
         read: |input, pad, action, values| {
             let data = input.get_analog_action_data(pad, action);
             let (active, x, y) = (data.bActive, data.x, data.y);
@@ -133,6 +165,10 @@ pub fn stick<A: InputAction<Output = Vec2>>() -> SteamAction {
 
 /// Connects to Steam, or leaves the pad dead and the keyboard working if there is no client.
 pub fn plugin(app: &mut App) {
+    app.insert_resource(PromptSource(|world, action, scope| {
+        SteamPrompts(world).prompts(action, scope)
+    }));
+
     // Ahead of the client, since the button has to say when there is none.
     app.add_systems(
         Update,
@@ -229,6 +265,7 @@ fn poll(
     mut table: ResMut<SteamActions>,
     controllers: Query<(Entity, &SteamController)>,
     mut contexts: Query<&mut AuthorityValues>,
+    device: Res<PromptDevice>,
     mut commands: Commands,
 ) {
     steam.0.run_callbacks();
@@ -251,20 +288,7 @@ fn poll(
             table.actions.len()
         );
     }
-    let set = match table
-        .set_handles
-        .iter()
-        .find(|(name, _)| *name == table.set)
-    {
-        Some(&(_, handle)) => handle,
-        None => {
-            let handle = input.get_action_set_handle(table.set);
-            if handle != 0 {
-                table.set_handles.push((table.set, handle));
-            }
-            handle
-        }
-    };
+    let set = set_handle(&mut table.set_handles, &input, table.set);
 
     let pads = connected(&input);
     if table.pads != Some(pads.len()) {
@@ -285,6 +309,45 @@ fn poll(
             info!("Steam pad {pad:#x} connected");
             commands.spawn(SteamController(pad));
         }
+    }
+
+    // The prompts follow the pad: its controls while Steam reports one, the keyboard's otherwise.
+    let family = if pads.is_empty() {
+        DeviceFamily::KeyboardMouse
+    } else {
+        DeviceFamily::Gamepad
+    };
+    if device.0 != Some(family) {
+        commands.insert_resource(PromptDevice(Some(family)));
+        PromptGeneration::invalidate(&mut commands);
+    }
+
+    // Steam says nothing when the player rebinds in its overlay, so the layout is asked every frame
+    // and compared. A pad going, or a different kind of pad taking over, changes the answer too.
+    //
+    // Every frame is the simplest thing that is always right, not a recommendation. Prompts can
+    // afford to lag, so a game with more actions can ask only when the window gains focus (S30) or
+    // a pad connects, check one action per frame in turn, or skip frames with no prompt on screen.
+    let mut rebound = false;
+    for action in &mut table.actions {
+        let set = set_handle(&mut table.set_handles, &input, action.set);
+        let origins = match pads.first() {
+            Some(&pad) if action.handle != 0 && set != 0 && action.digital => {
+                input.get_digital_action_origins(pad, set, action.handle)
+            }
+            Some(&pad) if action.handle != 0 && set != 0 => {
+                input.get_analog_action_origins(pad, set, action.handle)
+            }
+            _ => Vec::new(),
+        };
+        if action.origins != origins {
+            action.origins = origins;
+            rebound = true;
+        }
+    }
+    if rebound {
+        commands.insert_resource(SteamOrigins::read(&input, &table.actions));
+        PromptGeneration::invalidate(&mut commands);
     }
 
     // One player, so the first pad Steam lists flies the ship. Starts empty, so an action nothing
@@ -312,6 +375,19 @@ fn poll(
     }
 }
 
+/// The handle of the action set named `name`, looked up once it resolves. Zero until the manifest
+/// has loaded.
+fn set_handle(handles: &mut Vec<(&'static str, u64)>, input: &Input, name: &'static str) -> u64 {
+    if let Some(&(_, handle)) = handles.iter().find(|(set, _)| *set == name) {
+        return handle;
+    }
+    let handle = input.get_action_set_handle(name);
+    if handle != 0 {
+        handles.push((name, handle));
+    }
+    handle
+}
+
 /// The connected pads. `get_connected_controllers` always returns sixteen handles in 0.13.1, the
 /// tail zeroed (S12), so this goes through the slice form and truncates to the real count.
 fn connected(input: &Input) -> Vec<u64> {
@@ -319,4 +395,84 @@ fn connected(input: &Input) -> Vec<u64> {
     let count = input.get_connected_controllers_slice(&mut handles);
     handles.truncate(count);
     handles
+}
+
+/// What every action the pad feeds is bound to in Steam's layout, as prompts name it.
+///
+/// Rebuilt only when the layout changes, so drawing a prompt never calls into Steam.
+#[derive(Resource, Default)]
+pub struct SteamOrigins(Vec<(ActionId, ControlOrigin)>);
+
+impl SteamOrigins {
+    /// Asks Steam for the name and art of every control the table's actions are bound to.
+    ///
+    /// A control reached twice, by one action fed from two sets, is named once.
+    fn read(input: &Input, actions: &[SteamAction]) -> Self {
+        let mut origins = Vec::new();
+        for action in actions {
+            for &origin in &action.origins {
+                let glyph = input.get_glyph_for_action_origin(origin);
+                let control = ControlOrigin::Foreign {
+                    // Steam's own name for the control, which the SDK keeps from one release to the
+                    // next.
+                    name: format!(
+                        "steam/{}",
+                        format!("{origin:?}").trim_start_matches("k_EInputActionOrigin_")
+                    ),
+                    label: input.get_string_for_action_origin(origin),
+                    family: Some(DeviceFamily::Gamepad),
+                    class: action.class,
+                    glyph: (!glyph.is_empty()).then_some(glyph),
+                };
+                let entry = (action.action, control);
+                if !origins.contains(&entry) {
+                    origins.push(entry);
+                }
+            }
+        }
+        Self(origins)
+    }
+}
+
+/// Prompts with the pad's half answered by Steam.
+///
+/// The mapper's tables answer for the keyboard, and have nothing to say for the pad: every pad
+/// binding is an authority, whose controls are Steam's.
+pub struct SteamPrompts<'w>(pub &'w World);
+
+impl Prompts for SteamPrompts<'_> {
+    fn prompts(&self, action: ActionId, scope: PromptScope) -> Vec<Prompt> {
+        let mut prompts = BindingTable::new(self.0).prompts(action, scope);
+        // Steam's layout is per action set rather than per context, so a lookup narrowed to one
+        // context has no answer from it.
+        if scope.context.is_some()
+            || scope
+                .family
+                .is_some_and(|family| family != DeviceFamily::Gamepad)
+        {
+            return prompts;
+        }
+        let Some(origins) = self.0.get_resource::<SteamOrigins>() else {
+            return prompts;
+        };
+        prompts.extend(
+            origins
+                .0
+                .iter()
+                .filter(|(bound, _)| *bound == action)
+                .filter(|(_, origin)| {
+                    scope
+                        .class
+                        .is_none_or(|class| origin.class() == Some(class))
+                })
+                .map(|(_, origin)| Prompt {
+                    origin: origin.clone(),
+                    with: Vec::new(),
+                    part: BindingPart::Whole,
+                    condition: ConditionDescriptor::None,
+                    context: None,
+                }),
+        );
+        prompts
+    }
 }

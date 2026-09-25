@@ -973,6 +973,7 @@ pub enum ControlOrigin {
     Modifier(ModifierKey),              // a chord entry only, either key of the pair
     Foreign {
         name: String, label: String, family: Option<DeviceFamily>, class: Option<ControlClass>,
+        glyph: Option<String>,          // a path to the reporter's own image of it
     },
 }
 ```
@@ -990,11 +991,12 @@ either way, and `GamepadBrand::Generic` falls through to the positional answer.
 **Glyphs.** `resolve_glyph(&ControlOrigin, GamepadBrand, has_art)` names the art for one control and
 ships none: `has_art` is the app's atlas, answering whether a `GlyphTier` covers a control. A
 gamepad control tries its brand's tier and then `Generic`'s; a keyboard or mouse control, a modifier
-included, has the one `KeyboardMouse` tier; a foreign control answers `None`, its art being its
-reporter's. `Glyph` is `#[non_exhaustive]` with one variant, `Own(GlyphTier, ControlOrigin)`, so a
-backend's own image can arrive as another (R18.9). A chord resolves an entry at a time. Everything
-that draws — the atlas, inline and block layout, the art a Mac labels differently — is
-`examples/common/prompt_ui.rs`, outside the crate.
+included, has the one `KeyboardMouse` tier; a foreign control answers `Glyph::External` with the
+path its reporter supplied, or `None`, and the atlas is not asked (R18.9). The crate carries the
+path as reported, a `String`, since it has no asset types; making it loadable is the app's. `Glyph`
+stays `#[non_exhaustive]` for a backend that hands art over in another shape. A chord resolves an
+entry at a time. Everything that draws — the atlas, inline and block layout, the art a Mac labels
+differently — is `examples/common/prompt_ui.rs`, outside the crate.
 
 **A prompt is not a row of the settings screen.** `mappings` is what the game declared and is
 static; a prompt answers from the contexts something carries, so it is empty for a context nobody is

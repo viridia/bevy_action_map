@@ -9,8 +9,9 @@ only, for now: every setup step below was measured on macOS, and Windows has not
 
 ## Disasteroids
 
-The base game from `examples/disasteroids`, with Steam owning the pad. `main.rs`, `actions.rs` and
-`steam.rs` are this crate's own; every other module is the base game's, linked in by path.
+The base game from `examples/disasteroids`, with Steam owning the pad. `main.rs`, `actions.rs`,
+`glyphs.rs` and `steam.rs` are this crate's own; every other module is the base game's, linked in by
+path.
 
 The keyboard plays exactly as it does in the base game. Every pad binding there is an `Authority`
 binding here, fed by `steam.rs` from Steam's action data. The build leaves out `bevy_gilrs`, so the
@@ -76,8 +77,13 @@ pad reaches the game through Steam alone and never also as an ordinary gamepad.
    The afterburner is not in the list. It follows Thrust, so holding the trigger opens it up as it
    does in the base game.
 
+### Prompts
+
+While Steam reports a pad, the game's prompts name its controls in Steam's own art, read from the
+client's install, and follow the layout: a change in Steam's binding panel shows on the next frame.
+Without a pad they name keys, as in the base game. A missing install leaves the pad's prompts as
+Steam's words for its controls.
+
 ### What does not work yet
 
-- **Prompts name only keys.** The hint line asks for the keyboard, as it does in the base game.
-  Steam's own glyphs are chunk 151c.
 - **One pad.** The first pad Steam lists flies the ship; a second does nothing.

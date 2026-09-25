@@ -40,7 +40,8 @@ bevy = { version = "0.20.0-rc.1", default-features = false, features = [
   "mouse",
   "gamepad",
 ] }
-steamworks = "0.13"
+# `raw-bindings` for the origin enum, which the safe API takes and returns but does not export.
+steamworks = { version = "0.13", features = ["raw-bindings"] }
 
 [profile.dev]
 opt-level = 1

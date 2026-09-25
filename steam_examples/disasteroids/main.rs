@@ -1,15 +1,16 @@
 //! Disasteroids with Steam Input owning the pad.
 //!
-//! Everything but this file, [`actions`] and [`steam`] is the base game's own, linked in by path:
-//! those modules name `crate::actions`, so they fly on whichever actions the including crate
-//! declares. The keyboard plays exactly as it does there. The pad is read through Steam, and bound
-//! in Steam's layout rather than by the game — the README says how to set that up.
+//! Everything but this file, [`actions`], [`glyphs`] and [`steam`] is the base game's own, linked
+//! in by path: those modules name `crate::actions`, so they fly on whichever actions the including
+//! crate declares. The keyboard plays exactly as it does there. The pad is read through Steam, and
+//! bound in Steam's layout rather than by the game — the README says how to set that up.
 
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
 use bevy_action_map::prelude::*;
 
 mod actions;
+mod glyphs;
 mod steam;
 
 #[path = "../../examples/disasteroids/asteroids.rs"]
@@ -30,12 +31,13 @@ mod ship;
 #[path = "../../examples/common/mod.rs"]
 mod common;
 
-use common::prompt_ui::{self, PromptFamily, PromptSpan};
+use common::prompt_ui::{self, IconPromptSpan, PromptFamily, PromptSpan};
 use common::widget_focus;
 
 fn main() {
     App::new()
         .add_plugins((
+            glyphs::plugin,
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
@@ -122,7 +124,7 @@ fn hint() -> impl Scene {
             left: Val::Px(8.0),
         }
         Children [
-            PromptSpan(ToggleOverlay)
+            IconPromptSpan(ToggleOverlay)
             TextFont { font_size: 13.0_f32 }
             TextColor(KEY)
             --
@@ -130,7 +132,7 @@ fn hint() -> impl Scene {
             TextFont { font_size: 13.0_f32 }
             TextColor(LABEL)
             --
-            PromptSpan(ToggleSettings)
+            IconPromptSpan(ToggleSettings)
             TextFont { font_size: 13.0_f32 }
             TextColor(KEY)
             --

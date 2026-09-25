@@ -28,6 +28,7 @@
 
 use std::borrow::Cow;
 
+use bevy::asset::AssetPath;
 use bevy::ecs::schedule::SystemCondition;
 use bevy::prelude::*;
 use bevy::ui::UiSystems;
@@ -122,9 +123,29 @@ pub struct PromptUnbound(pub String);
 #[derive(Resource, Clone, Copy)]
 pub struct PromptBrand(pub GamepadBrand);
 
+/// Who every prompt asks: the mapper's own tables unless a backend that owns some of the bindings
+/// says otherwise.
+#[derive(Resource, Clone, Copy)]
+pub struct PromptSource(pub fn(&World, ActionId, PromptScope) -> Vec<Prompt>);
+
+impl Default for PromptSource {
+    fn default() -> Self {
+        Self(|world, action, scope| BindingTable::new(world).prompts(action, scope))
+    }
+}
+
+/// Where to load a backend's own art from: [`Glyph::External`]'s path, and whether the prompt is a
+/// block one, to an asset path.
+///
+/// The backend knows its own files and this module knows its sizes, so the backend installs this.
+/// Without it, a control with only external art falls back to text.
+#[derive(Resource, Clone, Copy)]
+pub struct ExternalArt(pub fn(&str, bool) -> Option<AssetPath<'static>>);
+
 /// Draws prompts, and keeps them true.
 pub fn plugin(app: &mut App) {
     app.init_resource::<IconManifest>();
+    app.init_resource::<PromptSource>();
     // Ahead of every UI system, so a caption that changed this frame is laid out at the width it
     // will be drawn at rather than at the width it used to be.
     app.add_systems(
@@ -242,19 +263,17 @@ type PromptQuery = (
 fn refresh_prompts(world: &mut World) {
     let device = active_family(world);
     let brand = labelling_brand(world);
+    let source = world.resource::<PromptSource>().0;
 
     let mut spans = world.query::<PromptQuery>();
     let captions: Vec<(Entity, String)> = spans
         .iter(world)
         .map(|(entity, span, scheme, class, pick, unbound)| {
             let (scope, index) = scope_and_index(device, scheme, class, pick);
-            let text = BindingTable::new(world)
-                .prompts(span.0, scope)
-                .get(index)
-                .map_or_else(
-                    || unbound.map_or_else(|| "—".to_string(), |text| text.0.clone()),
-                    |prompt| caption(prompt, brand),
-                );
+            let text = source(world, span.0, scope).get(index).map_or_else(
+                || unbound.map_or_else(|| "—".to_string(), |text| text.0.clone()),
+                |prompt| caption(prompt, brand),
+            );
             (entity, text)
         })
         .collect();
@@ -332,9 +351,18 @@ fn tier_str(tier: GlyphTier) -> &'static str {
 ///
 /// A Mac takes `macos/` first where it has an entry, for the keys it labels differently: Option
 /// for Alt, and Command for Super.
-fn icon_path(glyph: &Glyph, manifest: &IconManifest, block: bool) -> String {
-    let Glyph::Own(tier, origin) = glyph else {
-        unreachable!("`Glyph` has one variant today");
+///
+/// `None` for a backend's art where the backend has not said how to load it.
+fn icon_path(
+    glyph: &Glyph,
+    manifest: &IconManifest,
+    external: Option<&ExternalArt>,
+    block: bool,
+) -> Option<AssetPath<'static>> {
+    let (tier, origin) = match glyph {
+        Glyph::Own(tier, origin) => (tier, origin),
+        Glyph::External(path) => return external.and_then(|art| (art.0)(path, block)),
+        _ => return None,
     };
     let name = origin.name();
     let mac = format!("macos/{name}");
@@ -351,7 +379,7 @@ fn icon_path(glyph: &Glyph, manifest: &IconManifest, block: bool) -> String {
     } else {
         "input_prompts_inline"
     };
-    format!("{dir}/{key}.png")
+    Some(format!("{dir}/{key}.png").into())
 }
 
 /// Everything one icon prompt needs in order to ask its question — mirrors [`PromptQuery`].
@@ -367,7 +395,7 @@ type IconPromptQuery = (
 /// What one icon prompt resolved to: an image to load per control in the chord, in the order they
 /// are drawn, or text to fall back to.
 enum Resolved {
-    Icons(Vec<String>),
+    Icons(Vec<AssetPath<'static>>),
     Text(String),
 }
 
@@ -394,6 +422,8 @@ fn refresh_icon_prompts(world: &mut World) {
     let brand = connected_brand(world);
     let labelled = labelling_brand(world);
     let manifest = world.resource::<IconManifest>();
+    let external = world.get_resource::<ExternalArt>();
+    let source = world.resource::<PromptSource>().0;
     let has_art = |tier, origin: &ControlOrigin| {
         manifest
             .0
@@ -408,7 +438,7 @@ fn refresh_icon_prompts(world: &mut World) {
                 (None, None) => unreachable!("`AnyOf` matched neither"),
             };
             let (scope, index) = scope_and_index(device, scheme, class, pick);
-            let prompts = BindingTable::new(world).prompts(action, scope);
+            let prompts = source(world, action, scope);
             let resolved = match prompts.get(index) {
                 None => {
                     Resolved::Text(unbound.map_or_else(|| "—".to_string(), |text| text.0.clone()))
@@ -421,7 +451,7 @@ fn refresh_icon_prompts(world: &mut World) {
                     .chain([&prompt.origin])
                     .map(|origin| {
                         resolve_glyph(origin, brand, has_art)
-                            .map(|glyph| icon_path(&glyph, manifest, block))
+                            .and_then(|glyph| icon_path(&glyph, manifest, external, block))
                     })
                     .collect::<Option<Vec<_>>>()
                     .map_or_else(
@@ -490,7 +520,8 @@ struct PendingIcons(Vec<Handle<Image>>);
 /// in the same frame [`refresh_icon_prompts`] resolved it.
 ///
 /// An icon that fails to load leaves its chord pending, with the previous one still drawn: the
-/// manifest has already said the file exists, so a failure is a broken install, and Bevy logs it.
+/// manifest or the backend has already said the file exists, so a failure is a broken install, and
+/// Bevy logs it.
 fn swap_in_icons(
     mut commands: Commands,
     spans: Query<(

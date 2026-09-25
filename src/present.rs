@@ -626,17 +626,19 @@ pub enum GlyphTier {
 
 /// How to draw the control behind a prompt.
 ///
-/// One variant today, and `#[non_exhaustive]` on purpose: an external binding backend may answer
-/// with its own image in a shape this crate does not resolve yet — an opaque handle, raw bytes,
-/// and a filesystem path are all plausible. Marking this non-exhaustive now means adding that
-/// variant later is not a breaking change for code that already matches on this one.
+/// Either art your game ships, named by this crate, or art an external binding backend supplied for
+/// one of its own controls.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Glyph {
-    /// This crate's own identifier: the tier that resolved, and the control it draws.
-    ///
-    /// Never a [`ControlOrigin::Foreign`] one, whose art is whatever reported it to supply.
+    /// This crate's own identifier: the tier that resolved, and the control it draws. Your atlas
+    /// decides what file that is.
     Own(GlyphTier, ControlOrigin),
+    /// An image file a backend pointed to, by its path on disk, exactly as the backend reported it.
+    ///
+    /// Loading it is your game's business. Steam, for one, answers with an absolute path inside its
+    /// own install, which is outside anywhere an asset loader looks by default.
+    External(String),
 }
 
 /// Resolves a control to a glyph identifier, trying a brand's own art before falling back to a
@@ -650,7 +652,7 @@ pub enum Glyph {
 /// A gamepad control tries `brand` first and
 /// [`GamepadBrand::Generic`](crate::device::GamepadBrand::Generic) next, unless `brand` is already
 /// `Generic`. A keyboard or mouse control, modifiers included, has only the one tier to try. A
-/// foreign control always answers `None`: this crate has no art of its own for it.
+/// foreign control answers with whatever art its reporter supplied, and `has_art` is not asked.
 ///
 /// A chord is drawn one entry at a time, so resolve [`Prompt::with`] as well as [`Prompt::origin`].
 #[cfg(feature = "gamepad")]
@@ -661,8 +663,8 @@ pub fn resolve_glyph(
 ) -> Option<Glyph> {
     use crate::device::GamepadBrand::Generic;
 
-    if matches!(origin, ControlOrigin::Foreign { .. }) {
-        return None;
+    if let ControlOrigin::Foreign { glyph, .. } = origin {
+        return glyph.clone().map(Glyph::External);
     }
     let own = |tier| has_art(tier, origin).then(|| Glyph::Own(tier, origin.clone()));
     if origin.family() != Some(DeviceFamily::Gamepad) {
@@ -680,14 +682,15 @@ pub fn resolve_glyph(
 /// Resolves a control to a glyph identifier.
 ///
 /// Without gamepad support there is only ever one tier to try, since every control left is keyboard
-/// or mouse. A foreign control always answers `None`: this crate has no art of its own for it.
+/// or mouse. A foreign control answers with whatever art its reporter supplied, and `has_art` is
+/// not asked.
 #[cfg(not(feature = "gamepad"))]
 pub fn resolve_glyph(
     origin: &ControlOrigin,
     has_art: impl Fn(GlyphTier, &ControlOrigin) -> bool,
 ) -> Option<Glyph> {
-    if matches!(origin, ControlOrigin::Foreign { .. }) {
-        return None;
+    if let ControlOrigin::Foreign { glyph, .. } = origin {
+        return glyph.clone().map(Glyph::External);
     }
     has_art(GlyphTier::KeyboardMouse, origin)
         .then(|| Glyph::Own(GlyphTier::KeyboardMouse, origin.clone()))
@@ -727,6 +730,9 @@ pub enum ControlOrigin {
         /// is why a caller narrowing by class has to decide whether an unclassified control
         /// belongs in the answer.
         class: Option<ControlClass>,
+        /// The path to an image of it, where the reporter supplied one. [`resolve_glyph`] hands it
+        /// back as [`Glyph::External`].
+        glyph: Option<String>,
     },
 }
 
@@ -1411,22 +1417,33 @@ mod tests {
         assert_eq!(glyph, Some(Glyph::Own(GlyphTier::KeyboardMouse, origin)));
     }
 
-    /// A foreign control's art is whatever reported it to supply, so this crate never claims to
-    /// have any, whatever `has_art` would say.
+    /// A foreign control's art is whatever reported it to supply, so the atlas is never asked, and
+    /// one reported without art has none, whatever `has_art` would say.
     #[cfg(feature = "gamepad")]
     #[test]
-    fn resolve_glyph_leaves_a_foreign_control_alone() {
+    fn resolve_glyph_answers_a_foreign_control_with_its_reporters_art() {
         use crate::device::GamepadBrand;
 
-        let origin = ControlOrigin::Foreign {
+        let mut origin = ControlOrigin::Foreign {
             name: "steam/trackpad".into(),
             label: "Trackpad".into(),
             family: Some(DeviceFamily::Gamepad),
             class: None,
+            glyph: None,
         };
         assert_eq!(
             resolve_glyph(&origin, GamepadBrand::Xbox, |_, _| true),
             None
+        );
+
+        if let ControlOrigin::Foreign { glyph, .. } = &mut origin {
+            *glyph = Some("/steam/glyphs/trackpad.png".into());
+        }
+        assert_eq!(
+            resolve_glyph(&origin, GamepadBrand::Xbox, |_, _| panic!(
+                "asked the atlas"
+            )),
+            Some(Glyph::External("/steam/glyphs/trackpad.png".into()))
         );
     }
 
@@ -1836,6 +1853,7 @@ mod prompt_tests {
             label: "Touchpad".into(),
             family: Some(crate::device::DeviceFamily::Gamepad),
             class: Some(ControlClass::AnyDelta),
+            glyph: None,
         };
 
         assert_eq!(foreign.name(), "steam/dualsense_touchpad");
@@ -1857,6 +1875,7 @@ mod prompt_tests {
             label: "Mystery".into(),
             family: None,
             class: None,
+            glyph: None,
         };
 
         assert_eq!(unsaid.class(), None);

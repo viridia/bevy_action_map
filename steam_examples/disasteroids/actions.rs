@@ -213,20 +213,30 @@ pub fn plugin(app: &mut App) {
     app.insert_resource(SteamActions::new(
         GAMEPLAY,
         vec![
-            steam::axis::<Thrust>(),
-            steam::axis::<Turn>(),
-            steam::button::<Fire>(),
-            steam::button::<SmartBomb>(),
-            steam::button::<Hyperspace>(),
-            steam::button::<Pause>(),
-            steam::button::<ToggleOverlay>(),
-            steam::button::<ToggleSettings>(),
-            steam::stick::<Navigate>(),
-            steam::button::<Back>(),
-            steam::button::<Confirm>(),
-            steam::button::<Clear>(),
-            steam::button_as::<ToggleSettings>("disasteroids.menu.toggle_settings"),
-            steam::button::<Activate>(),
+            (
+                GAMEPLAY,
+                vec![
+                    steam::axis::<Thrust>(),
+                    steam::axis::<Turn>(),
+                    steam::button::<Fire>(),
+                    steam::button::<SmartBomb>(),
+                    steam::button::<Hyperspace>(),
+                    steam::button::<Pause>(),
+                    steam::button::<ToggleOverlay>(),
+                    steam::button::<ToggleSettings>(),
+                ],
+            ),
+            (
+                MENU,
+                vec![
+                    steam::stick::<Navigate>(),
+                    steam::button::<Confirm>(),
+                    steam::button::<Back>(),
+                    steam::button::<Clear>(),
+                    steam::button_as::<ToggleSettings>("disasteroids.menu.toggle_settings"),
+                    steam::button::<Activate>(),
+                ],
+            ),
         ],
     ));
     app.add_systems(Update, choose_set);
