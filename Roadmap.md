@@ -215,6 +215,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 151b | Disasteroids on Steam                                                 |
 | 155  | An authority that stops supplying a held action cancels it            |
 | 151d | A delegated row                                                       |
+| 157  | The controls screen as a template with a slot                         |
 
 ---
 
@@ -612,35 +613,10 @@ supplies, and prompt invalidation the backend drives. A Steam build of Disastero
 Friction, is the real backend. It lives in `steam_examples/`, beside `steam_probe/`, with its own
 `Cargo.toml` outside the workspace so `steamworks-sys` never builds in `verify.sh`.
 
-151c, 151e and 151f are independent of each other; 151f follows 157.
+151c, 151e and 151f are independent of each other.
 
-Every chunk here but 157 is an audit rather than a gate. It needs a running client, a pad, and a
-layout bound by hand (`docs/steam.md` S16), and no CI can run it.
-
-### 157. The controls screen as a template with a slot
-
-Base Disasteroids' controls screen, restructured so a build can say how its pad is remapped. The
-presets, the dead-zone stepper and the hold/toggle switch are one strategy for that, and the Steam
-build's is another: a way into Steam's own screen. Today the first is written into `settings.rs`, so
-the second has nowhere to go but a fork. An internal change: the game does not change.
-
-- **`ControlsScreen` is a `SceneComponent`** whose props are one slot,
-  `gamepad_remapping: Box<dyn SceneList>`, on the model of `FeathersDialogProps`. The slot is named
-  for what fills it, the controls that remap the pad besides its cells, not for where it sits. Its
-  scene function is layout: the title, the two tables with their headings, the slot under the pad
-  table, the three buttons, the help line and the refusal line.
-- **A `MappingTable(DeviceFamily)` fills itself** from `mappings` in an `On<Ready>` observer, so the
-  props carry no snapshot of the world. `Ready` rather than `Add`: it fires once the table's own
-  children exist, so the rows land after the heading.
-- **The presets, the stepper and the switch move to `pad_presets.rs`**, with their observers and
-  their share of `redraw_pending`. `PendingOverrides` and `working_copy` become visible to it.
-- **Each build spawns the screen**, ordered after `seed_pending`, passing its slot's contents. The
-  Steam build passes `pad_presets` too until 151f.
-- **Not doing: a slot for the keyboard.** Its cells are its remapping, and nothing yet wants to put
-  anything beside them.
-- **Verified by:** `disasteroids/rebind.py` passing unchanged, which selects cells and preset
-  buttons by `Name` and so checks the selectors survived the move; and the Steam build still
-  compiling (`verify.sh --full`).
+Every chunk here is an audit rather than a gate. It needs a running client, a pad, and a layout
+bound by hand (`docs/steam.md` S16), and no CI can run it.
 
 ### 156. Navigating from no focus
 
@@ -689,9 +665,10 @@ R18.8, R18.9 and R18.10 against a real backend.
 
 151d's rows, and a way into the screen that owns them.
 
-- **The Steam build fills 157's slot with one button** that opens `show_binding_panel`, observed in
-  `steam.rs`. The pad rows stay listed as text. The presets and the dead-zone stepper are not passed
-  in: under Steam they could only be refused. `settings.rs` never learns that delegation exists.
+- **The Steam build's gamepad column has one button `below` its table**, which opens
+  `show_binding_panel`, observed in `steam.rs`. The pad rows stay listed as text. The presets and
+  the dead-zone stepper are not passed in: under Steam they could only be refused. `settings.rs`
+  never learns that delegation exists.
 - **`common::widget_focus` answers the pad under Steam.** Its `ButtonFocused` and `StepperFocused`
   contexts bind the pad's buttons directly, and without `bevy_gilrs` nothing reaches them, so the
   Steam build's pad can move the selection but not press a focused button or step a stepper. Its

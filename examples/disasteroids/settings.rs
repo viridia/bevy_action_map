@@ -9,8 +9,10 @@
 //! up.
 //!
 //! There are separate tables for keyboard and gamepad, because the rebinding strategies are
-//! different: keyboard allows rebinding of individual keys, while gamepad allows a choice of
-//! presets.
+//! different: keyboard allows rebinding of individual keys, while the pad is remapped by whatever
+//! the build puts under its table. [`ControlsScreen`] is the layout around the tables, and each
+//! build spawns it with a [`MappingColumn`] per family; base Disasteroids puts
+//! [`pad_presets`](crate::pad_presets) under the pad's.
 //!
 //! Selection movement is driven by
 //! [`AutoDirectionalNavigation`](bevy::ui::auto_directional_navigation::AutoDirectionalNavigation).
@@ -29,10 +31,11 @@
 use bevy::input_focus::{AutoFocus, InputFocus};
 use bevy::math::CompassOctant;
 use bevy::prelude::*;
+use bevy::scene::{Ready, SceneList};
 use bevy::ui::UiSystems;
 use bevy::ui::auto_directional_navigation::AutoDirectionalNavigator;
 use bevy::ui_widgets::{Activate, Button};
-use bevy_action_map::mapping::{Tunable, TunableValue, fallback_label, tunables};
+use bevy_action_map::mapping::{TunableValue, fallback_label};
 use bevy_action_map::overrides::{
     OverrideProblemKind, Overrides, Rebind, apply_overrides_with_preset,
 };
@@ -44,29 +47,24 @@ use crate::actions::{
     Back, Clear, Confirm, Menu, Navigate, TURN_DEAD_ZONE_KEY, ToggleSettings, Turn,
 };
 use crate::common::prompt_ui::{IconPrompt, PromptFamily, PromptSpan};
-use crate::common::widget_focus::{
-    Adjusted, ButtonFocused, Stepper, decrement_pressed, focusable, increment_pressed,
-};
+use crate::common::widget_focus::{ButtonFocused, focusable};
 use crate::pause::Simulating;
 use crate::saved_controls;
 
 // Colors
 
 /// A row the player may change, and the box drawn around such a cell.
-const CHANGEABLE: Color = Color::srgb(0.75, 0.95, 0.8);
+pub(crate) const CHANGEABLE: Color = Color::srgb(0.75, 0.95, 0.8);
 /// Everything that is listed to be read rather than changed.
-const FIXED: Color = Color::srgb(0.55, 0.6, 0.62);
+pub(crate) const FIXED: Color = Color::srgb(0.55, 0.6, 0.62);
 /// A follower's line: dimmer than [`FIXED`], since it is a fact about the row above rather than a
 /// row the player reads on its own.
 const SUBORDINATE: Color = Color::srgb(0.4, 0.44, 0.46);
-const HEADING: Color = Color::srgb(0.45, 0.7, 0.95);
-const TITLE: Color = Color::srgb(0.9, 0.95, 1.0);
-/// The background a cell shows while it is listening for the next control — without this, a
-/// capture in progress and one that has not started look identical.
+pub(crate) const HEADING: Color = Color::srgb(0.45, 0.7, 0.95);
+pub(crate) const TITLE: Color = Color::srgb(0.9, 0.95, 1.0);
+/// The background a cell shows while it is listening for the next control — without this, a capture
+/// in progress and one that has not started look identical.
 const LISTENING: Color = Color::srgb(0.4, 0.28, 0.05);
-/// The preset currently in effect, drawn distinct from the rest of the row — its own color, since
-/// "selected" and "listening" are not the same fact about a cell.
-const SELECTED: Color = Color::srgb(0.25, 0.55, 0.35);
 /// Why a press did not take. A lighter relative of [`LISTENING`], because it is the same
 /// conversation — the row asked for a control and this is the answer.
 const REFUSED_TEXT: Color = Color::srgb(0.95, 0.72, 0.3);
@@ -103,10 +101,6 @@ const ROW_FONT_SIZE: f32 = 13.0;
 const ROW_GAP: f32 = 4.0;
 /// The vertical padding inside a cell's border, above and below its text.
 const ROW_PADDING_V: f32 = 0.0;
-
-/// How far one press of the stepper moves `Turn`'s deadzone. The bounds are the tunable's own,
-/// declared in `actions.rs` and read back off it, so the two cannot drift apart.
-const DEAD_ZONE_STEP: f32 = 0.05;
 
 /// Whether the controls screen is up.
 ///
@@ -160,7 +154,7 @@ pub(crate) struct AppliedControls(pub Controls);
 /// here into the running game, via [`apply_overrides_with_preset`]. What a row shows is always what
 /// Confirm would commit.
 #[derive(Resource, Default)]
-struct PendingOverrides(Controls);
+pub(crate) struct PendingOverrides(pub Controls);
 
 /// The preset a player who has never picked one is on, and where a saved name this build no longer
 /// declares lands.
@@ -201,7 +195,7 @@ pub(crate) fn working_copy(world: &World, controls: &Controls) -> (Overrides, Ov
 }
 
 /// [`working_copy`] against the unconfirmed copy, which is what everything on this screen draws.
-fn pending_copy(world: &World) -> Overrides {
+pub(crate) fn pending_copy(world: &World) -> Overrides {
     working_copy(world, &world.resource::<PendingOverrides>().0).0
 }
 
@@ -210,9 +204,8 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<PendingOverrides>();
     app.init_resource::<AppliedControls>();
     app.init_resource::<Refusal>();
-    // Chained: `show` builds the screen out of the working copy, so it has to see the copy this
-    // visit starts from rather than the one the last visit left behind.
-    app.add_systems(OnEnter(Settings::Showing), (seed_pending, show).chain());
+    // The screen itself is spawned by each build, since each fills its slot differently.
+    app.add_systems(OnEnter(Settings::Showing), seed_pending);
     app.add_systems(OnExit(Settings::Showing), release_focus);
     // Ahead of every UI system, so a cell that changed this frame is laid out at the width its new
     // text wants rather than the width it used to be — the same reason `prompt_ui` runs where it
@@ -232,11 +225,11 @@ pub fn plugin(app: &mut App) {
             .before(UiSystems::Prepare),
     );
 
-    // `Menu` being exclusive already stops the ship answering; this stops the simulation
-    // continuing to run behind a screen nobody can see it through. A second, independent
-    // `run_if` on the set `pause::plugin` already configures, rather than a state this file
-    // would have to remember to hand back — `Simulating` composes the two conditions itself, so
-    // there is nothing to restore if the game was already paused when the screen opened.
+    // `Menu` being exclusive already stops the ship answering; this stops the simulation continuing
+    // to run behind a screen nobody can see it through. A second, independent `run_if` on the set
+    // `pause::plugin` already configures, rather than a state this file would have to remember to
+    // hand back — `Simulating` composes the two conditions itself, so there is nothing to restore
+    // if the game was already paused when the screen opened.
     app.configure_sets(Update, Simulating.run_if(in_state(Settings::Hidden)));
     app.configure_sets(FixedUpdate, Simulating.run_if(in_state(Settings::Hidden)));
 }
@@ -250,7 +243,7 @@ fn seed_pending(applied: Res<AppliedControls>, mut pending: ResMut<PendingOverri
 /// Opens the screen, and closes it again.
 ///
 /// Attached twice: to the shell context's entity by [`actions::shell`](crate::actions::shell), like
-/// the other controls the player can always reach, and to the screen's own root by [`screen`] below
+/// the other controls the player can always reach, and to the screen's own root by [`ControlsScreen`] below
 /// — `Menu` binds `ToggleSettings` a second time so the same key that opened the screen also closes
 /// it, without needing `Shell` to answer while `Menu` shadows it.
 pub(crate) fn toggle(
@@ -262,14 +255,6 @@ pub(crate) fn toggle(
         Settings::Hidden => Settings::Showing,
         Settings::Showing => Settings::Hidden,
     });
-}
-
-/// Spawns the screen from what the world says is bound.
-///
-/// A system rather than `screen.spawn()`, because the scene is built out of the mapping list and so
-/// needs the world to build it from.
-fn show(world: &World, mut commands: Commands) {
-    commands.spawn_scene(screen(world));
 }
 
 /// Forgets what was selected, because in a moment it will not exist.
@@ -388,7 +373,10 @@ fn apply_and_close(world: &mut World) {
 /// a row: a `MappingKey` cannot be built outside the crate, so `Preset::build` is what asks the
 /// world what `Turn`'s gamepad row actually is, the same way `add_context` asks it what `Turn`
 /// itself is.
-fn presets(world: &World) -> Vec<Preset> {
+///
+/// Here rather than beside the preset buttons, because a saved choice names a preset whether or not
+/// the build offers the buttons to pick one.
+pub(crate) fn presets(world: &World) -> Vec<Preset> {
     vec![
         Preset {
             name: DEFAULT_PRESET,
@@ -424,151 +412,140 @@ fn row_named(
         .find(|row| row.family == family && row.key == key)
 }
 
-/// The whole screen, as a scene.
+/// The whole screen, around a column for each device family the build lists.
 ///
-/// [`mappings`] hands back every row the game has declared, in both schemes. Splitting them into two
-/// tables and sorting each is the screen's business, which is why the crate does not do it.
+/// A build spawns it on entering [`Settings::Showing`]:
+///
+/// ```ignore
+/// bsn! {
+///     @ControlsScreen {
+///         @columns: bsn_list! {
+///             @MappingColumn { @family: DeviceFamily::KeyboardMouse }
+///             --
+///             @MappingColumn {
+///                 @family: DeviceFamily::Gamepad,
+///                 @below: {pad_presets::remapping()},
+///             }
+///         },
+///     }
+/// }
+/// ```
 ///
 /// The root carries [`Menu`] and the observers for its actions, which is the arrangement
 /// [`actions::shell`](crate::actions::shell) already uses for the always-on controls. Here it buys
 /// something the shell does not need: the context is the screen, so there is no activation
 /// condition to write and nothing to switch off on the way out.
-fn screen(world: &World) -> impl Scene {
-    // `Menu`'s own bindings — the stick, the D-pad and the arrow keys that move the selection on
-    // this very screen — are machinery for operating the settings screen, not controls a player
-    // thinks of as part of the game. `mappings` cannot tell the two apart on its own, so this is
-    // the one place the screen names a context: everything from here down still reads
-    // `ActionMapping` alone. `ButtonFocused` is excluded for the same reason —
-    // `common::widget_focus`'s bridge, not a control this screen's own player thinks of as
-    // bindable.
-    let all: Vec<ActionMapping> = mappings(world)
-        .into_iter()
-        .filter(|mapping| mapping.context != Menu::PATH && mapping.context != ButtonFocused::PATH)
-        .collect();
-    let rows = |family| -> Vec<ActionMapping> {
-        all.iter()
-            .filter(|mapping| mapping.family == family)
-            .cloned()
-            .collect()
-    };
+#[derive(SceneComponent, Default, Clone)]
+#[scene(ControlsScreenProps)]
+pub(crate) struct ControlsScreen;
 
-    let presets = presets(world);
-    let live_tunables = tunables(world);
-    let pending = pending_copy(world);
-    let selected = world.resource::<PendingOverrides>().0.preset;
-    let dead_zone = dead_zone_tunable(world, &pending);
-    let hold_or_toggle = live_tunables
-        .iter()
-        .find(|tunable| tunable.key == HOLD_OR_TOGGLE_KEY)
-        .is_some_and(|tunable| effective_tunable(tunable, &pending) == TunableValue::Bool(true));
+/// What a build puts on the [`ControlsScreen`].
+pub(crate) struct ControlsScreenProps {
+    /// Laid out side by side, left to right: ordinarily one [`MappingColumn`] per family.
+    pub columns: Box<dyn SceneList>,
+}
 
-    bsn! {
-        // Closing the screen is nothing but despawning it, which the state can do on its own — and
-        // that takes the context below with it.
-        #Settings
-        DespawnOnExit::<Settings>(Settings::Showing)
-        Menu
-        on(navigate)
-        on(back)
-        on(confirm)
-        on(clear_cell)
-        on(toggle)
-        // Over the game and the debug overlay both, since it covers them.
-        GlobalZIndex(10)
-        BackgroundColor({Color::srgba(0.02, 0.02, 0.06, 0.97)})
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            row_gap: Val::Px(14.0),
+impl Default for ControlsScreenProps {
+    fn default() -> Self {
+        Self {
+            columns: Box::new(bsn_list! {}),
         }
-        Children [
-            Text::new("CONTROLS")
-            TextFont { font_size: 27.0_f32 }
-            TextColor(TITLE)
-            --
-            Node { column_gap: Val::Px(48.0), align_items: AlignItems::Start }
+    }
+}
+
+impl ControlsScreen {
+    fn scene(props: ControlsScreenProps) -> impl Scene {
+        bsn! {
+            // Closing the screen is nothing but despawning it, which the state can do on its own —
+            // and that takes the context below with it.
+            #Settings
+            DespawnOnExit::<Settings>(Settings::Showing)
+            Menu
+            on(navigate)
+            on(back)
+            on(confirm)
+            on(clear_cell)
+            on(toggle)
+            // Over the game and the debug overlay both, since it covers them.
+            GlobalZIndex(10)
+            BackgroundColor({Color::srgba(0.02, 0.02, 0.06, 0.97)})
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(14.0),
+            }
             Children [
-                @{table("Keyboard & Mouse", DeviceFamily::KeyboardMouse, rows(DeviceFamily::KeyboardMouse), KEYBOARD_COLUMNS, CONTROL_WIDTH)}
+                Text::new("CONTROLS")
+                TextFont { font_size: 27.0_f32 }
+                TextColor(TITLE)
                 --
-                Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0) }
+                Node { column_gap: Val::Px(48.0), align_items: AlignItems::Start }
                 Children [
-                    @{table("Gamepad", DeviceFamily::Gamepad, rows(DeviceFamily::Gamepad), GAMEPAD_COLUMNS, GAMEPAD_CONTROL_WIDTH)}
-                    --
-                    @{preset_row(&presets, selected)}
-                    --
-                    // Two rows' worth of control on one line, for now: the screen is
-                    // already at the height budget the window allows, and neither reads
-                    // worse side by side than stacked.
-                    Node { column_gap: Val::Px(24.0) }
-                    Children [
-                        @{dead_zone_row(dead_zone)}
-                        --
-                        @{hold_or_toggle_row(hold_or_toggle)}
-                    ]
+                    {props.columns}
                 ]
-            ]
-            --
-            Node { column_gap: Val::Px(16.0), margin: {UiRect::top(Val::Px(4.0))} }
-            Children [
-                // Cancel first in the tree as well as on screen, so that the one the selection
-                // starts on is also the one the eye starts on — which is also why Reset is not
-                // first, since a selection landing on it would put the destructive one under the
-                // player's thumb before they had read the screen. Left to right they run by
-                // increasing commitment: leave, change everything back, commit.
-                @{cancel_button()}
                 --
-                @{reset_button()}
+                Node { column_gap: Val::Px(16.0), margin: {UiRect::top(Val::Px(4.0))} }
+                Children [
+                    // Cancel first in the tree as well as on screen, so that the one the selection
+                    // starts on is also the one the eye starts on — which is also why Reset is not
+                    // first, since a selection landing on it would put the destructive one under
+                    // the player's thumb before they had read the screen. Left to right they run by
+                    // increasing commitment: leave, change everything back, commit.
+                    @{cancel_button()}
+                    --
+                    @{reset_button()}
+                    --
+                    @{confirm_button()}
+                ]
                 --
-                @{confirm_button()}
-            ]
-            --
-            // The one thing on this screen that has to know an action. A span rather than a lookup
-            // formatted into the sentence, because the answer changes while the screen is up, as
-            // the player rebinds.
-            Text::new(
-                "Boxed cells are the ones this game offers for rebinding — press one, then \
-                 press what you want bound there; everything else is listed so you can see \
-                 what it does.\nPress "
-            )
-            // Three spans rather than one sentence with the controls written into it, so they
-            // follow the player's own rebinding while the screen is up.
-            Node {
-                margin: UiRect::axes(percent(10), px(0))
-            }
-            TextFont { font_size: 13.0_f32 }
-            TextColor(FIXED)
-            Children [
-                PromptSpan(Clear)
-                TextFont { font_size: 13.0_f32 }
-                TextColor(TITLE)
-                --
-                TextSpan::new(" to empty the selected cell, or ")
+                // The one thing on this screen that has to know an action. A span rather than a
+                // lookup formatted into the sentence, because the answer changes while the screen
+                // is up, as the player rebinds.
+                Text::new(
+                    "Boxed cells are the ones this game offers for rebinding — press one, then \
+                     press what you want bound there; everything else is listed so you can see \
+                     what it does.\nPress "
+                )
+                // Three spans rather than one sentence with the controls written into it, so they
+                // follow the player's own rebinding while the screen is up.
+                Node {
+                    margin: UiRect::axes(percent(10), px(0))
+                }
                 TextFont { font_size: 13.0_f32 }
                 TextColor(FIXED)
+                Children [
+                    PromptSpan(Clear)
+                    TextFont { font_size: 13.0_f32 }
+                    TextColor(TITLE)
+                    --
+                    TextSpan::new(" to empty the selected cell, or ")
+                    TextFont { font_size: 13.0_f32 }
+                    TextColor(FIXED)
+                    --
+                    PromptSpan(ToggleSettings)
+                    TextFont { font_size: 13.0_f32 }
+                    TextColor(TITLE)
+                    --
+                    TextSpan::new(" to close.")
+                    TextFont { font_size: 13.0_f32 }
+                    TextColor(FIXED)
+                ]
                 --
-                PromptSpan(ToggleSettings)
+                // Empty until a press is turned down. A line that is always present, rather than
+                // one spawned and despawned, so nothing below it moves when a refusal appears.
+                Text::new("")
+                RefusalLine
+                Node {
+                    margin: UiRect::axes(percent(10), px(0))
+                }
                 TextFont { font_size: 13.0_f32 }
-                TextColor(TITLE)
-                --
-                TextSpan::new(" to close.")
-                TextFont { font_size: 13.0_f32 }
-                TextColor(FIXED)
+                TextColor(REFUSED_TEXT)
             ]
-            --
-            // Empty until a press is turned down. A line that is always present, rather than one
-            // spawned and despawned, so nothing below it moves when a refusal appears.
-            Text::new("")
-            RefusalLine
-            Node {
-                margin: UiRect::axes(percent(10), px(0))
-            }
-            TextFont { font_size: 13.0_f32 }
-            TextColor(REFUSED_TEXT)
-        ]
+        }
     }
 }
 
@@ -684,274 +661,7 @@ fn confirm_pressed(_: On<Activate>, mut commands: Commands) {
     commands.queue(apply_and_close);
 }
 
-/// The row of preset buttons under the gamepad table.
-///
-/// `+ use<>` on this and [`preset_button`] below: both build an owned scene from what they're
-/// handed rather than holding onto it, but Rust 2024's default `impl Trait` capture rule would tie
-/// the result to `presets`'s borrow anyway, which does not outlive the caller's own local of the
-/// same name in [`screen`].
-fn preset_row(presets: &[Preset], selected: &str) -> impl Scene + use<> {
-    let buttons: Vec<_> = presets
-        .iter()
-        .map(|preset| preset_button(preset, preset.name == selected))
-        .collect();
-    bsn! {
-        Node { column_gap: Val::Px(10.0) }
-        Children [
-            {buttons}
-        ]
-    }
-}
-
-/// One preset's own button. The one currently in effect takes [`SELECTED`] for its border and a
-/// wash of the same color behind it — the swap [`LISTENING`] makes for a cell that is listening.
-fn preset_button(preset: &Preset, selected: bool) -> impl Scene + use<> {
-    let name = preset.name;
-    let label = fallback_label(name);
-    let border = if selected { SELECTED } else { FIXED };
-    let background = if selected {
-        SELECTED.with_alpha(0.25)
-    } else {
-        Color::NONE
-    };
-    bsn! {
-        Button
-        on(preset_pressed)
-        @focusable()
-        ~{PresetButton(name)}
-        Text::new(label)
-        TextFont { font_size: 14.0_f32 }
-        TextColor(TITLE)
-        BorderColor::all(border)
-        BackgroundColor(background)
-        Node {
-            border: {UiRect::all(Val::Px(1.0))},
-            border_radius: {BorderRadius::all(Val::Px(4.0))},
-            padding: {UiRect::axes(Val::Px(12.0), Val::Px(3.0))},
-        }
-    }
-}
-
-/// A label and its stepper, the same "row names what it is, then draws the control" shape the two
-/// tables already use.
-fn dead_zone_row(value: TunableValue) -> impl Scene {
-    let value = match value {
-        TunableValue::Range { value, .. } => value,
-        TunableValue::Bool(_) => 0.0,
-    };
-    bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(3.0) }
-        Children [
-            Text::new("Turn dead zone") TextFont { font_size: 13.0_f32 } TextColor(HEADING)
-            --
-            @{stepper(value)}
-        ]
-    }
-}
-
-/// One place the value's format is decided, so the spawned row and [`redraw_pending`] agree.
-fn dead_zone_label(value: f32) -> String {
-    format!("{value:.2}")
-}
-
-/// One chevron on either side of the value, `justify_content: SpaceBetween` so the row's own width
-/// is what spaces them rather than a gap that would also grow the digits between them.
-///
-/// The chevrons are `Button`s but not `focusable()`: this row is the one tab stop, the same
-/// distinction [`common::widget_focus`](crate::common::widget_focus) draws between a stepper and
-/// the widgets inside it — a click still presses one (`bevy_ui_widgets` sees to that on its own),
-/// it just never moves the selection.
-fn stepper(value: f32) -> impl Scene {
-    bsn! {
-        Stepper
-        on(apply_dead_zone_delta)
-        @focusable()
-        Node {
-            width: Val::Px(130.0),
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            border: {UiRect::all(Val::Px(1.0))},
-            border_radius: {BorderRadius::all(Val::Px(4.0))},
-            padding: {UiRect::axes(Val::Px(8.0), Val::Px(3.0))},
-        }
-        BorderColor::all(CHANGEABLE)
-        Children [
-            Button on(decrement_pressed) Text::new("<") TextFont { font_size: 15.0_f32 } TextColor(TITLE)
-            --
-            DeadZoneValue
-            Text::new(dead_zone_label(value))
-            TextFont { font_size: 14.0_f32 }
-            TextColor(TITLE)
-            --
-            Button on(increment_pressed) Text::new(">") TextFont { font_size: 15.0_f32 } TextColor(TITLE)
-        ]
-    }
-}
-
-/// Names the stepper's own value `Text`, so [`redraw_dead_zone`] can find it again — mirrors how
-/// [`RowCell`] names a cell rather than a system holding onto the entity itself.
-#[derive(Component, Default, Clone, Copy)]
-struct DeadZoneValue;
-
-/// `Turn`'s deadzone as the working copy has it, with the bounds the declaration gave it.
-///
-/// Returns the declared bounds alongside the value rather than constants of this file's own: the
-/// range lives on the tunable, so a stepper that clamped to its own numbers could stop somewhere
-/// the binding would not accept.
-fn dead_zone_tunable(world: &World, pending: &Overrides) -> TunableValue {
-    tunables(world)
-        .into_iter()
-        .find(|tunable| tunable.key == TURN_DEAD_ZONE_KEY)
-        .map_or(
-            TunableValue::Range {
-                value: 0.0,
-                min: 0.0,
-                max: 0.0,
-            },
-            |tunable| effective_tunable(&tunable, pending),
-        )
-}
-
-/// Applies one step, clamped to the tunable's declared range. Into the working copy, so a deadzone
-/// the player is still deciding about does not move the ship underneath them.
-fn apply_dead_zone_delta(adjusted: On<Adjusted>, mut commands: Commands) {
-    let delta = adjusted.delta;
-    commands.queue(move |world: &mut World| {
-        let Some(tunable) = tunables(world)
-            .into_iter()
-            .find(|tunable| tunable.key == TURN_DEAD_ZONE_KEY)
-        else {
-            return;
-        };
-        let TunableValue::Range { value, min, max } =
-            effective_tunable(&tunable, &pending_copy(world))
-        else {
-            return;
-        };
-        world.resource_mut::<PendingOverrides>().0.captures.tune(
-            tunable.family,
-            tunable.key,
-            TunableValue::Range {
-                value: (value + delta * DEAD_ZONE_STEP).clamp(min, max),
-                min,
-                max,
-            },
-        );
-    });
-}
-
-/// The key `actions.rs` declared `Thrust`'s toggle tunable under. Named once so the row builder,
-/// the press handler and the redraw below all agree with the declaration without repeating the
-/// string in four places.
-const HOLD_OR_TOGGLE_KEY: &str = "disasteroids.thrust.hold_or_toggle";
-
-/// What a tunable reads as with the working copy laid over it — the tunable half of what
-/// [`effective`] already does for a mapping row's controls.
-fn effective_tunable(tunable: &Tunable, pending: &Overrides) -> TunableValue {
-    pending
-        .get_tunable(tunable.family, tunable.key)
-        .unwrap_or(tunable.value)
-}
-
-/// A label and a checkbox-shaped button, the same "row names what it is, then draws the control"
-/// shape [`dead_zone_row`] uses — reading `PendingOverrides` rather than a resource of its own,
-/// since unlike the deadzone stepper this one really does apply on Confirm.
-fn hold_or_toggle_row(active: bool) -> impl Scene {
-    bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(3.0) }
-        Children [
-            Text::new("Thrust") TextFont { font_size: 13.0_f32 } TextColor(HEADING)
-            --
-            Button
-            on(hold_or_toggle_pressed)
-            @focusable()
-            BorderColor::all(CHANGEABLE)
-            Node {
-                width: Val::Px(130.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border: {UiRect::all(Val::Px(1.0))},
-                border_radius: {BorderRadius::all(Val::Px(4.0))},
-                padding: {UiRect::axes(Val::Px(8.0), Val::Px(3.0))},
-            }
-            Children [
-                HoldOrToggleValue
-                Text::new(hold_or_toggle_label(active))
-                TextFont { font_size: 14.0_f32 }
-                TextColor(TITLE)
-            ]
-        ]
-    }
-}
-
-fn hold_or_toggle_label(active: bool) -> &'static str {
-    if active { "Toggle" } else { "Hold" }
-}
-
-/// Names the checkbox's own label `Text`, mirroring [`DeadZoneValue`].
-#[derive(Component, Default, Clone, Copy)]
-struct HoldOrToggleValue;
-
-/// Flips the tunable in the working copy. Reads `tunables` fresh rather than trusting a captured
-/// value, so two presses in the same visit agree with each other.
-fn hold_or_toggle_pressed(_: On<Activate>, mut commands: Commands) {
-    commands.queue(|world: &mut World| {
-        let Some(tunable) = tunables(world)
-            .into_iter()
-            .find(|tunable| tunable.key == HOLD_OR_TOGGLE_KEY)
-        else {
-            return;
-        };
-        let TunableValue::Bool(active) = effective_tunable(&tunable, &pending_copy(world)) else {
-            return;
-        };
-        world.resource_mut::<PendingOverrides>().0.captures.tune(
-            tunable.family,
-            tunable.key,
-            TunableValue::Bool(!active),
-        );
-    });
-}
-
-/// Names the preset a button selects, so a press can find its rows again — mirrors how
-/// [`RebindCell`] names a row by key rather than carrying the row's own data.
-#[derive(Component, Clone, Copy)]
-struct PresetButton(&'static str);
-
-/// Names the pressed preset in the working copy, and does nothing else.
-///
-/// Recording the name is the whole of it, because [`working_copy`] resolves the rows fresh every
-/// time it is asked. That is what makes picking a preset supersede the last rather than layer onto
-/// it, with no register of which rows any preset touches: `Default` names no rows, so switching
-/// back to it leaves nothing of Southpaw behind.
-///
-/// The captures the preset itself names are dropped, though — a preset press is a fresh statement
-/// about the rows it covers, and a player who nudged the dead zone and then pressed Southpaw again
-/// is asking for Southpaw's dead zone. Captures the preset does not name are left alone, which is
-/// what keeps a keyboard rebind from being thrown away by a gamepad preset.
-fn preset_pressed(activate: On<Activate>, buttons: Query<&PresetButton>, mut commands: Commands) {
-    let Ok(&PresetButton(name)) = buttons.get(activate.entity) else {
-        return;
-    };
-    commands.queue(move |world: &mut World| {
-        let Some(preset) = presets(world)
-            .into_iter()
-            .find(|preset| preset.name == name)
-        else {
-            return;
-        };
-        let mut pending = world.resource_mut::<PendingOverrides>();
-        for (family, key, _) in preset.rows.iter() {
-            pending.0.captures.reset(family, key);
-        }
-        for (family, key, _) in preset.rows.iter_tunables() {
-            pending.0.captures.reset_tunable(family, key);
-        }
-        pending.0.preset = preset.name;
-    });
-}
-
-/// Rewrites every row and every preset button to match the pending working copy.
+/// Rewrites every row to match the pending working copy.
 ///
 /// Every one of them rather than only the row a capture or a preset press actually named: a steal
 /// can move any row, and a preset can move several at once, so asking "which one" buys nothing a
@@ -959,13 +669,11 @@ fn preset_pressed(activate: On<Activate>, buttons: Query<&PresetButton>, mut com
 /// condition this is registered with: it does not run at all on a frame where
 /// [`PendingOverrides`] did not change.
 ///
-/// Exclusive, because it reads every tagged cell in the table alongside the mapping list, the
-/// preset list and the pending copy all at once.
+/// Exclusive, because it reads every tagged cell in the table alongside the mapping list and the
+/// pending copy all at once. Whatever fills the slot under the pad table redraws itself.
 fn redraw_pending(world: &mut World) {
     let live = mappings(world);
-    let live_tunables = tunables(world);
     let pending = pending_copy(world);
-    let selected = world.resource::<PendingOverrides>().0.preset;
 
     let mut principals = world.query::<(&RowCell, &mut Text)>();
     for (cell, mut text) in principals.iter_mut(world) {
@@ -998,54 +706,118 @@ fn redraw_pending(world: &mut World) {
                 }),
         );
     }
+}
 
-    let mut buttons = world.query::<(&PresetButton, &mut BorderColor, &mut BackgroundColor)>();
-    for (button, mut border, mut background) in buttons.iter_mut(world) {
-        let is_selected = button.0 == selected;
-        *border = BorderColor::all(if is_selected { SELECTED } else { FIXED });
-        *background = BackgroundColor(if is_selected {
-            SELECTED.with_alpha(0.25)
-        } else {
-            Color::NONE
-        });
-    }
+/// One device family's table, with whatever the build lays out under it.
+#[derive(SceneComponent, Default, Clone)]
+#[scene(MappingColumnProps)]
+pub(crate) struct MappingColumn;
 
-    if let Some(tunable) = live_tunables
-        .iter()
-        .find(|tunable| tunable.key == HOLD_OR_TOGGLE_KEY)
-        && let TunableValue::Bool(active) = effective_tunable(tunable, &pending)
-    {
-        let mut checkbox = world.query_filtered::<&mut Text, With<HoldOrToggleValue>>();
-        if let Ok(mut text) = checkbox.single_mut(world) {
-            *text = Text::new(hold_or_toggle_label(active));
-        }
-    }
+/// What a build puts in a [`MappingColumn`].
+pub(crate) struct MappingColumnProps {
+    /// The family whose rows the table lists.
+    pub family: DeviceFamily,
+    /// Laid out under the table: whatever remaps this family besides its cells. Empty by default.
+    pub below: Box<dyn SceneList>,
+}
 
-    if let TunableValue::Range { value, .. } = dead_zone_tunable(world, &pending) {
-        let mut stepper = world.query_filtered::<&mut Text, With<DeadZoneValue>>();
-        if let Ok(mut text) = stepper.single_mut(world) {
-            *text = Text::new(dead_zone_label(value));
+impl Default for MappingColumnProps {
+    fn default() -> Self {
+        Self {
+            family: DeviceFamily::KeyboardMouse,
+            below: Box::new(bsn_list! {}),
         }
     }
 }
 
-/// One device's worth of rows, under a heading and grouped by category, `columns` control cells
-/// wide.
-fn table(
-    title: &'static str,
-    family: DeviceFamily,
-    mut rows: Vec<ActionMapping>,
-    columns: usize,
-    control_width: f32,
-) -> impl Scene {
+impl MappingColumn {
+    fn scene(props: MappingColumnProps) -> impl Scene {
+        bsn! {
+            Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0) }
+            Children [
+                @{table(props.family)}
+                --
+                {props.below}
+            ]
+        }
+    }
+}
+
+/// One family's table: its heading, with the rows filled in under it by [`fill_table`] once it has
+/// spawned.
+fn table(family: DeviceFamily) -> impl Scene {
     // A row appears in both tables under the same key, so the family is what tells the two apart
     // for a test selecting one. Named off the family rather than the heading above it: the heading
     // is display text and may be translated, and a selector that moved with it would be a test
     // broken by a wording change.
-    let id = match family {
-        DeviceFamily::KeyboardMouse => "KeyboardMouse",
-        DeviceFamily::Gamepad => "Gamepad",
+    let (id, title) = match family {
+        DeviceFamily::KeyboardMouse => ("KeyboardMouse", "Keyboard & Mouse"),
+        DeviceFamily::Gamepad => ("Gamepad", "Gamepad"),
     };
+    bsn! {
+        ~{Name::new(id)}
+        ~{MappingTable(family)}
+        on(fill_table)
+        Node { flex_direction: FlexDirection::Column, row_gap: {Val::Px(ROW_GAP)} }
+        Children [
+            Text::new(title)
+            TextFont { font_size: 17.0_f32 }
+            TextColor(TITLE)
+            Node { margin: {UiRect::bottom(Val::Px(4.0))} }
+        ]
+    }
+}
+
+/// The table listing one family's rows.
+#[derive(Component, Clone, Copy)]
+struct MappingTable(DeviceFamily);
+
+/// Lists the table's rows under its heading, read from the mapping list as it stands.
+///
+/// On [`Ready`] rather than on add, since that is when the heading exists to be listed after.
+fn fill_table(ready: On<Ready>, world: &World, mut commands: Commands) {
+    let Some(&MappingTable(family)) = world.get::<MappingTable>(ready.entity) else {
+        return;
+    };
+    append_children(&mut commands, ready.entity, table_lines(world, family));
+}
+
+/// Spawns `scenes` as `parent`'s last children when `commands` is applied.
+///
+/// Not `queue_spawn_related_scenes`, which waits for the next scene spawn: the screen opens after
+/// that has run, so the rows would miss the redraw the opening frame paints them with.
+pub(crate) fn append_children(commands: &mut Commands, parent: Entity, scenes: impl SceneList) {
+    commands.queue(
+        move |world: &mut World| match world.spawn_scene_list(scenes) {
+            Ok(children) => {
+                world.entity_mut(parent).add_children(&children);
+            }
+            Err(error) => error!("the controls screen could not fill {parent}: {error}"),
+        },
+    );
+}
+
+/// One family's rows, grouped by category.
+fn table_lines(world: &World, family: DeviceFamily) -> Vec<impl Scene + use<>> {
+    let (columns, control_width) = match family {
+        DeviceFamily::KeyboardMouse => (KEYBOARD_COLUMNS, CONTROL_WIDTH),
+        DeviceFamily::Gamepad => (GAMEPAD_COLUMNS, GAMEPAD_CONTROL_WIDTH),
+    };
+    // `Menu`'s own bindings — the stick, the D-pad and the arrow keys that move the selection on
+    // this very screen — are machinery for operating the settings screen, not controls a player
+    // thinks of as part of the game. `mappings` cannot tell the two apart on its own, so this is
+    // the one place the screen names a context: everything from here down still reads
+    // `ActionMapping` alone. `ButtonFocused` is excluded for the same reason —
+    // `common::widget_focus`'s bridge, not a control this screen's own player thinks of as
+    // bindable.
+    let mut rows: Vec<ActionMapping> = mappings(world)
+        .into_iter()
+        .filter(|mapping| {
+            mapping.family == family
+                && mapping.context != Menu::PATH
+                && mapping.context != ButtonFocused::PATH
+        })
+        .collect();
     // Stable, so rows keep the order the game declared them in within each category.
     rows.sort_by_key(|mapping| (mapping.category.is_none(), mapping.category));
 
@@ -1086,19 +858,7 @@ fn table(
             ));
         }
     }
-
-    bsn! {
-        ~{Name::new(id)}
-        Node { flex_direction: FlexDirection::Column, row_gap: {Val::Px(ROW_GAP)} }
-        Children [
-            Text::new(title)
-            TextFont { font_size: 17.0_f32 }
-            TextColor(TITLE)
-            Node { margin: {UiRect::bottom(Val::Px(4.0))} }
-            --
-            {lines}
-        ]
-    }
+    lines
 }
 
 /// One control as a cell reads it, with whatever has to be held in front of it.

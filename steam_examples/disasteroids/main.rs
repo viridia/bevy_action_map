@@ -18,6 +18,8 @@ mod asteroids;
 mod field;
 #[path = "../../examples/disasteroids/overlay.rs"]
 mod overlay;
+#[path = "../../examples/disasteroids/pad_presets.rs"]
+mod pad_presets;
 #[path = "../../examples/disasteroids/pause.rs"]
 mod pause;
 #[path = "../../examples/disasteroids/saved_controls.rs"]
@@ -70,6 +72,7 @@ fn main() {
             pause::plugin,
             overlay::plugin,
             settings::plugin,
+            pad_presets::plugin,
             saved_controls::plugin,
             prompt_ui::plugin,
             widget_focus::plugin,
@@ -77,11 +80,34 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))
         .insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)))
         .add_systems(Startup, (camera.spawn(), hint.spawn()))
+        .add_systems(
+            OnEnter(settings::Settings::Showing),
+            controls_screen.spawn(),
+        )
         .run();
 }
 
 fn camera() -> impl Scene {
     bsn! { Camera2d }
+}
+
+/// Both families' tables, with the base game's presets under the pad's until this build has a way
+/// into Steam's own screen to put there instead.
+fn controls_screen() -> impl Scene {
+    use settings::{ControlsScreen, MappingColumn};
+
+    bsn! {
+        @ControlsScreen {
+            @columns: bsn_list! {
+                @MappingColumn { @family: DeviceFamily::KeyboardMouse }
+                --
+                @MappingColumn {
+                    @family: DeviceFamily::Gamepad,
+                    @below: {pad_presets::remapping()},
+                }
+            },
+        }
+    }
 }
 
 fn hint() -> impl Scene {

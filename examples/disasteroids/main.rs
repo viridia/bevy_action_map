@@ -26,6 +26,7 @@ mod actions;
 mod asteroids;
 mod field;
 mod overlay;
+mod pad_presets;
 mod pause;
 mod saved_controls;
 mod settings;
@@ -75,6 +76,7 @@ fn main() {
             pause::plugin,
             overlay::plugin,
             settings::plugin,
+            pad_presets::plugin,
             // After `settings::plugin`, which owns the resources its startup load writes into, and
             // after `actions::plugin`, whose contexts it resolves a saved row against.
             saved_controls::plugin,
@@ -87,7 +89,30 @@ fn main() {
         // corner. Nothing infers this — a crate guessing it would be wrong silently.
         .insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)))
         .add_systems(Startup, (camera.spawn(), hint.spawn()))
+        .add_systems(
+            OnEnter(settings::Settings::Showing),
+            controls_screen.spawn(),
+        )
         .run();
+}
+
+/// The controls screen: both families' tables, with the presets under the pad's as this build's way
+/// to remap it.
+fn controls_screen() -> impl Scene {
+    use settings::{ControlsScreen, MappingColumn};
+
+    bsn! {
+        @ControlsScreen {
+            @columns: bsn_list! {
+                @MappingColumn { @family: DeviceFamily::KeyboardMouse }
+                --
+                @MappingColumn {
+                    @family: DeviceFamily::Gamepad,
+                    @below: {pad_presets::remapping()},
+                }
+            },
+        }
+    }
 }
 
 /// The camera, as a one-entity scene.
