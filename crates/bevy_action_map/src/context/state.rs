@@ -2753,53 +2753,6 @@ mod tests {
         );
     }
 
-    /// The sampling step, end to end: the crate feeds the sampler while it exists, and what it
-    /// measured is what silences the stick afterwards.
-    #[cfg(feature = "gamepad")]
-    #[test]
-    fn a_calibration_step_measures_the_pad_that_reported_during_it() {
-        use crate::device::{CalibrationSampling, GamepadCalibration};
-
-        let pad = bevy_ecs::entity::Entity::PLACEHOLDER;
-        let mut app = App::new();
-        app.add_plugins((InputPlugin, ActionMapPlugin));
-        app.add_context::<OnFoot>(|context| {
-            context.bind::<Turn>(GamepadAxis::RightStickX);
-        });
-        app.world_mut().spawn(OnFoot);
-        app.init_resource::<GamepadProbe>();
-        app.add_systems(FixedUpdate, probe_gamepad);
-
-        // The game puts up its "let go of the sticks" screen.
-        app.world_mut().init_resource::<CalibrationSampling>();
-        for value in [0.09, 0.11, 0.10] {
-            app.world_mut()
-                .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
-                    pad,
-                    GamepadAxis::RightStickX,
-                    value,
-                )));
-            app.update();
-            run_fixed_tick(&mut app);
-        }
-
-        let sampling = app.world_mut().remove_resource::<CalibrationSampling>();
-        let sampling = sampling.expect("the sampling resource outlives the step");
-        assert_eq!(sampling.axes_seen(), 1);
-        sampling.finish(&mut app.world_mut().resource_mut::<GamepadCalibration>());
-
-        // What the player was told to hold still now reads as still.
-        app.world_mut()
-            .write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(
-                pad,
-                GamepadAxis::RightStickX,
-                0.10,
-            )));
-        app.update();
-        run_fixed_tick(&mut app);
-        assert_eq!(app.world().resource::<GamepadProbe>().turn, 0.0);
-    }
-
     #[cfg(feature = "gamepad")]
     #[test]
     fn raw_gamepad_events_drive_sticks_and_buttons() {

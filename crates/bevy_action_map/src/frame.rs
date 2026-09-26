@@ -299,9 +299,6 @@ pub fn sample_input(
     #[cfg(feature = "gamepad")] calibration: bevy_ecs::system::Res<
         crate::device::GamepadCalibration,
     >,
-    #[cfg(feature = "gamepad")] mut sampling: Option<
-        bevy_ecs::system::ResMut<crate::device::CalibrationSampling>,
-    >,
 ) {
     frame.begin_sample();
     #[cfg(feature = "keyboard")]
@@ -328,13 +325,8 @@ pub fn sample_input(
     for event in gamepad_inputs.read() {
         let mut event = event.clone();
         // Here rather than in the evaluator: calibration is a fact about the hardware, not about
-        // who is reading it, so every context and every capture sees one answer for one pass. It
-        // also sits ahead of the point a backend supplying its own values enters the frame at, so
-        // R14.10 holds by placement rather than by a check (TD2).
+        // who is reading it, so every context and every capture sees one answer for one pass.
         if let RawGamepadEvent::Axis(axis) = &mut event {
-            if let Some(sampling) = sampling.as_mut() {
-                sampling.observe(axis.gamepad, axis.axis, axis.value);
-            }
             axis.value = calibration.apply(axis.gamepad, axis.axis, axis.value);
         }
         frame.record(RawEvent::Gamepad(event));

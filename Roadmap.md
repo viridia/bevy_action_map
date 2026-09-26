@@ -203,6 +203,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 144  | One rule for what counts as a character                               |
 | 143  | One apply, for the world or for an entity                             |
 | 162  | A warning for a modifier idle on a composite part                     |
+| 72b  | Calibration the app sets, and measuring withdrawn                     |
 
 ---
 
@@ -219,39 +220,6 @@ its identity rather than its position.
 
 No chunk currently carries a defect. The register of what is known to be wrong is
 [docs/issues.md](./docs/issues.md), and an entry there that acquires a chunk gets a section here.
-
-## Devices and players
-
-Disasteroids is one player reading one set of bindings, so everything about device pairing is
-invisible to it. Split Friction is the example that has to answer *which* device drove an
-action, and most of this section is what it needs.
-
-### 72b. Calibration the app persists, and measuring withdrawn · E[1]
-
-The crate applies stage-1 calibration and names the device; storing it, and anything a player sees,
-is the app's. Measuring a worn stick needs expertise most game developers lack, and popular titles
-leave it to the platform, so it leaves the crate for X47.
-
-- **Withdraw `CalibrationSampling`** and `REST_MARGIN`, with the test in
-  `crates/bevy_action_map/src/context/state.rs` that drives them and the hook in
-  `crates/bevy_action_map/src/frame.rs` that feeds them. It is public and broken: following its own
-  doc records the stick's deflection as rest.
-- **A recipe on `GamepadCalibration`'s doc comment.** Everything it needs exists: the backend puts
-  `Identity(DeviceId)` on a pad's entity, so an app restores by `DeviceId` when `Identity` appears
-  and saves through `SavedDeviceId`. The doc says a reconnect loses the value and not that the app
-  is expected to restore it. Under gilrs the identity names a model, so two identical pads share an
-  entry; widening one envelope to cover both is the recipe's suggestion, not crate code. It also
-  says which stage a player-facing dead zone slider belongs to: the preference stage, over the
-  binding's `DeadZone`, as Disasteroids' existing tunable is — calibration is set from code.
-- **Requirements.** R11.7 and R14.11 say the crate stores calibration by identity and offers a
-  player-facing step. Both are reworded: live calibration is keyed by the runtime handle, the
-  device's identity is reachable from it, and storage and presentation are the app's.
-- **`docs/design.md` TD8** says there is no persistent device identity to key calibration to, which
-  has been false since `Identity` landed, and describes `CalibrationSampling`.
-- **Verified by:** a headless `App` test that sets a pad's calibration, disconnects and reconnects
-  it, restores by `Identity` as the recipe does, and reads the correction back.
-- **Not done:** a calibration screen, or a second dead zone in Disasteroids; its settings screen
-  already has one, and a second would make it incoherent.
 
 ## Gamepad devices, for upstream
 
@@ -827,6 +795,82 @@ prelude are the candidates, 48 at the first run.
   items.
 - **Narrowing visibility breaks the public API**, which costs nothing until the first publish.
 - **Verified by:** `scripts/verify.sh`, since this one changes code, and the examples do not change.
+
+## Tooling
+
+Tools the project runs on itself, under `tools/` and `scripts/`, rather than anything a game uses.
+
+### 173. A reflow tool that parses what it reflows · E[3]
+
+devfmt classifies lines by guessing: a comment is any line starting with `//`, and a block's kind is
+read off its first characters. A new tool beside it finds comments with a Rust lexer and block
+boundaries with `pulldown-cmark`, and keeps devfmt's rewrap and `--diff` scoping unchanged.
+
+- **devfmt stays**, and is the oracle: both tools run `--sweep` over the tree and every divergence
+  is reviewed as a bug in one or the other. devfmt's tests are the new tool's starting suite.
+- **The cutover** is `CLAUDE.md` naming the new tool as the authority on width, once the divergences
+  are all devfmt's.
+- **Verified by:** the divergence list, reviewed to empty or to devfmt's bugs alone, and a test for
+  each block type devfmt misreads: an indented code block, an HTML block, a fence inside a list
+  item, and a string literal starting with `///`.
+- **Not done:** retiring devfmt, or rendering Markdown through the parser, which would restyle every
+  document.
+
+### 174. A section, printed by its anchor · E[1]
+
+`scripts/show.py <anchor>` prints one section of the documents: a chunk (`72b`), a design section
+(`TD8.4`), a decision, a requirement, a deferred entry, a guideline, or a driver `DR`/`DD` section.
+It replaces the `grep -n` and `sed -n` pair `CLAUDE.md` prescribes for a lookup.
+
+- **It reuses `xref.py`'s patterns**, which know every anchor but a chunk's; a chunk is a Roadmap
+  `###` heading.
+- **A section ends** at the next heading of the same or a higher level. A requirement ends at the
+  next `- **R` line, so its indented sub-bullets are included, which a fixed `grep -A` cuts off.
+- **`CLAUDE.md`'s lookup instructions** name the script instead of the pair.
+- **Verified by:** one anchor of each kind printed and read against its source, and an unknown
+  anchor exiting non-zero.
+- **Not done:** printing the places that cite an anchor, which is 175's.
+
+### 175. Every mention of a name, in one call · E[1]
+
+`scripts/mentions.sh <pattern>` greps the tree with the exclusions a sweep always wants (`archive/`,
+`target/`, `.git/`) and the glob quoting zsh needs, so a sweep for a withdrawn name or a moved
+decision is one call and the same call each time.
+
+- **Output is `file:line:text`**, grouped by file, with each line cut at a fixed width so that one
+  long table row cannot flood the transcript.
+- **Verified by:** a name known to appear in code, documents and `archive/` alike, found in the
+  first two and not the third.
+- **Not done:** matching anything but a regular expression; this is grep with the exclusions fixed.
+
+### 176. A dependency's source, at the locked version · E[1]
+
+`scripts/depsrc.sh <crate> [grep arguments]` finds the version `Cargo.lock` holds for a crate,
+resolves its source directory in the cargo registry, and greps it, or prints the directory when no
+pattern is given. Settling how Bevy or gilrs behaves otherwise takes a `ls -d` over the registry and
+a shell variable per call.
+
+- **A crate locked at two versions** lists both and asks for one.
+- **Verified by:** `bevy_gilrs` resolving to 0.20.0-rc.1, and a crate absent from the lock exiting
+  non-zero.
+- **Not done:** git dependencies, and the Bevy checkout at `~/Projects/games/bevy`, which tracks
+  upstream `main` rather than the locked version.
+
+### 177. An example, launched and checked · E[1]
+
+`scripts/smoke.sh <example>` is the launch `CLAUDE.md` asks of every example a chunk touches: run it
+for a minute and fail if the log has `panicked` or `ERROR`. It knows each example's features
+(Disasteroids needs `serialize`) and the warnings known to be harmless (Split Friction's
+`mesh2d::bindings` import, bevy#25936), so a clean run prints one line.
+
+- **It bounds the run itself**, since macOS has no `timeout`: one missing exits 127 before the
+  example starts, and an empty log reads as a clean one.
+- **`CLAUDE.md`'s launch paragraph** names the script, and the known warnings move into it, where a
+  Bevy bump that fixes one shows up as a stale entry.
+- **Verified by:** a clean run of each example, and a run with a deliberate panic in a scratch
+  example reported as failed.
+- **Not done:** driving the example, which is the remote driver's job, or catching a wrong answer
+  that neither panics nor logs.
 
 ---
 

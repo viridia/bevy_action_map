@@ -270,9 +270,8 @@ one nobody has.)*
 What the crate does with that is three stages, because three parties have a claim on the number and
 they are answering different questions (TD8.4):
 
-1. **Calibration** — this physical unit's true centre and rest envelope, measured by an explicit
-   "move the sticks and let go" step the game drives, applied as the event is recorded. Per device
-   unit, because drift is a wear characteristic of one pad.
+1. **Calibration** — this physical unit's true centre and rest envelope, set by the game and applied
+   as the event is recorded. Per device unit, because drift is a wear characteristic of one pad.
 2. **Design** — the shape and curve the mechanic wants. This is the stage that rescales, so full
    deflection still reads 1.0.
 3. **Preference** — the player's own adjustment, modulating stage 2.

@@ -761,10 +761,10 @@ is unmodeled.
   with an app-overridable mapping seeded from a database such as [SDL_GameControllerDB][sdl-db],
   since glyph choice depends on it and `vendor_id`/`product_id` are `Option` and often absent
   (notably on wasm and some Linux setups).
-- **R11.7 (MUST)** Per-device calibration (stage 1 of D20: center offset and rest envelope) stored
-  separately from bindings and keyed by persistent device identity (R11.5). Note this _supersedes_
-  rather than interoperates with Bevy's `GamepadSettings` deadzone, per R14.9 — the two must not
-  both be active.
+- **R11.7 (MUST)** Per-device calibration (stage 1 of D20: center offset and rest envelope) held
+  separately from bindings and keyed by the device's runtime handle, from which its persistent
+  identity (R11.5) is reachable. Note this _supersedes_ rather than interoperates with Bevy's
+  `GamepadSettings` deadzone, per R14.9 — the two must not both be active.
 - **R11.8 (SHOULD)** Virtual devices: on-screen touch sticks, AI/bot drivers, and test fixtures must
   be first-class devices, not special cases.
 - **R11.9 (MAY)** Surface unhandled/unknown controls as opaque IDs rather than dropping them, so
@@ -915,7 +915,7 @@ answering **three different questions**, which belong at three different stages:
 
 | Stage              | Question                                                                         | Scope              | Owner                          |
 | ------------------ | -------------------------------------------------------------------------------- | ------------------ | ------------------------------ |
-| **1. Calibration** | Where is this physical stick's true center, and how much does it jitter at rest? | per device _unit_  | measured, with player override |
+| **1. Calibration** | Where is this physical stick's true center, and how much does it jitter at rest? | per device _unit_  | the app                        |
 | **2. Design**      | What deadzone shape and response curve does this mechanic want?                  | per binding/action | game developer                 |
 | **3. Preference**  | Scale the above for comfort, accessibility, or a worn thumbstick.                | per player         | player (R20.5)             |
 
@@ -984,9 +984,9 @@ measurement-based rather than assuming a centered zero.
   that configures them and expects a binding to honour it gets silence rather than an error.
 - **R14.10 (MUST)** _(D20, D22)_ When an authority backend supplies action values, stages 1–3 are
   the backend's and must not be applied again on our side (R0.4).
-- **R14.11 (SHOULD)** Stage 1 calibration must be persistable per device identity (R11.5) and
-  offerable as an explicit player-facing calibration step, since auto-detection of a worn stick's
-  resting envelope needs samples the game may not otherwise collect.
+- **R14.11 (SHOULD)** _(D21)_ Stage 1 calibration is set by the app, from code. Measuring it,
+  storing it against a device identity (R11.5) and any player-facing step are the app's; the crate
+  applies what it is given.
 - **R14.5 (SHOULD)** Motion/gyro as a bindable 3D source where the platform exposes it (
   [gilrs][gilrs], Bevy's gamepad backend, does not
   expose it — which argues for R11.2 extensibility rather than a built-in).

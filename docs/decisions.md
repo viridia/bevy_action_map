@@ -51,7 +51,7 @@ here, so there is one `D`-numbering in the project.
 | **D19** | Modifiers and conditions are enums with a `Custom` variant                    | TD8.2     |
 | **D65** | The device model is closed; a third-party kind needs one in hand             | —               |
 | **D20** | We own the whole dead-zone chain, in three stages, with one rescaling         | TD8.4     |
-| **D21** | Calibration is measured by an explicit step, never detected                   | TD8.4     |
+| **D21** | Calibration is set by the app, never detected                                 | TD8.4     |
 | **D22** | Backends enter at two seams, not one                                          | —               |
 | **D93** | A backend suppresses a whole device family, and the game declares it         | —               |
 | **D23** | Focus integrates by activation, and interception is static                    | —               |
@@ -701,23 +701,23 @@ and it means the evaluator never has to hold per-device state. It also puts cali
 correct side of the injection seam: a backend supplying its own values writes into the frame past
 it.
 
-### D21 — Calibration is measured by an explicit step, never detected
+### D21 — Calibration is set by the app, never detected
 
-**Decided.** Stage 1 ships a manual API plus a sampling helper the app drives during an explicit
-step, not background auto-detection.
+**Decided.** Stage 1 is a manual API. The app sets each axis's calibration from code; measuring it,
+storing it and showing it to a player are the app's. The crate applies it and names the device, by
+`Identity`, so the app has a key to store it under.
 
-**Rules out.** Learning a stick's centre while the game is running.
+**Rules out.** Learning a stick's centre while the game is running, and a measuring step in the
+crate.
 
 **Reversal.** A stick deflected while detection is running would be learned as centre, and hardware
 that misreports would poison the measurement silently — which is the failure mode this exists to
-prevent, so a background detector is worse than no calibration at all.
+prevent, so a background detector is worse than no calibration at all. A measuring step is X47's:
+the one the crate shipped learned a released stick's deflection as rest, and doing it right needs
+expertise most game developers lack, while popular titles leave it to the platform.
 
-**Note.** The instruction to the player is "move the sticks and let go", not "hold still", because a
-pad reports an axis only when it _changes_. A stick that settled before the step began reports
-nothing during it, and that is exactly the drifting stick most in need of measuring.
-
-**Accepted cost.** What is measured lasts as long as the process. Persisting needs a stable device
-identity, which does not exist yet.
+**Accepted cost.** A game that wants calibration to outlive a connection writes the store and the
+restore itself, and the crate offers no vetted way to do it yet (`docs/issues.md`, 1074).
 
 ---
 
@@ -1369,9 +1369,9 @@ player does get are tunables (D32). Per-family separation is what keeps a keyboa
 disturbing the gamepad layout.
 
 **No device identity.** A row names a control on a device *class*. Which physical unit drives which
-player is pairing state and which stick rests where is calibration state, both keyed by persistent
-device identity rather than by profile. That separation is what lets two players with identical
-controllers and identical mappings share one override table and differ only in pairing.
+player is pairing state and which stick rests where is calibration state, both kept per device
+rather than per profile. That separation is what lets two players with identical controllers and
+identical mappings share one override table and differ only in pairing.
 
 ### D46 — A cleared row is a state of its own
 

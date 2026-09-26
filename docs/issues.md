@@ -19,7 +19,7 @@ part that stays good. Re-verify before acting on one.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 tier, and never reused. A gap in the sequence is a retired entry.
 
-**Next: 1074.**
+**Next: 1075.**
 
 **What the tiers mean.**
 
@@ -188,6 +188,28 @@ The gap is in `Requirements.md` first: no requirement covers it, so the crate is
 Whether a device name is R18's business (a display string, like a control's) or R11's (a fact about
 the device, like its brand) is the question to settle before anything is built.
 
+### 1074 Calibration has no vetted way to outlive a connection
+
+`GamepadCalibration`, keyed by entity · R11.7, D21 · **the first risk read from the schedule; the
+entity reuse read from gilrs's source; none probed**
+
+A game restoring a pad's calibration when it reconnects has to write the hook itself. Chunk 72b
+drafted one as a doc recipe, an observer on `DeviceConnected` that clears the entity's entries and
+restores from a store keyed by `Identity`, and withdrew it for these:
+
+- **The connect frame is uncorrected.** `DeviceConnected` is raised in `Dispatch`, after that
+  frame's axis readings were sampled and evaluated with the entity's old or empty entry.
+- **A reused entity can carry another unit's values.** gilrs on Linux hands a returning pad the slot
+  of any disconnected pad with the same UUID, which names a model; macOS spawns a new entity.
+  Restoring by `Identity` cannot tell identical units apart either.
+- **Entries accumulate.** On macOS every reconnect is a new entity, and the old one's entries stay.
+- **A pad without an `Identity`** (wasm, some Linux setups) is left uncalibrated, and silently.
+- **The store goes stale** if the game re-measures a connected pad and does not write it back.
+
+The fork is whether the crate owns the restore: `GamepadCalibration` holding entries by `DeviceId`
+as well, looked up in `sample_input` when the entity has none, removes the first and third and
+makes the fourth reportable. The alternative is a recipe that mitigates each by hand.
+
 ### 1021 A chord has no sequential alternative
 
 R20.3 (SHOULD) · uncited anywhere in tree
@@ -307,10 +329,6 @@ any one of them is misled about a mechanism.
 
 ### 1032 Internal comments whose stated reason is false
 
-- `frame.rs:340` credits calibration's placement with meeting R14.10. R14.10 governs an authority
-  backend, which per D51 enters at the button state machine and never touches the frame. The
-  placement is right and the `R`-number is wrong; it is the crate's only claim on R14.10. **Small —
-  worth a minute if something else is open in this file, not worth a pass of its own.**
 - `action.rs:335`, `Scratch::flags` is documented as "Condition-defined bits" and a modifier defines
   one too (`TOGGLE_LATCH`, `binding.rs:2311`). Related, and worth carrying with it: `condition.rs`'s
   own constant does not carry the note `binding.rs`'s does, explaining why two constants in two
@@ -339,8 +357,8 @@ any one of them is misled about a mechanism.
 - **A `TD10.1` citation points at the wrong section**, at `context/declare.rs:761`. It is about the
   override store being keyed by mapping alone, which is TD10's preamble; TD10.1 is "Applying," and
   this is not about applying. Two others, both in `overrides.rs` and both about the serialized form
-  (now TD10.3), went with 117e. **Small — worth a minute alongside the R14.10 mis-citation above,
-  not worth a pass of its own.**
+  (now TD10.3), went with 117e. **Small — worth a minute if something else is open in this file, not
+  worth a pass of its own.**
 
 ### 1055 Split Friction teaches a disputed claim about somebody else's crate
 

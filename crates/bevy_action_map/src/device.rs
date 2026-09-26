@@ -607,11 +607,38 @@ impl AxisCalibration {
 
 /// What each connected gamepad's axes do when nobody is touching them.
 ///
-/// Empty by default, which reads as "every axis is honest": a game that never touches this gets
-/// raw readings unchanged. Fill it from [`CalibrationSampling`], or [`set`](Self::set) a value
-/// directly for a game that lets the player enter one.
+/// Empty by default, which reads as "every axis is honest": a game that never touches this gets raw
+/// readings unchanged. [`set`](Self::set) a value for each axis that needs correcting. Entries are
+/// keyed by the pad's entity, so they last no longer than the entity does, which on some platforms
+/// is one connection.
 ///
-/// Keyed by the backend's entity for the pad, so nothing here survives a reconnect.
+/// A dead-zone slider for the player does not belong here. That is the binding's own dead zone,
+/// made adjustable with [`tunable_dead_zone`](crate::binding::BindingBuilder::tunable_dead_zone),
+/// and it runs after this.
+///
+/// # Choosing an approach
+///
+/// Where the values come from is the game's decision. Many games leave calibration to the platform
+/// and rely on a binding's dead zone to absorb ordinary drift. A game that does calibrate usually
+/// takes one of these approaches:
+///
+/// - **Per device.** Each pad gets its own values, which is the most accurate, since drift is a
+///   property of one worn unit rather than of a model. Keeping them across a restart means storing
+///   them against something that recognizes the pad again, such as its [`Identity`]. Under Bevy's
+///   own gamepad backend an identity names a model rather than a unit, so two identical pads cannot
+///   be told apart by it.
+/// - **Global.** One set of values applied to every pad as it connects. Simple, but a correction
+///   wide enough for the worst pad takes travel away from every good one, which makes it little
+///   different from a larger dead zone on the binding.
+/// - **Automatic.** Learning where a stick rests while the game runs. A stick that happens to be
+///   held while the game is learning is learned as the centre, and nothing in the readings says
+///   that it was, so this is safe only where the game knows the player is not touching the pad.
+/// - **Interactive.** A screen that asks the player to move the sticks and let go, then measures.
+///   Two things make this harder than it looks. A pad reports an axis only when it changes, so a
+///   stick that was already resting before the screen opened reports nothing; asking the player to
+///   move it is what produces a reading. And readings taken while the stick is still moving would
+///   be learned as rest, so measure only once it has settled. Some sticks settle at a different
+///   point after each release, so the rest envelope should span several releases rather than one.
 #[cfg(feature = "gamepad")]
 #[cfg_attr(
     feature = "bevy_reflect",
@@ -648,85 +675,6 @@ impl GamepadCalibration {
     /// Corrects one raw reading, using this axis's calibration if it has one.
     pub fn apply(&self, gamepad: Entity, axis: GamepadAxis, raw: f32) -> f32 {
         self.get(gamepad, axis).apply(raw)
-    }
-}
-
-/// How much wider than the observed spread a measured rest envelope is made.
-///
-/// A sampling step sees a few seconds of a stick that will be resting for hours, so the widest
-/// wander it happened to catch is a floor rather than the answer.
-#[cfg(feature = "gamepad")]
-const REST_MARGIN: f32 = 1.25;
-
-/// What one axis was seen doing during a calibration step.
-#[cfg(feature = "gamepad")]
-#[derive(Clone, Copy, Debug)]
-struct RestSample {
-    min: f32,
-    max: f32,
-}
-
-/// Collects what the sticks do while nobody is touching them.
-///
-/// Insert it as a resource to begin an explicit "let go of the sticks" step, and remove it to end
-/// one. While it is present, every raw axis reading is offered to it; when enough has arrived, hand
-/// what it saw to a [`GamepadCalibration`] with [`finish`](Self::finish).
-///
-/// Driven by the game rather than running in the background, deliberately: a stick that happens to
-/// be deflected while a background detector is learning would be learned as centre, and there is no
-/// way for the detector to know it should not be.
-///
-/// **Ask the player to move the sticks and let go**, rather than only to hold still. A gamepad
-/// reports an axis when it *changes*, so a stick that settled before the step began reports nothing
-/// during it and is left uncalibrated — which is the case that most needs calibrating, since a
-/// stick resting steadily off centre is exactly what drift looks like. Releasing one during the
-/// step guarantees a reading at whatever it now rests at.
-#[cfg(feature = "gamepad")]
-#[derive(Resource, Default, Debug)]
-pub struct CalibrationSampling {
-    seen: HashMap<(Entity, GamepadAxis), RestSample>,
-}
-
-#[cfg(feature = "gamepad")]
-impl CalibrationSampling {
-    /// Offers one raw reading to the sample.
-    ///
-    /// Called for you while this resource exists. It takes the reading *before* correction, so that
-    /// running a second calibration step does not measure the first one's output.
-    pub fn observe(&mut self, gamepad: Entity, axis: GamepadAxis, raw: f32) {
-        self.seen
-            .entry((gamepad, axis))
-            .and_modify(|sample| {
-                sample.min = sample.min.min(raw);
-                sample.max = sample.max.max(raw);
-            })
-            .or_insert(RestSample { min: raw, max: raw });
-    }
-
-    /// How many axes have reported anything so far.
-    ///
-    /// A step that ends at zero measured nothing, which a screen may want to say rather than
-    /// silently claiming success.
-    pub fn axes_seen(&self) -> usize {
-        self.seen.len()
-    }
-
-    /// Writes what was seen into a calibration set.
-    ///
-    /// Centre is the midpoint of the readings and the envelope is half their spread, widened. An
-    /// axis that reported nothing is left alone rather than reset, so one pad going quiet during
-    /// the step does not discard what another step already learned about it.
-    pub fn finish(&self, into: &mut GamepadCalibration) {
-        for (&(gamepad, axis), sample) in self.seen.iter() {
-            into.set(
-                gamepad,
-                axis,
-                AxisCalibration {
-                    center: (sample.min + sample.max) / 2.0,
-                    rest: (sample.max - sample.min) / 2.0 * REST_MARGIN,
-                },
-            );
-        }
     }
 }
 
@@ -1327,27 +1275,6 @@ mod tests {
 
     #[cfg(feature = "gamepad")]
     #[test]
-    fn sampling_measures_a_centre_and_an_envelope() {
-        let pad = bevy_ecs::entity::Entity::from_bits(1);
-        let mut sampling = CalibrationSampling::default();
-        for value in [0.08, 0.12, 0.10, 0.09, 0.11] {
-            sampling.observe(pad, GamepadAxis::LeftStickX, value);
-        }
-        assert_eq!(sampling.axes_seen(), 1);
-
-        let mut calibration = GamepadCalibration::default();
-        sampling.finish(&mut calibration);
-
-        let measured = calibration.get(pad, GamepadAxis::LeftStickX);
-        assert!((measured.center - 0.10).abs() < 1e-6);
-        // Half the observed spread, widened by `REST_MARGIN`.
-        assert!((measured.rest - 0.02 * REST_MARGIN).abs() < 1e-6);
-        // And the whole point of measuring: the rest position now reads as untouched.
-        assert_eq!(measured.apply(0.10), 0.0);
-    }
-
-    #[cfg(feature = "gamepad")]
-    #[test]
     fn calibration_is_per_unit_and_forgettable() {
         let worn = bevy_ecs::entity::Entity::from_bits(1);
         let fresh = bevy_ecs::entity::Entity::from_bits(2);
@@ -1370,32 +1297,6 @@ mod tests {
 
         calibration.clear_device(worn);
         assert!(calibration.is_empty());
-    }
-
-    #[cfg(feature = "gamepad")]
-    #[test]
-    fn a_quiet_axis_keeps_the_calibration_it_had() {
-        let pad = bevy_ecs::entity::Entity::from_bits(1);
-        let mut calibration = GamepadCalibration::default();
-        calibration.set(
-            pad,
-            GamepadAxis::LeftStickX,
-            AxisCalibration {
-                center: 0.1,
-                rest: 0.05,
-            },
-        );
-
-        // A step during which one stick never moves measures nothing about it.
-        let mut sampling = CalibrationSampling::default();
-        sampling.observe(pad, GamepadAxis::LeftStickY, 0.0);
-        sampling.finish(&mut calibration);
-
-        assert_eq!(
-            calibration.get(pad, GamepadAxis::LeftStickX).center,
-            0.1,
-            "an axis that reported nothing was reset rather than left alone"
-        );
     }
 
     // A pad arrives carrying default settings, so the warning has to be about a game that moved
