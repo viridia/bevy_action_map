@@ -223,30 +223,31 @@ Disasteroids is one player reading one set of bindings, so everything about devi
 invisible to it. Split Friction is the example that has to answer *which* device drove an
 action, and most of this section is what it needs.
 
-### 72b. Calibration that survives a restart, and a screen that measures one · E[4]
+### 72b. Calibration the app persists, and measuring withdrawn · E[1]
 
-R11.7 and R14.11: stage-1 calibration stored per persistent device identity, and offered as an
-explicit player-facing step. `DeviceId` is the identity to key it by, and it exists.
+The crate applies stage-1 calibration and names the device; storing it, and anything a player sees,
+is the app's. Measuring a worn stick needs expertise most game developers lack, and popular titles
+leave it to the platform, so it leaves the crate for X47.
 
-- **Chunk 22 built the measuring and the applying keyed to the runtime handle**, which is exactly
-  what a persistent identity keys instead. `GamepadCalibration` and `CalibrationSampling` are keyed
-  by `Entity` today; this chunk re-keys the stored half to `DeviceId` while the live half stays on
-  the handle, or says why the two want different storage.
-- **The calibration step has no in-tree caller.** `CalibrationSampling` is driven end to end by
-  tests and by no screen. A calibration a player performs and then loses on quit is worth little, so
-  the screen and the persistence are one feature.
-- **Sampling learns the deflection as rest.** `CalibrationSampling`'s doc tells the player to move
-  the sticks and let go, and `observe` takes every reading while the resource exists, so a step that
-  follows the instruction sees values near ±1.0 and finishes with a rest envelope wider than the
-  stick's range: the axis goes dead. The tests feed only rest values, and no screen has run it. The
-  options: two game-driven phases, sampling only after the player lets go, which still catches the
-  spring-back and needs a settle wait; restarting an axis's min and max whenever a reading jumps
-  well outside any drift, around 0.5, which keeps the instruction and the API as they are; or
-  recording each settled position and taking the envelope across those. The second is the lean.
-- **Verified by:** calibrating a drifting stick, quitting, relaunching, and finding the stick still
-  corrected. The in-house fixture is a DualSense whose left stick is noisy at rest and settles at a
-  different point after each release, varying the drift's speed and direction; one release is not a
-  calibration of it, so the step has to widen across several.
+- **Withdraw `CalibrationSampling`** and `REST_MARGIN`, with the test in `src/context/state.rs` that
+  drives them and the hook in `src/frame.rs` that feeds them. It is public and broken: following its
+  own doc records the stick's deflection as rest.
+- **A recipe on `GamepadCalibration`'s doc comment.** Everything it needs exists: the backend puts
+  `Identity(DeviceId)` on a pad's entity, so an app restores by `DeviceId` when `Identity` appears
+  and saves through `SavedDeviceId`. The doc says a reconnect loses the value and not that the app
+  is expected to restore it. Under gilrs the identity names a model, so two identical pads share an
+  entry; widening one envelope to cover both is the recipe's suggestion, not crate code. It also
+  says which stage a player-facing dead zone slider belongs to: the preference stage, over the
+  binding's `DeadZone`, as Disasteroids' existing tunable is — calibration is set from code.
+- **Requirements.** R11.7 and R14.11 say the crate stores calibration by identity and offers a
+  player-facing step. Both are reworded: live calibration is keyed by the runtime handle, the
+  device's identity is reachable from it, and storage and presentation are the app's.
+- **`docs/design.md` TD8** says there is no persistent device identity to key calibration to, which
+  has been false since `Identity` landed, and describes `CalibrationSampling`.
+- **Verified by:** a headless `App` test that sets a pad's calibration, disconnects and reconnects
+  it, restores by `Identity` as the recipe does, and reads the correction back.
+- **Not done:** a calibration screen, or a second dead zone in Disasteroids; its settings screen
+  already has one, and a second would make it incoherent.
 
 ### 163. Local multiplayer's types in the prelude · E[0]
 

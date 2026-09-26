@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 47.**
+**Next: 48.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -450,6 +450,20 @@ restore, re-simulate — is chunk 83, which also takes the held-state containers
 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so
 no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs
 a remote player's resolved action to inject and a later correction to reconcile against it.
+
+### X47 — Measuring a stick's rest envelope
+
+**Gate:** a game asking the crate to measure calibration rather than set it, or someone with the
+domain expertise offering to own it.
+
+Chunk 72b withdrew `CalibrationSampling`, which recorded every reading while it existed and told the
+player to move the sticks and let go, so a step that followed the instruction learned the deflection
+as rest and killed the axis. The instruction was right: a pad reports an axis only when it changes,
+so a stick that settled before the step reports nothing. The fixes considered were two game-driven
+phases that sample only after release, with a settle wait; restarting an axis's min and max when a
+reading jumps past about 0.5; and taking the envelope across each settled position. The second was
+the lean. The test fixture is a DualSense whose left stick settles at a different point after each
+release, so one release is not a calibration of it.
 
 ### X36 — Timestamped authority transitions
 
