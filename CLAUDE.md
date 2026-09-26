@@ -16,8 +16,12 @@ Everything below is on demand.
 
 ## The documents, and when to open one
 
-Every section is numbered, so a known target can be reached with `grep -n` for the anchor and
-`sed -n` for the span. Use that for lookups; see "Context" below for when not to.
+Every section is numbered, so a known target is one command away: `scripts/show.py <anchor>...`
+prints it, given a chunk number, a `TD`, `D`, `X`, `G`, `S` or `R` anchor, or a driver `DR` or `DD`
+one, and takes several at once. `--outline` prints only the headings and requirements inside, with
+line numbers, for a section too long to read whole; `--toc TD` (or `R`, `D`, `X`, `G`, `S`, `DR`,
+`DD`, `chunks`) lists every heading of one document, to find a section before its anchor is known.
+Use that for lookups; see "Context" below for when not to.
 
 | File | Holds | Reach for it when |
 | --- | --- | --- |
@@ -50,9 +54,9 @@ requirements inside them by the dot: `R19` is the section, `R19.14` a requiremen
 retired, and `scripts/xref.py` fails on one: any that survives is a reference nothing migrated.
 
 A requirement is defined once, as a list item reading `- **R<section>.<n> (MUST)**`, and is cited
-bare everywhere else. So to reach a definition, search for `**` followed by the number: the `**`
-prefix appears nowhere but the definition. Read it to the next `- **R` line: indented sub-bullets
-are part of the requirement, and a fixed `grep -A` cuts them off.
+bare everywhere else, so `**` followed by the number appears nowhere but the definition. Indented
+sub-bullets are part of the requirement; `scripts/show.py` includes them, where a fixed `grep -A`
+cuts them off.
 
 ## Workflow
 
@@ -66,8 +70,9 @@ not positions.
 - **Ground rule 5 is the one that bites:** nothing outstanding may be left without a destination. An
   item with no chunk number is an item that will be dropped. "Later" and "its own decision" are not
   destinations — an entry in `docs/deferred.md` with a stated gate is.
-- **A new chunk gets a `###` section**, with its effort level (G19), and nothing else. The "Next"
-  list is the author's shortlist.
+- **A new chunk gets a `###` section**, with its effort level (G19), and nothing else. A chunk split
+  into lettered parts gives each part its own `###` section; a sweep's units are the exception,
+  lettered as they land under the sweep's section. The "Next" list is the author's shortlist.
 - **A structural idiom is proposed before it is built.** A new kind of function, module dependency
   or wrapper arrives as options with a recommendation, not in a diff.
 - **A plan opens with what changes**, in sentences that assume nothing, and answers a question about

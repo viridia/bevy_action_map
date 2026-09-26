@@ -8,6 +8,8 @@
 /steam_probe
 
 .DS_Store
+__pycache__/
+*.pyc
 
 # Editor configuration is each contributor's own.
 .vscode/

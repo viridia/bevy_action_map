@@ -204,6 +204,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 143  | One apply, for the world or for an entity                             |
 | 162  | A warning for a modifier idle on a composite part                     |
 | 72b  | Calibration the app sets, and measuring withdrawn                     |
+| 174  | A section, printed by its anchor                                      |
 
 ---
 
@@ -815,21 +816,6 @@ boundaries with `pulldown-cmark`, and keeps devfmt's rewrap and `--diff` scoping
   item, and a string literal starting with `///`.
 - **Not done:** retiring devfmt, or rendering Markdown through the parser, which would restyle every
   document.
-
-### 174. A section, printed by its anchor · E[1]
-
-`scripts/show.py <anchor>` prints one section of the documents: a chunk (`72b`), a design section
-(`TD8.4`), a decision, a requirement, a deferred entry, a guideline, or a driver `DR`/`DD` section.
-It replaces the `grep -n` and `sed -n` pair `CLAUDE.md` prescribes for a lookup.
-
-- **It reuses `xref.py`'s patterns**, which know every anchor but a chunk's; a chunk is a Roadmap
-  `###` heading.
-- **A section ends** at the next heading of the same or a higher level. A requirement ends at the
-  next `- **R` line, so its indented sub-bullets are included, which a fixed `grep -A` cuts off.
-- **`CLAUDE.md`'s lookup instructions** name the script instead of the pair.
-- **Verified by:** one anchor of each kind printed and read against its source, and an unknown
-  anchor exiting non-zero.
-- **Not done:** printing the places that cite an anchor, which is 175's.
 
 ### 175. Every mention of a name, in one call · E[1]
 
