@@ -392,7 +392,7 @@ pub mod prelude {
     };
     #[cfg(feature = "gamepad")]
     pub use crate::device::ConnectedGamepad;
-    pub use crate::device::DeviceFamily;
+    pub use crate::device::{DeviceFamily, DeviceHandle};
     pub use crate::event::{Canceled, ClassBinding, ClassFired, Completed, Fired, Started};
     pub use crate::frame::{FrameTimestamp, InputFrame, RawEvent, TimedRawEvent};
     pub use crate::join::is_claimed;
@@ -400,6 +400,7 @@ pub mod prelude {
         ActionMapping, BoundSlot, Follower, MappingKey, RebindPolicy, Tunable, TunableValue,
         declared_mappings, declared_tunables, mappings, tunables,
     };
+    pub use crate::player::Paired;
     pub use crate::present::{
         BindingTable, ControlOrigin, Glyph, GlyphTier, Prompt, PromptDevice, PromptGeneration,
         PromptScope, Prompts, resolve_glyph,

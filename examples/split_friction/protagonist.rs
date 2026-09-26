@@ -13,8 +13,6 @@
 
 use bevy::image::TextureAtlasTemplate;
 use bevy::prelude::*;
-use bevy_action_map::device::DeviceHandle;
-use bevy_action_map::player::Paired;
 use bevy_action_map::prelude::*;
 
 use crate::popup::{self, OpenMenu, Popup};

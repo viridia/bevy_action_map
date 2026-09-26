@@ -199,6 +199,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 158  | Reserving an authority is an error                                    |
 | 164  | Child crates under `crates/`                                          |
 | 171  | The root crate moves under `crates/`                                  |
+| 163  | Local multiplayer's types in the prelude                              |
 
 ---
 
@@ -250,21 +251,6 @@ leave it to the platform, so it leaves the crate for X47.
   it, restores by `Identity` as the recipe does, and reads the correction back.
 - **Not done:** a calibration screen, or a second dead zone in Disasteroids; its settings screen
   already has one, and a second would make it incoherent.
-
-### 163. Local multiplayer's types in the prelude · E[0]
-
-`docs/issues.md` 1068. `use bevy_action_map::prelude::*` gives neither `Paired` (`player.rs`) nor
-`DeviceHandle` (`device.rs`), so the minimal two-player setup, spawning
-`(Player, OnFoot, Paired::to(device))`, needs two imports reaching into modules by hand. The prelude
-already exports `DeviceFamily` and `ConnectedGamepad`, so the omission reads as an oversight rather
-than a line drawn.
-
-- **Add both to `prelude` (`lib.rs`).** `Paired` is ungated, and `DeviceHandle` exists in every
-  configuration since `KeyboardMouse` is unconditional, so neither export takes a `cfg`.
-- **The examples drop their path imports of the two** — Pong's `paddle.rs` and four files in Split
-  Friction. That diff in `examples/` is the chunk's point rather than a leak.
-- **Verified by:** the no-devices build and the eight-combination matrix, since the prelude is a
-  `cfg` group, and the examples building with the path imports gone.
 
 ## Gamepad devices, for upstream
 

@@ -16,8 +16,6 @@
 
 use bevy::prelude::*;
 use bevy_action_map::binding::InputContextBuilder;
-use bevy_action_map::device::DeviceHandle;
-use bevy_action_map::player::Paired;
 use bevy_action_map::prelude::*;
 
 use super::court::HALF_EXTENT;

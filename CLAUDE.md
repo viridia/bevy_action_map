@@ -277,7 +277,9 @@ treat one as such rather than assuming it was already there.
 **Launch every example a chunk touched** before calling it done: `cargo run --example <x>` in the
 background for a minute, with the log grepped for `panicked|ERROR` (Disasteroids needs
 `--features serialize`). It catches what the recipe cannot, such as a system running before the
-entities it expects exist.
+entities it expects exist. Split Friction logs one `WARN` at startup, an unresolved import of
+`mesh2d::bindings`: that is Bevy's, bevy#25936, and harmless. Check at each Bevy bump whether it has
+gone.
 
 ## Context, and what not to economize on
 
