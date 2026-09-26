@@ -201,6 +201,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 171  | The root crate moves under `crates/`                                  |
 | 163  | Local multiplayer's types in the prelude                              |
 | 144  | One rule for what counts as a character                               |
+| 143  | One apply, for the world or for an entity                             |
 
 ---
 
@@ -212,7 +213,6 @@ its identity rather than its position.
 
 * 115: A timing declared as a tunable
 * 122: The wheel as a binding source
-* 143: One apply, for the world or for an entity
 * 28: Docs that run
 * 33: Conditions that read other actions
 
@@ -651,22 +651,6 @@ the expensive part.
 
 Work no game asks for and no published crate can do without: the crate's internals kept consistent,
 extension points exercised, and documentation that is true and runs.
-
-### 143. One apply, for the world or for an entity · E[1]
-
-`overrides.rs`'s `apply_with` and `apply_for_entity_with` are the same function: they differ only in
-which applier they collect from `DeclaredContexts`, and then both run the same `NoSuchMapping`
-report and the same prompt bump. The per-entity copy's own comment says so. The report is tested
-only through `apply_overrides`, so a change made to one copy and not the other fails nothing.
-
-- **One `apply_with(world, target: Option<Entity>, overrides, preset)`**, matching on `target` to
-  call `apply` or `apply_for_entity`. Everything after the appliers exists once. The four public
-  entry points keep their signatures and pass `None` or `Some(entity)`.
-- **A test that `apply_overrides_for` reports `NoSuchMapping`**, the path nothing covers today.
-- **Not doing: merging `DeclaredContexts`'s two function pointers.** `apply_to_context` rewrites the
-  shared default and every instance, and `apply_to_entity` rewrites one instance. Those are two
-  operations rather than a copy of one.
-- **Verified by:** the new test, the existing suite unchanged, and no diff in `examples/`.
 
 ### 112. A backend suppresses a device family at L0 · E[2]
 

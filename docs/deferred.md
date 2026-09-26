@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 49.**
+**Next: 50.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -313,6 +313,18 @@ and neither can be answered without a customer to ask.
 
 Kept rather than deleted because the sprites, the dungeon's region aspects and a `Fire`-shaped
 action all exist, so changing our mind is cheap.
+
+### X49 — Reading back one entity's rebound rows
+
+**Gate:** a game or example in tree building a per-player controls screen.
+
+`apply_to_entity` computes the rewritten mappings and tunables and drops them: `AppliedPlan<C>` is
+the default a new instance inherits, so a per-entity apply cannot write there, and there is no
+per-entity store for them. `mappings` and `tunables` therefore read the world-wide rows only, and a
+screen showing one player's bindings after `apply_overrides_for` shows the shared ones. The fix is a
+per-entity reader, with the rows kept on the instance or recomputed from its plan. Until then, a
+game holds each player's `Overrides` itself and can layer them over `declared_mappings`, though that
+skips refusal.
 
 ## 4. The Steam build
 

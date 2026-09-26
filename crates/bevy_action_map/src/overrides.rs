@@ -1035,7 +1035,7 @@ impl Rebind {
 ///
 /// Rows this build cannot use come back as [`OverrideProblem`]s; everything else is applied.
 pub fn apply_overrides(world: &mut World, overrides: &Overrides) -> Vec<OverrideProblem> {
-    apply_with(world, overrides, None)
+    apply_with(world, None, overrides, None)
 }
 
 /// Like [`apply_overrides`], but a preset's rows are exempt from the "not rebindable here"
@@ -1051,7 +1051,7 @@ pub fn apply_overrides_with_preset(
     overrides: &Overrides,
     preset: &Overrides,
 ) -> Vec<OverrideProblem> {
-    apply_with(world, overrides, Some(preset))
+    apply_with(world, None, overrides, Some(preset))
 }
 
 /// Like [`apply_overrides`], but reaches only one entity's own instance rather than every one.
@@ -1071,7 +1071,7 @@ pub fn apply_overrides_for(
     entity: Entity,
     overrides: &Overrides,
 ) -> Vec<OverrideProblem> {
-    apply_for_entity_with(world, entity, overrides, None)
+    apply_with(world, Some(entity), overrides, None)
 }
 
 /// Like [`apply_overrides_for`], but a preset's rows are exempt from the "not rebindable here"
@@ -1082,12 +1082,20 @@ pub fn apply_overrides_for_with_preset(
     overrides: &Overrides,
     preset: &Overrides,
 ) -> Vec<OverrideProblem> {
-    apply_for_entity_with(world, entity, overrides, Some(preset))
+    apply_with(world, Some(entity), overrides, Some(preset))
 }
 
-fn apply_for_entity_with(
+/// The body of the four public entry points.
+///
+/// - `target`: `None` rewrites every instance and the default new ones inherit; `Some` rewrites
+///   that entity's instance alone.
+/// - `overrides`: the whole set, diffed against the pristine declaration rather than layered onto
+///   the last apply.
+/// - `preset`: rows exempt from the `NotRebindable` refusal. `None` exempts none, as an empty set
+///   would.
+fn apply_with(
     world: &mut World,
-    entity: Entity,
+    target: Option<Entity>,
     overrides: &Overrides,
     preset: Option<&Overrides>,
 ) -> Vec<OverrideProblem> {
@@ -1098,50 +1106,15 @@ fn apply_for_entity_with(
     let appliers: Vec<_> = declared
         .0
         .iter()
-        .map(|context| context.apply_for_entity)
+        .map(|context| (context.apply, context.apply_for_entity))
         .collect();
 
     let mut problems = Vec::new();
-    for apply in appliers {
-        problems.extend(apply(world, entity, overrides, preset));
-    }
-
-    // Same diagnostic `apply_with` reports, for the same reason.
-    let declared = crate::mapping::declared_mappings(world);
-    problems.extend(
-        overrides
-            .iter()
-            .filter(|&(family, key, _)| {
-                !declared
-                    .iter()
-                    .any(|row| row.key == key && row.family == family)
-            })
-            .map(|(family, mapping, _)| OverrideProblem {
-                family,
-                mapping,
-                kind: OverrideProblemKind::NoSuchMapping,
-            }),
-    );
-
-    // The one entity's own prompts may now name a different control.
-    crate::present::PromptGeneration::bump(world);
-    problems
-}
-
-fn apply_with(
-    world: &mut World,
-    overrides: &Overrides,
-    preset: Option<&Overrides>,
-) -> Vec<OverrideProblem> {
-    let Some(declared) = world.get_resource::<crate::inspect::DeclaredContexts>() else {
-        return Vec::new();
-    };
-    // Collected first because each one takes the world exclusively in turn.
-    let appliers: Vec<_> = declared.0.iter().map(|context| context.apply).collect();
-
-    let mut problems = Vec::new();
-    for apply in appliers {
-        problems.extend(apply(world, overrides, preset));
+    for (apply, apply_for_entity) in appliers {
+        problems.extend(match target {
+            None => apply(world, overrides, preset),
+            Some(entity) => apply_for_entity(world, entity, overrides, preset),
+        });
     }
 
     // Reported here rather than per context, because "no context declares this" is the only form
@@ -2077,6 +2050,34 @@ mod tests {
         assert_eq!(
             slots(&app, "override_tests.jump"),
             filled([Control::PhysicalKey(KeyCode::Space)])
+        );
+    }
+
+    /// The per-entity apply reports a row no context declares, as the world-wide one does.
+    #[test]
+    fn apply_overrides_for_reports_a_mapping_nothing_declares() {
+        let mut app = app();
+        let player = app.world_mut().spawn(Playing).id();
+        let gone = MappingKey::new(
+            "override_tests.no_such_action",
+            crate::binding::BindingPart::Whole,
+        );
+
+        let mut overrides = Overrides::new();
+        overrides.bind(
+            DeviceFamily::KeyboardMouse,
+            gone,
+            [Control::PhysicalKey(KeyCode::KeyZ)],
+        );
+
+        let problems = apply_overrides_for(app.world_mut(), player, &overrides);
+        assert_eq!(
+            problems,
+            [OverrideProblem {
+                family: DeviceFamily::KeyboardMouse,
+                mapping: gone,
+                kind: OverrideProblemKind::NoSuchMapping,
+            }]
         );
     }
 

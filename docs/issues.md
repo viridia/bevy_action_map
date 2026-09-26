@@ -465,8 +465,8 @@ press that opened the session, and a refused press is claimed so it does not als
 nor `is_claimed` enforces exclusivity, which is what lets two players share one keyboard.
 
 **Excluded rather than missed**, both already recorded: `apply_overrides_for` discards the rewritten
-rows, which is chunk 143's; and `Override::NotOurs` leaves the crate's binding live rather than
-silencing it, which is R0.6 and chunk 112's.
+rows, which is X49; and `Override::NotOurs` leaves the crate's binding live rather than silencing
+it, which is R0.6 and chunk 112's.
 
 **Plausible and wrong**, from a later scan that read these as defects. `chord_claims` on
 `InputContextState` is written every fold: `fold` destructures `self`, so the name there is the
