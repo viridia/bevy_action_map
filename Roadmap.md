@@ -245,7 +245,7 @@ Disasteroids is one player reading one set of bindings, so everything about devi
 invisible to it. Split Friction is the example that has to answer *which* device drove an
 action, and most of this section is what it needs.
 
-### 72b. Calibration that survives a restart, and a screen that measures one
+### 72b. Calibration that survives a restart, and a screen that measures one · E[4]
 
 R11.7 and R14.11: stage-1 calibration stored per persistent device identity, and offered as an
 explicit player-facing step. `DeviceId` is the identity to key it by, and it exists.
@@ -270,6 +270,21 @@ explicit player-facing step. `DeviceId` is the identity to key it by, and it exi
   different point after each release, varying the drift's speed and direction; one release is not a
   calibration of it, so the step has to widen across several.
 
+### 163. Local multiplayer's types in the prelude · E[0]
+
+`docs/issues.md` 1068. `use bevy_action_map::prelude::*` gives neither `Paired` (`player.rs`) nor
+`DeviceHandle` (`device.rs`), so the minimal two-player setup, spawning
+`(Player, OnFoot, Paired::to(device))`, needs two imports reaching into modules by hand. The prelude
+already exports `DeviceFamily` and `ConnectedGamepad`, so the omission reads as an oversight rather
+than a line drawn.
+
+- **Add both to `prelude` (`lib.rs`).** `Paired` is ungated, and `DeviceHandle` exists in every
+  configuration since `KeyboardMouse` is unconditional, so neither export takes a `cfg`.
+- **The examples drop their path imports of the two** — Pong's `paddle.rs` and four files in Split
+  Friction. That diff in `examples/` is the chunk's point rather than a leak.
+- **Verified by:** the no-devices build and the eight-combination matrix, since the prelude is a
+  `cfg` group, and the examples building with the path imports gone.
+
 ---
 
 ## Bindings and conditions
@@ -277,7 +292,7 @@ explicit player-facing step. `DeviceId` is the identity to key it by, and it exi
 What a binding can name, and when it counts as firing. Each of these is a gap a game runs into
 rather than a defect in what exists.
 
-### 129b. A screen that sets a modifier
+### 129b. A screen that sets a modifier · E[3]
 
 129's caller, and the obligation 129 lands short of. Nothing in tree can edit a chord until
 something draws the toggles; what they edit is `BoundSlot::with`, written back through
@@ -300,7 +315,7 @@ something draws the toggles; what they edit is `BoundSlot::with`, written back t
   row precisely because no screen could edit it; with an editor, a chorded row can be `mappable` and
   mean it.
 
-### 135. A chord across two device families
+### 135. A chord across two device families · E[2]
 
 `docs/issues.md` 1060. `binding_family` files a row under its primary control's family without
 consulting the chord, and conflicts are per family, so a key in a gamepad binding's chord is
@@ -319,7 +334,7 @@ keyboard row applies.
 - **Verified by** tests on both paths — a declaration mixing families, and a saved row naming a
   gamepad entry on a keyboard row.
 
-### 121. A camera that takes the mouse, and gives it back
+### 121. A camera that takes the mouse, and gives it back · E[3]
 
 R13.4, and the picking half of R22.4: nothing in tree has ever grabbed the cursor, so the one delta
 that must not be invented has never had a camera to snap, and the lever an app pulls to keep picking
@@ -351,7 +366,7 @@ off a captured mouse has never been pulled.
   whatever the cursor accumulated while away, which is R13.4's rule arriving through R16 rather than
   through a mode change the player asked for.
 
-### 122. The wheel as a binding source, and a zoom for the orbit
+### 122. The wheel as a binding source, and a zoom for the orbit · E[3]
 
 R13.3: `Control` names mouse buttons and mouse motion and nothing else, so a game wanting the wheel
 reads Bevy's own message beside the mapper, and loses the rebinding along with it.
@@ -366,7 +381,7 @@ reads Bevy's own message beside the mapper, and loses the rebinding along with i
   machine and only the binding is that specific — so either the requirement is right and the case is
   rarer than it sounds, or it is a clause to revise.
 
-### 33. Conditions that read other actions
+### 33. Conditions that read other actions · E[3]
 
 A chord may require another *control* but not another *action*, and `BlockedBy` does not exist. Both
 read a neighbouring slot rather than their own value, which needs the operand evaluated first: slots
@@ -384,7 +399,7 @@ ordered topologically, and a cycle rejected at plan build with a diagnostic nami
   from a system. The likely demo is that gate replaced by a condition, on that variant, rather than
   a second `Serve` in another.
 
-### 115. A timing declared as a tunable
+### 115. A timing declared as a tunable · E[2]
 
 R20.7 (`docs/issues.md` 1045): a hold duration, tap window, multi-tap gap or pulse interval offered
 to the player as a named tunable, the way `tunable_dead_zone` already offers a dead zone.
@@ -408,13 +423,35 @@ to the player as a named tunable, the way `tunable_dead_zone` already offers a d
 - **Verified by:** Disasteroids' settings screen offering one timing beside the dead-zone slider it
   already has, and the changed value still applied after a quit and relaunch.
 
+### 162. A warning for a magnitude modifier on a composite part · E[1]
+
+`docs/issues.md` 1067, confirmed by running: written by mistake while porting, caught by a failing
+test. `context.bind::<Move>(DirectionalButtons::wasd()).clamp_magnitude()` reads as the way to stop
+a diagonal outrunning a straight line, and does nothing. A composite expands to one binding per
+part, and `part_value` (`eval.rs`) yields exactly rest or exactly unit, so a modifier acting on
+magnitude is the identity on a part: `ClampMagnitude` acts only above a length of 1.0, and
+`DeadZone` with rescaling maps 1.0 to 1.0 under `Radial` and `PerAxis` alike. The spelling that
+works is `combined::<Move>().clamp_magnitude()`, on the folded value, which is the only place the
+1.41 diagonal exists. `combined`'s doc says so; nothing warns someone who did not read it.
+
+- **A warning in `diagnose` (`plan.rs`)** when a `BindingInput::Part` carries `DeadZone` or
+  `ClampMagnitude`, naming `combined` in the message. A warning rather than an error: the modifier
+  is inert rather than wrong, and a game that chains one harmlessly should not fail to boot.
+  `CombinedWithoutBindings` is the mirror-image diagnostic, and the one to copy.
+- **Once per `bind` call**, not once per part, which `BindingSpec::continues_declaration` already
+  provides.
+- **Check the rest of `BindingModifier` for the same shape.** A third modifier that is the identity
+  on a unit value joins the warning; the two above are the ones confirmed.
+- **Verified by:** a plan test that a four-part composite with `clamp_magnitude()` warns once and
+  `combined` does not, and the examples launching without the warning.
+
 ---
 
 ## Presentation and prompts
 
 What the player is shown, once the crate knows what is bound.
 
-### 73. A key rendered through a catalogue
+### 73. A key rendered through a catalogue · E[2]
 
 Every `fallback_label` call in tree is unconditional: nineteen sites across `examples/`, not one
 going through a catalogue. The crate's half of R19.14 is done, but the claim that those names are
@@ -439,7 +476,7 @@ going through a catalogue. The crate's half of R19.14 is done, but the claim tha
 Taking a context's state out and putting it back, in memory between ticks. The other half of this
 section was persistence — the same move, to a file between runs — and chunks 92 and 92b landed it.
 
-### 83. Rewind, without the network
+### 83. Rewind, without the network · E[4]
 
 `InputContextState`'s own comment says a rollback snapshot is the two tables plus the dirty bits,
 and TD6 says the same. Nothing has ever taken one. A ring buffer of snapshots and the `InputFrame`s
@@ -483,7 +520,7 @@ the expensive part.
 Work no game asks for and no published crate can do without: the crate's internals kept consistent,
 extension points exercised, and documentation that is true and runs.
 
-### 143. One apply, for the world or for an entity
+### 143. One apply, for the world or for an entity · E[1]
 
 `overrides.rs`'s `apply_with` and `apply_for_entity_with` are the same function: they differ only in
 which applier they collect from `DeclaredContexts`, and then both run the same `NoSuchMapping`
@@ -499,7 +536,7 @@ only through `apply_overrides`, so a change made to one copy and not the other f
   operations rather than a copy of one.
 - **Verified by:** the new test, the existing suite unchanged, and no diff in `examples/`.
 
-### 144. One rule for what counts as a character
+### 144. One rule for what counts as a character · E[1]
 
 A logical key is decided from text in two places: `eval.rs`'s `bound_character`, from a key event's
 `Key::Character`, and `Control::from_name` (`present.rs`), from a saved `char/` name. Both take
@@ -514,7 +551,7 @@ name is only good if a key event can produce the same character — and nothing 
 - **Verified by:** a unit test on `single_character` (empty, one, two, uppercase), `from_name`'s
   existing `char/` tests unchanged, and no diff in `examples/`.
 
-### 112. A backend suppresses a device family at L0
+### 112. A backend suppresses a device family at L0 · E[2]
 
 R0.6's other half, and the smallest it will ever be: `docs/steam.md` S1 and S3 rule out suppressing
 one device, so what is left is a family switch (D93).
@@ -548,7 +585,7 @@ one device, so what is left is a family switch (D93).
   gamepad family.
 - **Not doing: R0.4's per-family split**, which lives at L2 and landed as chunk 151a.
 
-### 28. Docs that run
+### 28. Docs that run · E[4]
 
 - **Make the doctests execute anywhere.** `scripts/verify.sh --doc` runs them on macOS, pointing
   dyld at the toolchain's libstd that `dynamic_linking` on the `bevy` dev-dependency leaves the
@@ -589,7 +626,7 @@ It is developed here because that is faster, as a workspace member (`bevy_remote
 own documents, and is meant to leave as a standalone crate, so what it needs travels with it. Which
 of its server methods are proposed upstream to Bevy is a separate question, and DD8's.
 
-### 149. The mapper's `remote` feature
+### 149. The mapper's `remote` feature · E[2]
 
 R25 and DD6: `action_map.dump` and `action_map.authority`, and the client's generic `call` step for
 a method it does not know, which is how a plan reaches either.
@@ -619,7 +656,7 @@ Friction, is the real backend. It lives in `steam_examples/`, beside `steam_prob
 Every chunk here is an audit rather than a gate. It needs a running client, a pad, and a layout
 bound by hand (`docs/steam.md` S16), and no CI can run it.
 
-### 156. Navigating from no focus
+### 156. Navigating from no focus · E[2]
 
 Disasteroids' controls screen can lose focus with the screen still open, and a player with only a
 pad then has no way back: `navigate` discards `DirectionalNavigationError::NoFocus`, so the stick
@@ -643,7 +680,7 @@ flight test, cause unknown; the route found in the code is a pointer press on em
 - **Verified by:** a `disasteroids/pad.py` step that clears `InputFocus` and navigates, if the
   driver can clear it; by hand otherwise.
 
-### 151e. Split Friction on Steam
+### 151e. Split Friction on Steam · E[3]
 
 Two players are two `InputHandle_t`s, not two action sets (`docs/steam.md`'s appendix).
 
@@ -669,7 +706,7 @@ chunk (159a, 159b, …) small enough to finish in one session, and a unit is nev
 unit starts and ends with `scripts/growth.py`, so its effect is measured rather than asserted, and
 its section's **Done** line records it.
 
-### 159. Compressing `docs/decisions.md`
+### 159. Compressing `docs/decisions.md` · E[1]
 
 The preamble's "What an entry keeps", applied to every entry: each keeps what going back would cost
 and the facts that make a rejected alternative worse, and loses the argument for a choice between
@@ -683,7 +720,7 @@ equals and the story of how a revised entry got where it is.
 - **Verified by:** `scripts/xref.py`, and the unit's `growth.py` numbers.
 - **Done:** D22, the sample, which halved and became D22 and D93.
 
-### 160. An editorial pass on `docs/design.md`
+### 160. An editorial pass on `docs/design.md` · E[1]
 
 For order and clarity, not length: TD9.1, the sample, lost a tenth of its words. Most of the
 document was written by an earlier model and has not been edited as a whole.
@@ -697,7 +734,7 @@ document was written by an earlier model and has not been edited as a whole.
 - **Verified by:** `scripts/xref.py`, and the unit's `growth.py` numbers.
 - **Done:** TD9.1.
 
-### 161. Public items nothing outside `src/` names
+### 161. Public items nothing outside `src/` names · E[1]
 
 `growth.py --api` lists public items that no example or integration test names; the ones outside the
 prelude are the candidates, 48 at the first run.

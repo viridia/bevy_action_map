@@ -9,7 +9,9 @@ job.
 **How to read an entry.** Each says where the problem is, what someone would actually observe, and
 whether it was confirmed by running something or only by reading. Many were found by a model asked
 to scan `src/`, and some are rules nobody would violate, so that distinction matters; where the
-reachable case is hypothetical, the entry says so.
+reachable case is hypothetical, the entry says so. A sketched fix carries its effort level, `E[n]`
+([G19](./guidelines.md)); an entry without a sketch is not yet scoped, and one that cannot be
+sketched yet says what it waits on, under _Before a sketch_.
 
 **Line numbers drift.** Take a `file.rs:NNN` as "roughly here"; the symbol named beside it is the
 part that stays good. Re-verify before acting on one.
@@ -46,9 +48,9 @@ A moving stick sends axis events nearly every frame, so a pad hold charges two t
 while the player steers. `Tap`, `HoldAndRelease` and any modifier that integrates `delta` take the
 same path.
 
-_Fix, sketched:_ the tick's `delta` to one fold and zero to the rest, which keeps the per-event
-replay R9.3 needs. Which fold gets it decides how a press and release inside one tick are timed.
-Riding along: `part_value` carries the same `#[cfg]` twice.
+_Fix, sketched (E[1]):_ the tick's `delta` to one fold and zero to the rest, which keeps the
+per-event replay R9.3 needs. Which fold gets it decides how a press and release inside one tick are
+timed. Riding along: `part_value` carries the same `#[cfg]` twice.
 
 ### 1071 Require-reset lets a held key through if the binding has a hold
 
@@ -64,6 +66,16 @@ R7.5 fails for every binding with a time condition, through `activate`, `enable`
 `unshadow` alike. `a_context_activating_ignores_a_control_already_held` binds plainly, which is why
 it passes.
 
+_Fix, sketched (E[2]):_ decide the latch in `fold`, between the press threshold and the conditions,
+rather than in `commit_slot` after them. While a `Button` slot is latched, each binding still runs
+its modifiers and threshold, notes whether the result reads pressed, and hands rest to its
+conditions; the stage's conditions then see rest too, since the fold is rest. After the binding
+loop, a latched slot whose bindings all read rest clears. So a hold never charges on a pre-held key,
+and a latched binding never claims its control from the context below. Reading the pre-condition
+value in `commit_slot` instead would fix the hold but not `Tap` or `HoldAndRelease`, which would
+fire on releasing the key held across activation. The latch check in `commit_slot` goes, and the
+test is the probe above with `hold`, `tap` and `hold_and_release` each.
+
 ### 1072 `Started<A>` is public and never triggered
 
 `eval.rs`, `commit_slot`'s edge filter · **confirmed by a probe**
@@ -74,19 +86,44 @@ has just been pressed", and TD5.6 lists it. `commit_slot` logs only `Fired`, `Co
 empty. Nothing in tree observes `Started<A>`; Disasteroids reads the phase instead (`ship.rs`),
 while its comment in `actions.rs` says `Started` fires.
 
-### 1073 A claim lifting reads as a fresh press to the context below
+_Fix, sketched (E[1]):_ add `ActionPhase::Started` to `commit_slot`'s edge filter; `dispatch_for`
+already maps it. The transition log's only consumer is `dispatch_transitions`, so the change reaches
+observers and nothing else. Tests that list a hold's transitions gain a `Started`, and one test
+observes `Started<A>` through an `App`.
 
-`eval.rs`, `fold`'s `is_pressed` · **confirmed by a probe; needs a ruling before a fix**
+### 1073 A claim lifting reads as a fresh press, and a claim arriving as a release
 
-A consumed control reads as untouched, and nothing records that the reader never saw it go down.
-When a claim stops with the key still held (the hold completes or is abandoned, its chord breaks,
-the higher context deactivates) the lower context's plain binding on that key fires. Probed: Space
-claimed on one tick, unclaimed on the next, never released: `Jump` `Fired`. In play: Shift+Space
-held for a vehicle boost, Shift released first, and the on-foot context jumps.
+`eval.rs`, `fold`'s `is_pressed` · **the lift confirmed by a probe; the arrival read only**
 
-R7.5 and R3.7 give require-reset to activation and to `enable`. Nothing gives it to consumption, and
-R8.2 says only that lower contexts "do not see" the control. Whether this is the require-reset case
-is the author's call.
+A consumed control reads as untouched, and the reader cannot tell a claim coming or going from the
+player pressing or releasing. Both directions go wrong.
+
+**A claim lifting.** When a claim stops with the key still held (the hold completes or is abandoned,
+its chord breaks, the higher context deactivates), the lower context's plain binding on that key
+fires. Probed: Space claimed on one tick, unclaimed on the next, never released: `Jump` `Fired`. In
+play: a dialog confirms on A and closes while A is still down, and the character jumps; or
+Shift+Space held for a vehicle boost, Shift released first, and the on-foot context jumps.
+
+**A claim arriving.** When a higher context claims a key a lower binding was firing from, the lower
+action reads a release and reports `Completed`. In play: Space held, `Jump` firing, Shift added for
+the vehicle's boost, and on-foot's `Jump` completes as though the player had let go. Read from
+`fold`: `Fold::Interrupted` is set for focus loss, a disconnect and authority loss, not for a claim.
+
+D94 rules both, following the authority path (TD5.8): a key that arrives already down is ignored by
+`Button` actions until released, and one that goes away while down cancels what it was firing.
+
+_Fix, sketched (E[2]):_ two halves, landable apart. The edge for both is the difference between the
+claims a context read last tick and this one, so the context keeps last tick's.
+
+- **The lift** sets 1071's latch on each lower `Button` action with a binding on the returning
+  control; analog actions resume. Depends on 1071: without it, a returning key whose binding has a
+  hold slips through the latch as it does on activation. A claim covers a binding's primary control,
+  not its chord, so a chord's other keys never return and are untouched.
+- **The arrival** folds each lower action with a binding on the claimed control as
+  `Fold::Interrupted`, so what was firing is `Canceled`. Probe it first: `Jump` firing on Space, a
+  higher context claiming Space the next tick, `Canceled` expected.
+- **Both rules go into R8.2**, since R7.5 covers activation alone. The kept claims are state a
+  snapshot must carry (chunk 83).
 
 ---
 
@@ -118,54 +155,24 @@ stick. What the join gesture wants is movement, not position — a game where es
 wiggling the stick rapidly is the same shape of control, and it works on hardware whose zero nobody
 calibrated for exactly this reason.
 
-_Fix, sketched:_ not a crate change. `Modifier` (`binding.rs:1256`) is a pure function of a value
-and its own `Scratch` — `scratch.prev` holds last tick's position, `scratch.count`/`scratch.time`
-can track reversals within a window — so a stateful "wiggle" modifier that outputs `Bool(false)`
-until enough movement has accumulated, then passes the real value through, is buildable entirely in
-`examples/` today via `.custom()` (`binding.rs:1885`). Free parameters — window length, reversal
-count, how much movement counts — are a game's own design question, which is the reason this stays a
-worked example rather than a `BindingModifier` variant: baking in an intensity or a pattern would be
-guessing at what any particular game's grapple-escape or join gesture actually wants. It rides an
-ordinary `.bind::<Join>(Stick::Left)`, since class bindings skip the modifier chain, so a game
-wanting both gestures observes `Fired<Join>` for the wiggle beside whatever it already does for the
-button. Worth doing once Split Friction wants the polish; not routed to a chunk, since nothing here
-is missing from the crate.
+_Fix, sketched (E[2]):_ not a crate change. `Modifier` (`binding.rs:1256`) is a pure function of a
+value and its own `Scratch` — `scratch.prev` holds last tick's position,
+`scratch.count`/`scratch.time` can track reversals within a window — so a stateful "wiggle" modifier
+that outputs `Bool(false)` until enough movement has accumulated, then passes the real value
+through, is buildable entirely in `examples/` today via `.custom()` (`binding.rs:1885`). Free
+parameters — window length, reversal count, how much movement counts — are a game's own design
+question, which is the reason this stays a worked example rather than a `BindingModifier` variant:
+baking in an intensity or a pattern would be guessing at what any particular game's grapple-escape
+or join gesture actually wants. It rides an ordinary `.bind::<Join>(Stick::Left)`, since class
+bindings skip the modifier chain, so a game wanting both gestures observes `Fired<Join>` for the
+wiggle beside whatever it already does for the button. Worth doing once Split Friction wants the
+polish; not routed to a chunk, since nothing here is missing from the crate.
 
 ---
 
 ## 3. Absent — something should exist and nothing does
 
 Ordered by what a real game would miss first.
-
-### 1067 A magnitude modifier on a composite part is silently a no-op
-
-`diagnose` (`plan.rs`), `apply_clamp_magnitude` and `apply_dead_zone` (`binding/modifier.rs`),
-`part_value` (`eval.rs`) · **confirmed by running** — written by mistake while porting, caught by a
-failing test
-
-`context.bind::<Move>(DirectionalButtons::wasd()).clamp_magnitude()` reads as the obvious way to
-stop a diagonal outrunning a straight line. It does nothing at all, and nothing says so.
-
-A composite expands to one binding per part, and `part_value` yields exactly rest or exactly unit —
-`Axis2(Vec2::Y)`, `Axis1(1.0)`, never anything between or beyond. So every modifier that acts on
-magnitude is the identity on a part:
-
-- `ClampMagnitude` acts only above `length() > 1.0`, which a unit part never is.
-- `DeadZone` with rescaling divides the surviving remainder by `1.0 - lower`, which for a magnitude
-  of exactly 1.0 returns exactly 1.0 — checked for both `Radial` and `PerAxis`.
-
-The spelling that works is `combined::<Move>().clamp_magnitude()`, acting on the folded value, which
-is the only place the 1.41 diagonal exists. `combined`'s own doc says so; nothing warns the person
-who did not read it. `diagnose` already refuses a `combined` naming an action with no bindings
-(`CombinedWithoutBindings`), so the machinery to report the mirror-image mistake is present.
-
-This is the class of error the diagnostics exist for: no error, no warning, and movement 41% faster
-on the diagonal, discovered by feel.
-
-_Fix, sketched:_ a warning when a `BindingInput::Part` carries `DeadZone` or `ClampMagnitude`,
-naming `combined` in the message. Warning rather than error, because it is inert rather than wrong
-and a game that chains one harmlessly should not fail to boot. `BindingSpec::continues_declaration`
-already makes it report once per `bind` call rather than four times.
 
 ### 1052 Naming a device to the player has no requirement and no support
 
@@ -261,22 +268,6 @@ The crate depends on `log` rather than `bevy_log`, and the comment in `Cargo.tom
 `docs/decisions.md`'s own admission test — name what breaks if reversed, and the answer is R22.3 or
 the `no_std` build — and that document does not carry it.
 
-### 1068 The prelude omits both types local multiplayer needs
-
-`prelude` (`lib.rs:371`), `Paired` (`player.rs:33`), `DeviceHandle` (`device.rs:36`) · read, and hit
-while writing chunk 137's probes
-
-`use bevy_action_map::prelude::*` gives you neither `Paired` nor `DeviceHandle`, so the minimal
-two-player setup needs two further imports reaching into `player` and `device` by hand. The prelude
-does export `DeviceFamily` and `ConnectedGamepad`, which are the types a prompt needs, so the
-omission reads as an oversight rather than a line drawn somewhere.
-
-Per-player input is one of the crate's headline distinctions in `docs/comparison.md`, and spawning
-`(Player, OnFoot, Paired::to(device))` is its whole surface.
-
-_Fix, sketched:_ add both. `Paired` is ungated, and `DeviceHandle` exists in every configuration
-since `KeyboardMouse` is unconditional.
-
 ### 1069 Landing `touch` breaks every exhaustive match on the device enums
 
 `Control` (`binding/control.rs:434`), `ButtonControl` (`binding/control.rs:26`), `RawEvent`
@@ -300,9 +291,9 @@ Not blanket advice. `ActionValue`, `ActionPhase` and `ChannelShape` are closed s
 argues are complete, and `ActionIntent`'s four are load-bearing in `accepts`. Those should stay
 exhaustive.
 
-_Fix, sketched:_ `#[non_exhaustive]` on the five named above, and an entry in `docs/decisions.md`
-recording which enums are deliberately closed and on what grounds, so the next person adding one has
-a rule rather than a coin flip.
+_Fix, sketched (E[1]):_ `#[non_exhaustive]` on the five named above, and an entry in
+`docs/decisions.md` recording which enums are deliberately closed and on what grounds, so the next
+person adding one has a rule rather than a coin flip.
 
 ### 1029 Two routing gaps rather than findings
 

@@ -46,6 +46,7 @@ here, so there is one `D`-numbering in the project.
 | **D16** | Nothing user-defined runs inside the evaluator                                | TD5.6     |
 | **D17** | Transitions are generic entity events on the context entity                   | TD5.6     |
 | **D18** | Require-reset holds back buttons only                                         | TD7.2     |
+| **D94** | A key that arrives or goes away while down is treated alike on every path | TD5.7, TD5.8, TD7.2 |
 | **D26** | Failures surface at the earliest tier that can catch them                     | TD4, TD7.3 |
 | **D19** | Modifiers and conditions are enums with a `Custom` variant                    | TD8.2     |
 | **D65** | The device model is closed; a third-party kind needs one in hand             | —               |
@@ -582,6 +583,25 @@ resumes.
 stage-2 dead zone entirely leaves a drifting stick that is never seen at rest — so the action never
 recovers. What the latch guards against is a _fire_ synthesized from a control already held, and an
 analog action has none to synthesize.
+
+### D94 — A key that arrives or goes away while down is treated alike on every path
+
+**Decided.** A context can gain or lose a key the player is holding without the player pressing or
+releasing it: a higher context's claim lifting or arriving, an authority starting or stopping
+supplying an action, and an interruption such as focus loss or a disconnect. Every such path follows
+one rule. A key that arrives already down is ignored by `Button` actions until the player releases
+it, as on activation (D18), while analog actions take its value at once. A key that goes away while
+down ends what it was firing as `Canceled`, not `Completed`, since the player never let go. Only the
+actions bound to that key or that authority source are affected.
+
+**Rules out.** A per-path choice, such as a lifted claim delivering a fresh press on the grounds
+that the lower context never saw the key go down.
+
+**Reversal.** The same player gesture, a layer going away with a key down, would fire an action on
+one path and not another, and an observer of `Canceled` would have to know which mechanism took the
+key away to interpret it.
+
+**Remainder.** Consumption does not follow the rule yet (`docs/issues.md` 1073).
 
 ### D77 — A disabled action is out of evaluation, as an inactive context is
 

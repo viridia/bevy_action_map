@@ -12,7 +12,7 @@ belongs there, and why a particular choice was made belongs in [`decisions.md`](
 **Numbering.** Each guideline's number is a permanent identity from a single counter, independent of
 its group, and never reused. A gap in the sequence is a retired guideline.
 
-**Next: 19.**
+**Next: 20.**
 
 ---
 
@@ -76,6 +76,27 @@ An observation nobody can explain does not become guidance in the README, a requ
 design. Record what was seen, and any proposed cause as a hypothesis a measurement could falsify, on
 the chunk that will run it; it becomes a `docs/steam.md` entry once measured. A rule written around
 a symptom hardens a guess into documentation.
+
+### G19 — Estimate effort on an exponential scale
+
+An estimate is for sorting and prioritizing, not scheduling, so a wrong one costs a misplaced item
+and nothing more. Each level is several times the one below, judged by what the change touches
+rather than by how long it seems:
+
+| Level | Touches                                                                             |
+| ----- | ----------------------------------------------------------------------------------- |
+| E[0]  | One line, or prose only                                                             |
+| E[1]  | One function or one document section, with its test                                 |
+| E[2]  | Several functions, or a new piece of an example; the design stays as it is          |
+| E[3]  | A new mechanism or a changed public API, and a `TD` section rewritten: one chunk    |
+| E[4]  | More than a chunk, or a changed requirement or decision; split before it is written |
+| E[5]  | A core subsystem redesigned                                                         |
+
+A chunk carries its level at the end of its heading, and a sweep's is one unit's. An issue carries
+one on its sketched fix, and only there: an issue without a sketch has nothing to measure yet, so a
+missing level marks it unscoped. A level is written once and overwritten when scoping proves it
+wrong, not kept up to date. It measures effort, not risk: a one-line change to a one-way door is
+still E[0].
 
 ## 2. Code
 

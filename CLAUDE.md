@@ -67,7 +67,8 @@ not positions.
 - **Ground rule 5 is the one that bites:** nothing outstanding may be left without a destination. An
   item with no chunk number is an item that will be dropped. "Later" and "its own decision" are not
   destinations — an entry in `docs/deferred.md` with a stated gate is.
-- **A new chunk gets a `###` section** and nothing else. The "Next" list is the author's shortlist.
+- **A new chunk gets a `###` section**, with its effort level (G19), and nothing else. The "Next"
+  list is the author's shortlist.
 - **A structural idiom is proposed before it is built.** A new kind of function, module dependency
   or wrapper arrives as options with a recommendation, not in a diff.
 - **A plan opens with what changes**, in sentences that assume nothing, and answers a question about
