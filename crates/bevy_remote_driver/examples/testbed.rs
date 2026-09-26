@@ -4,7 +4,7 @@
 //! is typed. Run it under the client:
 //!
 //! ```sh
-//! python3 bevy_remote_driver/client/run.py bevy_remote_driver/plans/testbed/smoke.json
+//! python3 crates/bevy_remote_driver/client/run.py crates/bevy_remote_driver/plans/testbed/smoke.json
 //! ```
 
 use bevy::{

@@ -1311,7 +1311,7 @@ src/
   present.rs         control naming, prompts, prompt scope and staleness
   inspect.rs         the type-erased read of contexts and actions
   backend.rs         Authority, and AuthorityValues, the component an authority binding reads
-bevy_action_map_macros/   #[derive(InputAction)], #[derive(InputContext)]
+crates/bevy_action_map_macros/   #[derive(InputAction)], #[derive(InputContext)]
 ```
 
 `inspect.rs` exists for code outside a game: every other read in the crate is generic over the

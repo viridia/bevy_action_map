@@ -341,8 +341,6 @@ any one of them is misled about a mechanism.
   this is not about applying. Two others, both in `overrides.rs` and both about the serialized form
   (now TD10.3), went with 117e. **Small — worth a minute alongside the R14.10 mis-citation above,
   not worth a pass of its own.**
-- **TD11's layout tree lists `bevy_action_map_macros/`** as a directory beside `src/`. The crate of
-  that name lives in `macros/`.
 
 ### 1055 Split Friction teaches a disputed claim about somebody else's crate
 

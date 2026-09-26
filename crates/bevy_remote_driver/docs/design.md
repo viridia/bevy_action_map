@@ -199,7 +199,7 @@ the worked example of.
 
 ### 4.3 A run
 
-`python3 bevy_remote_driver/client/run.py <plan>` is the one command (DR6.1). It:
+`python3 crates/bevy_remote_driver/client/run.py <plan>` is the one command (DR6.1). It:
 
 1. builds the example with `cargo build --example`, adding `-p` and `--features` where the plan
    names them, and fails fast on a build error. Cargo's JSON messages give the binary's path and its
@@ -362,9 +362,9 @@ a Python plan that between them use every step but `pad`, which the testbed bind
 
 1. **Find what to select.** Read the example's scenes for `#Name`s. If what the test needs has none,
    add one where the entity is declared, rather than selecting by component or position.
-2. **Write a Python plan** under `bevy_remote_driver/plans/<example>/`, with the steps of DD4.1 as
-   methods on the driver. Start with a `present` on the screen's root with `ready=True`. Set
-   `PACKAGE` if the example is not the root crate's, and `FEATURES` if it declares
+2. **Write a Python plan** under `crates/bevy_remote_driver/plans/<example>/`, with the steps of
+   DD4.1 as methods on the driver. Start with a `present` on the screen's root with `ready=True`.
+   Set `PACKAGE` if the example is not the root crate's, and `FEATURES` if it declares
    `required-features`. Write JSON only for a plan that is a flat list of steps and reads as one
    (DD4.2).
 3. **Put the app into the state the test assumes, rather than assuming it.** An app that saves
@@ -381,10 +381,10 @@ a Python plan that between them use every step but `pad`, which the testbed bind
    seconds for the app's own logic passes in front and fails behind the editor. `seconds` is for
    assets loaded after a scene is ready, such as prompt glyphs, and nothing else.
 6. **Run it with the one command, and nothing else:**
-   `python3 bevy_remote_driver/client/run.py <plan>`, from anywhere in the workspace. Every approval
-   prompt brings the editor forward and covers the window, so a run split across several commands
-   tests a different app from the one that runs in one. Do not start the app in one command and
-   drive it in another.
+   `python3 crates/bevy_remote_driver/client/run.py <plan>`, from anywhere in the workspace. Every
+   approval prompt brings the editor forward and covers the window, so a run split across several
+   commands tests a different app from the one that runs in one. Do not start the app in one command
+   and drive it in another.
 7. **Read a failure from the report first**, then the log, then the screenshots, in that order. The
    report names the step, and the log says what the app did. An exit status of 2 is the plan or the
    build, not the app.

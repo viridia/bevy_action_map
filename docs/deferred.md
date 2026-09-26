@@ -88,8 +88,8 @@ limit: a crate published against an rc pins its users to a version about to be s
 entry holds is the order. A change that breaks the public API is free until the first publish and
 costly after it, so those land first: chunk 161's narrowing of public items is one, and so is any
 reshaping of the extensibility mechanism. The README's "Not on crates.io yet" section changes with
-the publish. Chunk 164 lands first, since until then the root's dev-dependency on the driver
-declares a version crates.io would have to supply.
+the publish. The macros crate goes first: until it is on crates.io, `cargo package` resolves the
+root only with `--exclude-lockfile`.
 
 ## 2. An upstream decision still open
 

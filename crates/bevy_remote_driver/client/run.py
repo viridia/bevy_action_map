@@ -1,6 +1,6 @@
 """Runs a plan: builds the example, launches it, runs the steps, reports, closes it (DD4.3).
 
-    python3 bevy_remote_driver/client/run.py <plan.json | plan.py>
+    python3 crates/bevy_remote_driver/client/run.py <plan.json | plan.py>
 
 A JSON plan names its `example`, optionally its `package`, and its `steps`. A Python plan sets
 `EXAMPLE`, optionally `PACKAGE`, and defines `run(driver)`.
@@ -20,7 +20,7 @@ from pathlib import Path
 
 from driver import BrpError, Driver, StepFailed
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 STARTUP_SECONDS = 60
 EXIT_SECONDS = 3
 

@@ -36,8 +36,8 @@ ENTRIES = {
     "docs/steam.md": ("S", re.compile(r"^### (S\d+)\b")),
     "docs/design.md": ("TD", re.compile(r"^#{2,3} (\d+(?:\.\d+)?)\.? ")),
     "Requirements.md": ("R", re.compile(r"^- \*\*(R\d+\.\d+[a-z]?) ")),
-    "bevy_remote_driver/docs/requirements.md": ("DR", re.compile(r"^- \*\*(DR\d+\.\d+[a-z]?) ")),
-    "bevy_remote_driver/docs/design.md": ("DD", re.compile(r"^#{2,3} (\d+(?:\.\d+)?)\.? ")),
+    "crates/bevy_remote_driver/docs/requirements.md": ("DR", re.compile(r"^- \*\*(DR\d+\.\d+[a-z]?) ")),
+    "crates/bevy_remote_driver/docs/design.md": ("DD", re.compile(r"^#{2,3} (\d+(?:\.\d+)?)\.? ")),
 }
 LIST_ENTRY = {"R", "DR"}
 

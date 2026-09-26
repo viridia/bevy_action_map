@@ -1,5 +1,5 @@
 [workspace]
-members = ["macros", "bevy_remote_driver"]
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -33,7 +33,7 @@ workspace = true
 # upstream inclusion, and R24.2 asks for a minimal dependency surface. Examples pull the full
 # `bevy` via dev-dependencies instead.
 [dependencies]
-bevy_action_map_macros = { path = "macros", version = "0.1.0" }
+bevy_action_map_macros = { path = "crates/bevy_action_map_macros", version = "0.1.0" }
 bevy_app = { version = "0.20.0-rc.1", default-features = false }
 bevy_ecs = { version = "0.20.0-rc.1", default-features = false }
 bevy_input = { version = "0.20.0-rc.1", default-features = false }
@@ -72,7 +72,7 @@ bevy = { version = "0.20.0-rc.1", features = [
 trybuild = "1.0"
 # Every example adds `RemoteDriverPlugin`, which is inert unless the port variable is set, so a
 # plan can drive any of them without the example knowing it is under test.
-bevy_remote_driver = { path = "bevy_remote_driver", version = "0.1.0" }
+bevy_remote_driver = { path = "crates/bevy_remote_driver" }
 # Picked as the concrete format for chunk 55's golden persistence test — a format this crate never
 # learns about outside that one test (§10.1).
 toml = "0.8"

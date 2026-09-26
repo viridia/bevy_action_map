@@ -47,11 +47,11 @@ def sources():
     md = (
         sorted(ROOT.glob("*.md"))
         + sorted(ROOT.glob("docs/*.md"))
-        + sorted(ROOT.glob("bevy_remote_driver/docs/*.md"))
+        + sorted(ROOT.glob("crates/bevy_remote_driver/docs/*.md"))
     )
     rs = sorted(
         p
-        for d in ("src", "tests", "examples", "bevy_remote_driver/src")
+        for d in ("src", "tests", "examples", "crates/bevy_remote_driver/src")
         for p in (ROOT / d).rglob("*.rs")
     )
     return md, rs
@@ -96,7 +96,7 @@ def main():
     req_sections = headings(req, H2_NUM)
     des_sections = headings(des, H2_NUM) | headings(des, H3_NUM)
 
-    driver = ROOT / "bevy_remote_driver/docs"
+    driver = ROOT / "crates/bevy_remote_driver/docs"
     dreq, ddes = driver / "requirements.md", driver / "design.md"
     dr_defined = {m.group(1) for _, l in prose(dreq) for m in [DR_DEF.match(l)] if m}
     dreq_sections = headings(dreq, H2_NUM)

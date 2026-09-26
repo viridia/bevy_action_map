@@ -220,6 +220,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 151f | The delegated row on the Steam controls screen                        |
 | 151c | Prompts from Steam's origins                                          |
 | 158  | Reserving an authority is an error                                    |
+| 164  | Child crates under `crates/`                                          |
 
 ---
 
@@ -693,25 +694,6 @@ one device, so what is left is a family switch (D93).
 - **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
   look at the module pages the way a stranger would.
 
-### 164. Child crates under `crates/` · E[2]
-
-The workspace members `macros/` and `bevy_remote_driver/` sit at the root beside the crate's own
-`src/`. Bevy's layout keeps the root as the main crate and every other member in `crates/`, each
-directory named after its crate, and this repository follows it.
-
-- **`macros/` becomes `crates/bevy_action_map_macros/`, and `bevy_remote_driver/` becomes
-  `crates/bevy_remote_driver/`.** `tools/`, `steam_examples/` and `steam_probe/` are outside the
-  workspace and stay.
-- **The driver gets `publish = false`, and the root's dev-dependency on it drops its `version`**, so
-  publishing `bevy_action_map` asks nothing of the driver (X45). The published package still carries
-  examples that name it; building those from the tarball fails, which is accepted.
-- **Every path follows:** the seven files naming `bevy_remote_driver/`, among them `CLAUDE.md`'s
-  end-to-end command, `run.py` and `scripts/verify.sh`, and the root `Cargo.toml`'s two `path`s.
-- **The move is its own commit**, ahead of the path edits, so each file's history follows it.
-- **Verified by:** `scripts/verify.sh --full`, no diff in `examples/`, one end-to-end run, and
-  `cargo package --no-verify` with the packaged manifest checked for the driver's absence. A full
-  dry run needs the macros crate published first.
-
 ---
 
 ## Driving an example from outside
@@ -722,9 +704,9 @@ has been made by reading instead. What is wanted works the way Playwright does: 
 an element by a path of names, click it, wait until what it opens exists and has loaded, take a
 screenshot, quit — all over HTTP and JSON.
 
-It is developed here because that is faster, as a workspace member (`bevy_remote_driver/`) with its
-own documents, so what it needs travels with it if it leaves; whether it does is X45's. Which of its
-server methods are proposed upstream to Bevy is a separate question, and DD8's.
+It is developed here because that is faster, as a workspace member (`crates/bevy_remote_driver/`)
+with its own documents, so what it needs travels with it if it leaves; whether it does is X45's.
+Which of its server methods are proposed upstream to Bevy is a separate question, and DD8's.
 
 ### 149. The mapper's `remote` feature · E[2]
 

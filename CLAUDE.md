@@ -33,8 +33,8 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 | `docs/guidelines.md` | how this project judges scope and shapes code, in entries `G<n>` | you are about to scope a chunk or write code |
 | `docs/deferred.md` | work decided against for now, in entries `X<n>`, each with its gate | a gate may have fired (a Bevy bump is the first group), or you are about to defer something |
 | `docs/steam.md` | what a running Steam client actually does, in entries `S<n>` | a decision rests on how an external backend behaves |
-| `bevy_remote_driver/docs/requirements.md` | numbered requirements for the remote test driver, `DR<section>.<n>` | a chunk touches the driver, or cites a DR-number |
-| `bevy_remote_driver/docs/design.md` | how the driver works, in sections `DD<n>` | you are writing or running an end-to-end test against a live example — see "Verification" for the command |
+| `crates/bevy_remote_driver/docs/requirements.md` | numbered requirements for the remote test driver, `DR<section>.<n>` | a chunk touches the driver, or cites a DR-number |
+| `crates/bevy_remote_driver/docs/design.md` | how the driver works, in sections `DD<n>` | you are writing or running an end-to-end test against a live example — see "Verification" for the command |
 
 `archive/` holds the retired `Design.md`, `Log.md` and `Log-archive.md`. **Nothing in flight reasons
 from them** — they describe the crate as it was, two of them are longer than anything in `docs/`,
@@ -258,15 +258,15 @@ windowed app and a minute. Run one when a change could only fail in a running ga
 chunk's acceptance test is something a player does.
 
 ```sh
-python3 bevy_remote_driver/client/run.py bevy_remote_driver/plans/disasteroids/rebind.py
+python3 crates/bevy_remote_driver/client/run.py crates/bevy_remote_driver/plans/disasteroids/rebind.py
 ```
 
-The plans live under `bevy_remote_driver/plans/<example>/`: `disasteroids/rebind.py` covers the
-controls screen and the override path, `disasteroids/pad.py` the virtual gamepad, and `testbed/` the
-steps themselves. One command per run, from anywhere in the workspace — `DD9` is the instructions
-for writing a plan, and says why a run cannot be split across two commands. A plan that rebinds
-writes the developer's real settings file: a clean pass puts it back, a failure halfway leaves it
-dirty.
+The plans live under `crates/bevy_remote_driver/plans/<example>/`: `disasteroids/rebind.py` covers
+the controls screen and the override path, `disasteroids/pad.py` the virtual gamepad, and `testbed/`
+the steps themselves. One command per run, from anywhere in the workspace — `DD9` is the
+instructions for writing a plan, and says why a run cannot be split across two commands. A plan that
+rebinds writes the developer's real settings file: a clean pass puts it back, a failure halfway
+leaves it dirty.
 
 **Known, not regressions:** 42 of the 51 doctests are `ignore` fences — fragments written to be read
 mid-prose rather than to stand alone — so they are neither compiled nor run, and chunk 28 owns
