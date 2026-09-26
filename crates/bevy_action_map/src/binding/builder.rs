@@ -1399,7 +1399,13 @@ mod tests {
             .bind::<DummyVec2>(DirectionalButtons::wasd())
             .dead_zone(DeadZone::radial(0.2))
             .tunable_dead_zone("tests.keys_deadzone", 0.0..=0.5);
-        assert_eq!(builder.diagnostics(), &[]);
+        // Warned as idle on keys, but the sharing is what is tested.
+        assert!(
+            builder
+                .diagnostics()
+                .iter()
+                .all(|diagnostic| diagnostic.severity() == crate::plan::Severity::Warning)
+        );
 
         let (bindings, ..) = builder.finish();
         let tunables = crate::mapping::tunables_of(&bindings, "tests");

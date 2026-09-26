@@ -53,9 +53,17 @@ fn main() {
 
     report("Two deadzones that both rescale", |controls| {
         controls
-            .bind::<Move>(DirectionalButtons::wasd())
+            .bind::<Move>(Stick::Left)
             .dead_zone(DeadZone::radial(0.05))
             .dead_zone(DeadZone::radial(0.15));
+    });
+
+    report("A diagonal clamped one key at a time", |controls| {
+        // Each key of a composite reads 0 or 1 on its own, so the too-long diagonal only exists
+        // once they are added up. `combined` is where that happens.
+        controls
+            .bind::<Move>(DirectionalButtons::wasd())
+            .clamp_magnitude();
     });
 
     report("The same control bound twice", |controls| {

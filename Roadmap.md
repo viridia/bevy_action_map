@@ -202,6 +202,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 163  | Local multiplayer's types in the prelude                              |
 | 144  | One rule for what counts as a character                               |
 | 143  | One apply, for the world or for an entity                             |
+| 162  | A warning for a modifier idle on a composite part                     |
 
 ---
 
@@ -472,28 +473,6 @@ to the player as a named tunable, the way `tunable_dead_zone` already offers a d
   gate as X19 rather than riding along here.
 - **Verified by:** Disasteroids' settings screen offering one timing beside the dead-zone slider it
   already has, and the changed value still applied after a quit and relaunch.
-
-### 162. A warning for a magnitude modifier on a composite part · E[1]
-
-`docs/issues.md` 1067, confirmed by running: written by mistake while porting, caught by a failing
-test. `context.bind::<Move>(DirectionalButtons::wasd()).clamp_magnitude()` reads as the way to stop
-a diagonal outrunning a straight line, and does nothing. A composite expands to one binding per
-part, and `part_value` (`eval.rs`) yields exactly rest or exactly unit, so a modifier acting on
-magnitude is the identity on a part: `ClampMagnitude` acts only above a length of 1.0, and
-`DeadZone` with rescaling maps 1.0 to 1.0 under `Radial` and `PerAxis` alike. The spelling that
-works is `combined::<Move>().clamp_magnitude()`, on the folded value, which is the only place the
-1.41 diagonal exists. `combined`'s doc says so; nothing warns someone who did not read it.
-
-- **A warning in `diagnose` (`plan.rs`)** when a `BindingInput::Part` carries `DeadZone` or
-  `ClampMagnitude`, naming `combined` in the message. A warning rather than an error: the modifier
-  is inert rather than wrong, and a game that chains one harmlessly should not fail to boot.
-  `CombinedWithoutBindings` is the mirror-image diagnostic, and the one to copy.
-- **Once per `bind` call**, not once per part, which `BindingSpec::continues_declaration` already
-  provides.
-- **Check the rest of `BindingModifier` for the same shape.** A third modifier that is the identity
-  on a unit value joins the warning; the two above are the ones confirmed.
-- **Verified by:** a plan test that a four-part composite with `clamp_magnitude()` warns once and
-  `combined` does not, and the examples launching without the warning.
 
 ---
 

@@ -211,7 +211,7 @@ pub enum DiagnosticKind {
     ReservedAndMappable, FollowsNothing { .. }, FollowsUnlisted { .. },
     DuplicateClassBinding { .. }, DuplicateTunableKey { .. },
     TunableShapeDisagreement { .. }, DeadZoneAtFullDeflection { .. },
-    BoundAndDelegated, DeltaFromAuthority, ReservedAuthority,
+    ModifierOnPart { .. }, BoundAndDelegated, DeltaFromAuthority, ReservedAuthority,
     CombinedWithoutBindings,
 }
 ```

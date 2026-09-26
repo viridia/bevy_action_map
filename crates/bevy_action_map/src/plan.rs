@@ -61,7 +61,8 @@ impl BindingDiagnostic {
             DiagnosticKind::DuplicateBinding { .. }
             | DiagnosticKind::ConsumeDisagreement { .. }
             | DiagnosticKind::DuplicateClassBinding { .. }
-            | DiagnosticKind::DeadZoneAtFullDeflection { .. } => Severity::Warning,
+            | DiagnosticKind::DeadZoneAtFullDeflection { .. }
+            | DiagnosticKind::ModifierOnPart { .. } => Severity::Warning,
         }
     }
 }
@@ -150,6 +151,12 @@ pub enum DiagnosticKind {
     DeadZoneAtFullDeflection {
         /// The declared lower bound.
         lower: f32,
+    },
+    /// A modifier that shapes partial or diagonal values is chained onto a composite, whose parts
+    /// each read only rest or full deflection.
+    ModifierOnPart {
+        /// The builder method that declared it.
+        modifier: &'static str,
     },
     /// An action is bound to a control of the same device family an outside authority supplies it
     /// for.
@@ -264,6 +271,25 @@ impl core::fmt::Display for BindingDiagnostic {
                  mouse motion, produces anything",
                 self.action
             ),
+            DiagnosticKind::ModifierOnPart { modifier } => {
+                write!(
+                    f,
+                    "`{}` chains `{modifier}` onto a composite, which applies it to each part on \
+                     its own, and a part reads only rest or full deflection. ",
+                    self.action
+                )?;
+                if *modifier == "dead_zone" {
+                    f.write_str(
+                        "A key has no small deflection to ignore; put the deadzone on an analog \
+                         binding, or drop it",
+                    )
+                } else {
+                    f.write_str(
+                        "Declare it on `combined` instead, which shapes the value the parts add \
+                         up to",
+                    )
+                }
+            }
             DiagnosticKind::BoundAndDelegated => write!(
                 f,
                 "`{}` is bound to an authority for a device family, and also to a control of that \
@@ -403,6 +429,19 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
                 found.push(at(DiagnosticKind::DeadZoneAtFullDeflection {
                     lower: dead_zone.lower,
                 }));
+            }
+        }
+
+        // Two deadzones on one composite are one mistake, not two.
+        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+        if let BindingInput::Part(..) = binding.input {
+            for modifier in &binding.modifiers {
+                if let Some(modifier) = modifier.idle_on_a_part() {
+                    let diagnostic = at(DiagnosticKind::ModifierOnPart { modifier });
+                    if !found[before..].contains(&diagnostic) {
+                        found.push(diagnostic);
+                    }
+                }
             }
         }
 
@@ -1322,9 +1361,68 @@ mod tests {
         builder
             .bind::<Move>(DirectionalButtons::arrow_keys())
             .dead_zone(DeadZone::radial(0.1));
-        let found = builder.diagnostics();
+        // A deadzone on keys also warns that it is idle there, which is not what this is about.
+        let found: Vec<_> = builder
+            .diagnostics()
+            .into_iter()
+            .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+            .collect();
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found[0].kind, DiagnosticKind::ChainedRescaling { count: 2 });
+    }
+
+    // A part reads rest or full deflection, so the diagonal a magnitude clamp is for exists only
+    // once the parts are added up.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_magnitude_clamp_on_a_composite_warns_once() {
+        use crate::binding::DirectionalButtons;
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder
+            .bind::<Move>(DirectionalButtons::wasd())
+            .clamp_magnitude();
+        let found = builder.diagnostics();
+        assert_eq!(found.len(), 1, "one for four parts: {found:?}");
+        assert_eq!(
+            found[0].kind,
+            DiagnosticKind::ModifierOnPart {
+                modifier: "clamp_magnitude"
+            }
+        );
+        assert_eq!(found[0].severity(), Severity::Warning);
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<Move>(DirectionalButtons::wasd());
+        builder.combined::<Move>().clamp_magnitude();
+        assert_eq!(builder.diagnostics(), &[]);
+    }
+
+    // Each is the identity on a part, or for a deadzone that does not rescale, a disguised scale.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn every_modifier_idle_on_a_part_warns() {
+        use crate::binding::{CompassPoints, DeadZone, DirectionalButtons};
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder
+            .bind::<Move>(DirectionalButtons::wasd())
+            .dead_zone(DeadZone::radial(0.1).without_rescale())
+            .dead_zone(DeadZone::radial(0.2).without_rescale())
+            .curve(2.0)
+            .compass(CompassPoints::Eight)
+            .scale(2.0)
+            .negate();
+        let found: Vec<_> = builder
+            .diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.kind)
+            .collect();
+        assert_eq!(
+            found,
+            ["dead_zone", "curve", "compass"]
+                .map(|modifier| DiagnosticKind::ModifierOnPart { modifier })
+        );
     }
 
     // Declaring it again adds to it, as binding an action twice does, and the stage's working

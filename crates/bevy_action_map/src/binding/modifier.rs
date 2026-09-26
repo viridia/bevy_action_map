@@ -210,6 +210,20 @@ impl BindingModifier {
         }
     }
 
+    /// The builder method declaring this modifier, when it shapes only values a composite's part
+    /// never produces. A part reads rest or full deflection along one axis: each of these leaves
+    /// both alone, except a deadzone that does not rescale, which shortens full deflection.
+    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+    pub(crate) fn idle_on_a_part(&self) -> Option<&'static str> {
+        match self {
+            Self::DeadZone(_) => Some("dead_zone"),
+            Self::ClampMagnitude => Some("clamp_magnitude"),
+            Self::Curve(_) => Some("curve"),
+            Self::Compass(_) => Some("compass"),
+            _ => None,
+        }
+    }
+
     /// Whether this modifier stretches its input onto a different range.
     pub fn rescales(&self) -> bool {
         match self {
