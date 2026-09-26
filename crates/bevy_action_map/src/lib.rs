@@ -208,6 +208,9 @@ extern crate alloc;
 
 // L0
 pub mod device;
+// Depends on Bevy alone: written as it would sit in `bevy_input`.
+#[cfg(feature = "gamepad")]
+pub mod gamepad;
 
 // L1
 pub mod frame;
@@ -390,11 +393,11 @@ pub mod prelude {
     pub use crate::context::{
         ActionMapAppExt, ActionObstacle, ActionsQuery, ContextActions, InputContextState,
     };
-    #[cfg(feature = "gamepad")]
-    pub use crate::device::ConnectedGamepad;
     pub use crate::device::{DeviceFamily, DeviceHandle};
     pub use crate::event::{Canceled, ClassBinding, ClassFired, Completed, Fired, Started};
     pub use crate::frame::{FrameTimestamp, InputFrame, RawEvent, TimedRawEvent};
+    #[cfg(feature = "gamepad")]
+    pub use crate::gamepad::ConnectedGamepad;
     pub use crate::join::is_claimed;
     pub use crate::mapping::{
         ActionMapping, BoundSlot, Follower, MappingKey, RebindPolicy, Tunable, TunableValue,

@@ -205,6 +205,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 162  | A warning for a modifier idle on a composite part                     |
 | 72b  | Calibration the app sets, and measuring withdrawn                     |
 | 174  | A section, printed by its anchor                                      |
+| 165  | `gamepad/`, and the two pieces that exist                             |
 
 ---
 
@@ -234,19 +235,6 @@ The prototype is a module, `crates/bevy_action_map/src/gamepad/`, written as it 
 `bevy_input`: it depends on Bevy alone, and the rest of the crate depends on it. Not a crate of its
 own, because a crates.io name is permanent and this one would be abandoned once `bevy_input` takes
 the work, and because `bevy_action_map` cannot publish while depending on an unpublished crate.
-
-### 165. `crates/bevy_action_map/src/gamepad/`, and the two pieces that exist · E[3]
-
-- **`ConnectedGamepad` and `Brand` move in** from `device.rs`, with what maintains them:
-  `mark_gamepad_connected` and its removal twin, `GamepadBrand`, `GamepadBrands` and resolution.
-  Gated on `gamepad`, as now. `device` re-exports them, so the examples do not change.
-- **Whether `GamepadModelId` moves too** is decided here. It is a fact about the pad, but
-  `DeviceId`'s persistence, which stays in the mapper, is built from it.
-- **A boundary scan in `scripts/verify.sh`:** a `crate::` path under
-  `crates/bevy_action_map/src/gamepad/` that leaves the module fails the run. Validated first
-  against a planted import.
-- **Verified by:** `scripts/verify.sh --full`, since the `gamepad` cfg group moves, and no diff in
-  `examples/`.
 
 ### 166. Capabilities and battery, from gilrs · E[3]
 
@@ -298,9 +286,10 @@ capabilities and battery on its own pad entities, and drives `Rumble` through St
 A document for Bevy's maintainers: the problem, the components, how each backend fills them, and
 what changes for users of `Gamepad`. Written for that audience, and for the author to edit and post.
 
-- **Beside `Gamepad`, or a split of it,** is the question the proposal has to answer. The prototype
-  sits beside it, because a module outside `bevy_input` cannot change it; the proposal may argue for
-  either.
+- **A split of `Gamepad`** is what the proposal argues for: backend-neutral components a game
+  queries, and backend components beneath them that fill them, with the breaking change that costs
+  stated. The prototype sits beside `Gamepad`, because a module outside `bevy_input` cannot change
+  it; `gamepad/mod.rs` and `gamepad/gilrs.rs` are the two layers the split would produce.
 - **Drafted at any point, finished after 168**, so each claim has been run on both backends.
 - **Links the prototype**, and says how `crates/bevy_action_map/src/gamepad/` maps onto
   `bevy_input`'s files.

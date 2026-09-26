@@ -233,13 +233,8 @@ cargo test -p bevy_action_map --no-default-features --features std,mouse,gamepad
 ```
 
 Whenever a `cfg` group changes, build all eight device-feature combinations — a configuration nobody
-has ever built is where the breakage hides. `scripts/verify.sh --full` covers this too:
-
-```sh
-for f in "" keyboard mouse gamepad keyboard,mouse keyboard,gamepad mouse,gamepad keyboard,mouse,gamepad; do
-  cargo check -p bevy_action_map --no-default-features --features "std,bevy_reflect,$f" || echo "FAILED: [$f]"
-done
-```
+has ever built is where the breakage hides. `scripts/verify.sh --matrix` builds them and nothing
+else, failing a combination on a warning as well as an error; `--full` includes it.
 
 `--full` also runs clippy on `steam_examples/`, which is outside the workspace and links the base
 Disasteroids' modules by path, so a change under `examples/disasteroids` can break it without

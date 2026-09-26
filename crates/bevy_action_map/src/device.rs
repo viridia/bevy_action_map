@@ -1,9 +1,16 @@
-//! Devices: families, enumeration, identity, brand, and calibration.
+//! Devices: families, handles, identity, and calibration.
 //!
 //! This module models devices at two grains: a [`DeviceFamily`] is the class of hardware a binding
 //! is written for, and a [`DeviceHandle`] is one unit of it plugged in right now. Alongside those
-//! are a persistent identity that survives a reconnect, the brand a prompt names a pad's buttons
-//! from, and per-device calibration.
+//! are a persistent identity that survives a reconnect, and per-device calibration. Which gamepads
+//! are connected, and what brand each one is, are answered by [`gamepad`](crate::gamepad), whose
+//! items are also available here.
+
+#[cfg(feature = "gamepad")]
+pub use crate::gamepad::{
+    Brand, ConnectedGamepad, GamepadBrand, GamepadBrands, GamepadModelId, mark_gamepad_connected,
+    mark_gamepad_disconnected, resolve_gamepad_brand,
+};
 
 // Named so the `#[reflect(..)]` attributes on `DeviceId` resolve; not referred to directly.
 #[cfg(feature = "serialize")]
@@ -39,7 +46,8 @@ pub enum DeviceHandle {
     // catch-all arm.
     /// The keyboard and mouse, treated as one device.
     KeyboardMouse,
-    /// One connected gamepad, identified by the backend's own entity for it.
+    /// One connected gamepad, identified by the backend's own entity for it: the entity carrying
+    /// [`ConnectedGamepad`], so a query over that component yields every pad this can name.
     #[cfg(feature = "gamepad")]
     Gamepad(bevy_ecs::entity::Entity),
 }
@@ -540,25 +548,28 @@ impl<'de> serde::de::Visitor<'de> for SavedDeviceIdVisitor<'_> {
     }
 }
 
-// `Identity` is not gamepad-only: any backend's device can carry one.
-#[cfg(any(feature = "gamepad", feature = "bevy_reflect"))]
+#[cfg(feature = "bevy_reflect")]
 use bevy_ecs::prelude::Component;
 #[cfg(feature = "bevy_reflect")]
 use bevy_ecs::reflect::ReflectComponent;
 #[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
 use bevy_ecs::reflect::ReflectResource;
-#[cfg(any(feature = "gamepad", feature = "bevy_reflect"))]
+#[cfg(feature = "bevy_reflect")]
 use core::ops::Deref;
 
 #[cfg(feature = "gamepad")]
 use bevy_ecs::entity::Entity;
+#[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
+use bevy_ecs::lifecycle::Add;
 #[cfg(feature = "gamepad")]
-use bevy_ecs::lifecycle::{Add, Remove};
-#[cfg(feature = "gamepad")]
-use bevy_ecs::prelude::{Changed, Commands, On, Query, Res, Resource, Without};
+use bevy_ecs::prelude::{Changed, Query, Resource};
+#[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
+use bevy_ecs::prelude::{Commands, On, Without};
+#[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
+use bevy_input::gamepad::Gamepad;
 #[cfg(feature = "gamepad")]
 use bevy_input::gamepad::{
-    AxisSettings, ButtonAxisSettings, ButtonSettings, Gamepad, GamepadAxis, GamepadSettings,
+    AxisSettings, ButtonAxisSettings, ButtonSettings, GamepadAxis, GamepadSettings,
 };
 #[cfg(feature = "gamepad")]
 use bevy_platform::collections::HashMap;
@@ -678,116 +689,6 @@ impl GamepadCalibration {
     }
 }
 
-/// Which manufacturer's conventions a connected gamepad follows, for prompts and glyphs that want
-/// to say "A" on an Xbox pad and "Cross" on a PlayStation one rather than "South Button" on both.
-///
-/// `vendor_id` is `Option` and often absent — wasm, some Linux setups — so `Generic` is the
-/// ordinary answer for an unrecognized or unreported pad, not an error.
-#[cfg(feature = "gamepad")]
-#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum GamepadBrand {
-    /// An Xbox controller.
-    Xbox,
-    /// A PlayStation controller.
-    PlayStation,
-    /// A Nintendo controller — a Switch Pro Controller or Joy-Con.
-    Nintendo,
-    /// Every other pad, and one Bevy could not identify.
-    Generic,
-}
-
-#[cfg(feature = "gamepad")]
-impl core::fmt::Display for GamepadBrand {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(match self {
-            Self::Xbox => "Xbox",
-            Self::PlayStation => "PlayStation",
-            Self::Nintendo => "Nintendo",
-            Self::Generic => "Generic",
-        })
-    }
-}
-
-/// Resolves a connected gamepad's [`GamepadBrand`] from its `vendor_id`.
-///
-/// Seeded with the three current-generation console makers' USB vendor ids, not
-/// SDL_GameControllerDB's full device list. [`insert`](Self::insert) extends the table for
-/// hardware this crate does not ship pre-resolved.
-#[cfg(feature = "gamepad")]
-#[cfg_attr(
-    feature = "bevy_reflect",
-    derive(bevy_reflect::Reflect),
-    reflect(Resource)
-)]
-#[derive(Resource, Debug)]
-pub struct GamepadBrands {
-    by_vendor: HashMap<u16, GamepadBrand>,
-}
-
-#[cfg(feature = "gamepad")]
-impl Default for GamepadBrands {
-    fn default() -> Self {
-        let mut by_vendor = HashMap::new();
-        by_vendor.insert(0x045E, GamepadBrand::Xbox); // Microsoft
-        by_vendor.insert(0x054C, GamepadBrand::PlayStation); // Sony
-        by_vendor.insert(0x057E, GamepadBrand::Nintendo); // Nintendo
-        Self { by_vendor }
-    }
-}
-
-#[cfg(feature = "gamepad")]
-impl GamepadBrands {
-    /// Adds or replaces which brand a vendor id resolves to.
-    pub fn insert(&mut self, vendor_id: u16, brand: GamepadBrand) {
-        self.by_vendor.insert(vendor_id, brand);
-    }
-
-    /// Resolves a brand from a gamepad's vendor id, `Generic` if it is unknown or absent.
-    pub fn resolve(&self, vendor_id: Option<u16>) -> GamepadBrand {
-        vendor_id
-            .and_then(|id| self.by_vendor.get(&id).copied())
-            .unwrap_or(GamepadBrand::Generic)
-    }
-}
-
-/// A connected gamepad's [`GamepadBrand`], resolved once and attached to its entity.
-///
-/// Query this instead of reading a gamepad's `vendor_id` and asking [`GamepadBrands`] yourself, so
-/// that a pad from any backend answers the same way.
-#[cfg(feature = "gamepad")]
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Brand(pub GamepadBrand);
-
-#[cfg(feature = "gamepad")]
-impl Deref for Brand {
-    type Target = GamepadBrand;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-/// Attaches [`Brand`] to a gamepad's entity as soon as it connects, resolved from its `vendor_id`
-/// through [`GamepadBrands`].
-///
-/// Leaves an existing `Brand` alone, so inserting one yourself ahead of time overrides this for a
-/// pad you know better than the vendor id table does.
-#[cfg(feature = "gamepad")]
-pub fn resolve_gamepad_brand(
-    connected: On<Add<Gamepad>>,
-    mut commands: Commands,
-    gamepads: Query<&Gamepad, Without<Brand>>,
-    brands: Res<GamepadBrands>,
-) {
-    let entity = connected.entity;
-    if let Ok(gamepad) = gamepads.get(entity) {
-        commands
-            .entity(entity)
-            .insert(Brand(brands.resolve(gamepad.vendor_id())));
-    }
-}
-
 /// The keyboard and mouse, as a persistent identity.
 ///
 /// Carries nothing, because there is nothing to carry: a machine has one keyboard as far as this
@@ -809,38 +710,9 @@ impl DeviceIdentity for KeyboardMouseId {
     const DOMAIN: &'static str = "keyboard-mouse";
 }
 
-/// What Bevy's own gamepad backend can say about which device a pad is: the USB vendor and product
-/// ids it reported when it connected.
-///
-/// **This names a model, not a unit.** Two identical controllers on the same table report the same
-/// vendor and product id and cannot be told apart by it, so treat a match as a candidate rather
-/// than an answer.
-///
-/// Not every platform reports these. They are absent on wasm and on some Linux setups, and a pad
-/// that reports neither has no identity of this kind at all.
-#[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
-#[derive(bevy_reflect::Reflect, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct GamepadModelId {
-    /// The USB vendor id.
-    pub vendor: u16,
-    /// The USB product id.
-    pub product: u16,
-}
-
 #[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
 impl DeviceIdentity for GamepadModelId {
     const DOMAIN: &'static str = "gamepad-model";
-}
-
-#[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
-impl GamepadModelId {
-    /// The model id a connected pad reports, or `None` if it reports either half as absent.
-    pub fn of(gamepad: &Gamepad) -> Option<Self> {
-        Some(Self {
-            vendor: gamepad.vendor_id()?,
-            product: gamepad.product_id()?,
-        })
-    }
 }
 
 /// A connected device's persistent identity, resolved once and attached to its entity.
@@ -883,53 +755,6 @@ pub fn resolve_gamepad_identity(
             .entity(entity)
             .insert(Identity(DeviceId::new(model)));
     }
-}
-
-/// A gamepad that is connected and whose input this crate will deliver.
-///
-/// Query it to enumerate the pads available right now, and observe `Add` and `Remove` on it to
-/// learn when one arrives or goes away. It carries nothing, because the entity it sits on is
-/// already the answer: [`DeviceHandle::Gamepad`] is built from that entity.
-///
-/// ```ignore
-/// fn pads(pads: Query<Entity, With<ConnectedGamepad>>) {
-///     for entity in &pads {
-///         let device = DeviceHandle::Gamepad(entity);
-///     }
-/// }
-/// ```
-///
-/// Bevy's own `Gamepad` component is a different thing, and not a substitute for this one. It holds
-/// a pad's live button and axis readings, which only a backend feeding raw device messages can fill
-/// in; a platform input service that reports finished actions has no such readings to offer, so a
-/// pad it supplies would carry an empty one and read as though nobody were touching it. Enumerating
-/// through this component instead is what lets one game work on either kind of backend.
-///
-/// Bevy's gamepad backend gets this attached for you. A backend of your own inserts it on the
-/// entities it spawns, and removes it when a pad goes away.
-#[cfg(feature = "gamepad")]
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct ConnectedGamepad;
-
-/// Attaches [`ConnectedGamepad`] to a pad Bevy's own gamepad backend connected, so it enumerates
-/// alongside any other backend's.
-#[cfg(feature = "gamepad")]
-pub fn mark_gamepad_connected(connected: On<Add<Gamepad>>, mut commands: Commands) {
-    commands.entity(connected.entity).insert(ConnectedGamepad);
-}
-
-/// Removes [`ConnectedGamepad`] when Bevy's own gamepad backend loses a pad.
-///
-/// Watches the component rather than the entity because that backend keeps the entity alive across
-/// a disconnect — it removes `Gamepad` and re-adds it on reconnect, so the entity outlives any
-/// single connection and despawning is never the signal.
-#[cfg(feature = "gamepad")]
-pub fn mark_gamepad_disconnected(disconnected: On<Remove<Gamepad>>, mut commands: Commands) {
-    // `try_` because a game is free to despawn a pad's entity outright, which removes `Gamepad` on
-    // the way out and would leave this addressing something already gone.
-    commands
-        .entity(disconnected.entity)
-        .try_remove::<ConnectedGamepad>();
 }
 
 /// Warns about gamepad settings this crate does not honour.
@@ -1345,36 +1170,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "gamepad")]
-    #[test]
-    fn brand_resolves_from_the_seeded_vendor_ids() {
-        let brands = GamepadBrands::default();
-        assert_eq!(brands.resolve(Some(0x045E)), GamepadBrand::Xbox);
-        assert_eq!(brands.resolve(Some(0x054C)), GamepadBrand::PlayStation);
-        assert_eq!(brands.resolve(Some(0x057E)), GamepadBrand::Nintendo);
-    }
-
-    #[cfg(feature = "gamepad")]
-    #[test]
-    fn brand_is_generic_when_the_vendor_id_is_unknown_or_absent() {
-        let brands = GamepadBrands::default();
-        assert_eq!(brands.resolve(Some(0x1234)), GamepadBrand::Generic);
-        assert_eq!(brands.resolve(None), GamepadBrand::Generic);
-    }
-
-    #[cfg(feature = "gamepad")]
-    #[test]
-    fn an_app_can_override_or_extend_the_seeded_table() {
-        let mut brands = GamepadBrands::default();
-        // A pad this crate does not ship pre-resolved.
-        brands.insert(0x2DC8, GamepadBrand::PlayStation); // 8BitDo, playing PlayStation-style
-        assert_eq!(brands.resolve(Some(0x2DC8)), GamepadBrand::PlayStation);
-
-        // The seeded table is a default, not a fixture — an app can also correct it.
-        brands.insert(0x045E, GamepadBrand::Generic);
-        assert_eq!(brands.resolve(Some(0x045E)), GamepadBrand::Generic);
-    }
-
     #[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
     #[test]
     fn resolve_gamepad_identity_attaches_what_the_pad_reported() {
@@ -1423,103 +1218,6 @@ mod tests {
             app.world().get::<Identity>(claimed).map(|id| id.0.clone()),
             Some(DeviceId::new(PlatformDeviceId(7))),
             "an identity inserted ahead of the observer should stand"
-        );
-    }
-
-    /// The pool follows a pad nobody has claimed, which is the case `DeviceDisconnected` cannot
-    /// report: that is an entity event raised once per `Paired` holding the device, so an unclaimed
-    /// pad going away signals nothing at all — and an unclaimed pad is exactly what a join screen
-    /// is prompting for.
-    ///
-    /// Through `ActionMapPlugin` rather than by adding the observers here, so the wiring is under
-    /// test alongside the behaviour.
-    #[cfg(feature = "gamepad")]
-    #[test]
-    fn the_marker_follows_a_pad_with_no_pairing_behind_it() {
-        use bevy_app::App;
-        use bevy_input::InputPlugin;
-        use bevy_input::gamepad::{GamepadConnection, GamepadConnectionEvent};
-
-        let mut app = App::new();
-        app.add_plugins(InputPlugin);
-        app.add_plugins(crate::ActionMapPlugin);
-
-        let pad = app.world_mut().spawn_empty().id();
-        app.world_mut().write_message(GamepadConnectionEvent::new(
-            pad,
-            GamepadConnection::Connected {
-                name: "test pad".into(),
-                vendor_id: None,
-                product_id: None,
-            },
-        ));
-        app.update();
-
-        assert!(
-            app.world().get::<ConnectedGamepad>(pad).is_some(),
-            "a connected pad never entered the pool"
-        );
-
-        app.world_mut().write_message(GamepadConnectionEvent::new(
-            pad,
-            GamepadConnection::Disconnected,
-        ));
-        app.update();
-
-        assert!(
-            app.world().get::<ConnectedGamepad>(pad).is_none(),
-            "a pad left without leaving the pool"
-        );
-        // The entity outlives the connection, which is why a pool reads the marker rather than the
-        // entity.
-        assert!(app.world().get_entity(pad).is_ok());
-    }
-
-    #[cfg(feature = "gamepad")]
-    #[test]
-    fn resolve_gamepad_brand_attaches_it_once_per_connection() {
-        use bevy_app::App;
-        use bevy_input::InputPlugin;
-        use bevy_input::gamepad::{GamepadConnection, GamepadConnectionEvent};
-
-        let mut app = App::new();
-        app.add_plugins(InputPlugin);
-        app.insert_resource(GamepadBrands::default());
-        app.add_observer(resolve_gamepad_brand);
-
-        let known = app.world_mut().spawn_empty().id();
-        let unreported = app.world_mut().spawn_empty().id();
-        // A pad this crate would otherwise call `Xbox` — a game that knows better inserts its own
-        // `Brand` ahead of the connection event, and the observer must leave it standing.
-        let overridden = app.world_mut().spawn(Brand(GamepadBrand::Nintendo)).id();
-
-        for (gamepad, vendor_id) in [
-            (known, Some(0x045E)),
-            (unreported, None),
-            (overridden, Some(0x045E)),
-        ] {
-            app.world_mut().write_message(GamepadConnectionEvent::new(
-                gamepad,
-                GamepadConnection::Connected {
-                    name: "test pad".into(),
-                    vendor_id,
-                    product_id: None,
-                },
-            ));
-        }
-        app.update();
-
-        assert_eq!(
-            app.world().get::<Brand>(known),
-            Some(&Brand(GamepadBrand::Xbox))
-        );
-        assert_eq!(
-            app.world().get::<Brand>(unreported),
-            Some(&Brand(GamepadBrand::Generic))
-        );
-        assert_eq!(
-            app.world().get::<Brand>(overridden),
-            Some(&Brand(GamepadBrand::Nintendo))
         );
     }
 }

@@ -646,11 +646,11 @@ pub struct GamepadBrands { /* vendor_id -> GamepadBrand */ }
 pub struct Brand(pub GamepadBrand);
 ```
 
-A device's brand is a fact about that one gamepad, resolved from its `vendor_id` — which is
-`Option` and often absent, so `Generic` is the ordinary answer for an unrecognized or unreported
-pad, not an error. `GamepadBrands` is a resource seeded with the three current-generation console
-makers' USB vendor ids and `init_resource`'d by `InputFramePlugin`; `insert` is the app-overridable
-mapping for hardware this crate does not ship pre-resolved.
+A device's brand is a fact about that one gamepad, resolved from its `vendor_id` — which is `Option`
+and often absent, so `Generic` is the ordinary answer for an unrecognized or unreported pad, not an
+error. `GamepadBrands` is a resource seeded with the three current-generation console makers' USB
+vendor ids and `init_resource`'d by `gamepad::plugin`; `insert` is the app-overridable mapping for
+hardware this crate does not ship pre-resolved.
 
 `Brand` is the resolved answer, attached once to the gamepad's own entity by an observer on
 `Add<Gamepad>` rather than re-derived at each read site. A read path holding that entity — from a
@@ -1291,7 +1291,9 @@ the `assets/` they load beside its manifest.
 
 ```
 crates/bevy_action_map/src/
-  device.rs      L0  families and handles, pairing sets, gamepad calibration and brand resolution
+  device.rs      L0  families and handles, pairing sets, identity, gamepad calibration
+  gamepad/mod.rs L0  the backend-neutral components: ConnectedGamepad, Brand
+    gilrs.rs         fills them from Bevy's Gamepad; GamepadBrands, GamepadModelId
   frame.rs       L1  the event queue, sampling, retirement
   action.rs          identity, intent, channel shape, value, phase, scratch
   binding/mod.rs     re-exports the three below, which are private to it
@@ -1320,6 +1322,12 @@ crates/bevy_action_map_macros/   #[derive(InputAction)], #[derive(InputContext)]
 `inspect.rs` exists for code outside a game: every other read in the crate is generic over the
 action type, which is right for game code and unusable for a debug overlay, an editor, or a settings
 screen rendering actions it was never compiled against.
+
+`gamepad/` is written as it would sit in `bevy_input`: it depends on Bevy alone, the rest of the
+crate depends on it, and `device` re-exports its items. Its two files are the two layers of a
+gamepad entity. `mod.rs` holds the components a game queries, which read the same whichever backend
+supplied the pad; `gilrs.rs` fills them from Bevy's `Gamepad`, and another backend fills them its
+own way.
 
 **Features**, mirroring `bevy_input`'s own layout:
 
