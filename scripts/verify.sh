@@ -80,8 +80,6 @@ run_doc_step() {
     libdir="$(rustc --print target-libdir)"
     # Appended rather than assigned: setting this variable at all discards dyld's own fallback list.
     export DYLD_FALLBACK_LIBRARY_PATH="${libdir}:${HOME}/lib:/usr/local/lib:/usr/lib"
-    # `--workspace`: a bare `cargo test` takes the root package, which leaves the macros crate's
-    # own doctest unreached — it had never been compiled.
     run_step "${name}" cargo test --workspace --all-features --doc
     unset DYLD_FALLBACK_LIBRARY_PATH
 }
@@ -97,24 +95,20 @@ run_step "cargo check --all-features --tests --examples" \
 # it compiled either way and panicked at runtime in the build anyone would actually start.
 run_step "cargo check --examples" cargo check --examples
 run_step "cargo clippy --all-features --all-targets" cargo clippy --all-features --all-targets
-run_step "cargo clippy --no-default-features --features libm" \
-    cargo clippy --no-default-features --features libm
+run_step "cargo clippy -p bevy_action_map --no-default-features --features libm" \
+    cargo clippy -p bevy_action_map --no-default-features --features libm
 run_step "cargo test --all-features --lib --tests" cargo test --all-features --lib --tests
-# A workspace member of its own, which the bare commands above take no part of.
-run_step "cargo clippy -p bevy_remote_driver --all-targets" \
-    cargo clippy -p bevy_remote_driver --all-targets
-run_step "cargo test -p bevy_remote_driver" cargo test -p bevy_remote_driver
 [[ ${doc} -eq 1 ]] && run_doc_step
-run_step "cargo test --no-default-features --features libm --test no_devices" \
-    cargo test --no-default-features --features libm --test no_devices
-run_step "cargo test --no-default-features --features std,mouse,gamepad --test focus_loss_without_keyboard" \
-    cargo test --no-default-features --features std,mouse,gamepad --test focus_loss_without_keyboard
+run_step "cargo test -p bevy_action_map --no-default-features --features libm --test no_devices" \
+    cargo test -p bevy_action_map --no-default-features --features libm --test no_devices
+run_step "cargo test -p bevy_action_map --no-default-features --features std,mouse,gamepad --test focus_loss_without_keyboard" \
+    cargo test -p bevy_action_map --no-default-features --features std,mouse,gamepad --test focus_loss_without_keyboard
 
 if [[ ${full} -eq 1 ]]; then
     echo "== device-feature matrix =="
     for combo in "" keyboard mouse gamepad keyboard,mouse keyboard,gamepad mouse,gamepad \
         keyboard,mouse,gamepad; do
-        out=$(cargo check --no-default-features --features "std,bevy_reflect,${combo}" 2>&1)
+        out=$(cargo check -p bevy_action_map --no-default-features --features "std,bevy_reflect,${combo}" 2>&1)
         if [[ $? -ne 0 ]]; then
             printf '%s\n' "${out}"
             echo "FAILED: device matrix [${combo}]"

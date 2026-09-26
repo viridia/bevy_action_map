@@ -1,0 +1,108 @@
+[package]
+name = "bevy_action_map"
+description = "Input action mapping for Bevy: bindings, contexts, devices, and binding presentation"
+keywords = ["bevy", "input", "gamepad", "keybindings"]
+categories = ["game-development"]
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# Depend on Bevy subcrates rather than the umbrella: this crate is a candidate for eventual
+# upstream inclusion, and R24.2 asks for a minimal dependency surface. The examples, a package of
+# their own, pull the full `bevy`.
+[dependencies]
+bevy_action_map_macros = { path = "../bevy_action_map_macros", version = "0.1.0" }
+bevy_app.workspace = true
+bevy_ecs.workspace = true
+bevy_input.workspace = true
+bevy_math.workspace = true
+bevy_time.workspace = true
+bevy_platform.workspace = true
+bevy_reflect = { workspace = true, optional = true }
+bevy_state = { workspace = true, optional = true }
+serde = { version = "1", default-features = false, features = [
+  "alloc",
+  "derive",
+], optional = true }
+# The logging facade `bevy_input` uses, rather than `bevy_log`: that crate installs a
+# `tracing-subscriber` and is `std`-only, while this is `no_std` and pulls nothing in behind it.
+log = { version = "0.4", default-features = false }
+# For `once!`, which is the `no_std` half of `bevy_log::warn_once!`. Already in the graph beneath
+# `bevy_ecs`, so it costs a line here and nothing to build.
+bevy_utils.workspace = true
+# For `DeviceHandleSet` (§15): a handful of devices per occupant, heap-spilling rather than
+# hard-capping. Already in the graph beneath `bevy_ecs`.
+smallvec = { version = "1", default-features = false }
+fixedbitset = "0.5"
+
+[dev-dependencies]
+bevy = { workspace = true, features = ["dynamic_linking"] }
+trybuild = "1.0"
+# Picked as the concrete format for chunk 55's golden persistence test — a format this crate never
+# learns about outside that one test (§10.1).
+toml = "0.8"
+
+[features]
+default = ["std", "bevy_reflect", "keyboard", "mouse", "gamepad", "state"]
+
+# The core mapping layer is no_std-capable (R24.1, R16.6).
+std = [
+  "bevy_app/std",
+  "bevy_ecs/std",
+  "bevy_input/std",
+  "bevy_math/std",
+  "bevy_platform/std",
+  "bevy_state?/std",
+  "bevy_time/std",
+  "bevy_reflect?/std",
+  "bevy_utils/std",
+  "serde?/std",
+]
+
+# glam takes its math backend from a feature, and `std` is the one it gets by default. A `no_std`
+# build has to name a replacement or glam refuses to compile at all, so check that configuration as
+# `--no-default-features --features libm`.
+libm = ["bevy_math/libm"]
+
+# Input sources, mirroring bevy_input's own feature layout.
+keyboard = ["bevy_input/keyboard"]
+mouse = ["bevy_input/mouse", "bevy_input/keyboard"]
+gamepad = ["bevy_input/gamepad"]
+touch = ["bevy_input/touch"]
+
+# Runtime reflection. Required to serialize custom modifiers/conditions (R5.6, R17.5).
+bevy_reflect = [
+  "dep:bevy_reflect",
+  # `Paired` holds its devices in a `SmallVec`.
+  "bevy_reflect/smallvec",
+  "bevy_app/bevy_reflect",
+  "bevy_ecs/bevy_reflect",
+  "bevy_input/bevy_reflect",
+  "bevy_math/bevy_reflect",
+  "bevy_time/bevy_reflect",
+]
+
+# Persistence of binding overrides and input frames (§17, R10.1). Depends on `bevy_reflect`:
+# `SavedOverrides` is the portable shape a save file or a Reflect-based settings layer actually
+# stores (D50), and needs `Reflect` to be structurally walkable.
+serialize = [
+  "dep:serde",
+  "bevy_input/serialize",
+  "bevy_math/serialize",
+  "bevy_reflect",
+]
+
+# bevy_state integration: a context's activation follows a game state (R7.1, R7.7).
+state = ["dep:bevy_state"]
+
+# Deliberately absent: a `scene`/BSN feature. Transitions are plain `EntityEvent`s, so `bsn!`
+# attaches observers with no adapter and no dependency either way (R22.15, R22.17).
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["-Zunstable-options", "--generate-link-to-definition", "--cfg", "docsrs"]

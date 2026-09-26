@@ -123,10 +123,11 @@ beyond the interpreter this project's own tooling already needs.
 A plan names the example to launch and lists the steps to run against it. The vocabulary below is
 the same whichever way it is written: as a Python program, which is the default (DD4.2), or as the
 JSON file shown here, which the client reads with the standard library and nothing compiled (DR7.1,
-DR7.3). An example outside the workspace's root package also names its `package`, as the driver's
-own `testbed` does, and one declaring `required-features` names its `features`, as Disasteroids does
-— cargo skips an example whose required features are off rather than refusing to build it, so a plan
-leaving them out fails as an example that does not exist.
+DR7.3). A plan may name its example's `package`, as the driver's own `testbed` does, which cargo
+needs only when two workspace members declare an example of that name; one declaring
+`required-features` names its `features`, as Disasteroids does — cargo skips an example whose
+required features are off rather than refusing to build it, so a plan leaving them out fails as an
+example that does not exist.
 
 ```json
 {
@@ -329,13 +330,13 @@ every action in the examples — a `MappingKey`'s prefix *is* the action's decla
 the same strings `action_map.dump` keys an action by (DD6).
 
 Each example adds `RemoteDriverPlugin` in its `main`; `diagnostics.rs` is the exception, having no
-`App` to add it to. The examples take the driver as a dev-dependency, and `bevy` gains its
-`bevy_remote` feature there, which every example build then compiles. The feature is not redundant
-with the driver's own dependency on the `bevy_remote` subcrate: without it an example still builds
-and still answers BRP, but `Image` has no serialization registered, and the screenshot step panics
-the app inside `bevy_remote` rather than failing the step. The plugin is inert unless the port
-variable is set. Adding the plugin and the names is an intended diff in `examples/`, which the chunk
-adding them says it is.
+`App` to add it to. The examples package depends on the driver, and `bevy` gains its `bevy_remote`
+feature there, which every example build then compiles. The feature is not redundant with the
+driver's own dependency on the `bevy_remote` subcrate: without it an example still builds and still
+answers BRP, but `Image` has no serialization registered, and the screenshot step panics the app
+inside `bevy_remote` rather than failing the step. The plugin is inert unless the port variable is
+set. Adding the plugin and the names is an intended diff in `examples/`, which the chunk adding them
+says it is.
 
 ## 8. Where each piece ends up
 

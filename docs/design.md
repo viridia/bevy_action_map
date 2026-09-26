@@ -1284,10 +1284,12 @@ than being refused on its first launch.
 ## 11. Crate layout
 
 One crate, feature-gated by input source, plus the proc-macro crate Rust requires for the derives.
-The macro crate is re-exported, so nothing names it.
+The macro crate is re-exported, so nothing names it. Both sit under `crates/` beside
+`bevy_remote_driver`; the workspace root is an unpublished package holding only the examples, with
+the `assets/` they load beside its manifest.
 
 ```
-src/
+crates/bevy_action_map/src/
   device.rs      L0  families and handles, pairing sets, gamepad calibration and brand resolution
   frame.rs       L1  the event queue, sampling, retirement
   action.rs          identity, intent, channel shape, value, phase, scratch

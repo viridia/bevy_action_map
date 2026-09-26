@@ -67,7 +67,7 @@ maintainer-facing and is governed by the first bullet, not the second.
 ## Calibration
 
 A real edit already accepted on this crate, so you can judge severity. A 36-line theory-of-operation
-block in `src/frame.rs` became 27 lines.
+block in `crates/bevy_action_map/src/frame.rs` became 27 lines.
 
 OUT: a parenthetical saying what the code "did originally"; a rationale already stated verbatim on
 the function it described; the word "load-bearing"; "take nothing" → "take none"; and a "Theory of
@@ -87,7 +87,8 @@ conclusion-first should shrink by nothing, and reporting that it cannot be cut i
 
 A flat ranked list. Each entry exactly one line:
 
-`src/file.rs:LINE` — CATEGORY — what to do, in one line — (for restatement: the other location)
+`crates/bevy_action_map/src/file.rs:LINE` — CATEGORY — what to do, in one line — (for restatement:
+the other location)
 
 At most 60 entries. **Prefer 25 excellent entries to 60 padded ones.** Omit any entry you are not
 confident about — a noisy list is worse than a short one. Do NOT propose replacement prose; the

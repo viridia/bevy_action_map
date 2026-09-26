@@ -20,7 +20,7 @@ the same pass.
 **Keep every conclusion. Cut history, restatement, scaffolding and tells.**
 
 The worked example, from the sweep that produced this skill. A 36-line theory-of-operation block in
-`src/frame.rs` became 27 lines.
+`crates/bevy_action_map/src/frame.rs` became 27 lines.
 
 Out: a parenthetical saying what the code "did originally"; a rationale already stated verbatim on
 the function it described; the word "load-bearing"; "take nothing" → "take none"; and a "Theory of
@@ -35,12 +35,12 @@ this crate's prose is in that state; the real yield is category 1 below, not len
 ## Categories, in value order
 
 1. **Restatement across locations.** A comment saying what is already said by its own adjacent doc
-   comment, by another comment elsewhere, or by `docs/design.md`. This is the highest-value
-   category and the one that justifies the recon cost, because it cannot be found by reading one
-   file. It is also the project's named regression: what has been built is described in exactly one
-   place, and a second description anywhere is the thing to watch for. The fix is to pick the
-   canonical home and let the others cross-reference it — `Plan::is_indexed` in `src/plan.rs` is the
-   model ("A class binding yields to this unconditionally; see the note on `indexed_controls`").
+   comment, by another comment elsewhere, or by `docs/design.md`. This is the highest-value category
+   and the one that justifies the recon cost, because it cannot be found by reading one file. It is
+   also the project's named regression: what has been built is described in exactly one place, and a
+   second description anywhere is the thing to watch for. The fix is to pick the canonical home and
+   let the others cross-reference it — `Plan::is_indexed` in `crates/bevy_action_map/src/plan.rs` is
+   the model ("A class binding yields to this unconditionally; see the note on `indexed_controls`").
 2. **Story rather than conclusion.** Prose narrating how the design was reached — what it used to
    do, what bug was hit, what was tried. A bug story that stops a maintainer re-introducing the bug
    earns its place **compressed to the warning**; cut the narrative tense, not the trap.
@@ -91,21 +91,21 @@ comment that loses a documented panic to brevity has been made worse.
 Measure before planning, so the split is sized from the real numbers:
 
 ```sh
-echo -n "doc-comment citations: "; grep -rnE '^\s*(///|//!)' --include='*.rs' src/ tests/ examples/ \
+echo -n "doc-comment citations: "; grep -rnE '^\s*(///|//!)' --include='*.rs' crates/bevy_action_map/src/ crates/bevy_action_map/tests/ examples/ \
   | grep -cE 'R[0-9]+\.[0-9]+|§|\bD[0-9]+\b|[Cc]hunk [0-9]+|\bOQ[0-9]*\b'
-echo -n "chunk refs:            "; grep -rncE '\bchunks?\b' --include='*.rs' src/ tests/ examples/ \
+echo -n "chunk refs:            "; grep -rncE '\bchunks?\b' --include='*.rs' crates/bevy_action_map/src/ crates/bevy_action_map/tests/ examples/ \
   | awk -F: '{s+=$2} END {print s}'
 echo -n "metaphors:             "; grep -rniE '(load-bearing|\bseams?\b|reach for)' --include='*.rs' \
-  src/ tests/ examples/ | grep -cE ':[0-9]+:\s*(///|//!|//)'
+  crates/bevy_action_map/src/ crates/bevy_action_map/tests/ examples/ | grep -cE ':[0-9]+:\s*(///|//!|//)'
 echo -n "hedges:                "; grep -rncE '^\s*(///|//!|//).*\b(simply|just)\b' --include='*.rs' \
-  src/ tests/ examples/ | awk -F: '{s+=$2} END {print s}'
+  crates/bevy_action_map/src/ crates/bevy_action_map/tests/ examples/ | awk -F: '{s+=$2} END {print s}'
 echo -n "manufactured signif.:  "; grep -rncE \
   '^\s*(///|//!|//).*(Crucially|Importantly|Notably|worth noting|Remember that|Keep in mind)' \
-  --include='*.rs' src/ tests/ examples/ | awk -F: '{s+=$2} END {print s}'
+  --include='*.rs' crates/bevy_action_map/src/ crates/bevy_action_map/tests/ examples/ | awk -F: '{s+=$2} END {print s}'
 echo -n "'nothing' in comments: "; grep -rncE '^\s*(///|//!|//).*\bnothing\b' --include='*.rs' \
-  src/ tests/ examples/ | awk -F: '{s+=$2} END {print s}'
+  crates/bevy_action_map/src/ crates/bevy_action_map/tests/ examples/ | awk -F: '{s+=$2} END {print s}'
 echo "internal comment lines, per file, heaviest first:"
-grep -rcE '^\s*//[^/!]' --include='*.rs' src/ | sort -t: -k2 -rn | head -15
+grep -rcE '^\s*//[^/!]' --include='*.rs' crates/bevy_action_map/src/ | sort -t: -k2 -rn | head -15
 ```
 
 Note `grep -c` counts *lines*, not occurrences, which is the right unit here.

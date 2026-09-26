@@ -8,10 +8,10 @@ job.
 
 **How to read an entry.** Each says where the problem is, what someone would actually observe, and
 whether it was confirmed by running something or only by reading. Many were found by a model asked
-to scan `src/`, and some are rules nobody would violate, so that distinction matters; where the
-reachable case is hypothetical, the entry says so. A sketched fix carries its effort level, `E[n]`
-([G19](./guidelines.md)); an entry without a sketch is not yet scoped, and one that cannot be
-sketched yet says what it waits on, under _Before a sketch_.
+to scan `crates/bevy_action_map/src/`, and some are rules nobody would violate, so that distinction
+matters; where the reachable case is hypothetical, the entry says so. A sketched fix carries its
+effort level, `E[n]` ([G19](./guidelines.md)); an entry without a sketch is not yet scoped, and one
+that cannot be sketched yet says what it waits on, under _Before a sketch_.
 
 **Line numbers drift.** Take a `file.rs:NNN` as "roughly here"; the symbol named beside it is the
 part that stays good. Re-verify before acting on one.
@@ -210,7 +210,7 @@ there.
 
 ### 1048 Virtual devices have no first-class support
 
-R11.8 (SHOULD) · no citation anywhere in `src/`
+R11.8 (SHOULD) · no citation anywhere in `crates/bevy_action_map/src/`
 
 "On-screen touch sticks, AI/bot drivers, and test fixtures must be first-class devices, not special
 cases" — nothing in `DeviceHandle` or the frame models a device that isn't a real keyboard, mouse or
@@ -287,9 +287,9 @@ person adding one has a rule rather than a coin flip.
   is "still deferred" while gating something else. Both are MAYs, so the stakes are small and the
   omission is not.
 - **The R7.5 opt-out is exercised by a test and nothing else.** `activate_including_held` now has a
-  caller — a unit test in `src/eval.rs` — where at the time of the scan it had none. What is still
-  missing is any example or production caller: the MUST's "unless explicitly opted in" clause is
-  proven correct in isolation but has never been asked for by a game in tree.
+  caller — a unit test in `crates/bevy_action_map/src/eval.rs` — where at the time of the scan it
+  had none. What is still missing is any example or production caller: the MUST's "unless explicitly
+  opted in" clause is proven correct in isolation but has never been asked for by a game in tree.
 
 ---
 

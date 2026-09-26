@@ -143,7 +143,8 @@ def bootstrap(tree):
 
 def code(tree):
     counts = defaultdict(int)
-    for path in tree.paths(r"src/.*\.rs"):
+    # Optional so that a base from before the crate moved under `crates/` still counts.
+    for path in tree.paths(r"(crates/bevy_action_map/)?src/.*\.rs"):
         test = False
         for line in tree.read(path).split("\n"):
             if line.startswith("#[cfg(test)]"):
@@ -191,7 +192,7 @@ def public_api():
     """Public items the crate defines, and methods from inherent impls. Methods a trait impl brings
     in, derived `Reflect` above all, are the trait's surface rather than the crate's."""
     listing = subprocess.run(
-        ["cargo", "public-api", "--all-features", "-sss", "--color=never"],
+        ["cargo", "public-api", "-p", "bevy_action_map", "--all-features", "-sss", "--color=never"],
         cwd=ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -223,7 +224,7 @@ def public_api():
 def prelude():
     """Names `lib.rs`'s prelude re-exports: public on purpose, where the rest of the public API may
     be public only because its module is."""
-    text = (ROOT / "src/lib.rs").read_text(encoding="utf-8")
+    text = (ROOT / "crates/bevy_action_map/src/lib.rs").read_text(encoding="utf-8")
     start = text.index("pub mod prelude {")
     end = text.index("\n}", start)
     return set(re.findall(r"\b\w+\b", text[start:end]))
@@ -233,7 +234,7 @@ def unreached(names):
     """Public names that no example, integration test or Steam example mentions."""
     text = "\n".join(
         p.read_text(encoding="utf-8")
-        for d in ("examples", "tests", "steam_examples/disasteroids")
+        for d in ("examples", "crates/bevy_action_map/tests", "steam_examples/disasteroids")
         for p in (ROOT / d).rglob("*.rs")
     )
     return sorted(n for n in names if not re.search(rf"\b{re.escape(n)}\b", text))

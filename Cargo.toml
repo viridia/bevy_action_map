@@ -1,5 +1,57 @@
 [workspace]
 members = ["crates/*"]
+# A bare command at the root takes every member, not only the examples.
+default-members = [".", "crates/*"]
+resolver = "3"
+
+# The examples, as a package of their own rather than the crate's: a crate built on
+# `bevy_action_map` that they use would, as its dev-dependency, give its unit tests a second copy of
+# its types. It has no library, and is here rather than in `examples/` so that `assets/` sits beside
+# its manifest, where Bevy looks for it.
+[package]
+name = "bevy_action_map_examples"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+bevy_action_map = { path = "crates/bevy_action_map" }
+# `bevy_settings` is not in the umbrella's default profiles. Split Friction is the only example
+# that stores anything, and where a game puts its bytes is the app's decision (D53), so the crate
+# itself knows nothing about it.
+bevy = { workspace = true, features = [
+  "dynamic_linking",
+  "bevy_settings",
+  # For the driver, below. The examples never name `bevy_remote` themselves, but the umbrella's
+  # feature is what registers `Image`'s serialization, without which a screenshot step panics the
+  # app rather than failing the step.
+  "bevy_remote",
+] }
+bevy_input.workspace = true
+bevy_math.workspace = true
+# Every example adds `RemoteDriverPlugin`, which is inert unless the port variable is set, so a
+# plan can drive any of them without the example knowing it is under test.
+bevy_remote_driver = { path = "crates/bevy_remote_driver" }
+
+[features]
+serialize = ["bevy_action_map/serialize"]
+
+# Declared rather than auto-discovered, for the one line that matters: each stores something, so
+# each needs `serialize`, which is not a default feature.
+[[example]]
+name = "split_friction"
+path = "examples/split_friction/main.rs"
+required-features = ["serialize"]
+
+[[example]]
+name = "disasteroids"
+path = "examples/disasteroids/main.rs"
+required-features = ["serialize"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,144 +63,26 @@ repository = "https://github.com/viridia/bevy_action_map"
 [workspace.lints.rust]
 missing_docs = "warn"
 
-[package]
-name = "bevy_action_map"
-description = "Input action mapping for Bevy: bindings, contexts, devices, and binding presentation"
-keywords = ["bevy", "input", "gamepad", "keybindings"]
-categories = ["game-development"]
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
-# Editor and agent configuration, development tooling, the README's screenshot, and the process
-# document are repository furniture rather than part of the crate. `images/` is the expensive one: a
-# single screenshot outweighs everything under `assets/`. `tools/` is already skipped for carrying
-# its own manifest — named here so that stays true if it ever stops being a package of its own.
-exclude = [".DS_Store", ".claude/", ".vscode/", "images/", "scripts/", "tools/", "CLAUDE.md"]
-
-[lints]
-workspace = true
-
-# Depend on Bevy subcrates rather than the umbrella: this crate is a candidate for eventual
-# upstream inclusion, and R24.2 asks for a minimal dependency surface. Examples pull the full
-# `bevy` via dev-dependencies instead.
-[dependencies]
-bevy_action_map_macros = { path = "crates/bevy_action_map_macros", version = "0.1.0" }
+# The Bevy pins, in one place. Subcrates are declared without default features, which a member that
+# wants them turns back on; the umbrella keeps its defaults, and is only ever a dev-dependency or
+# the examples'.
+[workspace.dependencies]
+bevy = "0.20.0-rc.1"
 bevy_app = { version = "0.20.0-rc.1", default-features = false }
+bevy_camera = { version = "0.20.0-rc.1", default-features = false }
+bevy_diagnostic = { version = "0.20.0-rc.1", default-features = false }
 bevy_ecs = { version = "0.20.0-rc.1", default-features = false }
 bevy_input = { version = "0.20.0-rc.1", default-features = false }
 bevy_math = { version = "0.20.0-rc.1", default-features = false }
-bevy_time = { version = "0.20.0-rc.1", default-features = false }
 bevy_platform = { version = "0.20.0-rc.1", default-features = false }
-bevy_reflect = { version = "0.20.0-rc.1", default-features = false, optional = true }
-bevy_state = { version = "0.20.0-rc.1", default-features = false, optional = true }
-serde = { version = "1", default-features = false, features = [
-  "alloc",
-  "derive",
-], optional = true }
-# The logging facade `bevy_input` uses, rather than `bevy_log`: that crate installs a
-# `tracing-subscriber` and is `std`-only, while this is `no_std` and pulls nothing in behind it.
-log = { version = "0.4", default-features = false }
-# For `once!`, which is the `no_std` half of `bevy_log::warn_once!`. Already in the graph beneath
-# `bevy_ecs`, so it costs a line here and nothing to build.
+bevy_reflect = { version = "0.20.0-rc.1", default-features = false }
+bevy_remote = { version = "0.20.0-rc.1", default-features = false }
+bevy_scene = { version = "0.20.0-rc.1", default-features = false }
+bevy_state = { version = "0.20.0-rc.1", default-features = false }
+bevy_time = { version = "0.20.0-rc.1", default-features = false }
+bevy_ui = { version = "0.20.0-rc.1", default-features = false }
 bevy_utils = { version = "0.20.0-rc.1", default-features = false }
-# For `DeviceHandleSet` (§15): a handful of devices per occupant, heap-spilling rather than
-# hard-capping. Already in the graph beneath `bevy_ecs`.
-smallvec = { version = "1", default-features = false }
-fixedbitset = "0.5"
-
-[dev-dependencies]
-# `bevy_settings` is not in the umbrella's default profiles. Split Friction is the only example
-# that stores anything, and where a game puts its bytes is the app's decision (D53), so this is a
-# dev-dependency feature rather than anything the crate itself knows about.
-bevy = { version = "0.20.0-rc.1", features = [
-  "dynamic_linking",
-  "bevy_settings",
-  # For the driver, below. The examples never name `bevy_remote` themselves, but the umbrella's
-  # feature is what registers `Image`'s serialization, without which a screenshot step panics the
-  # app rather than failing the step.
-  "bevy_remote",
-] }
-trybuild = "1.0"
-# Every example adds `RemoteDriverPlugin`, which is inert unless the port variable is set, so a
-# plan can drive any of them without the example knowing it is under test.
-bevy_remote_driver = { path = "crates/bevy_remote_driver" }
-# Picked as the concrete format for chunk 55's golden persistence test — a format this crate never
-# learns about outside that one test (§10.1).
-toml = "0.8"
-
-# Declared rather than auto-discovered, for the one line that matters: each stores something, so
-# each needs `serialize`, which is not a default feature. The others are still picked up
-# automatically.
-[[example]]
-name = "split_friction"
-path = "examples/split_friction/main.rs"
-required-features = ["serialize"]
-
-[[example]]
-name = "disasteroids"
-path = "examples/disasteroids/main.rs"
-required-features = ["serialize"]
-
-[features]
-default = ["std", "bevy_reflect", "keyboard", "mouse", "gamepad", "state"]
-
-# The core mapping layer is no_std-capable (R24.1, R16.6).
-std = [
-  "bevy_app/std",
-  "bevy_ecs/std",
-  "bevy_input/std",
-  "bevy_math/std",
-  "bevy_platform/std",
-  "bevy_state?/std",
-  "bevy_time/std",
-  "bevy_reflect?/std",
-  "bevy_utils/std",
-  "serde?/std",
-]
-
-# glam takes its math backend from a feature, and `std` is the one it gets by default. A `no_std`
-# build has to name a replacement or glam refuses to compile at all, so check that configuration as
-# `--no-default-features --features libm`.
-libm = ["bevy_math/libm"]
-
-# Input sources, mirroring bevy_input's own feature layout.
-keyboard = ["bevy_input/keyboard"]
-mouse = ["bevy_input/mouse", "bevy_input/keyboard"]
-gamepad = ["bevy_input/gamepad"]
-touch = ["bevy_input/touch"]
-
-# Runtime reflection. Required to serialize custom modifiers/conditions (R5.6, R17.5).
-bevy_reflect = [
-  "dep:bevy_reflect",
-  # `Paired` holds its devices in a `SmallVec`.
-  "bevy_reflect/smallvec",
-  "bevy_app/bevy_reflect",
-  "bevy_ecs/bevy_reflect",
-  "bevy_input/bevy_reflect",
-  "bevy_math/bevy_reflect",
-  "bevy_time/bevy_reflect",
-]
-
-# Persistence of binding overrides and input frames (§17, R10.1). Depends on `bevy_reflect`:
-# `SavedOverrides` is the portable shape a save file or a Reflect-based settings layer actually
-# stores (D50), and needs `Reflect` to be structurally walkable.
-serialize = [
-  "dep:serde",
-  "bevy_input/serialize",
-  "bevy_math/serialize",
-  "bevy_reflect",
-]
-
-# bevy_state integration: a context's activation follows a game state (R7.1, R7.7).
-state = ["dep:bevy_state"]
-
-# Deliberately absent: a `scene`/BSN feature. Transitions are plain `EntityEvent`s, so `bsn!`
-# attaches observers with no adapter and no dependency either way (R22.15, R22.17).
-
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["-Zunstable-options", "--generate-link-to-definition", "--cfg", "docsrs"]
+bevy_window = { version = "0.20.0-rc.1", default-features = false }
 
 [profile.dev]
 opt-level = 1

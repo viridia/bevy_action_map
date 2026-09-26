@@ -198,6 +198,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 151c | Prompts from Steam's origins                                          |
 | 158  | Reserving an authority is an error                                    |
 | 164  | Child crates under `crates/`                                          |
+| 171  | The root crate moves under `crates/`                                  |
 
 ---
 
@@ -229,9 +230,10 @@ The crate applies stage-1 calibration and names the device; storing it, and anyt
 is the app's. Measuring a worn stick needs expertise most game developers lack, and popular titles
 leave it to the platform, so it leaves the crate for X47.
 
-- **Withdraw `CalibrationSampling`** and `REST_MARGIN`, with the test in `src/context/state.rs` that
-  drives them and the hook in `src/frame.rs` that feeds them. It is public and broken: following its
-  own doc records the stick's deflection as rest.
+- **Withdraw `CalibrationSampling`** and `REST_MARGIN`, with the test in
+  `crates/bevy_action_map/src/context/state.rs` that drives them and the hook in
+  `crates/bevy_action_map/src/frame.rs` that feeds them. It is public and broken: following its own
+  doc records the stick's deflection as rest.
 - **A recipe on `GamepadCalibration`'s doc comment.** Everything it needs exists: the backend puts
   `Identity(DeviceId)` on a pad's entity, so an app restores by `DeviceId` when `Identity` appears
   and saves through `SavedDeviceId`. The doc says a reconnect loses the value and not that the app
@@ -272,20 +274,21 @@ connected, what kind, what it can do, how much charge is left) have no vendor-ne
 answered. [bevy#25757][] proposes that Bevy own that place; a concrete design with a working
 prototype is what the proposal needs.
 
-The prototype is a module, `src/gamepad/`, written as it would sit in `bevy_input`: it depends on
-Bevy alone, and the rest of the crate depends on it. Not a crate of its own, because a crates.io
-name is permanent and this one would be abandoned once `bevy_input` takes the work, and because
-`bevy_action_map` cannot publish while depending on an unpublished crate.
+The prototype is a module, `crates/bevy_action_map/src/gamepad/`, written as it would sit in
+`bevy_input`: it depends on Bevy alone, and the rest of the crate depends on it. Not a crate of its
+own, because a crates.io name is permanent and this one would be abandoned once `bevy_input` takes
+the work, and because `bevy_action_map` cannot publish while depending on an unpublished crate.
 
-### 165. `src/gamepad/`, and the two pieces that exist · E[3]
+### 165. `crates/bevy_action_map/src/gamepad/`, and the two pieces that exist · E[3]
 
 - **`ConnectedGamepad` and `Brand` move in** from `device.rs`, with what maintains them:
   `mark_gamepad_connected` and its removal twin, `GamepadBrand`, `GamepadBrands` and resolution.
   Gated on `gamepad`, as now. `device` re-exports them, so the examples do not change.
 - **Whether `GamepadModelId` moves too** is decided here. It is a fact about the pad, but
   `DeviceId`'s persistence, which stays in the mapper, is built from it.
-- **A boundary scan in `scripts/verify.sh`:** a `crate::` path under `src/gamepad/` that leaves the
-  module fails the run. Validated first against a planted import.
+- **A boundary scan in `scripts/verify.sh`:** a `crate::` path under
+  `crates/bevy_action_map/src/gamepad/` that leaves the module fails the run. Validated first
+  against a planted import.
 - **Verified by:** `scripts/verify.sh --full`, since the `gamepad` cfg group moves, and no diff in
   `examples/`.
 
@@ -319,8 +322,8 @@ value while it is set.
   level simpler than an event is the question.
 - **gilrs is driven from it** by a system that turns changes into `GamepadRumbleRequest`s, so the
   prototype asks nothing of `bevy_gilrs`.
-- **Routing is the mapper's half**, outside `src/gamepad/`: a player, their `Paired` device entity,
-  its `Rumble`.
+- **Routing is the mapper's half**, outside `crates/bevy_action_map/src/gamepad/`: a player, their
+  `Paired` device entity, its `Rumble`.
 - **Verified by:** a headless test on the requests emitted, and a pad by hand.
 
 ### 168. The Steam build fills them · E[3]
@@ -343,7 +346,8 @@ what changes for users of `Gamepad`. Written for that audience, and for the auth
   sits beside it, because a module outside `bevy_input` cannot change it; the proposal may argue for
   either.
 - **Drafted at any point, finished after 168**, so each claim has been run on both backends.
-- **Links the prototype**, and says how `src/gamepad/` maps onto `bevy_input`'s files.
+- **Links the prototype**, and says how `crates/bevy_action_map/src/gamepad/` maps onto
+  `bevy_input`'s files.
 
 ---
 
@@ -548,13 +552,15 @@ providers, and neither is special.
 - **The Steam provider** is `steam_examples/disasteroids/glyphs.rs`, registered ahead of Kenney:
   Steam's art for the pad, Kenney's for the keys.
 - **With no provider**, every prompt is text, as a control without art is today.
-- **Not the crate.** `src/` is untouched: `resolve_glyph` already takes coverage as a closure.
+- **Not the crate.** `crates/bevy_action_map/src/` is untouched: `resolve_glyph` already takes
+  coverage as a closure.
 - **Not `PromptSource`**, which decides which controls a prompt names. This decides how they are
   drawn.
 - **Not the packaging**, which is chunk 172.
-- **Verified by:** `tests/prompt_ui.rs`, plus a test that the first provider to answer wins;
-  `prompt_gallery` and Disasteroids drawing the art they drew before; `scripts/verify.sh --full` for
-  the Steam build, and the author running it to see Steam's pad glyphs beside Kenney's keys.
+- **Verified by:** `crates/bevy_action_map/tests/prompt_ui.rs`, plus a test that the first provider
+  to answer wins; `prompt_gallery` and Disasteroids drawing the art they drew before;
+  `scripts/verify.sh --full` for the Steam build, and the author running it to see Steam's pad
+  glyphs beside Kenney's keys.
 - **On landing:** that the presentation layer ships no art, and takes it from sibling providers, is
   an entry in `docs/decisions.md`.
 
@@ -577,7 +583,7 @@ become `crates/bevy_action_map_ui/`, published beside the base crate.
 - **Its docs owe a game the warning** `widget_focus.rs` carries today: `InputDispatchPlugin` in
   `DefaultPlugins` activates a focused `Button` on a key a context has consumed, so a game using
   both disables it.
-- **`tests/prompt_ui.rs` moves into the crate**, and its `#[path]` goes.
+- **`crates/bevy_action_map/tests/prompt_ui.rs` moves into the ui crate**, and its `#[path]` goes.
 - **Paths that follow it:** X2 and X5 name `widget_focus.rs`, and door 3 names `examples/common/` as
   where the layer sits. R22.7 and R22.8's annotations name the file too, and R22.8's calls the
   focus-kind contexts example-side for want of X8, which this makes crate API of the ui crate.
@@ -636,32 +642,6 @@ the expensive part.
 
 Work no game asks for and no published crate can do without: the crate's internals kept consistent,
 extension points exercised, and documentation that is true and runs.
-
-### 171. The root crate moves under `crates/` · E[2]
-
-The root manifest is both the workspace and `bevy_action_map`, so the crate's package is the whole
-repository less an `exclude` list, while its macros and the driver already sit under `crates/`. The
-crate moves to `crates/bevy_action_map/` with its `src/` and `tests/`, and the root becomes a
-virtual workspace.
-
-- **The examples become a package of their own**, `examples/Cargo.toml` with `publish = false`,
-  holding the umbrella `bevy`, `bevy_remote_driver` and the two `required-features` entries. Each
-  example is declared, since autodiscovery would look in `examples/examples/`. Not
-  `crates/bevy_action_map/examples/`: once chunk 172 lands they depend on the ui crate, which
-  depends on the base, and that dev-dependency cycle gives unit tests two copies of the base's
-  types. `cargo run --example <x>` still works from the root.
-- **`assets/` stays at the root** with the examples that use it, so every `include_bytes!`,
-  `#[path]` and asset path into `examples/` and `assets/` is unchanged, `steam_examples/`'s
-  included.
-- **The Bevy pins move to `[workspace.dependencies]`**, ahead of a third crate repeating them.
-- **What else changes:** `steam_examples/Cargo.toml`'s path dependency; `scripts/xref.py`'s source
-  list; the Verification commands in `scripts/verify.sh` and `CLAUDE.md`, which gain
-  `-p bevy_action_map` where they pass features; the `exclude` list, which goes; `readme`, pointing
-  at the root README; `tests/prompt_ui.rs`'s `#[path]`, one level deeper; and the 27 backquoted
-  `src/` paths in the markdown documents.
-- **Not the ui crate**, which is chunk 172.
-- **Verified by:** `scripts/verify.sh --full --doc`; `cargo package -p bevy_action_map --list`
-  showing the crate and nothing else; and no diff under `examples/` beyond its new manifest.
 
 ### 143. One apply, for the world or for an entity · E[1]
 
@@ -743,9 +723,9 @@ one device, so what is left is a family switch (D93).
   macros crate's only doctest, which until now no step reached at all.
 - **The README rewrite** — a user-facing introduction, feature list and quickstart, with examples
   lifted from a real game rather than invented.
-- **`src/lib.rs`'s crate-level docs, alongside it.** The `//!` block largely mirrors the README's
-  Concepts section and has drifted the same way — both were drafted early and neither has kept pace
-  with what the crate grew into since.
+- **`crates/bevy_action_map/src/lib.rs`'s crate-level docs, alongside it.** The `//!` block largely
+  mirrors the README's Concepts section and has drifted the same way — both were drafted early and
+  neither has kept pace with what the crate grew into since.
 - **Comparison upkeep.** [docs/comparison.md](./docs/comparison.md) is read against BEI 0.26.0 and
   LWIM 0.21.0, which is a claim with a date on it. Both crates move.
 - **`cargo doc` is not in the Verification list, and fails outside `--all-features`.** The
@@ -877,7 +857,7 @@ document was written by an earlier model and has not been edited as a whole.
 - **Verified by:** `scripts/xref.py`, and the unit's `growth.py` numbers.
 - **Done:** TD9.1.
 
-### 161. Public items nothing outside `src/` names · E[1]
+### 161. Public items nothing outside `crates/bevy_action_map/src/` names · E[1]
 
 `growth.py --api` lists public items that no example or integration test names; the ones outside the
 prelude are the candidates, 48 at the first run.

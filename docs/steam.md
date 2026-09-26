@@ -625,11 +625,11 @@ carrying the backend's own handle is the whole of it, and D52 already frames a h
 value no save file may compare across a restart, which is exactly what an `InputHandle_t` is.
 
 **And no new variant is needed.** `DeviceHandle::Gamepad` already holds a bare `Entity` and the
-crate never looks inside it: nothing in `src/` queries Bevy's `Gamepad` component, and the crate's
-own tests build handles from `Entity::from_bits` — synthetic entities carrying no components at
-all — with everything downstream working. The entity is an opaque key. The only place a real Bevy
-gamepad entity enters is `frame.rs`, converting a raw gamepad event, and that is the path
-suppression turns off.
+crate never looks inside it: nothing in `crates/bevy_action_map/src/` queries Bevy's `Gamepad`
+component, and the crate's own tests build handles from `Entity::from_bits` — synthetic entities
+carrying no components at all — with everything downstream working. The entity is an opaque key. The
+only place a real Bevy gamepad entity enters is `frame.rs`, converting a raw gamepad event, and that
+is the path suppression turns off.
 
 So a Steam backend spawns one entity per `InputHandle_t`, keeps the handle in its own component in
 its own crate, and hands the game `Paired::to(DeviceHandle::Gamepad(entity))`. `Entity` is already

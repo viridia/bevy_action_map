@@ -344,7 +344,8 @@ bevy_action_map = { git = "https://github.com/viridia/bevy_action_map" }
 Default features are `std`, `bevy_reflect`, `keyboard`, `mouse`, `gamepad`, and `state`. `serialize`
 adds `serde` support for overrides. `touch` is opt-in and reserved for touch input, which is not
 implemented yet. A `no_std` build needs `--no-default-features --features libm` to give `glam` a
-math backend. See `[features]` in [Cargo.toml](./Cargo.toml) for the complete list.
+math backend. See `[features]` in [Cargo.toml](./crates/bevy_action_map/Cargo.toml) for the complete
+list.
 
 ## Project documents
 

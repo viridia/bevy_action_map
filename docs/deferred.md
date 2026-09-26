@@ -511,10 +511,10 @@ touches, so what is left is the paragraphs in files nothing is working on, and a
 each month. Measured today, files needing a reflow: `src` 21/25, `docs` 6/6, `examples` 22/38,
 `macros` 1/1, `tests` 2/12. A `--sweep <dir>` is warranted when that stops falling, or ahead of
 reading a directory end to end. What rides with it: six backtick spans broken across two lines
-(`Requirements.md`, `Roadmap.md`, `docs/design.md`, `docs/issues.md`, `src/binding/control.rs`,
-`examples/split_friction/main.rs`), left by the bug 117m fixed. `tools/devfmt/src/main.rs` is swept
-by hand or not at all — its fixtures are string literals full of `///`, which is X41. `archive/` is
-excluded: nothing in flight reasons from it.
+(`Requirements.md`, `Roadmap.md`, `docs/design.md`, `docs/issues.md`,
+`crates/bevy_action_map/src/binding/control.rs`, `examples/split_friction/main.rs`), left by the bug
+117m fixed. `tools/devfmt/src/main.rs` is swept by hand or not at all — its fixtures are string
+literals full of `///`, which is X41. `archive/` is excluded: nothing in flight reasons from it.
 
 ### X41 — `devfmt` reading a comment marker inside a string literal
 
@@ -533,9 +533,9 @@ acquiring one is what changes that arithmetic.
 **Gate:** the author calling a refresh.
 
 The tour is a snapshot, frozen so that a chunk does not pay to keep its diagrams current. A refresh
-is one batch: `git log` from the file's own last commit, over `docs/design.md` and `src/`, lists
-what has moved since. Validate every Mermaid block by rendering it (`mmdc` through `npx`), since
-GitHub shows a broken one as its source text with no error.
+is one batch: `git log` from the file's own last commit, over `docs/design.md` and
+`crates/bevy_action_map/src/`, lists what has moved since. Validate every Mermaid block by rendering
+it (`mmdc` through `npx`), since GitHub shows a broken one as its source text with no error.
 
 ### X42 — Guardian migration
 

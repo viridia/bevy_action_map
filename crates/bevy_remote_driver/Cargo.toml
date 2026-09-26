@@ -15,20 +15,20 @@ workspace = true
 # Subcrates rather than the umbrella, for the same reason as `bevy_action_map`: the server methods
 # are candidates for upstream (DD8), and an app under test already has the umbrella.
 [dependencies]
-bevy_app = "0.20.0-rc.1"
-bevy_camera = "0.20.0-rc.1"
-bevy_diagnostic = "0.20.0-rc.1"
-bevy_ecs = "0.20.0-rc.1"
-bevy_input = { version = "0.20.0-rc.1", features = ["gamepad"] }
-bevy_reflect = "0.20.0-rc.1"
-bevy_remote = { version = "0.20.0-rc.1", default-features = false, features = ["http"] }
-bevy_scene = "0.20.0-rc.1"
-bevy_ui = "0.20.0-rc.1"
-bevy_window = "0.20.0-rc.1"
+bevy_app = { workspace = true, default-features = true }
+bevy_camera = { workspace = true, default-features = true }
+bevy_diagnostic = { workspace = true, default-features = true }
+bevy_ecs = { workspace = true, default-features = true }
+bevy_input = { workspace = true, default-features = true, features = ["gamepad"] }
+bevy_reflect = { workspace = true, default-features = true }
+bevy_remote = { workspace = true, features = ["http"] }
+bevy_scene = { workspace = true, default-features = true }
+bevy_ui = { workspace = true, default-features = true }
+bevy_window = { workspace = true, default-features = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
-bevy = { version = "0.20.0-rc.1", features = ["dynamic_linking", "bevy_remote"] }
-bevy_math = "0.20.0-rc.1"
-bevy_time = "0.20.0-rc.1"
+bevy = { workspace = true, features = ["dynamic_linking", "bevy_remote"] }
+bevy_math = { workspace = true, default-features = true }
+bevy_time = { workspace = true, default-features = true }

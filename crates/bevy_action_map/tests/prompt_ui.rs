@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use bevy_action_map::prelude::*;
 
-#[path = "../examples/common/prompt_ui.rs"]
+#[path = "../../../examples/common/prompt_ui.rs"]
 mod prompt_ui;
 
 use prompt_ui::{
@@ -36,7 +36,12 @@ fn app() -> App {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
-        bevy::asset::AssetPlugin::default(),
+        // The art is the examples', at the repository root; a path here is relative to this
+        // crate's manifest.
+        bevy::asset::AssetPlugin {
+            file_path: "../../assets".into(),
+            ..default()
+        },
         bevy::image::ImagePlugin::default(),
         bevy::input::InputPlugin,
         ActionMapPlugin,

@@ -837,11 +837,12 @@ unadoptable for anyone wanting only raw input.
 and context model, so putting it there inverts the dependency and drags the whole action system into
 a crate that today does one small thing well. A `focus` feature here is the correct direction.
 
-**Related, and enforced in the tree.** Nothing under `src/` may name Steam — not a feature, not a
-variant, not a trait method. The real backend is `std`-only, `unsafe` FFI beneath, and wants the
-Steamworks redistributable at link time, where this crate is `no_std` and forbids unsafe. So it is
-someone else's crate, and the test of whether the seam is sufficient without being Steam-shaped is
-that the Steam backend in `steam_examples/` builds against the public API alone.
+**Related, and enforced in the tree.** Nothing under `crates/bevy_action_map/src/` may name Steam —
+not a feature, not a variant, not a trait method. The real backend is `std`-only, `unsafe` FFI
+beneath, and wants the Steamworks redistributable at link time, where this crate is `no_std` and
+forbids unsafe. So it is someone else's crate, and the test of whether the seam is sufficient
+without being Steam-shaped is that the Steam backend in `steam_examples/` builds against the public
+API alone.
 
 **Also enforced.** Nothing in the crate depends on `bevy_ui`. `bevy_ui` already depends on
 `bevy_input` and `bevy_input_focus`, so depending on it would invert that layering and foreclose
