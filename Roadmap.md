@@ -22,36 +22,13 @@ entry in [docs/deferred.md](./docs/deferred.md).
 [docs/design.md](./docs/design.md) is what the crate does today, and
 [docs/issues.md](./docs/issues.md) is what is known to be wrong and not yet routed, and
 [docs/deferred.md](./docs/deferred.md) is what was decided against for now, each with the gate that
-reopens it. What follows is the rest of the delta: what was never built, and what is left to do.
+reopens it. The chunks below are the rest of the delta.
 
 The target the remaining sequence aims at is **Disasteroids** — an asteroids-like game playable on
 keyboard or gamepad, with a rebinding screen built on `bevy_ui_widgets` and operable from the
 controller. It is not a phase of its own; it arrives early, badly, and grows a capability per chunk,
 because ground rule 3 wants something runnable at every step and a real game is a better acceptance
 test than a synthetic one.
-
-### Never built
-
-- **A snapshot of a context's state.** The shape is designed and written down; nothing has taken one
-  — chunk 83.
-
-### Upstreaming, if it happens
-
-There is a possibility this crate is taken upstream into Bevy. It is **not committed**, and nothing
-here is built on the assumption that it will be. The rule is that the possibility may influence the
-*shape* and the *order* of what gets built, but no work happens that a third-party crate would not
-want anyway. What that changes today:
-
-- **The extensibility mechanism is public API**, cheap to change now and breaking later, upstream
-  or not.
-- **The presentation crate (X6) names this as its own gate**, so if it happens, that split is
-  decided as part of the plan rather than discovered in the middle of it.
-
-What it does **not** change: there is no upstream repository, no PR sequence, and no
-re-implementation. If it goes ahead it would be a fresh implementation staged as reviewable PRs —
-the first around 1,000–2,000 lines, keyboard only — written against this crate as a model so it can
-skip the blind alleys this one took. The commitments that follow from the possibility are recorded
-as decisions rather than here.
 
 ---
 

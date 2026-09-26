@@ -9,8 +9,7 @@ One chunk per session, ending at the commit. To orient, in this order — it is 
 whole bootstrap:
 
 1. `git log --oneline -5` — what landed, and therefore where in the sequence we are.
-2. `docs/issues.md` for what is known to be wrong, and `Roadmap.md`'s "Where this stands" for what
-   was never built.
+2. `docs/issues.md` for what is known to be wrong.
 3. The current chunk's `###` section in `Roadmap.md`.
 
 Everything below is on demand.

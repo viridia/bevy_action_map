@@ -89,7 +89,7 @@ A shipped game needs more from its input layer than a map from `KeyCode` to an e
 - **Diagnostics that answer "why didn't this fire?"** — inactive context, a higher-priority consumer,
   a longer chord winning, an unmet condition, or a device that isn't this player's.
 
-See [Roadmap.md](./Roadmap.md)'s "Where this stands" for what is not built yet.
+See [Roadmap.md](./Roadmap.md) for what is not built yet.
 
 ## Quick start
 

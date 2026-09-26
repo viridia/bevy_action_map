@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 46.**
+**Next: 47.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -108,6 +108,17 @@ already enough, are guesses about other people's UI. The second: open Bevy issue
 of widget state will change what an orchestrator has to do, so guidance written now would describe a
 shape about to move. Nothing is blocked — a game wanting the highlight has D87's rule and no crate
 change to wait for.
+
+### X46 — Upstreaming L0, then a minimal mapper
+
+**Gate:** Bevy accepting the gamepad capability layer proposed in [bevy#25757][], which chunks
+165–169 build.
+
+Upstreaming goes in three stages, each a stack of reviewable PRs: the gamepad layer first, then L0
+(device families, raw messages and calibration), and a minimal mapper only on top of those. A first
+PR that is the mapper itself, keyboard only and in 1,000–2,000 lines, was the earlier plan; the
+prototype on the `ported` branch showed a minimal working mapper does not come close to fitting that
+budget.
 
 ### X6 — A presentation crate (`bevy_action_map_ui`)
 
@@ -531,6 +542,7 @@ is a port plus a rewrite. Porting first keeps the two apart: doing both at once 
 [bevy#25675]: https://github.com/bevyengine/bevy/pull/25675
 [bevy#25767]: https://github.com/bevyengine/bevy/pull/25767
 [bevy#25842]: https://github.com/bevyengine/bevy/issues/25842
+[bevy#25757]: https://github.com/bevyengine/bevy/discussions/25757
 [bevy#25847]: https://github.com/bevyengine/bevy/pull/25847
 [bevy#25902]: https://github.com/bevyengine/bevy/pull/25902
 [bevy#25904]: https://github.com/bevyengine/bevy/pull/25904
