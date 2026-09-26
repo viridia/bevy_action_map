@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 44.**
+**Next: 45.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -496,6 +496,15 @@ edits. So the cost today is a hand check on a file already under review, not a c
 sees. Telling the two apart needs a Rust lexer carrying string state, raw strings and `\`-continued
 literals, which is a different tool from the line classifier this is built on; a second file
 acquiring one is what changes that arithmetic.
+
+### X44 — Refreshing `docs/architecture.md`
+
+**Gate:** the author calling a refresh.
+
+The tour is a snapshot, frozen so that a chunk does not pay to keep its diagrams current. A refresh
+is one batch: `git log` from the file's own last commit, over `docs/design.md` and `src/`, lists
+what has moved since. Validate every Mermaid block by rendering it (`mmdc` through `npx`), since
+GitHub shows a broken one as its source text with no error.
 
 ### X42 — Guardian migration
 

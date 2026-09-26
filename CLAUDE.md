@@ -22,6 +22,7 @@ Every section is numbered, so a known target can be reached with `grep -n` for t
 
 | File | Holds | Reach for it when |
 | --- | --- | --- |
+| `docs/architecture.md` | a diagram-led tour of the crate for a new maintainer, unnumbered | you are new to the crate, or a diagram would settle a question faster than prose |
 | `docs/design.md` | how the crate works, in sections `TD<n>` | you need the shape of a thing before changing it |
 | `docs/decisions.md` | why it is that way, in entries `D<n>` | a decision looks arbitrary, or you are about to reverse one |
 | `Roadmap.md` | what is left, what is broken, the chunk sequence | **start here for any chunk** |
@@ -98,6 +99,7 @@ Each document admits one kind of thing, and the test is what distinguishes them.
 | Document | Admits | The test |
 | --- | --- | --- |
 | `docs/design.md` | mechanism, present tense | Would this still be true after the reason for it is forgotten? |
+| `docs/architecture.md` | the shape of the mechanism, taught | Does it help a newcomer build a mental model? A signature, a variant list or an edge case belongs in `design.md`, linked by `TD` section. |
 | `docs/decisions.md` | decisions expensive to reverse | Name what breaks if it is reversed. If you cannot, it is a code comment. |
 | `Requirements.md` | normative statements | Can it be violated? If nothing could violate it, it is design. |
 | `Roadmap.md` | work not done, and gaps | Does it name something that will change? If it describes the present, it is design. |
@@ -108,7 +110,10 @@ Each document admits one kind of thing, and the test is what distinguishes them.
 
 **What has been built is described in exactly one place, `docs/design.md`.** Four documents used to
 describe it; that duplication is what the refactor removed, and re-introducing a second description
-anywhere is the regression to watch for.
+anywhere is the regression to watch for. `docs/architecture.md` is the one sanctioned companion: it
+teaches the shape in diagrams, defers every detail to a `TD` section, and does not argue. It is a
+frozen snapshot, refreshed in batches (X44): a chunk does not update it, even when it changes a flow
+it draws.
 
 ## House style
 

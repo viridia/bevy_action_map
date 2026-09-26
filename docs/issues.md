@@ -328,6 +328,8 @@ any one of them is misled about a mechanism.
 
 - TD3's trait sketch says `// plus CATEGORY and CONSUME, with defaults`. The constant is `CONSUMES`.
   Copying the sketch into a hand-written impl does not compile.
+- TD5.6's `Fired<A>` sketch names its target field `context`, and the `bsn!` example under it reads
+  `ev.context`. The field is `entity` (`event.rs`), so the example does not compile.
 
 ### 1032 Internal comments whose stated reason is false
 
@@ -365,6 +367,8 @@ any one of them is misled about a mechanism.
   this is not about applying. Two others, both in `overrides.rs` and both about the serialized form
   (now TD10.3), went with 117e. **Small — worth a minute alongside the R14.10 mis-citation above,
   not worth a pass of its own.**
+- **TD11's layout tree lists `bevy_action_map_macros/`** as a directory beside `src/`. The crate of
+  that name lives in `macros/`.
 
 ### 1055 Split Friction teaches a disputed claim about somebody else's crate
 
