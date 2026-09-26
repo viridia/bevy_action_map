@@ -526,8 +526,9 @@ fn reflow_paragraphs(
     let mut in_fence = false;
     let mut para: Option<Paragraph> = None;
 
-    for (line_no, line) in (start_line..).zip(text.lines()) {
-        let content = line.strip_prefix(base_indent).unwrap_or(line);
+    // `text` arrives with `base_indent` already removed. Stripping it again would eat a doc comment
+    // inside a doc example, whose content itself starts with `/// `.
+    for (line_no, content) in (start_line..).zip(text.lines()) {
         let trimmed = content.trim_start();
         let indent = &content[..content.len() - trimmed.len()];
 
@@ -1027,6 +1028,12 @@ mod tests {
     fn fenced_code_blocks_are_untouched_however_long() {
         let input = "/// ```rust\n/// let x = some_very_long_identifier_that_would_never_fit_on_an_eighty_column_line;\n/// ```\n";
         assert_eq!(rust(input, 40), input);
+    }
+
+    #[test]
+    fn a_doc_comment_inside_a_doc_example_keeps_its_marker() {
+        let input = "/// ```rust\n/// /// A resource.\n/// struct Known;\n/// ```\n";
+        assert_eq!(rust(input, 100), input);
     }
 
     #[test]
