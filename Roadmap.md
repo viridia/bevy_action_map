@@ -556,7 +556,7 @@ providers, and neither is special.
   coverage as a closure.
 - **Not `PromptSource`**, which decides which controls a prompt names. This decides how they are
   drawn.
-- **Not the packaging**, which is chunk 172.
+- **Not the packaging**, which is chunk 172a.
 - **Verified by:** `crates/bevy_action_map/tests/prompt_ui.rs`, plus a test that the first provider
   to answer wins; `prompt_gallery` and Disasteroids drawing the art they drew before;
   `scripts/verify.sh --full` for the Steam build, and the author running it to see Steam's pad
@@ -564,33 +564,56 @@ providers, and neither is special.
 - **On landing:** that the presentation layer ships no art, and takes it from sibling providers, is
   an entry in `docs/decisions.md`.
 
-### 172. `bevy_action_map_ui`, from `examples/common/` · E[3]
+### 172a. `bevy_action_map_ui`, starting with prompts · E[3]
 
 `prompt_ui.rs` and `widget_focus.rs` are the layer door 3 of `docs/one-way-doors.md` says an input
 crate cannot own: drawing prompts, and a `bevy_ui_widgets` bridge for a controls screen. Both are
 written against the public API and reach their users by `#[path]`, the Steam build included. They
-become `crates/bevy_action_map_ui/`, published beside the base crate.
+become `crates/bevy_action_map_ui/`, published beside the base crate, a layer at a time. Prompts
+come first: neither file uses the other, and prompts are the half with tests.
 
 - **Depends on chunks 170 and 171**: 170 leaves `prompt_ui.rs` with no path into `assets/`, and 171
   leaves a workspace for the crate to join.
-- **The public shape is proposed before it is built**: what is `pub`, which plugins there are, and
-  which of the prompt components and resources keep their names.
+- **The crate is created here**, with prompts as its first module. Its public shape is proposed
+  before it is built: what is `pub`, which plugins there are, and which of the prompt components and
+  resources keep their names.
+- **Ships no art.** The Kenney provider stays in `examples/common/` beside `assets/`, and the Steam
+  provider in `steam_examples/`.
+- **`crates/bevy_action_map/tests/prompt_ui.rs` moves into the ui crate**, and its `#[path]` goes.
+  Until it does, the base crate's package ships a test that cannot build from the package, since the
+  file it includes is outside it.
+- **Both published crates carry the license files.** The base stopped shipping `LICENSE-MIT` and
+  `LICENSE-APACHE` when it moved under `crates/`, and the ui crate starts without them; whether each
+  crate gets copies or links is settled here.
+- **Not the focus bridge**, which is 172b, and with it door 3's path: the layer is half moved until
+  then.
+- **Not upstreaming it**, which is X48.
+- **Verified by:** `scripts/verify.sh --full --doc`, `prompt_gallery`, Disasteroids and Split
+  Friction drawing the prompts they drew before, the author running the Steam build, and
+  `cargo package --list` for both crates showing the license files and no test reaching outside its
+  crate.
+
+### 172b. The focus bridge joins `bevy_action_map_ui` · E[3]
+
+`widget_focus.rs`, the `bevy_ui_widgets` bridge a controls screen is built on, becomes the ui
+crate's second module, completing the layer 172a started.
+
+- **Depends on chunk 172a**, for the crate and the shape its public API took.
+- **The public shape is proposed before it is built**, as for prompts: what is `pub`, and which
+  plugin a game adds.
 - **`WidgetKind` is published as the crate's own**, a newtype over a string that Bevy's own id
   replaces once [bevy#25592][] gives one, which is X8. The crate is the bridging crate R22.9 names
   as the one place allowed to know both widgets and mapping.
-- **Ships no art.** The Kenney provider stays in `examples/common/` beside `assets/`, and the Steam
-  provider in `steam_examples/`.
 - **Its docs owe a game the warning** `widget_focus.rs` carries today: `InputDispatchPlugin` in
   `DefaultPlugins` activates a focused `Button` on a key a context has consumed, so a game using
   both disables it.
-- **`crates/bevy_action_map/tests/prompt_ui.rs` moves into the ui crate**, and its `#[path]` goes.
 - **Paths that follow it:** X2 and X5 name `widget_focus.rs`, and door 3 names `examples/common/` as
   where the layer sits. R22.7 and R22.8's annotations name the file too, and R22.8's calls the
   focus-kind contexts example-side for want of X8, which this makes crate API of the ui crate.
 - **Not upstreaming it**, which is X48.
-- **Split if it grows**: prompts and focus are separable.
-- **Verified by:** `scripts/verify.sh --full --doc`, every example launching and drawing what it
-  drew before, and the author running the Steam build.
+- **Verified by:** `scripts/verify.sh --full --doc`, the controls screens and menus of Disasteroids
+  and Split Friction navigating as before, `disasteroids/rebind.py` and `disasteroids/pad.py`
+  passing, and the author running the Steam build.
 
 ---
 

@@ -124,8 +124,8 @@ budget.
 
 **Gate:** X46's minimal mapper accepted into Bevy.
 
-`bevy_action_map_ui`, which chunk 172 extracts, can go upstream only above an input crate that is
-already there: Bevy cannot ship a crate depending on a third-party one. Whether it goes is
+`bevy_action_map_ui`, which chunks 172a and 172b extract, can go upstream only above an input crate
+that is already there: Bevy cannot ship a crate depending on a third-party one. Whether it goes is
 independent of whether it exists, and on the gate it is ported onto the upstream mapper's API rather
 than moved, since X46 is a fresh implementation.
 
@@ -134,7 +134,7 @@ than moved, since X46 is a fresh implementation.
 **Gate:** [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native
 widget-kind id, landing in a Bevy this crate pins.
 
-Chunk 172 publishes `WidgetKind` in `bevy_action_map_ui`, a newtype over a string, rather than wait
+Chunk 172b publishes `WidgetKind` in `bevy_action_map_ui`, a newtype over a string, rather than wait
 for that conversation. On the gate the ui crate's copy is replaced by Bevy's, a breaking change a
 0.x crate can take. The base crate never gains it: R22.9 keeps widget knowledge in a bridging crate.
 
