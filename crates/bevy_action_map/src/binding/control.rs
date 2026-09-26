@@ -362,6 +362,18 @@ pub(crate) fn normalize_character(character: char) -> char {
     }
 }
 
+/// The normalized character `text` holds, if it holds exactly one. A key event's text and a
+/// `char/` name read by [`Control::from_name`] both decide a logical key through this, so a name
+/// that loads is one a key can produce.
+#[cfg(feature = "keyboard")]
+pub(crate) fn single_character(text: &str) -> Option<char> {
+    let mut characters = text.chars();
+    match (characters.next(), characters.next()) {
+        (Some(single), None) => Some(normalize_character(single)),
+        _ => None,
+    }
+}
+
 /// Mouse motion as a binding input.
 ///
 /// ```ignore
@@ -1066,5 +1078,14 @@ mod tests {
         assert_eq!(LogicalKey('İ').character(), 'İ');
         // And untouched where there is no case to fold.
         assert_eq!(LogicalKey('+').character(), '+');
+    }
+
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn only_a_single_character_names_a_logical_key() {
+        assert_eq!(single_character(""), None);
+        assert_eq!(single_character("z"), Some('z'));
+        assert_eq!(single_character("Z"), Some('z'));
+        assert_eq!(single_character("´e"), None);
     }
 }

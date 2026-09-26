@@ -200,6 +200,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 164  | Child crates under `crates/`                                          |
 | 171  | The root crate moves under `crates/`                                  |
 | 163  | Local multiplayer's types in the prelude                              |
+| 144  | One rule for what counts as a character                               |
 
 ---
 
@@ -212,7 +213,6 @@ its identity rather than its position.
 * 115: A timing declared as a tunable
 * 122: The wheel as a binding source
 * 143: One apply, for the world or for an entity
-* 144: One rule for what counts as a character
 * 28: Docs that run
 * 33: Conditions that read other actions
 
@@ -667,21 +667,6 @@ only through `apply_overrides`, so a change made to one copy and not the other f
   shared default and every instance, and `apply_to_entity` rewrites one instance. Those are two
   operations rather than a copy of one.
 - **Verified by:** the new test, the existing suite unchanged, and no diff in `examples/`.
-
-### 144. One rule for what counts as a character · E[1]
-
-A logical key is decided from text in two places: `eval.rs`'s `bound_character`, from a key event's
-`Key::Character`, and `Control::from_name` (`present.rs`), from a saved `char/` name. Both take
-exactly one `char`, then `normalize_character`, written out twice. The two have to agree — a saved
-name is only good if a key event can produce the same character — and nothing makes them.
-
-- **One `pub(crate) fn single_character(text: &str) -> Option<char>`** beside `normalize_character`
-  in `binding/control.rs`, returning the normalized character when `text` holds exactly one.
-  `bound_character` and `from_name` both call it.
-- **Not doing: `normalize_character`'s own one-character match.** It asks whether lowercasing is
-  one-for-one, which is a different question.
-- **Verified by:** a unit test on `single_character` (empty, one, two, uppercase), `from_name`'s
-  existing `char/` tests unchanged, and no diff in `examples/`.
 
 ### 112. A backend suppresses a device family at L0 · E[2]
 

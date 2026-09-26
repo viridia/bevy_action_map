@@ -427,13 +427,7 @@ impl Control {
         if let Some(character) = name.strip_prefix("char/") {
             // Exactly one character, so that a corrupt row cannot arrive as a control nothing could
             // ever press. `/` needs no escape: the remainder is taken whole.
-            let mut characters = character.chars();
-            return match (characters.next(), characters.next()) {
-                (Some(single), None) => Some(Self::LogicalKey(
-                    crate::binding::normalize_character(single),
-                )),
-                _ => None,
-            };
+            return crate::binding::single_character(character).map(Self::LogicalKey);
         }
         #[cfg(feature = "gamepad")]
         if let Some(button) = button_from_name(name) {

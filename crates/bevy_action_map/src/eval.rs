@@ -415,11 +415,7 @@ fn bound_character(logical_key: &bevy_input::keyboard::Key) -> Option<char> {
     let bevy_input::keyboard::Key::Character(text) = logical_key else {
         return None;
     };
-    let mut characters = text.chars();
-    match (characters.next(), characters.next()) {
-        (Some(single), None) => Some(crate::binding::normalize_character(single)),
-        _ => None,
-    }
+    crate::binding::single_character(text)
 }
 
 impl<C: InputContext> InputContextState<C> {
