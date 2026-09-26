@@ -5,25 +5,29 @@
 # A warning counts as a failure here even though cargo's own exit code ignores it, because
 # CLAUDE.md's convention is that this tree is warning-free in every configuration below.
 #
-# Usage: scripts/verify.sh [--full] [--doc]
-#   --full   also builds all eight device-feature combinations, and the Steam examples. Only
-#            needed when a `cfg` group changed — see CLAUDE.md's "Context, and what not to
-#            economize on" — or when `examples/disasteroids` did, so it is not part of the
-#            default run.
-#   --doc    also runs the doctests. Out of the default run because the doc examples are stable
-#            and the step pays for a separate compile of the merged doctest binary.
+# Usage: scripts/verify.sh [--full] [--doc] [--matrix]
+#   --full    also builds all eight device-feature combinations, and the Steam examples. Only
+#             needed when a `cfg` group changed — see CLAUDE.md's "Context, and what not to
+#             economize on" — or when `examples/disasteroids` did, so it is not part of the
+#             default run.
+#   --doc     also runs the doctests. Out of the default run because the doc examples are stable
+#             and the step pays for a separate compile of the merged doctest binary.
+#   --matrix  builds the eight device-feature combinations and nothing else, for the edit loop
+#             while a `cfg` group is changing.
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 full=0
 doc=0
+matrix=0
 for arg in "$@"; do
     case "${arg}" in
         --full) full=1 ;;
         --doc) doc=1 ;;
+        --matrix) matrix=1 ;;
         *)
-            echo "usage: $0 [--full] [--doc]" >&2
+            echo "usage: $0 [--full] [--doc] [--matrix]" >&2
             exit 2
             ;;
     esac
@@ -84,6 +88,31 @@ run_doc_step() {
     unset DYLD_FALLBACK_LIBRARY_PATH
 }
 
+# Through `run_step`, so a combination that builds with warnings fails like any other step.
+run_matrix() {
+    for combo in "" keyboard mouse gamepad keyboard,mouse keyboard,gamepad mouse,gamepad \
+        keyboard,mouse,gamepad; do
+        run_step "device matrix [${combo}]" \
+            cargo check -p bevy_action_map --no-default-features --features "std,bevy_reflect,${combo}"
+    done
+}
+
+summarize() {
+    echo "=================================="
+    if [[ ${failed} -eq 0 ]]; then
+        echo "All checks passed."
+    else
+        echo "FAILED:"
+        printf '  - %s\n' "${fail_names[@]}"
+    fi
+    exit ${failed}
+}
+
+if [[ ${matrix} -eq 1 ]]; then
+    run_matrix
+    summarize
+fi
+
 # First because it costs milliseconds, and because a reference that stopped resolving is the one
 # kind of breakage nothing else here would ever notice.
 run_step "scripts/xref.py" python3 scripts/xref.py --quiet
@@ -105,20 +134,7 @@ run_step "cargo test -p bevy_action_map --no-default-features --features std,mou
     cargo test -p bevy_action_map --no-default-features --features std,mouse,gamepad --test focus_loss_without_keyboard
 
 if [[ ${full} -eq 1 ]]; then
-    echo "== device-feature matrix =="
-    for combo in "" keyboard mouse gamepad keyboard,mouse keyboard,gamepad mouse,gamepad \
-        keyboard,mouse,gamepad; do
-        out=$(cargo check -p bevy_action_map --no-default-features --features "std,bevy_reflect,${combo}" 2>&1)
-        if [[ $? -ne 0 ]]; then
-            printf '%s\n' "${out}"
-            echo "FAILED: device matrix [${combo}]"
-            failed=1
-            fail_names+=("device matrix [${combo}]")
-        else
-            echo "pass: [${combo}]"
-        fi
-    done
-    echo
+    run_matrix
 
     # Outside the workspace, so nothing above builds it, and its modules are the base Disasteroids'
     # linked by path: a change there breaks this crate without touching a file in it. A check needs
@@ -127,11 +143,4 @@ if [[ ${full} -eq 1 ]]; then
         cargo clippy --manifest-path steam_examples/Cargo.toml
 fi
 
-echo "=================================="
-if [[ ${failed} -eq 0 ]]; then
-    echo "All checks passed."
-else
-    echo "FAILED:"
-    printf '  - %s\n' "${fail_names[@]}"
-fi
-exit ${failed}
+summarize
