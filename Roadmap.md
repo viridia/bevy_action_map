@@ -285,6 +285,87 @@ than a line drawn.
 - **Verified by:** the no-devices build and the eight-combination matrix, since the prelude is a
   `cfg` group, and the examples building with the path imports gone.
 
+## Gamepad devices, for upstream
+
+Bevy's `Gamepad` component is filled by `bevy_gilrs` alone, and holds live readings. A pad from any
+other backend, Steam Input above all, has none, so the questions a game asks of a pad (which are
+connected, what kind, what it can do, how much charge is left) have no vendor-neutral place to be
+answered. [bevy#25757][] proposes that Bevy own that place; a concrete design with a working
+prototype is what the proposal needs.
+
+The prototype is a module, `src/gamepad/`, written as it would sit in `bevy_input`: it depends on
+Bevy alone, and the rest of the crate depends on it. Not a crate of its own, because a crates.io
+name is permanent and this one would be abandoned once `bevy_input` takes the work, and because
+`bevy_action_map` cannot publish while depending on an unpublished crate.
+
+### 165. `src/gamepad/`, and the two pieces that exist · E[3]
+
+- **`ConnectedGamepad` and `Brand` move in** from `device.rs`, with what maintains them:
+  `mark_gamepad_connected` and its removal twin, `GamepadBrand`, `GamepadBrands` and resolution.
+  Gated on `gamepad`, as now. `device` re-exports them, so the examples do not change.
+- **Whether `GamepadModelId` moves too** is decided here. It is a fact about the pad, but
+  `DeviceId`'s persistence, which stays in the mapper, is built from it.
+- **A boundary scan in `scripts/verify.sh`:** a `crate::` path under `src/gamepad/` that leaves the
+  module fails the run. Validated first against a planted import.
+- **Verified by:** `scripts/verify.sh --full`, since the `gamepad` cfg group moves, and no diff in
+  `examples/`.
+
+### 166. Capabilities and battery, from gilrs · E[3]
+
+R11.3 and R14.7, and `docs/issues.md` 1047, which it replaces. Nothing answers a capability question
+(rumble, motion, touchpad, LED) or reports battery, so R18's prompts and a "can this player play at
+all" check have nothing to call. Bevy has no source either: in 0.20.0-rc.1 `Gamepad` holds a vendor
+id, a product id and live readings, and rumble exists only as an outgoing `GamepadRumbleRequest`.
+
+- **First, what gilrs knows.** If it reports force-feedback support and power state and `bevy_gilrs`
+  drops them, part of the upstream change is to stop dropping them. The prototype reads them through
+  what `bevy_gilrs` exposes, or states what it would have to expose.
+- **Capabilities as one component or as markers** is decided here. Markers let a query ask
+  `With<…>`; one struct is simpler for a prompt to take whole.
+- **Battery is state, not a capability.** It changes while the pad is connected, so it is a
+  component of its own, updated in place, and absent where the backend has no reading.
+- **The module doc names capability data again**, which chunk 117k removed from `device.rs` for
+  having nothing behind it.
+- **Verified by:** a headless test with a synthetic backend filling the components, and the
+  DualSense fixture reporting its battery.
+
+### 167. Rumble as a component · E[3]
+
+R14.6. Rumble is an event today: a game addresses a `GamepadRumbleRequest` to a pad's entity and
+times it itself. A `Rumble` component on that entity is a level instead, and the pad rumbles at its
+value while it is set.
+
+- **Who owns the value is this chunk's decision.** Gameplay and UI both want to set it: last write
+  wins, the strongest wins, or the component holds sources and combines them. Which of these keeps a
+  level simpler than an event is the question.
+- **gilrs is driven from it** by a system that turns changes into `GamepadRumbleRequest`s, so the
+  prototype asks nothing of `bevy_gilrs`.
+- **Routing is the mapper's half**, outside `src/gamepad/`: a player, their `Paired` device entity,
+  its `Rumble`.
+- **Verified by:** a headless test on the requests emitted, and a pad by hand.
+
+### 168. The Steam build fills them · E[3]
+
+The proof that the design is vendor-neutral: `steam_examples/` inserts `ConnectedGamepad`, `Brand`,
+capabilities and battery on its own pad entities, and drives `Rumble` through Steam's own API.
+
+- **Brand overlaps 151e**, which maps `InputType` onto `GamepadBrand`. Whichever lands second reuses
+  the other's mapping.
+- **Steam's battery can be wrong**, reporting a profile's rather than the pad's (`docs/steam.md`
+  S8). Whether that means "absent" is measured here, not assumed.
+- **Verified by:** an audit with a running client and a pad, as for the rest of the Steam section.
+
+### 169. The design proposal · E[2]
+
+A document for Bevy's maintainers: the problem, the components, how each backend fills them, and
+what changes for users of `Gamepad`. Written for that audience, and for the author to edit and post.
+
+- **Beside `Gamepad`, or a split of it,** is the question the proposal has to answer. The prototype
+  sits beside it, because a module outside `bevy_input` cannot change it; the proposal may argue for
+  either.
+- **Drafted at any point, finished after 168**, so each claim has been run on both backends.
+- **Links the prototype**, and says how `src/gamepad/` maps onto `bevy_input`'s files.
+
 ---
 
 ## Bindings and conditions
@@ -612,6 +693,25 @@ one device, so what is left is a family switch (D93).
 - **Review surface:** read the rendered docs, not the diff. `cargo doc --all-features --open`, and
   look at the module pages the way a stranger would.
 
+### 164. Child crates under `crates/` · E[2]
+
+The workspace members `macros/` and `bevy_remote_driver/` sit at the root beside the crate's own
+`src/`. Bevy's layout keeps the root as the main crate and every other member in `crates/`, each
+directory named after its crate, and this repository follows it.
+
+- **`macros/` becomes `crates/bevy_action_map_macros/`, and `bevy_remote_driver/` becomes
+  `crates/bevy_remote_driver/`.** `tools/`, `steam_examples/` and `steam_probe/` are outside the
+  workspace and stay.
+- **The driver gets `publish = false`, and the root's dev-dependency on it drops its `version`**, so
+  publishing `bevy_action_map` asks nothing of the driver (X45). The published package still carries
+  examples that name it; building those from the tarball fails, which is accepted.
+- **Every path follows:** the seven files naming `bevy_remote_driver/`, among them `CLAUDE.md`'s
+  end-to-end command, `run.py` and `scripts/verify.sh`, and the root `Cargo.toml`'s two `path`s.
+- **The move is its own commit**, ahead of the path edits, so each file's history follows it.
+- **Verified by:** `scripts/verify.sh --full`, no diff in `examples/`, one end-to-end run, and
+  `cargo package --no-verify` with the packaged manifest checked for the driver's absence. A full
+  dry run needs the macros crate published first.
+
 ---
 
 ## Driving an example from outside
@@ -623,8 +723,8 @@ an element by a path of names, click it, wait until what it opens exists and has
 screenshot, quit — all over HTTP and JSON.
 
 It is developed here because that is faster, as a workspace member (`bevy_remote_driver/`) with its
-own documents, and is meant to leave as a standalone crate, so what it needs travels with it. Which
-of its server methods are proposed upstream to Bevy is a separate question, and DD8's.
+own documents, so what it needs travels with it if it leaves; whether it does is X45's. Which of its
+server methods are proposed upstream to Bevy is a separate question, and DD8's.
 
 ### 149. The mapper's `remote` feature · E[2]
 
@@ -751,3 +851,4 @@ prelude are the candidates, 48 at the first run.
 ---
 
 [bevy#19741]: https://github.com/bevyengine/bevy/issues/19741
+[bevy#25757]: https://github.com/bevyengine/bevy/discussions/25757

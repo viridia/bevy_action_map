@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 45.**
+**Next: 46.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -88,7 +88,8 @@ limit: a crate published against an rc pins its users to a version about to be s
 entry holds is the order. A change that breaks the public API is free until the first publish and
 costly after it, so those land first: chunk 161's narrowing of public items is one, and so is any
 reshaping of the extensibility mechanism. The README's "Not on crates.io yet" section changes with
-the publish.
+the publish. Chunk 164 lands first, since until then the root's dev-dependency on the driver
+declares a version crates.io would have to supply.
 
 ## 2. An upstream decision still open
 
@@ -359,7 +360,15 @@ takes focus. Measured here: whether Steam's overlay toast appears in a game Stea
 
 ## 5. The remote driver
 
-These leave with the driver, into its own documents, when it moves out of this repository.
+These leave with the driver, into its own documents, if it moves out of this repository.
+
+### X45 — What the driver becomes
+
+**Gate:** X30's briefs answered, which says which of the driver's methods Bevy takes.
+
+The driver is `publish = false` (chunk 164), and nothing in `bevy_action_map` needs it published.
+What Bevy declines is the candidate for a standalone crate, and the Python client goes with it, or
+is rewritten, since a script does not ship well inside a published crate.
 
 ### X30 — Proposing the driver's server methods upstream (DD8)
 

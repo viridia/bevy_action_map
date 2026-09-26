@@ -208,23 +208,6 @@ pieces exist; what is missing is a way to stop `InputFramePlugin` scheduling sam
 Floated as a companion to chunk 83's rewind; chunk 83 says to confirm the need before routing it
 there.
 
-### 1047 Capability queries are absent for devices the crate already models
-
-R11.3 (MUST) · `device.rs`
-
-The module's own doc claims "capability data" (`device.rs:5`); nothing answers a capability question
-anywhere in the crate — no rumble, motion/gyro, touchpad, battery or LED query, and no way to ask
-what controls a device has beyond matching on `DeviceHandle`'s own closed kind. R18's prompts and
-any "can this player play at all" check — R11.3's own two named callers — have nothing to call.
-
-Unlike the device model's closedness (D65), this isn't about admitting an unknown device kind — a
-gamepad's rumble motors and battery level are things `bevy_input`'s own `Gamepad` component already
-reports. Nothing here reads them.
-
-Chunk 117k removed the module doc's claim rather than leaving it promising a MUST with nothing
-behind it. Whatever lands this puts it back: `device.rs`'s summary line and its second paragraph
-both list what the module holds, and capabilities belong in both once they exist.
-
 ### 1048 Virtual devices have no first-class support
 
 R11.8 (SHOULD) · no citation anywhere in `src/`
