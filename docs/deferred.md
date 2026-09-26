@@ -28,14 +28,15 @@ version.
 ### X1 — Deleting the gamepad message registration
 
 **Gate:** this crate's Bevy pin moving past [bevy#25904][], merged to main on 23 September 2026,
-after rc.1.
+after rc.1, and milestoned for 0.20.
 
 `RemoteDriverPlugin` registers `ReflectMessage` for `GamepadConnectionEvent` and `RawGamepadEvent`,
 because `bevy_input`'s nine gamepad messages carry no `reflect(Message)` where the ten in its other
-input modules all do, and `world.write_message` refuses a message without it (DD5.3). Whether it
-makes 0.20 final is not known, so the registration ships rather than waits. What to check on a bump
-is only whether the pinned version has it, because nothing else will say so: `register_type_data`
-over data a type already carries is an overwrite rather than an error, so the redundancy is silent.
+input modules all do, and `world.write_message` refuses a message without it (DD5.3). It is
+milestoned for 0.20, but no release carries it yet, so the registration ships rather than waits.
+What to check on a bump is only whether the pinned version has it, because nothing else will say so:
+`register_type_data` over data a type already carries is an overwrite rather than an error, so the
+redundancy is silent.
 
 ### X2 — Deleting `acquire_focus_directional`
 
@@ -381,14 +382,14 @@ the file first is the obvious answer and is half of one: it makes a run repeatab
 it writing the developer's real settings on the way out, which the bookend does handle. Isolation is
 the whole answer. At rc.1 it costs a platform branch — `XDG_CONFIG_HOME` on Linux, `LOCALAPPDATA` on
 Windows, and on macOS `HOME` itself, since `preferences_dir` is `home_dir()/Library/Preferences`
-with no narrower lever. [bevy#25902][], merged to main on 24 September 2026, after rc.1, makes
-`preferences_dir` honour an absolute `BEVY_SETTINGS_DIR` on all three, so past it isolation is one
-variable in `environment()` in `run.py`. Whichever is built wants a check that the throwaway
-directory was actually written, because a path or variable that is wrong fails silently: nothing is
-deleted, or the redirect does not take, and the plan passes while reading the real file.
-`SettingsPlugin`'s `app_name` is the directory component and is a plain `pub` field, so a per-run
-app id would isolate with no platform code at all — turned down because the example would have to
-read an env var, and a plan drives an example without the example knowing it is under test.
+with no narrower lever. [bevy#25902][], merged to main on 24 September 2026 after rc.1 and
+milestoned for 0.20, makes `preferences_dir` honour an absolute `BEVY_SETTINGS_DIR` on all three, so
+past it isolation is one variable in `environment()` in `run.py`. Whichever is built wants a check
+that the throwaway directory was actually written, because a path or variable that is wrong fails
+silently: nothing is deleted, or the redirect does not take, and the plan passes while reading the
+real file. `SettingsPlugin`'s `app_name` is the directory component and is a plain `pub` field, so a
+per-run app id would isolate with no platform code at all — turned down because the example would
+have to read an env var, and a plan drives an example without the example knowing it is under test.
 
 ### X32 — A step of the mapper's own, or a Python helper over `call`
 
