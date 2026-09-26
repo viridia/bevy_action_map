@@ -983,7 +983,7 @@ mod tests {
     /// And two bindings feeding one row cannot disagree about it either, which the builder cannot
     /// see and the plan can.
     #[test]
-    #[should_panic(expected = "disagree about whether the")]
+    #[should_panic(expected = "one `mappable` and one not")]
     fn two_bindings_feeding_one_mapping_cannot_disagree() {
         #[derive(InputContext)]
         #[context(path = "mapping_tests.disagreeing", tick = Fixed)]
