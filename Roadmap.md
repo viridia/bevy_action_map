@@ -529,6 +529,63 @@ going through a catalogue. The crate's half of R19.14 is done, but the claim tha
   that is a reading of the spec rather than a dependency.
 - **Review surface:** whether the key is the one an author would actually want to type.
 
+### 170. Prompt art from an ordered list of providers · E[2]
+
+`prompt_ui.rs` has Kenney's file layout built in (`IconManifest`, `tier_str`, `icon_path`), and a
+backend's art reaches it only through `ExternalArt`: one slot, consulted for `Glyph::External`
+alone. Kenney is the base and Steam an override that can only fill Kenney's gaps. Both become
+providers, and neither is special.
+
+- **What it is:** a resource in `prompt_ui.rs` holding an ordered list of providers, each a function
+  from a `Glyph` and whether the prompt is a block one to `Option<AssetPath>`. The first answer
+  wins, and the order the plugins are added in is the priority. `ExternalArt` goes.
+- **Coverage is the same question.** The `has_art` closure given to `resolve_glyph` becomes "does
+  any provider answer for this `Glyph::Own`", so the brand-to-generic fallback follows the art that
+  is installed rather than Kenney's manifest.
+- **The Kenney provider** is a module of its own in `examples/common/`, taking the manifest, the
+  tier directories and the `macos/` preference with it. `prompt_ui.rs` ends with no path into
+  `assets/`.
+- **The Steam provider** is `steam_examples/disasteroids/glyphs.rs`, registered ahead of Kenney:
+  Steam's art for the pad, Kenney's for the keys.
+- **With no provider**, every prompt is text, as a control without art is today.
+- **Not the crate.** `src/` is untouched: `resolve_glyph` already takes coverage as a closure.
+- **Not `PromptSource`**, which decides which controls a prompt names. This decides how they are
+  drawn.
+- **Not the packaging**, which is chunk 172.
+- **Verified by:** `tests/prompt_ui.rs`, plus a test that the first provider to answer wins;
+  `prompt_gallery` and Disasteroids drawing the art they drew before; `scripts/verify.sh --full` for
+  the Steam build, and the author running it to see Steam's pad glyphs beside Kenney's keys.
+- **On landing:** that the presentation layer ships no art, and takes it from sibling providers, is
+  an entry in `docs/decisions.md`.
+
+### 172. `bevy_action_map_ui`, from `examples/common/` · E[3]
+
+`prompt_ui.rs` and `widget_focus.rs` are the layer door 3 of `docs/one-way-doors.md` says an input
+crate cannot own: drawing prompts, and a `bevy_ui_widgets` bridge for a controls screen. Both are
+written against the public API and reach their users by `#[path]`, the Steam build included. They
+become `crates/bevy_action_map_ui/`, published beside the base crate.
+
+- **Depends on chunks 170 and 171**: 170 leaves `prompt_ui.rs` with no path into `assets/`, and 171
+  leaves a workspace for the crate to join.
+- **The public shape is proposed before it is built**: what is `pub`, which plugins there are, and
+  which of the prompt components and resources keep their names.
+- **`WidgetKind` is published as the crate's own**, a newtype over a string that Bevy's own id
+  replaces once [bevy#25592][] gives one, which is X8. The crate is the bridging crate R22.9 names
+  as the one place allowed to know both widgets and mapping.
+- **Ships no art.** The Kenney provider stays in `examples/common/` beside `assets/`, and the Steam
+  provider in `steam_examples/`.
+- **Its docs owe a game the warning** `widget_focus.rs` carries today: `InputDispatchPlugin` in
+  `DefaultPlugins` activates a focused `Button` on a key a context has consumed, so a game using
+  both disables it.
+- **`tests/prompt_ui.rs` moves into the crate**, and its `#[path]` goes.
+- **Paths that follow it:** X2 and X5 name `widget_focus.rs`, and door 3 names `examples/common/` as
+  where the layer sits. R22.7 and R22.8's annotations name the file too, and R22.8's calls the
+  focus-kind contexts example-side for want of X8, which this makes crate API of the ui crate.
+- **Not upstreaming it**, which is X48.
+- **Split if it grows**: prompts and focus are separable.
+- **Verified by:** `scripts/verify.sh --full --doc`, every example launching and drawing what it
+  drew before, and the author running the Steam build.
+
 ---
 
 ## Snapshots
@@ -579,6 +636,32 @@ the expensive part.
 
 Work no game asks for and no published crate can do without: the crate's internals kept consistent,
 extension points exercised, and documentation that is true and runs.
+
+### 171. The root crate moves under `crates/` · E[2]
+
+The root manifest is both the workspace and `bevy_action_map`, so the crate's package is the whole
+repository less an `exclude` list, while its macros and the driver already sit under `crates/`. The
+crate moves to `crates/bevy_action_map/` with its `src/` and `tests/`, and the root becomes a
+virtual workspace.
+
+- **The examples become a package of their own**, `examples/Cargo.toml` with `publish = false`,
+  holding the umbrella `bevy`, `bevy_remote_driver` and the two `required-features` entries. Each
+  example is declared, since autodiscovery would look in `examples/examples/`. Not
+  `crates/bevy_action_map/examples/`: once chunk 172 lands they depend on the ui crate, which
+  depends on the base, and that dev-dependency cycle gives unit tests two copies of the base's
+  types. `cargo run --example <x>` still works from the root.
+- **`assets/` stays at the root** with the examples that use it, so every `include_bytes!`,
+  `#[path]` and asset path into `examples/` and `assets/` is unchanged, `steam_examples/`'s
+  included.
+- **The Bevy pins move to `[workspace.dependencies]`**, ahead of a third crate repeating them.
+- **What else changes:** `steam_examples/Cargo.toml`'s path dependency; `scripts/xref.py`'s source
+  list; the Verification commands in `scripts/verify.sh` and `CLAUDE.md`, which gain
+  `-p bevy_action_map` where they pass features; the `exclude` list, which goes; `readme`, pointing
+  at the root README; `tests/prompt_ui.rs`'s `#[path]`, one level deeper; and the 27 backquoted
+  `src/` paths in the markdown documents.
+- **Not the ui crate**, which is chunk 172.
+- **Verified by:** `scripts/verify.sh --full --doc`; `cargo package -p bevy_action_map --list`
+  showing the crate and nothing else; and no diff under `examples/` beyond its new manifest.
 
 ### 143. One apply, for the world or for an entity · E[1]
 
@@ -811,4 +894,5 @@ prelude are the candidates, 48 at the first run.
 ---
 
 [bevy#19741]: https://github.com/bevyengine/bevy/issues/19741
+[bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
 [bevy#25757]: https://github.com/bevyengine/bevy/discussions/25757

@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 48.**
+**Next: 49.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -120,36 +120,23 @@ PR that is the mapper itself, keyboard only and in 1,000–2,000 lines, was the 
 prototype on the `ported` branch showed a minimal working mapper does not come close to fitting that
 budget.
 
-### X6 — A presentation crate (`bevy_action_map_ui`)
+### X48 — Upstreaming the presentation crate
 
-**Gate:** Bevy deciding to take this crate upstream, which is when the workspace has to be arranged
-properly regardless.
+**Gate:** X46's minimal mapper accepted into Bevy.
 
-Until then the layer is `examples/common/` — `prompt_ui.rs` and `widget_focus.rs`, both written
-against the public API with nothing added to the crate for them. What is deferred is packaging, not
-work; the cost of waiting is a `#[path]` import. The crate's docs owe a game the warning
-`widget_focus.rs` carries today: `InputDispatchPlugin` in `DefaultPlugins` activates a focused
-`Button` on a key a context has consumed, so a game using both disables it. The crate ships no art:
-Kenney's set and a backend's such as Steam's are sibling sources, both out of tree, where
-`prompt_ui.rs` today treats the in-tree Kenney atlas as the base and Steam's art as an override on
-top of it.
+`bevy_action_map_ui`, which chunk 172 extracts, can go upstream only above an input crate that is
+already there: Bevy cannot ship a crate depending on a third-party one. Whether it goes is
+independent of whether it exists, and on the gate it is ported onto the upstream mapper's API rather
+than moved, since X46 is a fresh implementation.
 
-### X7 — The generic tier's art
-
-**Gate:** X6, which is when the Kenney art source has to be offered with no holes in it.
-
-Kenney's generic set is blank, unlabeled buttons, so each generic face button needs a short text
-stamp authored onto it by hand: content work with a known answer, and no code. Until then an
-unrecognized pad's face buttons resolve to text, which is also where the fallback chain shows itself
-in tree, on Disasteroids' Cancel and Confirm and in the gallery's Generic brand.
-
-### X8 — Promoting `WidgetKind` and the per-kind context into the crate
+### X8 — Replacing `WidgetKind` with Bevy's own
 
 **Gate:** [bevy#25592][], the author's own upstream proposal for a `bevy_ui_widgets`-native
-widget-kind id.
+widget-kind id, landing in a Bevy this crate pins.
 
-Promoting a shape this crate invented first, ahead of that conversation, risks committing to the
-wrong one.
+Chunk 172 publishes `WidgetKind` in `bevy_action_map_ui`, a newtype over a string, rather than wait
+for that conversation. On the gate the ui crate's copy is replaced by Bevy's, a breaking change a
+0.x crate can take. The base crate never gains it: R22.9 keeps widget knowledge in a bridging crate.
 
 ### X9 — Whether an action is live, as something a hint can follow (R18.2's withdrawal)
 
@@ -489,6 +476,16 @@ even 151e has nothing to attach.
 
 Nothing in this crate's supported platforms emits a suspend signal or has a device re-enumeration
 step to hook.
+
+### X7 — The generic tier's art
+
+**Gate:** someone outside this repository wanting the Kenney provider, which is when it leaves
+`examples/common/` and has to be offered with no holes in it.
+
+Kenney's generic set is blank, unlabeled buttons, so each generic face button needs a short text
+stamp authored onto it by hand: content work with a known answer, and no code. Until then an
+unrecognized pad's face buttons resolve to text, which is also where the fallback chain shows itself
+in tree, on Disasteroids' Cancel and Confirm and in the gallery's Generic brand.
 
 ## 7. Tooling, and other projects
 

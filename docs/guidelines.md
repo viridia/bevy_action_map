@@ -12,7 +12,7 @@ belongs there, and why a particular choice was made belongs in [`decisions.md`](
 **Numbering.** Each guideline's number is a permanent identity from a single counter, independent of
 its group, and never reused. A gap in the sequence is a retired guideline.
 
-**Next: 20.**
+**Next: 21.**
 
 ---
 
@@ -76,6 +76,16 @@ An observation nobody can explain does not become guidance in the README, a requ
 design. Record what was seen, and any proposed cause as a hypothesis a measurement could falsify, on
 the chunk that will run it; it becomes a `docs/steam.md` entry once measured. A rule written around
 a symptom hardens a guess into documentation.
+
+### G20 — Care where the game developer will not
+
+The crate's value is care the developer would not spend: many small details, each cheap to learn
+once known about, that players notice when wrong and nobody praises when right. Deliver that care as
+the path of least resistance, so the correct behaviour is what a game gets without asking. Leave out
+what a developer is good at or motivated to get right, such as presentation, tuning and their own
+settings format, and what lies outside this project's experience to get right, such as measuring
+worn hardware. For either, a recipe in the docs can transfer the knowledge without code. Chunk 72b
+applied both: persistence went to the app, and measuring went to X47.
 
 ### G19 — Estimate effort on an exponential scale
 
