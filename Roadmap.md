@@ -210,6 +210,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 168  | The Steam build fills them                                            |
 | 169  | The design proposal                                                   |
 | 175  | Every mention of a name, in one call                                  |
+| 176  | A dependency's source, at the locked version                          |
 
 ---
 
@@ -737,19 +738,6 @@ boundaries with `pulldown-cmark`, and keeps devfmt's rewrap and `--diff` scoping
   item, and a string literal starting with `///`.
 - **Not done:** retiring devfmt, or rendering Markdown through the parser, which would restyle every
   document.
-
-### 176. A dependency's source, at the locked version · E[1]
-
-`scripts/depsrc.sh <crate> [grep arguments]` finds the version `Cargo.lock` holds for a crate,
-resolves its source directory in the cargo registry, and greps it, or prints the directory when no
-pattern is given. Settling how Bevy or gilrs behaves otherwise takes a `ls -d` over the registry and
-a shell variable per call.
-
-- **A crate locked at two versions** lists both and asks for one.
-- **Verified by:** `bevy_gilrs` resolving to 0.20.0-rc.1, and a crate absent from the lock exiting
-  non-zero.
-- **Not done:** git dependencies, and the Bevy checkout at `~/Projects/games/bevy`, which tracks
-  upstream `main` rather than the locked version.
 
 ### 177. An example, launched and checked · E[1]
 

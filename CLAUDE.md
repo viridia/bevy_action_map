@@ -287,7 +287,9 @@ Sessions run out before the work does. But the value of working this way is noti
 separated things disagree, and that is not free — so cut waste, not reading. Distinguish:
 
 - **A lookup**: you know what you need and where it lives. Go straight there. Reading the whole file
-  is waste.
+  is waste. In a dependency, `scripts/depsrc.sh <crate> <pattern>` greps the locked version's source
+  and prints its directory, which the Read tool then takes as an absolute path; a `cd` into the
+  registry prompts every time.
 - **A sweep**: you are looking for something you do not yet know to look for — a decision that moved
   and left a stale copy behind, a requirement the change quietly contradicts, a `cfg` group that now
   spans a configuration nobody has built. This costs context and is worth it, and it has repeatedly

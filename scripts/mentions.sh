@@ -9,7 +9,7 @@
 # long table row cannot flood the transcript. The count goes to stderr.
 #
 # Usage: scripts/mentions.sh [git-grep options] <pattern>
-#   The pattern is an extended regular expression. Options such as -i or -w pass through.
+#   The pattern is a Perl-compatible regular expression. Options such as -i or -w pass through.
 #   Exits 1 when there is no match, as grep does.
 
 set -uo pipefail
@@ -25,7 +25,8 @@ fi
 pattern="${!#}"
 opts=("${@:1:$#-1}")
 
-out="$(git grep --untracked -I -n -E --break --color=never "${opts[@]+"${opts[@]}"}" \
+# Perl syntax rather than -E: macOS's POSIX regex gives `\b` no meaning, and matches nothing.
+out="$(git grep --untracked -I -n -P --break --color=never "${opts[@]+"${opts[@]}"}" \
     -e "${pattern}" -- . ':!archive/')"
 status=$?
 if [[ ${status} -ne 0 ]]; then
