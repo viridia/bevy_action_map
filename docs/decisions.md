@@ -585,6 +585,11 @@ stage-2 dead zone entirely leaves a drifting stick that is never seen at rest â€
 recovers. What the latch guards against is a _fire_ synthesized from a control already held, and an
 analog action has none to synthesize.
 
+**Where it is judged.** Per binding, after the press threshold and before the conditions, which see
+rest while it is armed. Judged on the action's value after conditions, it lifted on the tick after
+activation, since a hold still charging contributes rest, and the hold then charged and fired on the
+pre-held key; a tap or a hold-and-release would fire on its release. Moving it back reopens both.
+
 ### D94 â€” A key that arrives or goes away while down is treated alike on every path
 
 **Decided.** A context can gain or lose a key the player is holding without the player pressing or

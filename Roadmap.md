@@ -214,6 +214,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 156  | Navigating from no focus                                              |
 | 179a | `Started<A>` reaches observers, with a tick-script fixture            |
 | 179b | A hold charges once per tick                                          |
+| 179c | Require-reset holds through a time condition                          |
 
 ---
 
@@ -241,27 +242,6 @@ an interruption. What happens once per tick has to land on exactly one of them, 
 that wrong in different places. They are lettered because each part's tests assume the one before.
 Each part writes its tests on `Script`, the tick-script fixture in `eval.rs`'s tests, extending it
 where a part needs more than events and a `delta` per tick.
-
-### 179c. Require-reset holds through a time condition · E[2]
-
-`commit_slot` holds a `Button` action back while its value reads pressed, and clears the latch the
-first time it reads rest. The value it checks is taken after conditions, and a binding whose hold is
-still `Building` contributes rest. So the latch clears on the first tick after activation with the
-key still down, and the hold charges and fires. Probed: Space held across `deactivate`/`activate`
-with `hold(0.25)` gave `Started`, `Building`, `Fired`. R7.5 fails for every binding with a time
-condition, through `activate`, `enable` (R3.7) and `unshadow` alike.
-`a_context_activating_ignores_a_control_already_held` binds plainly, which is why it passes.
-
-- **The fix:** the latch is decided in `fold`, between the press threshold and the conditions,
-  rather than in `commit_slot` after them. While a `Button` slot is latched, each binding still runs
-  its modifiers and threshold, notes whether the result reads pressed, and hands rest to its
-  conditions; the stage's conditions then see rest too, since the fold is rest. After the binding
-  loop, a latched slot whose bindings all read rest clears. So a hold never charges on a pre-held
-  key, and a latched binding never claims its control from the context below.
-- **Not in `commit_slot`:** reading the pre-condition value there would fix the hold but not `Tap`
-  or `HoldAndRelease`, which would fire on releasing the key held across activation. The latch check
-  in `commit_slot` goes.
-- **Verified by** the probe above with `hold`, `tap` and `hold_and_release` each.
 
 ### 179d. A claim arriving cancels what it took · E[2]
 
@@ -296,6 +276,32 @@ already down is ignored by `Button` actions until released.
 - **The lift rule joins R8.2.**
 - **Depends on 179c and 179d**: without 179c, a returning key whose binding has a hold slips through
   the latch as it does on activation.
+
+### 180. `fold`'s names say what they span · E[1]
+
+`fold` is about 360 lines, and names that read as local span a whole slot. "Fold" also names three
+things: the pass (`fold`), its kind (`Fold`), and one action's bindings summed (`Folded`), so
+`folded` reads as the pass's result.
+
+- **The renames:** `Fold` → `FoldKind` and `kind` → `fold_kind`; `Folded` → `Combined` and `folded`
+  → `combined`, matching the `combined::<A>()` stage it feeds; `best` → `strongest_condition`;
+  `owned` → `binding_scratch`; the slot loop's `index` → `binding_index`.
+- **Not here:** the eight successive `value`s in one binding's body. Which of them still need names
+  depends on the function 181 extracts them into, so 181 names them.
+- **Verified by** the tests and examples not changing (ground rule 3).
+
+### 181. `fold` split into functions · E[2]
+
+Shrinks the scope instead of lengthening the names. The body splits into `read_control` (the
+per-input `match`), `evaluate_binding` (modifiers, threshold, require-reset, conditions, claim) and
+`apply_stage` (the `combined::<A>()` step), leaving `fold` the pre-passes and the slot loop.
+
+- **Proposed before built:** `is_pressed` and `entry_held` close over six held-state fields plus
+  `consumed` and `devices`, so moving code out needs a borrowing view of them, such as a
+  `HeldInput<'a>` with those two as methods. The author settles the shape before code.
+- **Names the `value` stages** 180 left, where the extracted functions still need them.
+- **Depends on 180**, so the extraction moves code that already has its names.
+- **Verified by** the tests and examples not changing (ground rule 3).
 
 ## Bindings and conditions
 

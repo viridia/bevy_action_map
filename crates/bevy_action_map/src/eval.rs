@@ -819,6 +819,19 @@ impl<C: InputContext> InputContextState<C> {
             let mut folded = Folded::default();
             let mut best = ConditionState::Idle;
 
+            // Held over from before this context activated: every binding reads rest until the
+            // player lets go once, then the action behaves normally (R7.5). Decided before the
+            // conditions rather than on the action's value after them, which a hold still charging
+            // reports as rest, and a tap or a hold-and-release would fire on the release.
+            //
+            // Button intents only. What R7.5 guards is a *press* synthesized from a control the
+            // player was already holding, and an analog action has no press to synthesize, only a
+            // value that resumes. Holding one back until it reads exactly rest can wedge it
+            // forever, because an axis is not obliged to ever read rest: a drifting stick whose
+            // deadzone the player has taken to zero never does, and the action never recovers.
+            let awaiting_release = require_reset[slot] && intent == ActionIntent::Button;
+            let mut still_held = false;
+
             while index < bindings.len() && bindings[index].slot == slot {
                 let binding = &bindings[index];
 
@@ -942,6 +955,14 @@ impl<C: InputContext> InputContextState<C> {
                     }
                     _ => value,
                 };
+                // Rest reaches the conditions too, so a hold does not charge and a latched binding
+                // never claims its control from a context below.
+                let value = if awaiting_release {
+                    still_held |= value.to_bool();
+                    ActionValue::Bool(false)
+                } else {
+                    value
+                };
                 // Conditions decide *whether* this binding is firing; the value it contributes is
                 // rest until it is. A hold half-finished must not move the ship.
                 let condition_state =
@@ -966,6 +987,9 @@ impl<C: InputContext> InputContextState<C> {
 
                 folded = folded.add(value, intent);
                 index += 1;
+            }
+            if awaiting_release && !still_held {
+                require_reset.set(slot, false);
             }
 
             let value = folded.value();
@@ -1004,14 +1028,12 @@ impl<C: InputContext> InputContextState<C> {
             commit_slot(
                 Commit {
                     slot,
-                    intent,
                     value,
                     condition_state,
                     kind,
                 },
                 actions,
                 dirty,
-                require_reset,
                 transitions,
             );
         }
@@ -1021,7 +1043,6 @@ impl<C: InputContext> InputContextState<C> {
 /// One slot's resolved value.
 struct Commit {
     slot: usize,
-    intent: ActionIntent,
     value: ActionValue,
     condition_state: ConditionState,
     kind: Fold,
@@ -1032,31 +1053,14 @@ fn commit_slot(
     commit: Commit,
     actions: &mut [crate::action::ActionState],
     dirty: &mut FixedBitSet,
-    require_reset: &mut FixedBitSet,
     transitions: &mut Vec<Transition>,
 ) {
     let Commit {
         slot,
-        intent,
         value,
         condition_state,
         kind,
     } = commit;
-
-    // Held over from before this context activated: report rest until the player lets go once, then
-    // let the action behave normally (R7.5).
-    //
-    // Button intents only. What R7.5 guards is a *press* synthesized from a control the player was
-    // already holding, and an analog action has no press to synthesize, only a value that resumes.
-    // Holding one back until it reads exactly rest can wedge it forever, because an axis is not
-    // obliged to ever read rest: a drifting stick whose deadzone the player has taken to zero never
-    // does, and the action never recovers.
-    if require_reset[slot] && intent == ActionIntent::Button {
-        if value.to_bool() {
-            return;
-        }
-        require_reset.set(slot, false);
-    }
 
     // Compared rather than inferred from the phase: a held stick reports `Firing` every tick while
     // its value moves, and an action whose value moved has changed as surely as one that started or
@@ -2588,6 +2592,49 @@ mod tests {
             [ActionPhase::Started, ActionPhase::Canceled],
             "not held for the tick"
         );
+    }
+
+    /// A key held across activation is not a press, and a time condition on its binding must not
+    /// make one of it: a hold does not charge while the key stays down, and a tap or a
+    /// hold-and-release does not fire when it comes up.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_time_condition_ignores_a_control_held_across_activation() {
+        use bevy_input::keyboard::KeyCode;
+
+        type Declare = fn(&mut InputContextBuilder<Flying>);
+        let conditions: [(&str, Declare); 3] = [
+            ("hold", |controls| {
+                controls.bind::<Jump>(KeyCode::Space).hold(0.25);
+            }),
+            ("tap", |controls| {
+                controls.bind::<Jump>(KeyCode::Space).tap(0.2);
+            }),
+            ("hold_and_release", |controls| {
+                controls.bind::<Jump>(KeyCode::Space).hold_and_release(0.25);
+            }),
+        ];
+        for (name, declare) in conditions {
+            let mut script = Script::new(declare);
+            script.state.deactivate();
+            assert!(script.tick(0.1, [key(ButtonState::Pressed)]).is_empty());
+
+            script.state.activate();
+            for _ in 0..4 {
+                assert!(script.tick(0.1, []).is_empty(), "{name}: still held over");
+            }
+            assert_eq!(script.state.phase::<Jump>(), ActionPhase::Idle, "{name}");
+            assert!(
+                script.tick(0.1, [key(ButtonState::Released)]).is_empty(),
+                "{name}: letting go is not a release"
+            );
+
+            assert_eq!(
+                script.tick(0.1, [key(ButtonState::Pressed)]),
+                [ActionPhase::Started],
+                "{name}: the next press counts"
+            );
+        }
     }
 
     /// Two bindings on one action, one of which has a condition. The action reports the most

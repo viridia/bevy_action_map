@@ -454,7 +454,7 @@ impl<C: InputContext> InputContextState<C> {
             };
             let was = self.authority.value_of(action);
             let now = source.and_then(|values| values.value_of(action));
-            // Every intent is marked; `commit_slot` applies the latch to `Button` alone.
+            // Every intent is marked; `fold` applies the latch to `Button` alone.
             if was.is_none() && now.is_some_and(|value| value.to_bool()) {
                 self.require_reset.set(binding.slot, true);
             }

@@ -231,6 +231,7 @@ raw event, one at a time
       read the control    a consumed control reads as untouched
       modifier chain      negate · swizzle · scale · dead zone · curve · clamp · compass · custom
       press threshold     a Button action fed by a non-bool value, remembered per binding
+      require-reset       a latched Button action hands rest on, noting whether it read pressed
       conditions          explicit: any satisfies · implicit: all hold · blocking: any vetoes
       consume?            Building or Satisfied adds its controls to the instance's claims
   → fold by intent        several bindings, one action
@@ -527,9 +528,12 @@ and `activate_including_held` drive it by hand.
 
 Activation arms **require-reset**: a control the player was already holding does not read as a fresh
 press, and must be released once first. The latch holds back `Button` actions only — an analog
-action has no synthesized fire to guard against, and its value simply resumes.
-`activate_including_held` skips the arming, which is what a context taking over from another
-driving the same controls wants. Deactivation cancels whatever is in flight.
+action has no synthesized fire to guard against, and its value simply resumes. It sits between the
+press threshold and the conditions, so a latched binding's conditions see rest: a hold does not
+charge on the held key, a tap does not fire on its release, and the binding claims nothing. The
+latch lifts on the first fold in which every binding of the action reads rest.
+`activate_including_held` skips the arming, which is what a context taking over from another driving
+the same controls wants. Deactivation cancels whatever is in flight.
 
 One action can be switched off on its own with `disable::<A>()`, and back on with `enable::<A>()`,
 without unbinding it. Disabling cancels that action's in-flight state and takes its slot out of the
