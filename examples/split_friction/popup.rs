@@ -14,7 +14,6 @@
 //! [`split_screen`]: crate::split_screen
 
 use bevy::input_focus::AutoFocus;
-use bevy::math::CompassOctant;
 use bevy::prelude::*;
 use bevy::ui::auto_directional_navigation::AutoDirectionalNavigator;
 use bevy::ui_widgets::{Activate, Button};
@@ -23,7 +22,7 @@ use bevy_action_map::prelude::*;
 use bevy_action_map::preset::Preset;
 use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
 
-use crate::common::widget_focus::focusable;
+use crate::common::widget_focus::{focusable, navigate_from};
 use crate::protagonist::{ClaimedDevices, Move, OnFoot, Protagonist};
 use crate::saved_pairings;
 
@@ -147,11 +146,16 @@ fn open_menu(
 
 /// Moves the selection. [`AutoDirectionalNavigator`] rather than the manual one: the popup
 /// declares no links, so every answer comes from where the buttons are on screen.
-fn navigate(fired: On<Fired<Navigate>>, mut nav: AutoDirectionalNavigator) {
+fn navigate(
+    fired: On<Fired<Navigate>>,
+    mut nav: AutoDirectionalNavigator,
+    starts: Query<(), With<AutoFocus>>,
+    children: Query<&Children>,
+) {
     let Ok(direction) = Dir2::new(fired.value) else {
         return;
     };
-    let _ = nav.navigate(CompassOctant::from(direction));
+    navigate_from(fired.entity, direction, &mut nav, &starts, &children);
 }
 
 fn back(_: On<Fired<Back>>, mut next: ResMut<NextState<Popup>>) {

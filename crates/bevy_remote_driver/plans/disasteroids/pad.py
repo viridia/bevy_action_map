@@ -14,6 +14,7 @@ TEXT = "bevy_ui::widget::text::Text"
 # The ring is an `Outline` on every focusable, `Color::NONE` until focus arrives. None is a
 # `LinearRgba` and the lit colour an `Srgba`, so which variant answers is already the answer.
 RING = {"color": {"Srgba": {"alpha": 1.0}}}
+UNLIT = {"color": {"LinearRgba": {"alpha": 0.0}}}
 THRUST = "Settings/KeyboardMouse/disasteroids.thrust/0"
 
 
@@ -34,6 +35,14 @@ def run(driver):
     # ring: Reset puts every row back to what the game declares.
     driver.pad("South")
     driver.expect(THRUST, TEXT, "W")
+
+    # A click on the title, which nothing focusable encloses, clears the selection. The next
+    # direction selects where the screen starts rather than moving, so a pad can always get back.
+    driver.click("Settings/Title")
+    driver.expect("Settings/Reset", OUTLINE, UNLIT)
+    driver.pad("LeftStickX", 1.0)
+    driver.pad("LeftStickX", 0.0)
+    driver.expect("Settings/Cancel", OUTLINE, RING)
 
     # East backs out without committing, so nothing here is written to disk.
     driver.pad("East")

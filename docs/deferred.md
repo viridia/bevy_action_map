@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 53.**
+**Next: 54.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -75,6 +75,18 @@ navigation. Read on main, it retires the observer outright, including for a sche
 stops at the first `Focusable` ancestor whatever the scheme, and `AutoDirectionalNavigation`
 requires `Focusable`. What is left on the bump is the deletion, and the stepper's chevrons as its
 test.
+
+### X53 — Deleting `navigate_from`
+
+**Gate:** this crate's Bevy pin moving past a fix for [bevy#25944][], filed 27 September 2026.
+
+`AutoDirectionalNavigator::navigate` returns `NoFocus` with nothing focused, so a click on empty
+space leaves a pad with no way back. `examples/common/widget_focus.rs`'s `navigate_from` answers it
+by focusing the screen's `AutoFocus` entity, and both Disasteroids' controls screen and Split
+Friction's popup call it. The issue offers that and two other defaults; whichever upstream picks,
+the two callers go back to calling the navigator directly, and `pad.py`'s click-on-the-title step is
+the test. If upstream picks a default other than `AutoFocus`, the step's expected landing changes
+with it.
 
 ### X3 — Deleting `examples/common/font.rs`
 
@@ -609,5 +621,6 @@ is a port plus a rewrite. Porting first keeps the two apart: doing both at once 
 [bevy#25904]: https://github.com/bevyengine/bevy/pull/25904
 [bevy#25824]: https://github.com/bevyengine/bevy/pull/25824
 [bevy#25890]: https://github.com/bevyengine/bevy/pull/25890
+[bevy#25944]: https://github.com/bevyengine/bevy/issues/25944
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678

@@ -29,7 +29,6 @@
 //! [`saved_controls`](crate::saved_controls) to write down.
 
 use bevy::input_focus::{AutoFocus, InputFocus};
-use bevy::math::CompassOctant;
 use bevy::prelude::*;
 use bevy::scene::{Ready, SceneList};
 use bevy::ui::UiSystems;
@@ -47,7 +46,7 @@ use crate::actions::{
     Back, Clear, Confirm, Menu, Navigate, TURN_DEAD_ZONE_KEY, ToggleSettings, Turn,
 };
 use crate::common::prompt_ui::{IconPrompt, PromptFamily, PromptSpan};
-use crate::common::widget_focus::{ButtonFocused, focusable};
+use crate::common::widget_focus::{ButtonFocused, focusable, navigate_from};
 use crate::pause::Simulating;
 use crate::saved_controls;
 
@@ -267,20 +266,22 @@ fn release_focus(mut focus: ResMut<InputFocus>) {
 
 /// Moves the selection.
 ///
-/// The value is a compass direction, because that is what the binding rounded it to; converting it
-/// to one of Bevy's own octants is the whole of what this has to do. A value at rest is a change
-/// like any other — the player let go — and there is no direction in it, which is what `Dir2`
-/// refusing to be built from a zero vector says for us.
+/// The value is a compass direction, because that is what the binding rounded it to. A value at
+/// rest is a change like any other — the player let go — and there is no direction in it, which is
+/// what `Dir2` refusing to be built from a zero vector says for us.
 ///
 /// [`AutoDirectionalNavigator`] rather than the manual one: this screen declares no links, so every
 /// answer comes from where the widgets are on screen.
-pub(crate) fn navigate(fired: On<Fired<Navigate>>, mut nav: AutoDirectionalNavigator) {
+pub(crate) fn navigate(
+    fired: On<Fired<Navigate>>,
+    mut nav: AutoDirectionalNavigator,
+    starts: Query<(), With<AutoFocus>>,
+    children: Query<&Children>,
+) {
     let Ok(direction) = Dir2::new(fired.value) else {
         return;
     };
-    // Nothing to do about a direction with nothing in it: the selection is against an edge, which
-    // is what the player will see when it does not move.
-    let _ = nav.navigate(CompassOctant::from(direction));
+    navigate_from(fired.entity, direction, &mut nav, &starts, &children);
 }
 
 /// Cancels a capture in progress, or — with none in progress — leaves the screen without applying
@@ -479,6 +480,7 @@ impl ControlsScreen {
                 row_gap: Val::Px(14.0),
             }
             Children [
+                #Title
                 Text::new("CONTROLS")
                 TextFont { font_size: 27.0_f32 }
                 TextColor(TITLE)

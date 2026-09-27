@@ -211,6 +211,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 169  | The design proposal                                                   |
 | 175  | Every mention of a name, in one call                                  |
 | 176  | A dependency's source, at the locked version                          |
+| 156  | Navigating from no focus                                              |
 
 ---
 
@@ -625,30 +626,6 @@ Friction, is the real backend. It lives in `steam_examples/`, beside `steam_prob
 
 Every chunk here is an audit rather than a gate. It needs a running client, a pad, and a layout
 bound by hand (`docs/steam.md` S16), and no CI can run it.
-
-### 156. Navigating from no focus · E[2]
-
-Disasteroids' controls screen can lose focus with the screen still open, and a player with only a
-pad then has no way back: `navigate` discards `DirectionalNavigationError::NoFocus`, so the stick
-does nothing, and only closing and reopening the screen lets `AutoFocus` restore it. Seen in 151b's
-flight test, cause unknown; the route found in the code is a pointer press on empty space, which
-`click_to_focus` bubbles to the window and `acquire_focus_directional` does not catch.
-
-- **First, reproduce the loss.** It followed a fat-fingered `ToggleSettings`; the stick held while
-  pressing it is the other suspect. Reading the code found neither clearing focus: close and reopen
-  cannot share a frame, and `Navigate` is evaluated before the transition that spawns the screen.
-  Drive base Disasteroids' virtual pad over the remote driver (`pad.py`) with Y pressed twice a
-  frame or two apart, and with Y pressed on a held stick, reading `InputFocus` after each. A cause
-  found here is fixed here, alongside the fallback below.
-- **On `NoFocus`, focus the screen's `AutoFocus` entity**, so the first direction selects instead of
-  moving, as a console menu does. Clicking away still clears focus, which is what a mouse user
-  expects.
-- **Whether `press_focused_button` takes the same fallback**, for a player who presses South before
-  a direction, is decided here.
-- **Not doing: an always-focused invariant.** It needs the same default, a system or observer to
-  hold it, and it would undo a deliberate click-away.
-- **Verified by:** a `disasteroids/pad.py` step that clears `InputFocus` and navigates, if the
-  driver can clear it; by hand otherwise.
 
 ### 151e. Split Friction on Steam · E[3]
 

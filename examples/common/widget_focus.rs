@@ -17,9 +17,11 @@
 //! pad, this game disables `InputDispatchPlugin` entirely rather than leave two mechanisms
 //! answering the same keys.
 
-use bevy::input_focus::{AcquireFocus, FocusCause, FocusGained, FocusLost, InputFocus};
+use bevy::input_focus::directional_navigation::DirectionalNavigationError;
+use bevy::input_focus::{AcquireFocus, AutoFocus, FocusCause, FocusGained, FocusLost, InputFocus};
+use bevy::math::CompassOctant;
 use bevy::prelude::*;
-use bevy::ui::auto_directional_navigation::AutoDirectionalNavigation;
+use bevy::ui::auto_directional_navigation::{AutoDirectionalNavigation, AutoDirectionalNavigator};
 use bevy::ui_widgets::{Activate as WidgetActivate, Button};
 use bevy_action_map::prelude::*;
 use bevy_input::{gamepad::GamepadButton, keyboard::KeyCode};
@@ -239,6 +241,31 @@ fn acquire_focus_directional(
         if focus.get() != Some(acquire.focused_entity) {
             focus.set(acquire.focused_entity, FocusCause::Pressed);
         }
+    }
+}
+
+/// Moves the selection one step toward `direction`, or, with nothing selected, selects `root`'s
+/// [`AutoFocus`] descendant without moving, as a console menu does.
+///
+/// A click on empty space clears focus, which is what a mouse user expects, and would otherwise
+/// leave a player with only a pad stuck until the screen was closed and reopened.
+pub fn navigate_from(
+    root: Entity,
+    direction: Dir2,
+    nav: &mut AutoDirectionalNavigator,
+    starts: &Query<(), With<AutoFocus>>,
+    children: &Query<&Children>,
+) {
+    // `NoNeighborInDirection` needs nothing: the selection is against an edge, which is what the
+    // player will see when it does not move.
+    if let Err(DirectionalNavigationError::NoFocus) = nav.navigate(CompassOctant::from(direction))
+        && let Some(start) = children
+            .iter_descendants(root)
+            .find(|&entity| starts.contains(entity))
+    {
+        nav.manual_directional_navigation
+            .focus
+            .set(start, FocusCause::Navigated);
     }
 }
 
