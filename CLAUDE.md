@@ -291,7 +291,8 @@ separated things disagree, and that is not free — so cut waste, not reading. D
 - **A sweep**: you are looking for something you do not yet know to look for — a decision that moved
   and left a stale copy behind, a requirement the change quietly contradicts, a `cfg` group that now
   spans a configuration nobody has built. This costs context and is worth it, and it has repeatedly
-  found things no diff would have shown.
+  found things no diff would have shown. `scripts/mentions.sh <pattern>` is the grep for one: it
+  skips `archive/` and ignored files, and cuts each line to a fixed width.
 - **A scan**: a script finds a signature, and only its hits are read. Validate it against a known
   positive first; a clean result from an unvalidated scan is worth nothing. Prefer a scan to a sweep
   wherever the thing sought has a signature.

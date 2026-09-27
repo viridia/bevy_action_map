@@ -209,6 +209,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 167  | Rumble as a component                                                 |
 | 168  | The Steam build fills them                                            |
 | 169  | The design proposal                                                   |
+| 175  | Every mention of a name, in one call                                  |
 
 ---
 
@@ -736,18 +737,6 @@ boundaries with `pulldown-cmark`, and keeps devfmt's rewrap and `--diff` scoping
   item, and a string literal starting with `///`.
 - **Not done:** retiring devfmt, or rendering Markdown through the parser, which would restyle every
   document.
-
-### 175. Every mention of a name, in one call · E[1]
-
-`scripts/mentions.sh <pattern>` greps the tree with the exclusions a sweep always wants (`archive/`,
-`target/`, `.git/`) and the glob quoting zsh needs, so a sweep for a withdrawn name or a moved
-decision is one call and the same call each time.
-
-- **Output is `file:line:text`**, grouped by file, with each line cut at a fixed width so that one
-  long table row cannot flood the transcript.
-- **Verified by:** a name known to appear in code, documents and `archive/` alike, found in the
-  first two and not the third.
-- **Not done:** matching anything but a regular expression; this is grep with the exclusions fixed.
 
 ### 176. A dependency's source, at the locked version · E[1]
 
