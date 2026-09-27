@@ -19,7 +19,7 @@ part that stays good. Re-verify before acting on one.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 tier, and never reused. A gap in the sequence is a retired entry.
 
-**Next: 1075.**
+**Next: 1076.**
 
 **What the tiers mean.**
 
@@ -325,6 +325,35 @@ This entry once recorded the second as gone, on a grep for `binding.source.contr
 it: the field was renamed to `input`, not removed. Which is the finding. Violations keep being found
 by reading, and then a reading finds them absent with equal confidence — "a rule with no tooling
 behind it," as the register puts it, does not only fail to prevent them.
+
+### 1075 A tick costs every binding once per event, bound or not
+
+`apply_frame`'s replay loop (`eval.rs`), and `fold` · reasoned from the loop, **not measured**
+
+Each level event a context replays is followed by a whole fold: the chord pre-pass, the shared
+toggles, and every binding of every action. So one context's tick costs its events times its
+bindings, and each context pays it separately. Mouse motion is summed and escapes this; gamepad axes
+do not, and a steered pad sends four to six events a frame. That is a few dozen folds a frame in
+play. After a hitch it is every event since the stall, replayed in one tick, which is the frame
+least able to afford it. The queue holds 4096.
+
+Most of those folds are for a control the context binds nowhere. Since 179b such a fold is handed a
+zero `delta` and reads the same input as the one before it, so it can change almost nothing: the
+exception is a phase stepping from `Fired` to `Firing` on it, which ties that step to unrelated
+keys.
+
+_Fix, sketched (E[2]):_ measure first. An `#[ignore]`d test beside `Script` drives `apply_frame`
+directly in a release build and prints the median time per tick, bindings (10, 50, 200) against
+events per tick (1, 30, 300, 4096), with folds run and bindings visited beside it as counts that do
+not jitter. Then skip the fold for an event on a control the plan does not read. `indexed_controls`
+is nearly that set but omits chord keys, which need adding. Focus loss and a disconnect name no
+control and always fold, the class-binding dispatch still runs per event, and 179b's count covers
+only the folds that run. Probe the `Fired` to `Firing` change before landing it. Rerun the
+measurement after.
+
+Rejected for now: collapsing one axis's readings within a tick, which loses a trigger crossing its
+press point and back inside a tick, the edge R9.3 protects for buttons; and folding only the actions
+an event touches, which gives each action a different count of folds per tick.
 
 ### 1054 Deriving a pane's persistent identity is boilerplate every game rewrites
 

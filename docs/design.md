@@ -240,10 +240,12 @@ raw event, one at a time
 ```
 
 Level events are replayed one at a time, each followed by a whole fold, so a press and a release
-inside one tick are two readings rather than none. A tick with no level event still folds once, so
-time-driven conditions advance. Mouse motion is summed across the tick and read by one further fold
-at the end, in which only `Delta2` actions take part. An inactive context applies the held-state
-update and nothing after it.
+inside one tick are two readings rather than none. Time is charged once per tick: the fold after the
+last event replayed is handed the tick's `delta`, and every fold before it is handed zero. So a hold
+advances by one tick however many events arrive, and a press and a release inside one tick read as a
+tap. A tick with no level event still folds once, so time-driven conditions advance. Mouse motion is
+summed across the tick and read by one further fold at the end, in which only `Delta2` actions take
+part. An inactive context applies the held-state update and nothing after it.
 
 Claims gather in a list local to the instance and reach `ConsumedControls` once it has finished, so
 an instance never reads back its own claim partway through a tick.

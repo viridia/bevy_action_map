@@ -213,6 +213,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 176  | A dependency's source, at the locked version                          |
 | 156  | Navigating from no focus                                              |
 | 179a | `Started<A>` reaches observers, with a tick-script fixture            |
+| 179b | A hold charges once per tick                                          |
 
 ---
 
@@ -237,30 +238,9 @@ Chunk 179 carries defects. The register of what is known to be wrong is
 
 `apply_frame` turns one tick into several folds: one per level event, and one before the events for
 an interruption. What happens once per tick has to land on exactly one of them, and these parts get
-that wrong in different places. They are lettered because each part's tests assume the one before:
-179b changes every hold's timing. Each part writes its tests on `Script`, the tick-script fixture in
-`eval.rs`'s tests, extending it where a part needs more than events and a `delta` per tick.
-
-### 179b. A hold charges once per tick · E[1]
-
-`apply_frame` hands each fold the whole tick's `delta`, and `Hold` adds `delta` on every call
-(`condition.rs`, `BindingCondition::evaluate`). A tick carrying three level events advances every
-hold timer by three ticks. Probed: `hold(0.25)` at a `delta` of 0.1, Space down on one tick, then a
-tick carrying three unrelated key events: `Firing` after 0.2 s. A moving stick sends axis events
-nearly every frame, so a pad hold charges two to three times faster while the player steers. `Tap`,
-`HoldAndRelease` and any modifier that integrates `delta` take the same path.
-
-- **The fix:** the tick's `delta` goes to its last level fold, and every earlier level or
-  interruption fold gets zero, which keeps the per-event replay R9.3 needs. The state a tick ends in
-  is taken to have lasted the tick. A tick with one event, or none, folds as it does today; an
-  interruption before the events (`authority_lost`, and 179d's claim arrival) charges nothing unless
-  it is the tick's only level fold. `Fold::Delta` reads only `Delta2` actions, once a tick, and
-  keeps its `delta`.
-- **So a press and release inside one tick read as a tap**, not as held for the tick. Events in a
-  tick carry no time between them, and the choice only matters when `delta` is large: after a hitch,
-  a quick press read as a long one turns a dodge into a sprint, which is the worse error. Tests:
-  that case with `tap` and `hold` over a large `delta`, and the probe above of three unrelated events.
-- **Riding along:** `part_value` carries the same `#[cfg]` twice.
+that wrong in different places. They are lettered because each part's tests assume the one before.
+Each part writes its tests on `Script`, the tick-script fixture in `eval.rs`'s tests, extending it
+where a part needs more than events and a `delta` per tick.
 
 ### 179c. Require-reset holds through a time condition · E[2]
 
@@ -296,11 +276,10 @@ authority path (TD5.8): a key that goes away while down cancels what it was firi
 - **The context keeps last tick's claims**, and the difference from this tick's is the edge. 179e
   reads the same difference.
 - **The fix:** each lower action with a binding on a newly claimed control folds as
-  `Fold::Interrupted`, beside the `authority_lost` fold and before the events, so it inherits 179b's
-  rule for `delta`.
+  `Fold::Interrupted`, beside the `authority_lost` fold and before the events, so it is handed
+  `delta` only when no event follows (D97).
 - **The arrival rule joins R8.2**, since R7.5 covers activation alone.
 - **Chunk 83 gains the kept claims** as state a restore must bring back.
-- **Depends on 179b.**
 
 ### 179e. A claim lifting waits for a release · E[1]
 

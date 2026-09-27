@@ -47,6 +47,7 @@ here, so there is one `D`-numbering in the project.
 | **D17** | Transitions are generic entity events on the context entity                   | TD5.6     |
 | **D18** | Require-reset holds back buttons only                                         | TD7.2     |
 | **D94** | A key that arrives or goes away while down is treated alike on every path | TD5.7, TD5.8, TD7.2 |
+| **D97** | A tick's time is charged once, to the state it ends in                        | TD5       |
 | **D26** | Failures surface at the earliest tier that can catch them                     | TD4, TD7.3 |
 | **D19** | Modifiers and conditions are enums with a `Custom` variant                    | TD8.2     |
 | **D65** | The device model is closed; a third-party kind needs one in hand             | —               |
@@ -602,6 +603,19 @@ one path and not another, and an observer of `Canceled` would have to know which
 key away to interpret it.
 
 **Remainder.** Consumption does not follow the rule yet (chunks 179d and 179e).
+
+### D97 — A tick's time is charged once, to the state it ends in
+
+**Decided.** A tick replays its events one at a time, and only the fold after the last one is handed
+the tick's `delta`; the folds before it are handed zero. The state the tick ends in is taken to have
+lasted the tick, so a press and a release inside one tick read as a tap.
+
+**Rules out.** Handing every fold the whole `delta`, which charges a hold once per event, so a pad
+hold charges two to three times faster while a stick is moving. Also splitting `delta` across the
+events: they carry no time between them, so any split is invented.
+
+**Reversal.** After a hitch, a quick press would read as held for the whole long tick, turning a tap
+into a hold: a dodge becomes a sprint. That is the worse of the two errors a long tick can make.
 
 ### D77 — A disabled action is out of evaluation, as an inactive context is
 

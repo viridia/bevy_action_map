@@ -454,13 +454,22 @@ impl<C: InputContext> InputContextState<C> {
         let mut mouse_delta = Vec2::ZERO;
         let mut level_changes = 0usize;
 
+        // Time is charged once per tick: the fold after the last event replayed below is handed
+        // `delta`, and every fold before it zero. Events in a tick carry no time between them, so
+        // the state the tick ends in is taken to have lasted it; handing each fold `delta` would
+        // charge a hold once per event.
+        let mut levels_left = unread
+            .iter()
+            .filter(|e| owns(e) && e.event.control() != Some(Control::MouseMotion))
+            .count();
+
         // Folded as a disconnect event would be, and before the events, so a key this tick
         // releases still holds its action here.
         if core::mem::take(&mut self.authority_lost) {
             self.fold(
                 threshold,
                 Vec2::ZERO,
-                delta,
+                if levels_left == 0 { delta } else { 0.0 },
                 Fold::Interrupted,
                 consumed,
                 claims,
@@ -483,10 +492,11 @@ impl<C: InputContext> InputContextState<C> {
                 continue;
             }
             self.apply_level_event(&event.event, threshold);
+            levels_left -= 1;
             self.fold(
                 threshold,
                 Vec2::ZERO,
-                delta,
+                if levels_left == 0 { delta } else { 0.0 },
                 interruption_kind(&event.event),
                 consumed,
                 claims,
@@ -1134,7 +1144,6 @@ fn widen(value: ActionValue) -> Vec3 {
     value.to_axis3()
 }
 
-#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 fn part_value(part: crate::binding::BindingPart, pressed: bool) -> ActionValue {
     use crate::binding::BindingPart;
@@ -2521,6 +2530,64 @@ mod tests {
             "abandoned before it ever fired"
         );
         assert!(!script.state.value::<Jump>());
+    }
+
+    /// A tick is one tick of time however many events it carries. Three keys that have nothing to
+    /// do with the hold arrive together, and the hold is charged for one tick, not three.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_hold_charges_once_per_tick() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut script = Script::new(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).hold(0.25);
+        });
+
+        assert_eq!(
+            script.tick(0.1, [key(ButtonState::Pressed)]),
+            [ActionPhase::Started]
+        );
+        assert!(
+            script
+                .tick(
+                    0.1,
+                    [
+                        layout_key(KeyCode::KeyA, "a", ButtonState::Pressed),
+                        layout_key(KeyCode::KeyS, "s", ButtonState::Pressed),
+                        layout_key(KeyCode::KeyA, "a", ButtonState::Released),
+                    ]
+                )
+                .is_empty(),
+            "0.2s is short of 0.25s"
+        );
+        assert_eq!(script.tick(0.1, []), [ActionPhase::Fired]);
+    }
+
+    /// Events inside one tick carry no time between them, so a press and a release in the same tick
+    /// are as quick as a press can be, even when the tick itself was long.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_press_and_release_in_one_long_tick_is_a_tap() {
+        use bevy_input::keyboard::KeyCode;
+
+        let press_and_release = [key(ButtonState::Pressed), key(ButtonState::Released)];
+
+        let mut tap = Script::new(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).tap(0.2);
+        });
+        assert_eq!(
+            tap.tick(1.0, press_and_release.clone()),
+            [ActionPhase::Started, ActionPhase::Fired]
+        );
+
+        let mut hold = Script::new(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).hold(0.25);
+        });
+        assert_eq!(
+            hold.tick(1.0, press_and_release),
+            [ActionPhase::Started, ActionPhase::Canceled],
+            "not held for the tick"
+        );
     }
 
     /// Two bindings on one action, one of which has a condition. The action reports the most
