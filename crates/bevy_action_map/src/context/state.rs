@@ -1185,6 +1185,49 @@ mod tests {
         assert_eq!(app.world().resource::<Heard>().0, ["fired", "completed"]);
     }
 
+    /// A hold reports the press that begins it, so a game can show the charge without polling.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_hold_beginning_reaches_an_observer() {
+        use crate::event::{Canceled, Started};
+        use bevy_ecs::observer::On;
+
+        #[derive(Resource, Default)]
+        struct Heard(Vec<&'static str>);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<FreeLook>(|context| {
+            context.bind::<Jump>(KeyCode::Space).hold(10.0);
+        });
+        app.init_resource::<Heard>();
+        app.add_observer(
+            |_: On<Started<Jump>>, mut heard: bevy_ecs::system::ResMut<'_, Heard>| {
+                heard.0.push("started");
+            },
+        );
+        app.add_observer(
+            |_: On<Canceled<Jump>>, mut heard: bevy_ecs::system::ResMut<'_, Heard>| {
+                heard.0.push("canceled");
+            },
+        );
+        app.world_mut().spawn(FreeLook);
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        assert_eq!(app.world().resource::<Heard>().0, ["started"]);
+
+        // Still charging: `Building` is not an edge.
+        app.update();
+        assert_eq!(app.world().resource::<Heard>().0, ["started"]);
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Released));
+        app.update();
+        assert_eq!(app.world().resource::<Heard>().0, ["started", "canceled"]);
+    }
+
     /// A runtime failure rather than a developer mistake: the entity carrying the context is
     /// gone, because whatever it belonged to was destroyed. The system that reads it stands down
     /// for the run instead of bringing the game down with it.

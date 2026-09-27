@@ -1060,7 +1060,7 @@ fn commit_slot(
     // for a held button would be noise rather than information.
     if matches!(
         phase,
-        ActionPhase::Fired | ActionPhase::Completed | ActionPhase::Canceled
+        ActionPhase::Started | ActionPhase::Fired | ActionPhase::Completed | ActionPhase::Canceled
     ) {
         transitions.push(Transition { slot, phase, value });
     }
@@ -2484,59 +2484,43 @@ mod tests {
     fn a_hold_starts_fires_completes_and_can_be_abandoned() {
         use bevy_input::keyboard::KeyCode;
 
-        let mut builder = InputContextBuilder::<Flying>::default();
-        builder.bind::<Jump>(KeyCode::Space).hold(0.25);
-        let plan = Arc::new({
-            let (bindings, class_bindings) = builder.finish();
-            Plan::from_bindings(bindings, class_bindings)
+        let mut script = Script::new(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).hold(0.25);
         });
-        let mut state = InputContextState::<Flying>::new(plan, None);
-        let threshold = ButtonThreshold::default();
-        let mut frame = InputFrame::default();
-
-        let step = |state: &mut InputContextState<Flying>, frame: &InputFrame| {
-            state.transitions.clear();
-            state.apply_frame(
-                frame,
-                &threshold,
-                0.1,
-                &ConsumedControls::default(),
-                &mut Vec::new(),
-                None,
-            );
-            state.phase::<Jump>()
-        };
 
         // Press, and wait it out.
-        frame.record(key(ButtonState::Pressed));
-        assert_eq!(step(&mut state, &frame), ActionPhase::Started);
         assert_eq!(
-            step(&mut state, &frame),
-            ActionPhase::Building,
-            "still charging"
+            script.tick(0.1, [key(ButtonState::Pressed)]),
+            [ActionPhase::Started]
         );
-        assert!(!state.value::<Jump>(), "and not yet jumping");
+        assert!(script.tick(0.1, []).is_empty(), "still charging");
+        assert_eq!(script.state.phase::<Jump>(), ActionPhase::Building);
+        assert!(!script.state.value::<Jump>(), "and not yet jumping");
         assert_eq!(
-            step(&mut state, &frame),
-            ActionPhase::Fired,
+            script.tick(0.1, []),
+            [ActionPhase::Fired],
             "0.3s is past 0.25s"
         );
-        assert!(state.value::<Jump>());
-        assert_eq!(step(&mut state, &frame), ActionPhase::Firing, "still held");
+        assert!(script.state.value::<Jump>());
+        assert!(script.tick(0.1, []).is_empty(), "still held");
+        assert_eq!(script.state.phase::<Jump>(), ActionPhase::Firing);
 
-        frame.record(key(ButtonState::Released));
-        assert_eq!(step(&mut state, &frame), ActionPhase::Completed);
+        assert_eq!(
+            script.tick(0.1, [key(ButtonState::Released)]),
+            [ActionPhase::Completed]
+        );
 
         // Now the same press, given up on early.
-        frame.record(key(ButtonState::Pressed));
-        assert_eq!(step(&mut state, &frame), ActionPhase::Started);
-        frame.record(key(ButtonState::Released));
         assert_eq!(
-            step(&mut state, &frame),
-            ActionPhase::Canceled,
+            script.tick(0.1, [key(ButtonState::Pressed)]),
+            [ActionPhase::Started]
+        );
+        assert_eq!(
+            script.tick(0.1, [key(ButtonState::Released)]),
+            [ActionPhase::Canceled],
             "abandoned before it ever fired"
         );
-        assert!(!state.value::<Jump>());
+        assert!(!script.state.value::<Jump>());
     }
 
     /// Two bindings on one action, one of which has a condition. The action reports the most
@@ -3038,6 +3022,45 @@ mod tests {
         let mut plan = Plan::from_bindings(bindings, class_bindings);
         plan.combine(combined);
         InputContextState::<Flying>::new(Arc::new(plan), None)
+    }
+
+    /// One context driven a tick at a time, each tick with its own events and `delta`, for tests
+    /// about what a tick logged rather than where it left the action.
+    #[cfg(feature = "keyboard")]
+    struct Script {
+        state: InputContextState<Flying>,
+        frame: InputFrame,
+    }
+
+    #[cfg(feature = "keyboard")]
+    impl Script {
+        fn new(declare: impl FnOnce(&mut InputContextBuilder<Flying>)) -> Self {
+            Self {
+                state: context_declaring(declare),
+                frame: InputFrame::default(),
+            }
+        }
+
+        /// The phases this tick logged, in order. The log is cleared first, as dispatch would.
+        fn tick(
+            &mut self,
+            delta: f32,
+            events: impl IntoIterator<Item = RawEvent>,
+        ) -> Vec<ActionPhase> {
+            for event in events {
+                self.frame.record(event);
+            }
+            self.state.transitions.clear();
+            self.state.apply_frame(
+                &self.frame,
+                &ButtonThreshold::default(),
+                delta,
+                &ConsumedControls::default(),
+                &mut Vec::new(),
+                None,
+            );
+            self.state.transitions.iter().map(|t| t.phase).collect()
+        }
     }
 
     /// Two keys held for a diagonal read `(1, 1)`, and a clamp declared once for the action pulls

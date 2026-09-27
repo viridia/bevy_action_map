@@ -212,6 +212,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 175  | Every mention of a name, in one call                                  |
 | 176  | A dependency's source, at the locked version                          |
 | 156  | Navigating from no focus                                              |
+| 179a | `Started<A>` reaches observers, with a tick-script fixture            |
 
 ---
 
@@ -221,7 +222,6 @@ its identity rather than its position.
 
 ## Next
 
-* 179a: `Started<A>` reaches observers, with a tick-script fixture
 * 179b: A hold charges once per tick
 * 179c: Require-reset holds through a time condition
 * 179d: A claim arriving cancels what it took
@@ -238,27 +238,8 @@ Chunk 179 carries defects. The register of what is known to be wrong is
 `apply_frame` turns one tick into several folds: one per level event, and one before the events for
 an interruption. What happens once per tick has to land on exactly one of them, and these parts get
 that wrong in different places. They are lettered because each part's tests assume the one before:
-179a changes every hold's transition list, and 179b changes every hold's timing.
-
-### 179a. `Started<A>` reaches observers, with a tick-script fixture · E[1]
-
-`dispatch_for` maps `ActionPhase::Started` to `Started<A>`, whose doc promises it for "a hold that
-has just been pressed", and TD5.6 lists it. `commit_slot`'s edge filter logs only `Fired`,
-`Completed` and `Canceled`, so `Started` never reaches the log. Probed: a tick ending in `Started`
-leaves the log empty. Nothing in tree observes `Started<A>`; Disasteroids reads the phase instead
-(`ship.rs`), while its comment in `actions.rs` says `Started` fires.
-
-- **The fix:** `ActionPhase::Started` joins the edge filter; `dispatch_for` already maps it. The
-  transition log's only consumer is `dispatch_transitions`, so the change reaches observers and
-  nothing else. Tests that list a hold's transitions gain a `Started`, and one test observes
-  `Started<A>` through an `App`.
-- **A tick-script fixture**, which this part's transition tests are the first to use: one context,
-  bindings with time conditions, a list of ticks each carrying its events and its `delta`, and the
-  transitions asserted. All four defects in this group were confirmed by probes of that shape, and
-  179b–e write theirs on it. Check first whether the tests in `eval.rs` or `context/state.rs`
-  already have one, and extend it rather than add a second.
-- **Not doing:** Disasteroids moving to `Started<A>`. It reads the phase, and its comment in
-  `actions.rs` becomes true.
+179b changes every hold's timing. Each part writes its tests on `Script`, the tick-script fixture in
+`eval.rs`'s tests, extending it where a part needs more than events and a `delta` per tick.
 
 ### 179b. A hold charges once per tick · E[1]
 
