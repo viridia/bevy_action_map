@@ -111,8 +111,8 @@ change to wait for.
 
 ### X46 — Upstreaming L0, then a minimal mapper
 
-**Gate:** Bevy accepting the gamepad capability layer proposed in [bevy#25757][], which chunks 165
-and 167–169 build.
+**Gate:** Bevy accepting the gamepad layer proposed in [bevy#25757][], which chunks 165 and 167–169
+build, and `docs/proposals/gamepad.md` sets out.
 
 Upstreaming goes in three stages, each a stack of reviewable PRs: the gamepad layer first, then L0
 (device families, raw messages and calibration), and a minimal mapper only on top of those. A first

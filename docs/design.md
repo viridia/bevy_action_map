@@ -740,7 +740,9 @@ nothing.
 A backend of its own drives its pads from `Rumble` directly, and the crate's driver leaves them
 alone, since they carry no `Gamepad`. The Steam build of Disasteroids sets Steam's motor speeds on
 each change, which Steam holds without a duration (S31), and inserts `ConnectedGamepad` and `Brand`,
-the latter mapped from Steam's product family, on the pad entities it spawns.
+the latter mapped from Steam's product family, on the pad entities it spawns. It keeps a pad's
+entity when the pad goes, removing only `ConnectedGamepad`, since Steam gives a returning pad the
+same handle (S8).
 
 ---
 

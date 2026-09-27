@@ -36,8 +36,10 @@ struct Steam(Client);
 
 /// One pad as Steam sees it.
 ///
-/// Spawned and despawned as Steam reports the pad connecting and going. The handle is Steam's own,
-/// with no relation to any OS device (S3), so this entity is the only identity the pad has here.
+/// Spawned when Steam first reports the pad, and kept when it goes: Steam gives a returning pad the
+/// same handle (S8), so `ConnectedGamepad` comes and goes on one entity, as it does under Bevy's
+/// gamepad backend. The handle is Steam's own, with no relation to any OS device (S3), so this
+/// entity is the only identity the pad has here.
 #[derive(Component)]
 pub struct SteamController(pub u64);
 
@@ -244,7 +246,7 @@ fn open_binding_panel(_: On<Activate>, steam: Option<NonSend<Steam>>) {
 /// Says whether a press will open the panel, and why not.
 fn caption(
     steam: Option<NonSend<Steam>>,
-    controllers: Query<(), With<SteamController>>,
+    controllers: Query<(), (With<SteamController>, With<ConnectedGamepad>)>,
     mut buttons: Query<(&mut Text, &mut BorderColor), With<BindingPanelButton>>,
 ) {
     let (caption, border) = if steam.is_none() {
@@ -269,7 +271,7 @@ fn caption(
 fn poll(
     steam: NonSend<Steam>,
     mut table: ResMut<SteamActions>,
-    controllers: Query<(Entity, &SteamController)>,
+    controllers: Query<(Entity, &SteamController, Has<ConnectedGamepad>)>,
     mut contexts: Query<&mut AuthorityValues>,
     device: Res<PromptDevice>,
     mut commands: Commands,
@@ -301,20 +303,29 @@ fn poll(
         table.pads = Some(pads.len());
         info!("Steam reports {} pads", pads.len());
     }
-    for (entity, controller) in &controllers {
-        if !pads.contains(&controller.0) {
-            info!("Steam pad {:#x} disconnected", controller.0);
-            commands.entity(entity).despawn();
+    for (entity, controller, connected) in &controllers {
+        if connected && !pads.contains(&controller.0) {
+            info!("Steam pad {:#x} disconnected ({entity})", controller.0);
+            commands.entity(entity).remove::<ConnectedGamepad>();
         }
     }
     for &pad in &pads {
-        if !controllers
+        match controllers
             .iter()
-            .any(|(_, controller)| controller.0 == pad)
+            .find(|(_, controller, _)| controller.0 == pad)
         {
-            let brand = brand(input.get_input_type_for_handle(pad));
-            info!("Steam pad {pad:#x} connected, {brand}");
-            commands.spawn((SteamController(pad), ConnectedGamepad, Brand(brand)));
+            Some((_, _, true)) => {}
+            Some((entity, _, false)) => {
+                info!("Steam pad {pad:#x} reconnected ({entity})");
+                commands.entity(entity).insert(ConnectedGamepad);
+            }
+            None => {
+                let brand = brand(input.get_input_type_for_handle(pad));
+                let entity = commands
+                    .spawn((SteamController(pad), ConnectedGamepad, Brand(brand)))
+                    .id();
+                info!("Steam pad {pad:#x} connected ({entity}), {brand}");
+            }
         }
     }
 
@@ -426,17 +437,28 @@ struct VibrationSent(GamepadRumbleIntensity);
 /// Sends each change to a Steam pad's [`Rumble`] to Steam.
 ///
 /// Steam sets a speed rather than adding one, so a new level needs no stop ahead of it. A pad that
-/// goes is despawned, and takes both components with it.
+/// goes forgets what it was sent, so it is sent its level again when it comes back.
+#[expect(
+    clippy::type_complexity,
+    reason = "the query names what the driver reads, per G21"
+)]
 fn vibrate(
     steam: NonSend<Steam>,
-    pads: Query<(
-        Entity,
-        &SteamController,
-        Option<&Rumble>,
-        Option<&VibrationSent>,
-    )>,
+    pads: Query<
+        (
+            Entity,
+            &SteamController,
+            Option<&Rumble>,
+            Option<&VibrationSent>,
+        ),
+        With<ConnectedGamepad>,
+    >,
+    gone: Query<Entity, (With<VibrationSent>, Without<ConnectedGamepad>)>,
     mut commands: Commands,
 ) {
+    for entity in &gone {
+        commands.entity(entity).remove::<VibrationSent>();
+    }
     for (entity, controller, rumble, sent) in &pads {
         let wanted = rumble
             .filter(|rumble| !rumble.is_still())

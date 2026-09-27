@@ -208,6 +208,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 165  | `gamepad/`, and the two pieces that exist                             |
 | 167  | Rumble as a component                                                 |
 | 168  | The Steam build fills them                                            |
+| 169  | The design proposal                                                   |
 
 ---
 
@@ -224,36 +225,6 @@ its identity rather than its position.
 
 No chunk currently carries a defect. The register of what is known to be wrong is
 [docs/issues.md](./docs/issues.md), and an entry there that acquires a chunk gets a section here.
-
-## Gamepad devices, for upstream
-
-Bevy's `Gamepad` component is filled by `bevy_gilrs` alone, and holds live readings. A pad from any
-other backend, Steam Input above all, has none, so the questions a game asks of a pad (which are
-connected, what kind, what it can do, how much charge is left) have no vendor-neutral place to be
-answered. [bevy#25757][] proposes that Bevy own that place; a concrete design with a working
-prototype is what the proposal needs.
-
-The prototype is a module, `crates/bevy_action_map/src/gamepad/`, written as it would sit in
-`bevy_input`: it depends on Bevy alone, and the rest of the crate depends on it. Not a crate of its
-own, because a crates.io name is permanent and this one would be abandoned once `bevy_input` takes
-the work, and because `bevy_action_map` cannot publish while depending on an unpublished crate.
-
-### 169. The design proposal · E[2]
-
-A document for Bevy's maintainers: the problem, the components, how each backend fills them, and
-what changes for users of `Gamepad`. Written for that audience, and for the author to edit and post.
-
-- **A split of `Gamepad`** is what the proposal argues for: backend-neutral components a game
-  queries, and backend components beneath them that fill them, with the breaking change that costs
-  stated. The prototype sits beside `Gamepad`, because a module outside `bevy_input` cannot change
-  it; `gamepad/mod.rs` and `gamepad/gilrs.rs` are the two layers the split would produce.
-- **Each claim has been run on both backends**, Steam's in chunk 168 (S31).
-- **Names capabilities and battery as absent** (X50), with the one ask that would supply part of
-  them: `bevy_gilrs` forwarding what gilrs already reports.
-- **Links the prototype**, and says how `crates/bevy_action_map/src/gamepad/` maps onto
-  `bevy_input`'s files.
-
----
 
 ## Bindings and conditions
 
@@ -688,8 +659,8 @@ Two players are two `InputHandle_t`s, not two action sets (`docs/steam.md`'s app
 - **Chunk 116's pool runs on Steam's entities**, which is the test of "backend-neutral".
 - **Brand is Disasteroids' `brand`**, which maps `InputType` onto `GamepadBrand`, shared rather than
   copied.
-- **Measured here:** whether a handle survives a relaunch and a client restart, which settles D74's
-  claim either way.
+- **Measured here:** whether a handle survives a client restart, which settles D74's claim either
+  way. A relaunch of the game it survives (S32).
 - **Measured here:** how Steam orders its connected pads with two awake, whether that order is
   stable, and which pad `show_binding_panel` opens for. 151f's flight test saw Steam hesitate to
   switch between the PS5 and Xbox layouts with both awake, cause unknown.
@@ -811,4 +782,3 @@ for a minute and fail if the log has `panicked` or `ERROR`. It knows each exampl
 
 [bevy#19741]: https://github.com/bevyengine/bevy/issues/19741
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
-[bevy#25757]: https://github.com/bevyengine/bevy/discussions/25757

@@ -1860,6 +1860,19 @@ it would stop only one source, and a game relying on it to silence the pad would
 Every backend reading the component, Steam's included (chunk 168), would read a combination instead
 of a value.
 
+### D96 — The upstream gamepad prototype is a module, not a crate
+
+**Decided.** The backend-neutral gamepad layer proposed to Bevy is
+`crates/bevy_action_map/src/gamepad/`, written as it would sit in `bevy_input`: it depends on Bevy
+alone, and the rest of the crate depends on it. The proposal itself is `docs/proposals/gamepad.md`,
+posted as a gist. Chunk 165 built the module.
+
+**Rules out.** A crate of its own under `crates/`.
+
+**Reversal.** A crates.io name is permanent, and this one would be abandoned once `bevy_input` takes
+the work. `bevy_action_map` cannot publish while it depends on an unpublished crate, so the crate
+would have to be published first, under that name.
+
 ---
 
 ## What the crate refuses to own

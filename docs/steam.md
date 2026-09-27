@@ -224,7 +224,7 @@ Ground rule 5 applies here as everywhere: each row names what would settle it.
 | **Why does a rebind show only when the game's window gains focus?** `S30`: the origins are asked every frame, and the panel losing focus is ruled out. Either Steam answers the old origins until the game has focus, or the game stopped asking while unfocused. Which one decides whether a panel docked beside the game can ever update it live | a log line per frame from the origin poll while the game is unfocused after a rebind: lines with the old origins point at Steam, no lines at the game |
 | **Do action set *layers* stack, where base sets do not?** `S19` settled the base case; layers are D51's intended answer and `steamworks` 0.13 exposes none of the functions | a patched `steamworks`, or a direct FFI call past the safe wrapper |
 | **Does the emulated pad carry Valve's vendor id on Windows?** `S1` is a macOS measurement, and the Valve-vendor claim D93 replaced may have described Windows | a Windows machine with the same pad |
-| **Does an `InputHandle_t` survive a restart?** D74 leans on it for a persistent identity, while this document's appendix follows D52 in treating a handle as runtime-only. S14's layout — vendor, product, instance suffix, kept on disk — suggests it survives, from one sample | chunk 151e: the same pad's handle read across two launches, and across a client restart |
+| **Does an `InputHandle_t` survive a client restart?** D74 leans on it for a persistent identity, while this document's appendix follows D52 in treating a handle as runtime-only. S32 found it surviving the game relaunching; S14's layout (vendor, product, instance suffix, kept on disk) suggests it survives the client too, from one sample | chunk 151e: the same pad's handle read across a client restart |
 | **A wired Xbox pad on macOS is invisible to raw IOHID enumeration, but Steam still reads it.** Plugged in over USB-C, the same pad opens macOS's own Game Center overlay on its Home button — a system-level claim — and `padprobe` (raw gilrs, `IOHIDManager`) sees nothing from it at all; the identical pad over Bluetooth is ordinary and gilrs sees it fine. Steam Input reads the wired pad regardless, so it has some access path an `IOHIDManager` consumer does not | a packet capture or Steam's own logging against the same wired pad, or confirmation from Valve on how Steam Input acquires a macOS-claimed HID device |
 | **Do action event callbacks carry every edge between two `RunFrame`s?** `EnableActionEventCallbacks` delivers a `SteamInputActionEvent_t` per change, from inside `RunFrame` or `RunCallbacks`, with the action's data and no timestamp. If a press and a release made between two polls arrive as two events in order, Steam Input supplies ordered edges, which is all D4 asks of a timestamp, and a backend could preserve a sub-poll tap. If only the state at the poll arrives, it is a level with extra steps. `steamworks` 0.13.1 does not wrap it; `steamworks-sys` has the raw call, and its callback takes no user data, so events go through a global queue | a probe registering the callback and running a deliberately slow frame, 100 ms, with quick taps: two events per tap or one |
 
@@ -554,6 +554,14 @@ Measured in chunk 168, with an Xbox pad, through the Steam build of Disasteroids
   with no call repeating it. A slight rise after a few seconds was felt, and may be perception.
 - **Both speeds at zero stop it.**
 - **Quitting while it rumbles stops the pad**, with no zero sent first.
+- **A pad that sleeps and wakes rumbles again** when next sent a level (S32).
+
+### S32 — A pad's handle survives it sleeping and the game relaunching
+
+Measured in chunk 168, with an Xbox pad, through the Steam build of Disasteroids. Put to sleep from
+its home button and woken again, the pad left `GetConnectedControllers` and came back with the same
+handle, `0x45eb133e5f260`, within one run. Three launches of the game that day each reported that
+same handle. A restart of the Steam client is not measured.
 
 ---
 
