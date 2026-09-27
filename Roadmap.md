@@ -207,6 +207,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 174  | A section, printed by its anchor                                      |
 | 165  | `gamepad/`, and the two pieces that exist                             |
 | 167  | Rumble as a component                                                 |
+| 168  | The Steam build fills them                                            |
 
 ---
 
@@ -237,18 +238,6 @@ The prototype is a module, `crates/bevy_action_map/src/gamepad/`, written as it 
 own, because a crates.io name is permanent and this one would be abandoned once `bevy_input` takes
 the work, and because `bevy_action_map` cannot publish while depending on an unpublished crate.
 
-### 168. The Steam build fills them · E[3]
-
-The proof that the design is vendor-neutral: `steam_examples/` inserts `ConnectedGamepad` and
-`Brand` on its own pad entities, and drives `Rumble` through Steam's own API.
-
-- **Brand overlaps 151e**, which maps `InputType` onto `GamepadBrand`. Whichever lands second reuses
-  the other's mapping.
-- **Does not fill capabilities or battery**, which Steam Input has no query for (X50).
-- **Verified by:** an audit with a running client and a pad, as for the rest of the Steam section,
-  and Disasteroids' scrape felt on the pad: gilrs has no force feedback on macOS, so chunk 167's
-  rumble has not been felt by hand.
-
 ### 169. The design proposal · E[2]
 
 A document for Bevy's maintainers: the problem, the components, how each backend fills them, and
@@ -258,7 +247,7 @@ what changes for users of `Gamepad`. Written for that audience, and for the auth
   queries, and backend components beneath them that fill them, with the breaking change that costs
   stated. The prototype sits beside `Gamepad`, because a module outside `bevy_input` cannot change
   it; `gamepad/mod.rs` and `gamepad/gilrs.rs` are the two layers the split would produce.
-- **Drafted at any point, finished after 168**, so each claim has been run on both backends.
+- **Each claim has been run on both backends**, Steam's in chunk 168 (S31).
 - **Names capabilities and battery as absent** (X50), with the one ask that would supply part of
   them: `bevy_gilrs` forwarding what gilrs already reports.
 - **Links the prototype**, and says how `crates/bevy_action_map/src/gamepad/` maps onto
@@ -697,7 +686,8 @@ Two players are two `InputHandle_t`s, not two action sets (`docs/steam.md`'s app
 - **The backend writes `RawGamepadEvent::Connection`** when a handle appears or goes, since nothing
   else will (D73), and an action held on a vanished pad releases (R11.4).
 - **Chunk 116's pool runs on Steam's entities**, which is the test of "backend-neutral".
-- **Brand is `InputType` mapped onto `GamepadBrand`**, or `Generic` where it has no answer (S7).
+- **Brand is Disasteroids' `brand`**, which maps `InputType` onto `GamepadBrand`, shared rather than
+  copied.
 - **Measured here:** whether a handle survives a relaunch and a client restart, which settles D74's
   claim either way.
 - **Measured here:** how Steam orders its connected pads with two awake, whether that order is

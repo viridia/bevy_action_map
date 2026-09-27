@@ -44,6 +44,14 @@ bevy = { version = "0.20.0-rc.1", default-features = false, features = [
 # `raw-bindings` for the origin enum, which the safe API takes and returns but does not export.
 steamworks = { version = "0.13", features = ["raw-bindings"] }
 
+# Bevy's, so each function that opts in says so and why (G22).
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
 [profile.dev]
 opt-level = 1
 

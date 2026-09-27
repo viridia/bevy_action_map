@@ -6,11 +6,16 @@
 //! binding stands in for. Nothing here knows what the actions mean: [`SteamActions`] is a table of
 //! names and how to read each one, and the game fills it in.
 
+use bevy::input::gamepad::GamepadRumbleIntensity;
 use bevy::prelude::*;
 use bevy::scene::SceneList;
 use bevy::ui_widgets::{Activate, Button};
+use bevy_action_map::gamepad::{Brand, GamepadBrand};
 use bevy_action_map::prelude::*;
-use steamworks::{Client, Input, sys::EInputActionOrigin};
+use steamworks::{
+    Client, Input, InputType,
+    sys::{self, EInputActionOrigin},
+};
 
 use crate::common::prompt_ui::PromptSource;
 use crate::common::widget_focus::focusable;
@@ -190,6 +195,7 @@ pub fn plugin(app: &mut App) {
     }
     app.insert_non_send(Steam(client));
     app.add_systems(PreUpdate, poll.before(ActionMapSystems::Evaluate));
+    app.add_systems(PostUpdate, vibrate);
 }
 
 /// The button under the pad's table on the controls screen, which opens Steam's binding panel.
@@ -306,8 +312,9 @@ fn poll(
             .iter()
             .any(|(_, controller)| controller.0 == pad)
         {
-            info!("Steam pad {pad:#x} connected");
-            commands.spawn(SteamController(pad));
+            let brand = brand(input.get_input_type_for_handle(pad));
+            info!("Steam pad {pad:#x} connected, {brand}");
+            commands.spawn((SteamController(pad), ConnectedGamepad, Brand(brand)));
         }
     }
 
@@ -395,6 +402,75 @@ fn connected(input: &Input) -> Vec<u64> {
     let count = input.get_connected_controllers_slice(&mut handles);
     handles.truncate(count);
     handles
+}
+
+/// The brand whose conventions a Steam product family follows. Steam names families rather than
+/// vendors (S7), and its own controllers and the Deck are none of the three.
+fn brand(kind: InputType) -> GamepadBrand {
+    match kind {
+        InputType::XBox360Controller | InputType::XBoxOneController => GamepadBrand::Xbox,
+        InputType::PS3Controller | InputType::PS4Controller | InputType::PS5Controller => {
+            GamepadBrand::PlayStation
+        }
+        InputType::SwitchJoyConPair
+        | InputType::SwitchJoyConSingle
+        | InputType::SwitchProController => GamepadBrand::Nintendo,
+        _ => GamepadBrand::Generic,
+    }
+}
+
+/// The level last sent to a Steam pad, present only while it is not at rest.
+#[derive(Component)]
+struct VibrationSent(GamepadRumbleIntensity);
+
+/// Sends each change to a Steam pad's [`Rumble`] to Steam.
+///
+/// Steam sets a speed rather than adding one, so a new level needs no stop ahead of it. A pad that
+/// goes is despawned, and takes both components with it.
+fn vibrate(
+    steam: NonSend<Steam>,
+    pads: Query<(
+        Entity,
+        &SteamController,
+        Option<&Rumble>,
+        Option<&VibrationSent>,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, controller, rumble, sent) in &pads {
+        let wanted = rumble
+            .filter(|rumble| !rumble.is_still())
+            .map(|rumble| rumble.0);
+        if wanted == sent.map(|sent| sent.0) {
+            continue;
+        }
+        trigger_vibration(
+            &steam,
+            controller.0,
+            wanted.unwrap_or(GamepadRumbleIntensity::strong_motor(0.0)),
+        );
+        match wanted {
+            Some(level) => commands.entity(entity).insert(VibrationSent(level)),
+            None => commands.entity(entity).remove::<VibrationSent>(),
+        };
+    }
+}
+
+/// Sets a pad's motor speeds: the strong motor is Steam's left, as XInput has it.
+#[expect(unsafe_code, reason = "steamworks 0.13 has no safe vibration call")]
+fn trigger_vibration(_: &Steam, pad: u64, level: GamepadRumbleIntensity) {
+    let speed = |motor: f32| (motor.clamp(0.0, 1.0) * f32::from(u16::MAX)) as u16;
+    // SAFETY:
+    // - `&Steam` holds the client, so the API is initialised and the interface pointer is live.
+    // - Steam looks the pad handle up rather than dereferencing it, so a stale one is safe.
+    unsafe {
+        sys::SteamAPI_ISteamInput_TriggerVibration(
+            sys::SteamAPI_SteamInput_v006(),
+            pad,
+            speed(level.strong_motor),
+            speed(level.weak_motor),
+        );
+    }
 }
 
 /// What every action the pad feeds is bound to in Steam's layout, as prompts name it.

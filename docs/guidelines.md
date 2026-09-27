@@ -12,7 +12,7 @@ belongs there, and why a particular choice was made belongs in [`decisions.md`](
 **Numbering.** Each guideline's number is a permanent identity from a single counter, independent of
 its group, and never reused. A gap in the sequence is a retired guideline.
 
-**Next: 21.**
+**Next: 23.**
 
 ---
 
@@ -191,3 +191,14 @@ A Bevy system names what it reads in its signature, so a long query type is the 
 rather than a smell. When clippy's `type_complexity` fires on one, answer it with
 `#[expect(clippy::type_complexity, reason = "...")]`; do not split a query or add a type alias to
 quiet it.
+
+### G22 — Unsafe code is one safe function wide
+
+The crate forbids `unsafe`. Code beside it that needs some, for a platform API with no safe binding,
+follows Bevy's conventions. Its manifest denies `unsafe_code` in `[lints]`, with
+`unsafe_op_in_unsafe_fn` and clippy's `undocumented_unsafe_blocks`, and opts in per function with
+`#[expect(unsafe_code, reason = "...")]`, never per module. That function is safe to call: a
+parameter proves its precondition, as `&Steam` proves the client is alive, so no `unsafe fn` escapes
+and no `# Safety` section is owed. Each `unsafe` block has a `// SAFETY:` comment above it, one
+bullet per condition when it relies on more than one. `known_folder` in Bevy's
+`bevy_platform/src/dirs/windows.rs` is the shape.

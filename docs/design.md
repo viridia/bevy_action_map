@@ -737,6 +737,11 @@ without a `Stop`, so a reconnect is sent its level again. The driver is unordere
 same frame or the next. gilrs has no force feedback on macOS, where the requests are accepted and do
 nothing.
 
+A backend of its own drives its pads from `Rumble` directly, and the crate's driver leaves them
+alone, since they carry no `Gamepad`. The Steam build of Disasteroids sets Steam's motor speeds on
+each change, which Steam holds without a duration (S31), and inserts `ConnectedGamepad` and `Brand`,
+the latter mapped from Steam's product family, on the pad entities it spawns.
+
 ---
 
 ## 8. Bindings

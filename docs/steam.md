@@ -23,7 +23,7 @@ nothing about another, and Steam ships client updates continuously.
 
 | | |
 | --- | --- |
-| Measured | 2026-09-09, corrected and extended 2026-09-10, extended 2026-09-24 |
+| Measured | 2026-09-09, corrected and extended 2026-09-10, extended 2026-09-24 and 2026-09-26 |
 | OS | macOS 15.7.4 (24G517), Apple M1 Pro |
 | Steam client | stable channel; exact build not recorded |
 | `steamworks` crate | 0.13.1 (`steamworks-sys` 0.13.0) |
@@ -543,6 +543,17 @@ Measured in chunk 151c, with an Xbox pad:
 - **A rebind shows when the game's window gains focus**, not when the panel's control changes, and
   not when the panel loses focus: moving focus from the panel to Finder left the prompt as it was.
   Why is not known; see "Not measured yet".
+
+### S31 — A vibration level holds until it is changed
+
+Measured in chunk 168, with an Xbox pad, through the Steam build of Disasteroids:
+
+- **`steamworks` 0.13 does not wrap `TriggerVibration`.** The raw call in `steamworks-sys`, given
+  the interface from `SteamAPI_SteamInput_v006()`, rumbles the pad on macOS, where gilrs cannot.
+- **One call sets a level, and it holds** for as long as the ship stayed in a rock, several seconds,
+  with no call repeating it. A slight rise after a few seconds was felt, and may be perception.
+- **Both speeds at zero stop it.**
+- **Quitting while it rumbles stops the pad**, with no zero sent first.
 
 ---
 
