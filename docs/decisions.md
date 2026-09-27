@@ -601,7 +601,7 @@ that the lower context never saw the key go down.
 one path and not another, and an observer of `Canceled` would have to know which mechanism took the
 key away to interpret it.
 
-**Remainder.** Consumption does not follow the rule yet (`docs/issues.md` 1073).
+**Remainder.** Consumption does not follow the rule yet (chunks 179d and 179e).
 
 ### D77 — A disabled action is out of evaluation, as an inactive context is
 

@@ -221,13 +221,122 @@ its identity rather than its position.
 
 ## Next
 
+* 179a: `Started<A>` reaches observers, with a tick-script fixture
+* 179b: A hold charges once per tick
+* 179c: Require-reset holds through a time condition
+* 179d: A claim arriving cancels what it took
+* 179e: A claim lifting waits for a release
 * 115: A timing declared as a tunable
 * 122: The wheel as a binding source
 * 28: Docs that run
 * 33: Conditions that read other actions
 
-No chunk currently carries a defect. The register of what is known to be wrong is
+Chunk 179 carries defects. The register of what is known to be wrong is
 [docs/issues.md](./docs/issues.md), and an entry there that acquires a chunk gets a section here.
+
+## The tick loop
+
+`apply_frame` turns one tick into several folds: one per level event, and one before the events for
+an interruption. What happens once per tick has to land on exactly one of them, and these parts get
+that wrong in different places. They are lettered because each part's tests assume the one before:
+179a changes every hold's transition list, and 179b changes every hold's timing.
+
+### 179a. `Started<A>` reaches observers, with a tick-script fixture · E[1]
+
+`dispatch_for` maps `ActionPhase::Started` to `Started<A>`, whose doc promises it for "a hold that
+has just been pressed", and TD5.6 lists it. `commit_slot`'s edge filter logs only `Fired`,
+`Completed` and `Canceled`, so `Started` never reaches the log. Probed: a tick ending in `Started`
+leaves the log empty. Nothing in tree observes `Started<A>`; Disasteroids reads the phase instead
+(`ship.rs`), while its comment in `actions.rs` says `Started` fires.
+
+- **The fix:** `ActionPhase::Started` joins the edge filter; `dispatch_for` already maps it. The
+  transition log's only consumer is `dispatch_transitions`, so the change reaches observers and
+  nothing else. Tests that list a hold's transitions gain a `Started`, and one test observes
+  `Started<A>` through an `App`.
+- **A tick-script fixture**, which this part's transition tests are the first to use: one context,
+  bindings with time conditions, a list of ticks each carrying its events and its `delta`, and the
+  transitions asserted. All four defects in this group were confirmed by probes of that shape, and
+  179b–e write theirs on it. Check first whether the tests in `eval.rs` or `context/state.rs`
+  already have one, and extend it rather than add a second.
+- **Not doing:** Disasteroids moving to `Started<A>`. It reads the phase, and its comment in
+  `actions.rs` becomes true.
+
+### 179b. A hold charges once per tick · E[1]
+
+`apply_frame` hands each fold the whole tick's `delta`, and `Hold` adds `delta` on every call
+(`condition.rs`, `BindingCondition::evaluate`). A tick carrying three level events advances every
+hold timer by three ticks. Probed: `hold(0.25)` at a `delta` of 0.1, Space down on one tick, then a
+tick carrying three unrelated key events: `Firing` after 0.2 s. A moving stick sends axis events
+nearly every frame, so a pad hold charges two to three times faster while the player steers. `Tap`,
+`HoldAndRelease` and any modifier that integrates `delta` take the same path.
+
+- **The fix:** the tick's `delta` goes to its last level fold, and every earlier level or
+  interruption fold gets zero, which keeps the per-event replay R9.3 needs. The state a tick ends in
+  is taken to have lasted the tick. A tick with one event, or none, folds as it does today; an
+  interruption before the events (`authority_lost`, and 179d's claim arrival) charges nothing unless
+  it is the tick's only level fold. `Fold::Delta` reads only `Delta2` actions, once a tick, and
+  keeps its `delta`.
+- **So a press and release inside one tick read as a tap**, not as held for the tick. Events in a
+  tick carry no time between them, and the choice only matters when `delta` is large: after a hitch,
+  a quick press read as a long one turns a dodge into a sprint, which is the worse error. Tests:
+  that case with `tap` and `hold` over a large `delta`, and the probe above of three unrelated events.
+- **Riding along:** `part_value` carries the same `#[cfg]` twice.
+
+### 179c. Require-reset holds through a time condition · E[2]
+
+`commit_slot` holds a `Button` action back while its value reads pressed, and clears the latch the
+first time it reads rest. The value it checks is taken after conditions, and a binding whose hold is
+still `Building` contributes rest. So the latch clears on the first tick after activation with the
+key still down, and the hold charges and fires. Probed: Space held across `deactivate`/`activate`
+with `hold(0.25)` gave `Started`, `Building`, `Fired`. R7.5 fails for every binding with a time
+condition, through `activate`, `enable` (R3.7) and `unshadow` alike.
+`a_context_activating_ignores_a_control_already_held` binds plainly, which is why it passes.
+
+- **The fix:** the latch is decided in `fold`, between the press threshold and the conditions,
+  rather than in `commit_slot` after them. While a `Button` slot is latched, each binding still runs
+  its modifiers and threshold, notes whether the result reads pressed, and hands rest to its
+  conditions; the stage's conditions then see rest too, since the fold is rest. After the binding
+  loop, a latched slot whose bindings all read rest clears. So a hold never charges on a pre-held
+  key, and a latched binding never claims its control from the context below.
+- **Not in `commit_slot`:** reading the pre-condition value there would fix the hold but not `Tap`
+  or `HoldAndRelease`, which would fire on releasing the key held across activation. The latch check
+  in `commit_slot` goes.
+- **Verified by** the probe above with `hold`, `tap` and `hold_and_release` each.
+
+### 179d. A claim arriving cancels what it took · E[2]
+
+A consumed control reads as untouched, so a lower context cannot tell a claim arriving from the
+player letting go. Space held, `Jump` firing, Shift added for the vehicle's boost: on-foot's `Jump`
+completes as though the player had released. Read from `fold`, not yet probed: `Fold::Interrupted`
+is set for focus loss, a disconnect and authority loss, not for a claim. D94 rules it, following the
+authority path (TD5.8): a key that goes away while down cancels what it was firing.
+
+- **Probe first:** `Jump` firing on Space, a higher context claiming Space the next tick, `Canceled`
+  expected.
+- **The context keeps last tick's claims**, and the difference from this tick's is the edge. 179e
+  reads the same difference.
+- **The fix:** each lower action with a binding on a newly claimed control folds as
+  `Fold::Interrupted`, beside the `authority_lost` fold and before the events, so it inherits 179b's
+  rule for `delta`.
+- **The arrival rule joins R8.2**, since R7.5 covers activation alone.
+- **Chunk 83 gains the kept claims** as state a restore must bring back.
+- **Depends on 179b.**
+
+### 179e. A claim lifting waits for a release · E[1]
+
+When a claim stops with the key still held (the hold completes or is abandoned, its chord breaks,
+the higher context deactivates), the lower context's plain binding on that key fires. Probed: Space
+claimed on one tick, unclaimed on the next, never released: `Jump` `Fired`. In play: a dialog
+confirms on A and closes while A is still down, and the character jumps; or Shift+Space held for a
+vehicle boost, Shift released first, and the on-foot context jumps. D94 rules it: a key that arrives
+already down is ignored by `Button` actions until released.
+
+- **The fix:** on the claim difference 179d keeps, each lower `Button` action with a binding on the
+  returning control gets 179c's latch; analog actions resume. A claim covers a binding's primary
+  control, not its chord, so a chord's other keys never return and are untouched.
+- **The lift rule joins R8.2.**
+- **Depends on 179c and 179d**: without 179c, a returning key whose binding has a hold slips through
+  the latch as it does on activation.
 
 ## Bindings and conditions
 
@@ -501,6 +610,8 @@ the expensive part.
 - **What stays deferred:** injection and reconciliation — feeding a remote player's resolved action
   through the authority-backend seam (D69), and disagreeing with the authority about what happened.
   Those want a network; rewinding does not, and the injection point itself is already chunk 111's.
+- **A context's kept claims are state a restore must bring back**, once chunk 179d adds them: the
+  claims it read last tick, from which it tells a claim arriving or lifting.
 - **`disabled` is state a restore must bring back**, beside `require_reset`: chunk 35's per-action
   switch, parallel to the action table.
 - **Split if it grows.** Making the state snapshot-able with a differential test is separable from
