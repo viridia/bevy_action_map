@@ -1,16 +1,21 @@
-//! Gamepads as a game asks about them: which are connected, and what kind each one is.
+//! Gamepads as a game asks about them: which are connected, and what kind each one is, and as a
+//! game drives them: how hard each one rumbles.
 //!
 //! Each question is answered by a component on the gamepad's own entity, and the answer reads the
 //! same whichever backend supplied the pad. Bevy's own gamepad backend gets these attached for you,
 //! from what it reports when a pad connects. A backend of your own inserts them on the entities it
 //! spawns, and code that queries them never needs to know which backend it is running on.
+//!
+//! [`Rumble`] runs the other way: the game sets it on a pad's entity, and the backend reads it.
 
-use bevy_app::App;
+use bevy_app::{App, PostUpdate};
 use bevy_ecs::prelude::Component;
+use bevy_input::gamepad::{GamepadRumbleIntensity, GamepadRumbleRequest};
 use core::ops::Deref;
 
 mod gilrs;
 
+use gilrs::drive_gamepad_rumble;
 pub use gilrs::{
     GamepadBrands, GamepadModelId, mark_gamepad_connected, mark_gamepad_disconnected,
     resolve_gamepad_brand,
@@ -85,10 +90,55 @@ impl Deref for Brand {
     }
 }
 
-/// Fills this module's components from Bevy's own gamepad backend.
+/// How hard a gamepad's motors rumble, for as long as this is set.
+///
+/// Insert it on a pad's entity to start the pad rumbling, change it to change the rumble, and
+/// remove it or set both motors to zero to stop. It is a level rather than an effect: the pad holds
+/// the value until you change it, with no duration to choose and no timer to keep.
+///
+/// ```ignore
+/// fn engine_rumble(ships: Query<(&Ship, &Pilot)>, mut commands: Commands) {
+///     for (ship, pilot) in &ships {
+///         let intensity = GamepadRumbleIntensity::strong_motor(ship.throttle * 0.4);
+///         commands.entity(pilot.pad).insert(Rumble(intensity));
+///     }
+/// }
+/// ```
+///
+/// There is one value per pad, and the last one written wins. A game that rumbles for more than one
+/// reason, such as gameplay and a menu at once, keeps each reason in a component of its own and
+/// combines them in one system that writes this.
+///
+/// Bevy's gamepad backend is driven from it for you, except on macOS, where that backend cannot
+/// rumble a pad at all. A backend of your own reads it from the entities it spawns and drives its
+/// pads the same way. For a short one-off buzz, sending Bevy's `GamepadRumbleRequest` yourself
+/// remains the simpler tool, but a change to this component stops any such buzz running on the same
+/// pad.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct Rumble(pub GamepadRumbleIntensity);
+
+impl Rumble {
+    /// Whether both motors are at rest.
+    pub fn is_still(&self) -> bool {
+        self.0.strong_motor <= 0.0 && self.0.weak_motor <= 0.0
+    }
+}
+
+impl Deref for Rumble {
+    type Target = GamepadRumbleIntensity;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Fills this module's components from Bevy's own gamepad backend, and drives its rumble from
+/// [`Rumble`].
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<GamepadBrands>();
     app.add_observer(resolve_gamepad_brand);
     app.add_observer(mark_gamepad_connected);
     app.add_observer(mark_gamepad_disconnected);
+    app.add_message::<GamepadRumbleRequest>();
+    app.add_systems(PostUpdate, drive_gamepad_rumble);
 }

@@ -184,3 +184,10 @@ handles wait on a pending component while the old children stay drawn, and the s
 frame, before UI layout, once every asset is loaded; a newer answer replaces the pending one.
 `prompt_ui.rs`'s `PendingIcons` is the shape. A headless test of it registers `ImageLoader` by hand,
 which the renderer otherwise does.
+
+### G21 — A system's parameter types are as complex as its dependencies
+
+A Bevy system names what it reads in its signature, so a long query type is the dependency list
+rather than a smell. When clippy's `type_complexity` fires on one, answer it with
+`#[expect(clippy::type_complexity, reason = "...")]`; do not split a query or add a type alias to
+quiet it.

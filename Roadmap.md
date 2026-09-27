@@ -206,6 +206,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 72b  | Calibration the app sets, and measuring withdrawn                     |
 | 174  | A section, printed by its anchor                                      |
 | 165  | `gamepad/`, and the two pieces that exist                             |
+| 167  | Rumble as a component                                                 |
 
 ---
 
@@ -236,21 +237,6 @@ The prototype is a module, `crates/bevy_action_map/src/gamepad/`, written as it 
 own, because a crates.io name is permanent and this one would be abandoned once `bevy_input` takes
 the work, and because `bevy_action_map` cannot publish while depending on an unpublished crate.
 
-### 167. Rumble as a component · E[3]
-
-R14.6. Rumble is an event today: a game addresses a `GamepadRumbleRequest` to a pad's entity and
-times it itself. A `Rumble` component on that entity is a level instead, and the pad rumbles at its
-value while it is set.
-
-- **Who owns the value is this chunk's decision.** Gameplay and UI both want to set it: last write
-  wins, the strongest wins, or the component holds sources and combines them. Which of these keeps a
-  level simpler than an event is the question.
-- **gilrs is driven from it** by a system that turns changes into `GamepadRumbleRequest`s, so the
-  prototype asks nothing of `bevy_gilrs`.
-- **Routing is the mapper's half**, outside `crates/bevy_action_map/src/gamepad/`: a player, their
-  `Paired` device entity, its `Rumble`.
-- **Verified by:** a headless test on the requests emitted, and a pad by hand.
-
 ### 168. The Steam build fills them · E[3]
 
 The proof that the design is vendor-neutral: `steam_examples/` inserts `ConnectedGamepad` and
@@ -259,7 +245,9 @@ The proof that the design is vendor-neutral: `steam_examples/` inserts `Connecte
 - **Brand overlaps 151e**, which maps `InputType` onto `GamepadBrand`. Whichever lands second reuses
   the other's mapping.
 - **Does not fill capabilities or battery**, which Steam Input has no query for (X50).
-- **Verified by:** an audit with a running client and a pad, as for the rest of the Steam section.
+- **Verified by:** an audit with a running client and a pad, as for the rest of the Steam section,
+  and Disasteroids' scrape felt on the pad: gilrs has no force feedback on macOS, so chunk 167's
+  rumble has not been felt by hand.
 
 ### 169. The design proposal · E[2]
 

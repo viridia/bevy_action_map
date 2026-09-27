@@ -1845,6 +1845,21 @@ the whole file rather than omitting the field. Anything persisted stores `SavedD
 [gilrs#158]: https://gitlab.com/gilrs-project/gilrs/-/work_items/158
 [gilrs#207]: https://gitlab.com/gilrs-project/gilrs/-/work_items/207
 
+### D95 — Rumble is one level per pad, and the last write wins
+
+**Decided.** `Rumble` is a component on the pad's entity holding one intensity, held until it
+changes. Several reasons to rumble at once are the game's to combine, in components of its own and
+one system that writes `Rumble`. Chunk 167 built it.
+
+**Rules out.** The component combining sources itself, whether by keeping the strongest request or
+by holding a keyed entry per source: either puts an ownership scheme in the API that one game in
+several needs, and a keyed entry left behind by a despawned source holds the pad rumbling.
+
+**Reversal.** Setting `Rumble` to zero, or removing it, stops the pad today; with sources combined
+it would stop only one source, and a game relying on it to silence the pad would leave it buzzing.
+Every backend reading the component, Steam's included (chunk 168), would read a combination instead
+of a value.
+
 ---
 
 ## What the crate refuses to own

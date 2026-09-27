@@ -1,14 +1,15 @@
 //! The player's ship: how it flies, and what it does when told to.
 
+use bevy::input::gamepad::GamepadRumbleIntensity;
 use bevy::prelude::*;
 use bevy_action_map::prelude::*;
 use std::f32::consts::TAU;
 
 use crate::actions::{Afterburner, Fire, Flying, Hyperspace, SmartBomb, Thrust, Turn};
-use crate::asteroids::{Asteroid, Doomed};
+use crate::asteroids::{Asteroid, Doomed, Size};
 use crate::common::prompt_ui::{IconPromptSpan, PromptFamily};
 use crate::field::{HALF_EXTENT, Lifetime, Velocity, Wraps};
-use crate::pause::Simulating;
+use crate::pause::{Game, Simulating};
 
 const TURN_RATE: f32 = 3.2;
 const ACCELERATION: f32 = 420.0;
@@ -35,6 +36,16 @@ const BLAST_DURATION: f32 = 0.3;
 /// the shockwave that caused it does.
 const BLAST_FUSE: f32 = 0.25;
 
+/// The ship's size, as a circle, for telling when it overlaps a rock.
+const HULL_RADIUS: f32 = 12.0;
+const HULL: Color = Color::srgb(0.85, 0.9, 1.0);
+const SCRAPED_HULL: Color = Color::srgb(1.0, 0.45, 0.35);
+/// How hard the pad shakes while the ship is inside a rock.
+const SCRAPE: GamepadRumbleIntensity = GamepadRumbleIntensity {
+    strong_motor: 0.5,
+    weak_motor: 0.2,
+};
+
 #[derive(Component, Default, Clone)]
 pub struct Ship;
 
@@ -58,7 +69,8 @@ pub fn plugin(app: &mut App) {
     // `fly` is the only polled system: a schedule holds what has to happen on every tick whether
     // the player did anything or not, and what happens *because* they did is an observer on the
     // ship itself.
-    app.add_systems(FixedUpdate, fly.in_set(Simulating));
+    app.add_systems(FixedUpdate, (fly, scrape).in_set(Simulating));
+    app.add_systems(OnEnter(Game::Paused), still_the_pads);
     app.add_systems(
         Update,
         (show_exhaust, redraw_bomb_meter, animate_shock_ring),
@@ -88,7 +100,7 @@ fn ship() -> impl Scene {
             Vec2::new(-12.0, 11.0),
             Vec2::new(-12.0, -11.0),
         )))
-        MeshMaterial2d::<ColorMaterial>(asset_value(Color::srgb(0.85, 0.9, 1.0)))
+        MeshMaterial2d::<ColorMaterial>(asset_value(HULL))
         Velocity
         Wraps
         Children [
@@ -127,6 +139,46 @@ fn fly(
         let heading = (transform.rotation * Vec3::X).truncate();
         velocity.0 += heading * thrust * ACCELERATION * boost * delta;
         velocity.0 *= 1.0 - DRAG * delta;
+    }
+}
+
+/// The ship flies through rocks rather than breaking on them, but it feels them: while it overlaps
+/// one, the hull glows and every connected pad rumbles.
+///
+/// [`Rumble`] is a level, so this says how hard the pads should shake right now and the pads hold
+/// it until the next tick says otherwise. Writing the same value again costs nothing; the pad is
+/// only told when it changes. One ship and no pairing, so every pad gets it; a game with players
+/// would take each one's pads from their [`Paired`].
+fn scrape(
+    ships: Query<(&Transform, &MeshMaterial2d<ColorMaterial>), With<Ship>>,
+    rocks: Query<(&Transform, &Size), With<Asteroid>>,
+    pads: Query<Entity, With<ConnectedGamepad>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut commands: Commands,
+) {
+    for (ship_at, material) in ships {
+        let scraped = rocks.iter().any(|(rock_at, size)| {
+            ship_at.translation.distance(rock_at.translation) < size.radius() + HULL_RADIUS
+        });
+        if let Some(mut material) = materials.get_mut(&material.0) {
+            material.color = if scraped { SCRAPED_HULL } else { HULL };
+        }
+        let rumble = if scraped {
+            SCRAPE
+        } else {
+            GamepadRumbleIntensity::weak_motor(0.0)
+        };
+        for pad in &pads {
+            commands.entity(pad).insert(Rumble(rumble));
+        }
+    }
+}
+
+/// Stops the pads when the game pauses. [`scrape`] stops running, so a ship paused inside a rock
+/// would otherwise leave them shaking through the pause.
+fn still_the_pads(pads: Query<Entity, With<Rumble>>, mut commands: Commands) {
+    for pad in &pads {
+        commands.entity(pad).remove::<Rumble>();
     }
 }
 

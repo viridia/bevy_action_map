@@ -716,6 +716,27 @@ match is a candidate rather than a proof. A pad whose platform reports neither i
 `.after(InputSystems)`, and the sync point that implies is where Bevy's deferred `Gamepad` insert
 lands and where the observer runs — so `Identity` is attached before `DeviceConnected` fires.
 
+### 7.8 Rumble
+
+```rust
+pub struct Rumble(pub GamepadRumbleIntensity);   // component, on the pad's entity
+impl DeviceHandleSet { pub fn gamepads(&self) -> impl Iterator<Item = Entity>; }
+```
+
+`Rumble` is a level: the pad rumbles at its value while it is set, and stops when both motors are
+zero or the component is removed. It holds one value, and the last write wins (D95). Routing is
+`Paired`'s: `gamepads()` yields the entities of a player's pads, which is where `Rumble` goes.
+
+Bevy's gamepad backend takes only timed `GamepadRumbleRequest`s and sums all of them running on a
+pad, so `drive_gamepad_rumble` in `PostUpdate` compares each pad's `Rumble` with a private
+`RumbleSent` and, on a difference, sends `Stop` and then `Add` for a day. A day because gilrs
+converts a duration to `u32` milliseconds; a level held longer lapses. The `Stop` also ends any
+timed request the game sent that pad itself. A pad that loses `Gamepad` drops its `RumbleSent`
+without a `Stop`, so a reconnect is sent its level again. The driver is unordered against
+`bevy_gilrs`'s `RumbleSystems`, which this crate cannot name, so a change reaches the pad in the
+same frame or the next. gilrs has no force feedback on macOS, where the requests are accepted and do
+nothing.
+
 ---
 
 ## 8. Bindings
@@ -1292,8 +1313,9 @@ the `assets/` they load beside its manifest.
 ```
 crates/bevy_action_map/src/
   device.rs      L0  families and handles, pairing sets, identity, gamepad calibration
-  gamepad/mod.rs L0  the backend-neutral components: ConnectedGamepad, Brand
-    gilrs.rs         fills them from Bevy's Gamepad; GamepadBrands, GamepadModelId
+  gamepad/mod.rs L0  the backend-neutral components: ConnectedGamepad, Brand, Rumble
+    gilrs.rs         fills them from Bevy's Gamepad, and drives its rumble; GamepadBrands,
+                     GamepadModelId
   frame.rs       L1  the event queue, sampling, retirement
   action.rs          identity, intent, channel shape, value, phase, scratch
   binding/mod.rs     re-exports the three below, which are private to it

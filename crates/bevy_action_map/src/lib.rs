@@ -397,7 +397,7 @@ pub mod prelude {
     pub use crate::event::{Canceled, ClassBinding, ClassFired, Completed, Fired, Started};
     pub use crate::frame::{FrameTimestamp, InputFrame, RawEvent, TimedRawEvent};
     #[cfg(feature = "gamepad")]
-    pub use crate::gamepad::ConnectedGamepad;
+    pub use crate::gamepad::{ConnectedGamepad, Rumble};
     pub use crate::join::is_claimed;
     pub use crate::mapping::{
         ActionMapping, BoundSlot, Follower, MappingKey, RebindPolicy, Tunable, TunableValue,

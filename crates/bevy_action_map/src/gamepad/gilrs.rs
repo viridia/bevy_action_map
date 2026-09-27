@@ -1,13 +1,17 @@
-//! Filling the backend-neutral components from Bevy's own `Gamepad`, which `bevy_gilrs` supplies.
+//! Filling the backend-neutral components from Bevy's own `Gamepad`, which `bevy_gilrs` supplies,
+//! and driving its rumble from them.
 
 use bevy_ecs::lifecycle::{Add, Remove};
-use bevy_ecs::prelude::{Commands, On, Query, Res, Resource, Without};
+use bevy_ecs::prelude::{
+    Commands, Component, Entity, Has, MessageWriter, On, Or, Query, Res, Resource, With, Without,
+};
 #[cfg(feature = "bevy_reflect")]
 use bevy_ecs::reflect::ReflectResource;
-use bevy_input::gamepad::Gamepad;
+use bevy_input::gamepad::{Gamepad, GamepadRumbleIntensity, GamepadRumbleRequest};
 use bevy_platform::collections::HashMap;
+use core::time::Duration;
 
-use super::{Brand, ConnectedGamepad, GamepadBrand};
+use super::{Brand, ConnectedGamepad, GamepadBrand, Rumble};
 
 /// Resolves a connected gamepad's [`GamepadBrand`] from its `vendor_id`.
 ///
@@ -115,6 +119,61 @@ pub fn mark_gamepad_disconnected(disconnected: On<Remove<Gamepad>>, mut commands
     commands
         .entity(disconnected.entity)
         .try_remove::<ConnectedGamepad>();
+}
+
+/// The level last requested of Bevy's gamepad backend, present only while it is not at rest.
+#[derive(Component)]
+pub(crate) struct RumbleSent(GamepadRumbleIntensity);
+
+/// How long one request holds a level. The backend has no "until stopped", and converts a duration
+/// to `u32` milliseconds, overflowing past about 49 days.
+const RUMBLE_HOLD: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Turns each change to a pad's [`Rumble`] into rumble requests for Bevy's own gamepad backend.
+///
+/// That backend sums every request running on a pad, so a new level stops the old one first. A pad
+/// that disconnects loses its rumble, and is sent its level again when it comes back.
+#[expect(
+    clippy::type_complexity,
+    reason = "`abandoned` is one filter, and splitting it would repeat the loop"
+)]
+pub(crate) fn drive_gamepad_rumble(
+    pads: Query<(Entity, &Rumble, Option<&RumbleSent>), With<Gamepad>>,
+    abandoned: Query<
+        (Entity, Has<Gamepad>),
+        (With<RumbleSent>, Or<(Without<Rumble>, Without<Gamepad>)>),
+    >,
+    mut requests: MessageWriter<GamepadRumbleRequest>,
+    mut commands: Commands,
+) {
+    for (gamepad, rumble, sent) in &pads {
+        match sent {
+            Some(sent) if sent.0 == rumble.0 => continue,
+            None if rumble.is_still() => continue,
+            Some(_) => {
+                requests.write(GamepadRumbleRequest::Stop { gamepad });
+            }
+            None => {}
+        }
+        if rumble.is_still() {
+            commands.entity(gamepad).remove::<RumbleSent>();
+        } else {
+            requests.write(GamepadRumbleRequest::Add {
+                duration: RUMBLE_HOLD,
+                intensity: rumble.0,
+                gamepad,
+            });
+            commands.entity(gamepad).insert(RumbleSent(rumble.0));
+        }
+    }
+
+    // A pad that went away has already stopped, and a stop sent to it would only be refused.
+    for (gamepad, connected) in &abandoned {
+        if connected {
+            requests.write(GamepadRumbleRequest::Stop { gamepad });
+        }
+        commands.entity(gamepad).remove::<RumbleSent>();
+    }
 }
 
 #[cfg(test)]
@@ -236,5 +295,118 @@ mod tests {
             app.world().get::<Brand>(overridden),
             Some(&Brand(GamepadBrand::Nintendo))
         );
+    }
+
+    /// What the driver asked of the backend since the last call: `None` a stop, `Some` a level.
+    fn requests(app: &mut App) -> alloc::vec::Vec<Option<(f32, f32)>> {
+        app.world_mut()
+            .resource_mut::<bevy_ecs::message::Messages<GamepadRumbleRequest>>()
+            .drain()
+            .map(|request| match request {
+                GamepadRumbleRequest::Add { intensity, .. } => {
+                    Some((intensity.strong_motor, intensity.weak_motor))
+                }
+                GamepadRumbleRequest::Stop { .. } => None,
+            })
+            .collect()
+    }
+
+    fn connect(app: &mut App, pad: Entity) {
+        app.world_mut().write_message(GamepadConnectionEvent::new(
+            pad,
+            GamepadConnection::Connected {
+                name: "test pad".into(),
+                vendor_id: None,
+                product_id: None,
+            },
+        ));
+    }
+
+    fn rumble_app() -> (App, Entity) {
+        let mut app = App::new();
+        app.add_plugins(InputPlugin);
+        app.add_plugins(crate::gamepad::plugin);
+        let pad = app.world_mut().spawn_empty().id();
+        connect(&mut app, pad);
+        app.update();
+        (app, pad)
+    }
+
+    #[test]
+    fn a_level_is_requested_once_and_held() {
+        let (mut app, pad) = rumble_app();
+        app.world_mut()
+            .entity_mut(pad)
+            .insert(Rumble(GamepadRumbleIntensity::MAX));
+        app.update();
+        assert_eq!(requests(&mut app), [Some((1.0, 1.0))]);
+
+        app.update();
+        assert_eq!(requests(&mut app), [], "an unchanged level was sent again");
+    }
+
+    #[test]
+    fn a_new_level_replaces_the_old_rather_than_adding_to_it() {
+        let (mut app, pad) = rumble_app();
+        app.world_mut()
+            .entity_mut(pad)
+            .insert(Rumble(GamepadRumbleIntensity::MAX));
+        app.update();
+        requests(&mut app);
+
+        app.world_mut().get_mut::<Rumble>(pad).unwrap().0 = GamepadRumbleIntensity::weak_motor(0.5);
+        app.update();
+        assert_eq!(requests(&mut app), [None, Some((0.0, 0.5))]);
+    }
+
+    #[test]
+    fn zero_and_removal_both_stop_the_pad() {
+        let (mut app, pad) = rumble_app();
+        app.world_mut()
+            .entity_mut(pad)
+            .insert(Rumble(GamepadRumbleIntensity::MAX));
+        app.update();
+        requests(&mut app);
+
+        app.world_mut().get_mut::<Rumble>(pad).unwrap().0 =
+            GamepadRumbleIntensity::strong_motor(0.0);
+        app.update();
+        assert_eq!(requests(&mut app), [None]);
+        app.update();
+        assert_eq!(requests(&mut app), [], "a pad at rest was stopped again");
+
+        app.world_mut().get_mut::<Rumble>(pad).unwrap().0 = GamepadRumbleIntensity::MAX;
+        app.update();
+        requests(&mut app);
+        app.world_mut().entity_mut(pad).remove::<Rumble>();
+        app.update();
+        assert_eq!(requests(&mut app), [None]);
+        app.update();
+        assert_eq!(requests(&mut app), []);
+    }
+
+    #[test]
+    fn a_pad_that_comes_back_is_sent_its_level_again() {
+        let (mut app, pad) = rumble_app();
+        app.world_mut()
+            .entity_mut(pad)
+            .insert(Rumble(GamepadRumbleIntensity::STRONG_MAX));
+        app.update();
+        requests(&mut app);
+
+        app.world_mut().write_message(GamepadConnectionEvent::new(
+            pad,
+            GamepadConnection::Disconnected,
+        ));
+        app.update();
+        assert_eq!(
+            requests(&mut app),
+            [],
+            "a stop was sent to a pad that is gone"
+        );
+
+        connect(&mut app, pad);
+        app.update();
+        assert_eq!(requests(&mut app), [Some((1.0, 0.0))]);
     }
 }

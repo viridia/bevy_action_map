@@ -114,6 +114,29 @@ impl DeviceHandleSet {
         self.0.iter().copied()
     }
 
+    /// The claimed gamepads' entities, in insertion order.
+    ///
+    /// A pad's entity is where a component addressing that one pad goes, so this is how a player
+    /// reaches their own pads:
+    ///
+    /// ```ignore
+    /// fn rumble_while_hurt(players: Query<(&Health, &Paired)>, mut commands: Commands) {
+    ///     for (health, paired) in &players {
+    ///         for pad in paired.gamepads() {
+    ///             let intensity = GamepadRumbleIntensity::weak_motor(health.recent_damage());
+    ///             commands.entity(pad).insert(Rumble(intensity));
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    #[cfg(feature = "gamepad")]
+    pub fn gamepads(&self) -> impl Iterator<Item = Entity> + '_ {
+        self.0.iter().filter_map(|device| match device {
+            DeviceHandle::Gamepad(pad) => Some(*pad),
+            DeviceHandle::KeyboardMouse => None,
+        })
+    }
+
     /// The claimed device belonging to the given family, if any.
     ///
     /// An occupant with one device per family has at most one answer; a game that pairs two devices
@@ -1167,6 +1190,25 @@ mod tests {
         assert_eq!(
             set.owner_for(DeviceFamily::KeyboardMouse),
             Some(DeviceHandle::KeyboardMouse)
+        );
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn gamepads_yields_every_claimed_pad_and_nothing_else() {
+        let first = bevy_ecs::entity::Entity::from_bits(1);
+        let second = bevy_ecs::entity::Entity::from_bits(2);
+        let set = DeviceHandleSet::from_iter([
+            DeviceHandle::Gamepad(first),
+            DeviceHandle::KeyboardMouse,
+            DeviceHandle::Gamepad(second),
+        ]);
+        assert!(set.gamepads().eq([first, second]));
+        assert_eq!(
+            DeviceHandleSet::of(DeviceHandle::KeyboardMouse)
+                .gamepads()
+                .count(),
+            0
         );
     }
 

@@ -19,7 +19,7 @@ pub enum Size {
 }
 
 impl Size {
-    fn radius(self) -> f32 {
+    pub fn radius(self) -> f32 {
         match self {
             Self::Large => 44.0,
             Self::Medium => 26.0,
