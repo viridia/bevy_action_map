@@ -229,7 +229,6 @@ its identity rather than its position.
 * 115: A timing declared as a tunable
 * 122: The wheel as a binding source
 * 28: Docs that run
-* 33: Conditions that read other actions
 
 Chunk 179 carries defects. The register of what is known to be wrong is
 [docs/issues.md](./docs/issues.md), and an entry there that acquires a chunk gets a section here.
@@ -431,24 +430,6 @@ reads Bevy's own message beside the mapper, and loses the rebinding along with i
   says app-configurable, but a trackpad and a notched wheel want different numbers on the same
   machine and only the binding is that specific — so either the requirement is right and the case is
   rarer than it sounds, or it is a clause to revise.
-
-### 33. Conditions that read other actions · E[3]
-
-A chord may require another *control* but not another *action*, and `BlockedBy` does not exist. Both
-read a neighbouring slot rather than their own value, which needs the operand evaluated first: slots
-ordered topologically, and a cycle rejected at plan build with a diagnostic naming the loop.
-
-- **Depends on chunk 95.** The demo is a Pong variant: serve is blocked while the ball is already in
-  play, one `BlockedBy` condition on the serve action reading the rally's own in-flight state. No
-  new content beyond what the base already has.
-- **Inherited from chunk 44: whether this subsumes `follow`.** An afterburner is genuinely "thrust,
-  still held", and a game that could say that in a condition would need no link at all. The two
-  answer different questions — `follow` says the mapping is shared, a condition says the value is
-  derived — but check when this lands whether the overlap is large enough that one should go, since
-  carrying both when either would do is what an outside reader notices first.
-- **`pong_countdown` already has a serve.** Chunk 35 gates it by disabling `Serve` outside the wait,
-  from a system. The likely demo is that gate replaced by a condition, on that variant, rather than
-  a second `Serve` in another.
 
 ### 115. A timing declared as a tunable · E[2]
 

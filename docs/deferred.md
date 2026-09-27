@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 54.**
+**Next: 55.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -499,6 +499,26 @@ restore, re-simulate — is chunk 83, which also takes the held-state containers
 (D69): a network authority backend supplies the already-resolved `ActionValue`, not a raw frame, so
 no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs
 a remote player's resolved action to inject and a later correction to reconcile against it.
+
+### X54 — Conditions that read other actions
+
+**Gate:** the crate public (X43), and its users asked on the Bevy Discord whether a game wants a
+condition that reads another action rather than a control.
+
+A chord may require another *control* but not another *action*, and `BlockedBy` does not exist. Both
+read a neighbouring slot rather than their own value, which needs the operand evaluated first: slots
+ordered topologically, and a cycle rejected at plan build with a diagnostic naming the loop. This
+was chunk 33, inherited from the prior-art survey (R6.1's chord and blocked-by), and it has no
+customer in tree: its planned demo blocked a Pong serve while the ball is in play, which is game
+state, and `pong_countdown` already gates that by disabling `Serve` from a system (chunk 35).
+
+- **Whether it subsumes `follow`**, inherited from chunk 44. An afterburner is genuinely "thrust,
+  still held", and a game that could say that in a condition would need no link at all. `follow`
+  says the mapping is shared, a condition says the value is derived; if both ship, check whether one
+  should go.
+- **What to ask:** whether a game gates one action on another's state in the mapper, or in a system
+  as `pong_countdown` does, and what the case was. An answer naming game state is R6.5's argument
+  and argues for withdrawing R6.1's two clauses.
 
 ### X47 — Measuring a stick's rest envelope
 
