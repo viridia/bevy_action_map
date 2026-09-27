@@ -1629,12 +1629,13 @@ properties that decided the state layout, as **D8**.
 
 ---
 
-## 24. API design and upstream constraints
+## 24. API design and Bevy's conventions
 
-**Problem.** Targeting eventual upstream inclusion in Bevy imposes constraints a standalone crate
-would not face: dependency scrutiny, `no_std`, reflection, and conformance to conventions that move
-between releases. The tension to manage is that generality of the kind this document demands tends
-to produce APIs in which the simplest case stops being simple.
+**Problem.** This crate is written as if it were intended for upstream inclusion in Bevy, which
+imposes constraints a standalone crate would not take on: dependency scrutiny, `no_std`, reflection,
+and conformance to conventions that move between releases. The tension to manage is that generality
+of the kind this document demands tends to produce APIs in which the simplest case stops being
+simple.
 
 - **R24.1 (MUST)** Core is `no_std`-compatible; device backends, serialization, and reflection
   behind feature flags mirroring Bevy's conventions (`keyboard`, `mouse`, `gamepad`, `touch`,

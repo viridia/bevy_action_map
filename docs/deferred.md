@@ -123,6 +123,15 @@ reshaping of the extensibility mechanism. The README's "Not on crates.io yet" se
 the publish. The macros crate goes first: until it is on crates.io, `cargo package` resolves the
 root only with `--exclude-lockfile`.
 
+The release itself runs in this order, once everything else is done:
+
+1. A final refresh of `docs/one-way-doors.md` against BEI's current release.
+2. The document moves out of the repo, with its rows in the README and `CLAUDE.md`, and the two
+   citations in `Roadmap.md` and `docs/decisions.md` re-pointed or cut. It critiques BEI for Bevy's
+   reviewers, which is a different audience from this crate's users.
+3. The publish, then an announcement on the Bevy Discord. X54's question goes to the users that
+   announcement reaches.
+
 ## 2. An upstream decision still open
 
 ### X5 — Focus orchestration: guidance, and a worked example (D87)
