@@ -53,7 +53,7 @@ here, so there is one `D`-numbering in the project.
 | **D20** | We own the whole dead-zone chain, in three stages, with one rescaling         | TD8.4     |
 | **D21** | Calibration is set by the app, never detected                                 | TD8.4     |
 | **D22** | Backends enter at two seams, not one                                          | —               |
-| **D93** | A backend suppresses a whole device family, and the game declares it         | —               |
+| **D93** | Raw input is filtered at L0 by removal-only systems, and their authors declare | —               |
 | **D23** | Focus integrates by activation, and interception is static                    | —               |
 | **D24** | One crate, feature-gated by source                                            | TD11      |
 | **D25** | What must not move upstream                                                   | —               |
@@ -740,28 +740,33 @@ assumes our tables are always the authority cannot be retrofitted with any of th
 
 **Still open.** Whether an authority's actions can take part in rollback, which is X23.
 
-### D93 — A backend suppresses a whole device family, and the game declares it
+### D93 — Raw input is filtered at L0 by removal-only systems, and their authors declare
 
-**Decided.** A backend authoritative for a device family can have this crate stop sampling that
-family at L0, so its raw events never reach the frame (R0.6). The game declares it, through the
-backend's plugin. Replay is what needs it: a replay mutes live hardware at runtime, in a build that
-compiled the driver in, and no build configuration expresses that (R10.8). A Steam build needs none:
-without `bevy_gilrs` it has no hardware pad event to suppress (`docs/steam.md` S21).
+**Decided.** A filter is an ordinary system in a set between sampling and the frame's first reader.
+It removes events sampled this frame, and cannot insert, reorder or rewrite one (R0.6). Several
+authors can each have one — a backend, a player's settings, the game — and because each only
+removes, they compose as an AND in any order, with a run condition to turn one off. The first
+customer is a single binary that serves a Steam launch and a direct one: it needs `bevy_gilrs` for
+pads without Steam, and when Steam Input starts, the pad is read twice (`docs/steam.md` S2, S21).
+Replay needs none: R10.4 injection already replaces live input for the player it drives.
 
 **Rules out.**
 
-- **Suppressing one device.** Steam's emulated pad carries the vendor and product id of the hardware
-  under it (`docs/steam.md` S1), and nothing relates Steam's controller handle to an OS device (S3),
-  so the emulation cannot be told apart. If Valve exposes that mapping, the policy can narrow with
-  nothing above L0 noticing.
-- **Detecting when to suppress.** A suppression that switches itself on and off between runs is the
-  worst kind of input bug to diagnose.
+- **A callback per event.** It costs a dynamic call on every event and cannot see the world, so a
+  player's ignore list would have to be copied into it.
+- **Filtering into a temporary buffer.** Two copies, and no more restrictive than a view of the
+  queue.
+- **Per-device filtering for Steam.** Steam's emulated pad carries the vendor and product id of the
+  hardware under it (`docs/steam.md` S1), and nothing relates Steam's controller handle to an OS
+  device (S3), so Steam's filter drops the gamepad family. Other authors can filter per device.
+- **Detection built into the crate.** A filter that switches itself on and off between runs is the
+  worst kind of input bug to diagnose. A filter can still do it; the crate documents against it.
 - **A Cargo feature on this crate.** A feature that removes behaviour breaks Cargo's additive rule:
   one crate in the graph enabling it would silence gamepads for every other.
 
-**Reversal.** Narrowing to one device changes nothing above L0. Detection or a feature would take
-the declaration out of every backend's plugin, and the replay case would lose the runtime switch it
-exists for.
+**Reversal.** Filters written as systems, and the order-independence of removal, are what games
+build on. Allowing a filter to rewrite or insert events would break the queue's sort order, which
+`events_after` binary-searches, and make the result depend on filter order.
 
 ### D23 — Focus integrates by activation, and interception is static
 

@@ -522,39 +522,56 @@ the expensive part.
 Work no game asks for and no published crate can do without: the crate's internals kept consistent,
 extension points exercised, and documentation that is true and runs.
 
-### 112. A backend suppresses a device family at L0 · E[2]
+### 112. Filtering raw input at L0 · E[2]
 
-R0.6's other half, and the smallest it will ever be: `docs/steam.md` S1 and S3 rule out suppressing
-one device, so what is left is a family switch (D93).
+R0.6, in the shape D93 settles: filters are removal-only systems, and the first customer is the
+Steam Disasteroids serving a Steam launch and a direct one from one binary.
 
-- **A resource naming the suppressed families**, read by `sample_input` (`frame.rs:304`) as a guard
-  around each family's own `MessageReader` loop. Nothing above L1 changes, because a suppressed
-  family simply never reaches the frame.
-- **Declared by the game, not detected**, because a suppression that turns itself on and off between
-  runs is the worst kind of input bug to diagnose. The backend's own plugin sets it once its init
-  succeeds.
-- **Replay is what justifies this, not Steam.** A replay backend mutes live hardware in a build that
-  compiled the driver in (R0.6, R10.8), which no build configuration expresses. A Steam build can
-  instead take `bevy/gamepad` without `bevy_gilrs` and produce no hardware event to suppress, which
-  is why D93 rests on replay.
-- **Not a Cargo feature on this crate**, because a feature that removes behaviour is not additive.
-- **Per family rather than per device** because per device is not implementable, not because it is
-  cheaper. S3: Steam hands out an `InputHandle_t` and nothing relates it to an OS device. If Valve
-  ever exposes that mapping the policy narrows and nothing above L0 notices.
-- **Verification is headless and needs no Steam.** An `App` with `gamepad` enabled, the resource
-  set, a synthetic `RawGamepadEvent` pushed through the sampler, and the frame asserted empty; the
-  same test with the resource clear asserts it arrives. The eight-combination matrix covers the
-  `cfg` interaction, since suppression has to compile with each family absent.
-- **Not doing: keyboard and mouse.** Steam emulates both alongside the pad (S1) and the family
-  switch would silence them wholesale, which is wrong — a player using a pad through Steam still
-  types. Steam does emit keys and mouse motion for a pad while the game reads Steam Input natively
-  (S27), as events nothing can tell from the real devices', so no family switch reaches them. This
-  chunk suppresses what a backend actually owns.
-- **Steam does not need this for the pad.** A Steam build without `bevy_gilrs` has no hardware event
-  to suppress, and it runs cleanly with the client absent (`docs/steam.md` S21), so one binary
-  serves both launches without switching anything off. Replay is this chunk's only customer for the
-  gamepad family.
-- **Not doing: R0.4's per-family split**, which lives at L2 and landed as chunk 151a.
+- **Measure first**, on the bench, before any code: whether gilrs sees the pad on macOS at all
+  (`docs/steam.md` "Not measured yet" has a wired Xbox pad invisible to raw IOHID), and whether
+  Steam's emulated pad (S1) is still present while the game reads Steam Input natively. S27 has the
+  emulated keyboard and mouse surviving that; the pad is unmeasured. If gilrs cannot see the pad,
+  try another pad or transport before concluding the double-read cannot be shown here.
+- **`ActionMapSystems::Filter`**, ordered after `Sample` and before `Capture`, so a rebinding
+  capture sees filtered input as well.
+- **`InputFrame::retain_sampled(impl FnMut(&RawEvent) -> bool)`**, reaching only events whose
+  timestamp is this sample's frame. `FocusLost` never reaches the predicate.
+- **The Steam Disasteroids takes `bevy_gilrs` back** (`steam_examples/Cargo.toml` drops it today),
+  and its Steam plugin adds a filter rejecting `RawEvent::Gamepad`, run-conditioned on Steam Input
+  having started. The acceptance test is the player's: launched through Steam, the pad plays once;
+  launched directly, it plays through gilrs.
+- **Doc comments mark it an advanced feature**, with four guidelines: filter by device, not by game
+  state, which is what contexts are for; change a filter only while the devices it newly rejects are
+  idle, or record `RawEvent::FocusLost` when it turns on; rejecting a device hides its connects and
+  disconnects too, so unpair it at the same time; decide from settled state, not by detecting noise.
+- **Verified headless, without Steam:** a filter rejecting one gamepad leaves another's events and a
+  `FocusLost` in the frame; two filters give the same frame in either order; events from an earlier
+  sample are untouched. The eight-combination matrix covers the `cfg` groups.
+- **Not doing: releasing a held input when a filter turns on.** The guideline covers it; a
+  per-device interruption would be the first of its kind and is machinery this does not justify.
+- **Not doing: Steam's emulated keyboard and mouse** (S27). Nothing tells their events from the real
+  devices', so no filter reaches them.
+- **Not doing: a player-facing ignore list**, which is chunk 178.
+
+### 178. "Ignore this controller" · E[2]
+
+The second author of an L0 filter (D93), and the one per device: a player marks a controller the
+game should never hear from. The case is measured, not hypothetical — a Switch-protocol clone
+decodes its timer byte as ~500 phantom presses a second (the R14 notes), and a phantom press
+captures every rebinding.
+
+- **Keyed by `Identity`**, as calibration is: under gilrs it names a model rather than a unit, so
+  ignoring one pad ignores every pad of its model. Said in the setting's doc comment, as
+  calibration's says it.
+- **On the Disasteroids controls screen**, persisted with the rest of the settings. An ignored pad
+  stays listed, so it can be un-ignored from the keyboard or another pad.
+- **Follows chunk 112's guidelines**: records `FocusLost` when the list changes, and unpairs the
+  ignored pad.
+- **Verified by** a headless test that an ignored identity's events leave the frame, and by hand
+  with the clone on the bench.
+- **Not doing: telling two identical pads apart.** That needs an identity per unit, which Bevy's
+  gamepad backend does not provide.
+- **Depends on chunk 112.**
 
 ### 28. Docs that run · E[4]
 

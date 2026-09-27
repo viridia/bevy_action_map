@@ -144,10 +144,10 @@ be delegable to the backend's own UI.
   bindings.
 - **R0.5 (MUST)** Consumers of action state (gameplay code, prompts) must not need to know which
   backend produced it. Backend identity is queryable but never required at the call site.
-- **R0.6 (MUST)** _(D93)_ A backend that is authoritative for a device must be able to suppress that
-  device at **L0**, so its raw events never reach the input frame at all — R0.4 stops our bindings
-  reading the family the backend owns, not sampling the hardware underneath it. The same capability
-  lets a replay backend mute live hardware while it plays.
+- **R0.6 (MUST)** _(D93)_ Raw input must be filterable at **L0**, after sampling and before anything
+  reads the input frame. A filter may remove events sampled this frame, and nothing else. R0.4 stops
+  our bindings reading the family a backend owns; this stops the hardware underneath reaching the
+  frame at all.
 - **R0.7 (MUST)** _(D92)_ A condition or modifier the game declares on an authority's input applies
   to it as to any other binding's. The backend's own stick shaping is not applied again (R14.10).
 
@@ -722,7 +722,7 @@ a stored input stream, and a deterministic test is a replay with assertions.
   test) in place of live device input, at L1, per player.
 - **R10.5 (MUST)** _(D69)_ Injection at L2 as well (force an action to a value/state) — the default
   seam for a network peer, since it replicates the resolved action without requiring peers to share
-  a `Plan`. Also needed for tutorials and cutscenes.
+  a `Plan`.
 - **R10.6 (SHOULD)** A quantization hook so float values entering the simulation can be reduced to a
   fixed representation, avoiding cross-platform float divergence and shrinking the wire format.
 - **R10.7 (SHOULD)** Document precisely which parts of the pipeline are guaranteed deterministic
