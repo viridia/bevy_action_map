@@ -343,16 +343,17 @@ says it is.
 | Piece | Home | Why |
 | --- | --- | --- |
 | Selection by name path | upstream, a filter on `world.query` | any app's test wants it, and it needs nothing but `Name` and `ChildOf` |
-| Where a UI node is drawn, for a click | upstream, `bevy_remote` or `bevy_ui` | the scale factor and target-camera steps are Bevy's own knowledge, which every client repeats |
+| Where a UI node is drawn, for a click | the client, past bevy#25890 (X51) | clicks then take physical pixels, which `UiGlobalTransform` holds, and the target-camera steps read reflected components |
 | Readiness as state | upstream, `bevy_scene` | a `Reflect` derive on `Ready` would not fix the race; the scene spawner leaving a component would |
-| Diagnostics over BRP | upstream, `Reflect` on `DiagnosticsStore` and what it holds | about as small as reflecting `FrameCount` alone, and makes every diagnostic readable through `world.get_resources`, frame count included |
+| Diagnostics over BRP | upstream, done: `diagnostics.get`, past bevy#25824 (X52) | BRP took a method rather than reflecting the store |
 | Bringing the window forward before a screenshot | the client | a policy for tests, not a property of screenshots |
 | Keys, text, gamepads, clicks | the client | the messages are already reflected, bar the type data DD5.3 registers |
 | Plans, the runner, the report | the driver crate | upstream has no reason to want a Python client |
 | Action state and authority values | `bevy_action_map`, `remote` feature | the mapper's own types |
 
-Every server method the plugin adds is a stopgap for an upstream gap. If all four close, the plugin
-is `SceneReady`'s observer and DD5.3's type-data registration at most, and the crate is its client.
+Every server method the plugin adds is a stopgap for an upstream gap. Two have closed on Bevy's
+main, and `docs/proposals/remote-driver.md` asks for the other two. If they close too, the plugin is
+`SceneReady`'s observer and DD5.3's type-data registration at most, and the crate is its client.
 That is the expected end state, and why the plugin is kept this small.
 
 ## 9. Writing a test

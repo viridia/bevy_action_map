@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 51.**
+**Next: 53.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -37,6 +37,26 @@ milestoned for 0.20, but no release carries it yet, so the registration ships ra
 What to check on a bump is only whether the pinned version has it, because nothing else will say so:
 `register_type_data` over data a type already carries is an overwrite rather than an error, so the
 redundancy is silent.
+
+### X51 — Clicking in physical pixels, and deleting `driver.locate`
+
+**Gate:** this crate's Bevy pin moving past [bevy#25890][], merged to main on 23 September 2026,
+after rc.1.
+
+It moves `CursorMoved`'s enrichment from `bevy_winit` to `bevy_window`, and a client writing
+`WindowEvent::CursorMoved` then supplies a `physical_position`. The driver's click writes a logical
+one (DD5.1), so this is not optional: the click breaks at the bump. `UiGlobalTransform` is already
+physical, and `ComputedUiTargetCamera` and `RenderTarget` are reflected, so the client can locate a
+node itself and `driver.locate` goes (DD3.3).
+
+### X52 — Deleting `driver.diagnostics`
+
+**Gate:** this crate's Bevy pin moving past [bevy#25824][], merged to main on 17 September 2026,
+after rc.1.
+
+It adds `diagnostics.get` to BRP, which reads `frame_count` as `driver.diagnostics` does (DD3.4).
+The client switches to it and the method goes. `FrameTimeDiagnosticsPlugin` is still the driver's to
+add, since it records the count and is not in `DefaultPlugins`.
 
 ### X2 — Deleting `acquire_focus_directional`
 
@@ -399,19 +419,12 @@ These leave with the driver, into its own documents, if it moves out of this rep
 
 ### X45 — What the driver becomes
 
-**Gate:** X30's briefs answered, which says which of the driver's methods Bevy takes.
+**Gate:** the driver proposal answered, which says which of the driver's methods Bevy takes. It is
+`docs/proposals/remote-driver.md`, posted by the author as a gist on 26 September 2026.
 
 The driver is `publish = false` (chunk 164), and nothing in `bevy_action_map` needs it published.
 What Bevy declines is the candidate for a standalone crate, and the Python client goes with it, or
 is rewritten, since a script does not ship well inside a published crate.
-
-### X30 — Proposing the driver's server methods upstream (DD8)
-
-**Gate:** chunk 148's plan passing, and a second plan against a different example.
-
-Four gaps: selection by name path, where a UI node is drawn, readiness as state, and a reflected
-`DiagnosticsStore`. The deliverable is a short brief for each, for the author to edit and post.
-Until two apps have used the methods, their shapes are guesses about what a test needs.
 
 ### X31 — Isolating an app under test from what it has saved
 
@@ -437,7 +450,7 @@ have to read an env var, and a plan drives an example without the example knowin
 
 ### X32 — A step of the mapper's own, or a Python helper over `call`
 
-**Gate:** a second plan whose raw `call` steps are unreadable, which is X30's gate as well.
+**Gate:** a second plan whose raw `call` steps are unreadable.
 
 Both extension points exist: BRP registration is the Rust one, and the mapper's `remote` feature
 adding `action_map.*` is already a plugin adding methods with no dependency either way; a Python
@@ -594,5 +607,7 @@ is a port plus a rewrite. Porting first keeps the two apart: doing both at once 
 [bevy#25847]: https://github.com/bevyengine/bevy/pull/25847
 [bevy#25902]: https://github.com/bevyengine/bevy/pull/25902
 [bevy#25904]: https://github.com/bevyengine/bevy/pull/25904
+[bevy#25824]: https://github.com/bevyengine/bevy/pull/25824
+[bevy#25890]: https://github.com/bevyengine/bevy/pull/25890
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678
