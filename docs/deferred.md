@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 50.**
+**Next: 51.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -111,14 +111,39 @@ change to wait for.
 
 ### X46 — Upstreaming L0, then a minimal mapper
 
-**Gate:** Bevy accepting the gamepad capability layer proposed in [bevy#25757][], which chunks
-165–169 build.
+**Gate:** Bevy accepting the gamepad capability layer proposed in [bevy#25757][], which chunks 165
+and 167–169 build.
 
 Upstreaming goes in three stages, each a stack of reviewable PRs: the gamepad layer first, then L0
 (device families, raw messages and calibration), and a minimal mapper only on top of those. A first
 PR that is the mapper itself, keyboard only and in 1,000–2,000 lines, was the earlier plan; the
 prototype on the `ported` branch showed a minimal working mapper does not come close to fitting that
 budget.
+
+### X50 — Gamepad capabilities and battery (R11.3, R14.7)
+
+**Gate:** a backend with a source for either. For gilrs, `bevy_gilrs` forwarding `power_info()` and
+`is_ff_supported()`, checked on each Bevy bump; for Steam, `ISteamInput` gaining a controller
+battery or capability query, checked on each `steamworks-sys` bump. Or a prompt in tree needing
+motion, touchpad or LED enough to pay for a table keyed on the pad's model.
+
+Was chunk 166, withdrawn before it began, because what either backend supplies is too little to
+build on:
+
+- **gilrs 0.11** reports power state and force-feedback support on Linux and Windows only, and
+  `Unknown` and `false` on macOS and wasm. It has no motion, touchpad or LED query anywhere, and no
+  power-change event, so battery would be polled.
+- **`bevy_gilrs` 0.20.0-rc.1** forwards neither, and keeps `Gilrs` and its entity-to-`GamepadId` map
+  `pub(crate)`, so a crate outside it cannot read them at all.
+- **Steam Input, through SDK 1.65** (`SteamInput007`), has no controller battery and no capability
+  query; `ISteamUtils`' battery calls report the host. Vibration, LED, haptics and trigger effects
+  are silent on hardware without them. The product family from `GetInputTypeForHandle` is the only
+  per-device fact.
+- **Under Steam, gilrs sees the emulated Xbox 360 pad** (S1), so its answers describe the emulation.
+
+Motion, touchpad and LED can only come from a table keyed on vendor and product id, or on Steam's
+family. That table is the chunk when this returns, and whether capabilities are one component or
+markers is decided with it.
 
 ### X48 — Upstreaming the presentation crate
 

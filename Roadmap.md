@@ -236,25 +236,6 @@ The prototype is a module, `crates/bevy_action_map/src/gamepad/`, written as it 
 own, because a crates.io name is permanent and this one would be abandoned once `bevy_input` takes
 the work, and because `bevy_action_map` cannot publish while depending on an unpublished crate.
 
-### 166. Capabilities and battery, from gilrs · E[3]
-
-R11.3 and R14.7, and `docs/issues.md` 1047, which it replaces. Nothing answers a capability question
-(rumble, motion, touchpad, LED) or reports battery, so R18's prompts and a "can this player play at
-all" check have nothing to call. Bevy has no source either: in 0.20.0-rc.1 `Gamepad` holds a vendor
-id, a product id and live readings, and rumble exists only as an outgoing `GamepadRumbleRequest`.
-
-- **First, what gilrs knows.** If it reports force-feedback support and power state and `bevy_gilrs`
-  drops them, part of the upstream change is to stop dropping them. The prototype reads them through
-  what `bevy_gilrs` exposes, or states what it would have to expose.
-- **Capabilities as one component or as markers** is decided here. Markers let a query ask
-  `With<…>`; one struct is simpler for a prompt to take whole.
-- **Battery is state, not a capability.** It changes while the pad is connected, so it is a
-  component of its own, updated in place, and absent where the backend has no reading.
-- **The module doc names capability data again**, which chunk 117k removed from `device.rs` for
-  having nothing behind it.
-- **Verified by:** a headless test with a synthetic backend filling the components, and the
-  DualSense fixture reporting its battery.
-
 ### 167. Rumble as a component · E[3]
 
 R14.6. Rumble is an event today: a game addresses a `GamepadRumbleRequest` to a pad's entity and
@@ -272,13 +253,12 @@ value while it is set.
 
 ### 168. The Steam build fills them · E[3]
 
-The proof that the design is vendor-neutral: `steam_examples/` inserts `ConnectedGamepad`, `Brand`,
-capabilities and battery on its own pad entities, and drives `Rumble` through Steam's own API.
+The proof that the design is vendor-neutral: `steam_examples/` inserts `ConnectedGamepad` and
+`Brand` on its own pad entities, and drives `Rumble` through Steam's own API.
 
 - **Brand overlaps 151e**, which maps `InputType` onto `GamepadBrand`. Whichever lands second reuses
   the other's mapping.
-- **Steam's battery can be wrong**, reporting a profile's rather than the pad's (`docs/steam.md`
-  S8). Whether that means "absent" is measured here, not assumed.
+- **Does not fill capabilities or battery**, which Steam Input has no query for (X50).
 - **Verified by:** an audit with a running client and a pad, as for the rest of the Steam section.
 
 ### 169. The design proposal · E[2]
@@ -291,6 +271,8 @@ what changes for users of `Gamepad`. Written for that audience, and for the auth
   stated. The prototype sits beside `Gamepad`, because a module outside `bevy_input` cannot change
   it; `gamepad/mod.rs` and `gamepad/gilrs.rs` are the two layers the split would produce.
 - **Drafted at any point, finished after 168**, so each claim has been run on both backends.
+- **Names capabilities and battery as absent** (X50), with the one ask that would supply part of
+  them: `bevy_gilrs` forwarding what gilrs already reports.
 - **Links the prototype**, and says how `crates/bevy_action_map/src/gamepad/` maps onto
   `bevy_input`'s files.
 
