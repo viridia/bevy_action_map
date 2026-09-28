@@ -45,7 +45,7 @@ Measured against this crate's `minimal` example with the `bevy/bevy_remote` feat
 | Bring the window forward | `world.mutate_components`, `Window.focused` to `true` | `bevy_winit` calls winit's `focus_window`; a capture 0.1 s later is correct |
 | Click | `world.write_message`, `WindowEvent::CursorMoved` then `MouseButtonInput` | read, from Bevy's `examples/remote/integration_test.rs` |
 | Quit | `world.write_message`, `bevy_app::AppExit` | read: `AppExit` is a reflected `Message` |
-| Connect a gamepad | `world.spawn_entity` an empty entity, then `world.write_message` `GamepadConnectionEvent` naming it | measured later, against `disasteroids`: `gamepad_connection_system` inserts `Gamepad` onto the entity the event names, but the gamepad messages carry no `reflect(Message)`, so `world.write_message` refuses them until something registers it (DD5.3) |
+| Connect a gamepad | `world.spawn_entity` an empty entity, then `world.write_message` `GamepadConnectionEvent` naming it | measured later, against `disasteroids`: `gamepad_connection_system` inserts `Gamepad` onto the entity the event names (DD5.3) |
 
 Two behaviours matter for every test. A covered window runs at about half the frame rate, so timing
 is measured in frames (DD4.3). And a window brought forward takes focus from whatever had it, the
@@ -258,12 +258,6 @@ device: the connection is what puts `Gamepad` on the entity, and `_send`'s frame
 (DR3.5) is enough for that to have happened before the first control arrives. A real pad plugged in
 at the same time is a second gamepad, not a conflict.
 
-One thing has to be added for that to work at all. Bevy's gamepad messages are reflected but carry
-no `reflect(Message)`, which `KeyboardInput` does, so `world.write_message` refuses them as "not
-reflectable". The plugin registers the type data itself, for the two messages a virtual pad is made
-of, because DR1.4 says an app under test adds the plugin and nothing else. If Bevy closes the gap
-the registration becomes a no-op rather than a conflict.
-
 A button and an axis are separate enums with no name in common, so the client tells them apart by a
 set of the six `GamepadAxis` variants and takes every other name for a button. A name in neither
 enum fails to deserialize, and the error names the word, so there is no table to keep in step with
@@ -347,7 +341,7 @@ says it is.
 | Readiness as state | upstream, `bevy_scene` | a `Reflect` derive on `Ready` would not fix the race; the scene spawner leaving a component would |
 | Diagnostics over BRP | upstream, done: `diagnostics.get`, past bevy#25824 (X52) | BRP took a method rather than reflecting the store |
 | Bringing the window forward before a screenshot | the client | a policy for tests, not a property of screenshots |
-| Keys, text, gamepads, clicks | the client | the messages are already reflected, bar the type data DD5.3 registers |
+| Keys, text, gamepads, clicks | the client | the messages are already reflected |
 | Plans, the runner, the report | the driver crate | upstream has no reason to want a Python client |
 | Action state and authority values | `bevy_action_map`, `remote` feature | the mapper's own types |
 

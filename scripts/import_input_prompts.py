@@ -185,7 +185,7 @@ def make_inline(src, dst):
         # down to a handful of alpha bands, and a 25px circle drawn in bands reads as an octagon.
         # File size was never the constraint an icon this size needed one for. `PNG32:` because
         # left to itself ImageMagick writes the smallest type that holds the pixels: a palette for
-        # colored art, and grey+alpha for monochrome, which Bevy 0.20.0-rc.1 loads as two channels
+        # colored art, and grey+alpha for monochrome, which Bevy 0.20.0-rc.2 loads as two channels
         # and draws as an opaque yellow box (bevyengine/bevy#25538).
         subprocess.run(
             [

@@ -22,26 +22,14 @@ group at a time: a Bevy version bump is the first group, and nothing else.
 
 ## 1. Bevy or winit moving past the pin
 
-Each of these is merged upstream after 0.20.0-rc.1. On every bump, check each against the new
-version.
-
-### X1 — Deleting the gamepad message registration
-
-**Gate:** this crate's Bevy pin moving past [bevy#25904][], merged to main on 23 September 2026,
-after rc.1, and milestoned for 0.20.
-
-`RemoteDriverPlugin` registers `ReflectMessage` for `GamepadConnectionEvent` and `RawGamepadEvent`,
-because `bevy_input`'s nine gamepad messages carry no `reflect(Message)` where the ten in its other
-input modules all do, and `world.write_message` refuses a message without it (DD5.3). It is
-milestoned for 0.20, but no release carries it yet, so the registration ships rather than waits.
-What to check on a bump is only whether the pinned version has it, because nothing else will say so:
-`register_type_data` over data a type already carries is an overwrite rather than an error, so the
-redundancy is silent.
+Each of these waits on an upstream change that 0.20.0-rc.2 does not carry. On every bump, check each
+against the new version: a release candidate is cut from the release branch, so a PR merged to main
+before it is in it only if it was picked.
 
 ### X51 — Clicking in physical pixels, and deleting `driver.locate`
 
-**Gate:** this crate's Bevy pin moving past [bevy#25890][], merged to main on 23 September 2026,
-after rc.1.
+**Gate:** this crate's Bevy pin moving past [bevy#25890][], merged to main on 23 September 2026 and
+not in rc.2.
 
 It moves `CursorMoved`'s enrichment from `bevy_winit` to `bevy_window`, and a client writing
 `WindowEvent::CursorMoved` then supplies a `physical_position`. The driver's click writes a logical
@@ -51,8 +39,8 @@ node itself and `driver.locate` goes (DD3.3).
 
 ### X52 — Deleting `driver.diagnostics`
 
-**Gate:** this crate's Bevy pin moving past [bevy#25824][], merged to main on 17 September 2026,
-after rc.1.
+**Gate:** this crate's Bevy pin moving past [bevy#25824][], merged to main on 17 September 2026 and
+not in rc.2.
 
 It adds `diagnostics.get` to BRP, which reads `frame_count` as `driver.diagnostics` does (DD3.4).
 The client switches to it and the method goes. `FrameTimeDiagnosticsPlugin` is still the driver's to
@@ -60,8 +48,8 @@ add, since it records the count and is not in `DefaultPlugins`.
 
 ### X2 — Deleting `acquire_focus_directional`
 
-**Gate:** this crate's Bevy pin moving past [bevy#25675][], merged to main on 24 September 2026,
-after rc.1.
+**Gate:** this crate's Bevy pin moving past [bevy#25675][], merged to main on 24 September 2026 and
+not in rc.2.
 
 `examples/common/widget_focus.rs` carries a global `AcquireFocus` observer mirroring
 `acquire_focus_tab_index`, with `AutoDirectionalNavigation` standing in for `TabIndex`:
@@ -91,7 +79,7 @@ with it.
 ### X3 — Deleting `examples/common/font.rs`
 
 **Gate:** this crate's Bevy pin moving past [bevy#25847][], which answers [bevy#25842][] and merged
-to main on 22 September 2026, after rc.1.
+to main on 22 September 2026 and not in rc.2.
 
 Until then the plugin overwrites the `default_font` feature's slot at `AssetId::default()` during
 plugin build, which depends on that slot's location and on text layout registering a font id once.
@@ -99,20 +87,9 @@ The answer is a `DefaultFontSource` resource that `FontSource::Default`, now `Te
 resolves to. Changing it rebuilds the font collection and marks every `TextFont` changed, so it
 reacts to a change and the build-time ordering goes with the file.
 
-### X4 — Dropping the pre-scaled inline glyph art
-
-**Gate:** this crate's Bevy pin moving past [bevy#25767][], merged to main after rc.1, which gives
-`InlineImage` a fixed `width` and `height`.
-
-At rc.1 an inline image sizes itself from the loaded image's pixel dimensions, so `prompt_ui.rs`
-loads inline glyphs from a second, pre-scaled `input_prompts_inline/` tree. With a size on the
-component, the inline prompt can load the block art and set its height from the line. Steam's art is
-the same case: its smallest glyph is 32 pixels against the in-tree inline art's 25, so the Steam
-build's inline prompts stand taller than the line until then.
-
 ### X43 — Publishing to crates.io
 
-**Gate:** Bevy 0.20.0 final. The dependency requirement `^0.20.0-rc.1` already admits it, so the
+**Gate:** Bevy 0.20.0 final. The dependency requirement `^0.20.0-rc.2` already admits it, so the
 move is a `cargo update` and a lockfile commit.
 
 crates.io would accept a publish against a release candidate, so the gate is a judgement, not a
@@ -174,7 +151,7 @@ build on:
 - **gilrs 0.11** reports power state and force-feedback support on Linux and Windows only, and
   `Unknown` and `false` on macOS and wasm. It has no motion, touchpad or LED query anywhere, and no
   power-change event, so battery would be polled.
-- **`bevy_gilrs` 0.20.0-rc.1** forwards neither, and keeps `Gilrs` and its entity-to-`GamepadId` map
+- **`bevy_gilrs` 0.20.0-rc.2** forwards neither, and keeps `Gilrs` and its entity-to-`GamepadId` map
   `pub(crate)`, so a crate outside it cannot read them at all.
 - **Steam Input, through SDK 1.65** (`SteamInput007`), has no controller battery and no capability
   query; `ISteamUtils`' battery calls report the host. Vibration, LED, haptics and trigger effects
@@ -458,9 +435,9 @@ the right answer while an app offers one, and it exercises two more paths beside
 cover is a plan that fails halfway, which leaves the file dirty for the next run to reset. Deleting
 the file first is the obvious answer and is half of one: it makes a run repeatable without stopping
 it writing the developer's real settings on the way out, which the bookend does handle. Isolation is
-the whole answer. At rc.1 it costs a platform branch — `XDG_CONFIG_HOME` on Linux, `LOCALAPPDATA` on
+the whole answer. At rc.2 it costs a platform branch — `XDG_CONFIG_HOME` on Linux, `LOCALAPPDATA` on
 Windows, and on macOS `HOME` itself, since `preferences_dir` is `home_dir()/Library/Preferences`
-with no narrower lever. [bevy#25902][], merged to main on 24 September 2026 after rc.1 and
+with no narrower lever. [bevy#25902][], merged to main on 24 September 2026, not in rc.2, and
 milestoned for 0.20, makes `preferences_dir` honour an absolute `BEVY_SETTINGS_DIR` on all three, so
 past it isolation is one variable in `environment()` in `run.py`. Whichever is built wants a check
 that the throwaway directory was actually written, because a path or variable that is wrong fails
@@ -659,12 +636,10 @@ is a port plus a rewrite. Porting first keeps the two apart: doing both at once 
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
 [bevy#25596]: https://github.com/bevyengine/bevy/issues/25596
 [bevy#25675]: https://github.com/bevyengine/bevy/pull/25675
-[bevy#25767]: https://github.com/bevyengine/bevy/pull/25767
 [bevy#25842]: https://github.com/bevyengine/bevy/issues/25842
 [bevy#25757]: https://github.com/bevyengine/bevy/discussions/25757
 [bevy#25847]: https://github.com/bevyengine/bevy/pull/25847
 [bevy#25902]: https://github.com/bevyengine/bevy/pull/25902
-[bevy#25904]: https://github.com/bevyengine/bevy/pull/25904
 [bevy#25824]: https://github.com/bevyengine/bevy/pull/25824
 [bevy#25890]: https://github.com/bevyengine/bevy/pull/25890
 [bevy#25944]: https://github.com/bevyengine/bevy/issues/25944

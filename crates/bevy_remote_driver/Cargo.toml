@@ -19,7 +19,6 @@ bevy_app = { workspace = true, default-features = true }
 bevy_camera = { workspace = true, default-features = true }
 bevy_diagnostic = { workspace = true, default-features = true }
 bevy_ecs = { workspace = true, default-features = true }
-bevy_input = { workspace = true, default-features = true, features = ["gamepad"] }
 bevy_reflect = { workspace = true, default-features = true }
 bevy_remote = { workspace = true, features = ["http"] }
 bevy_scene = { workspace = true, default-features = true }
