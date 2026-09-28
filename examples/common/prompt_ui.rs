@@ -34,7 +34,8 @@ use std::borrow::Cow;
 use bevy::asset::AssetPath;
 use bevy::ecs::schedule::SystemCondition;
 use bevy::prelude::*;
-use bevy::ui::UiSystems;
+use bevy::text::RemSize;
+use bevy::ui::{ComputedUiRenderTargetInfo, UiSystems};
 use bevy_action_map::device::{Brand, GamepadBrand};
 use bevy_action_map::prelude::*;
 
@@ -53,6 +54,10 @@ pub struct PromptSpan(pub ActionId);
 /// A chord draws every control in it as children of this span, joined by `+`, so the whole chord
 /// stays one run that moves with its sentence. The `+` takes the span's own `TextFont` and
 /// `TextColor`.
+///
+/// The icons are sized from the span's font, so a larger `TextFont` draws larger icons. A font size
+/// relative to the window is read when the icons go in, and a resize leaves them at that size until
+/// the prompt's answer next changes.
 ///
 /// A new answer waits for its art: the span goes on drawing the old one until every icon in the new
 /// one has loaded, so the line never reflows around an icon that is still loading.
@@ -312,9 +317,7 @@ fn branded(origin: &ControlOrigin, brand: GamepadBrand) -> Cow<'_, str> {
     }
 }
 
-/// Which (tier, control) pairs have art, in both `assets/input_prompts/` and
-/// `assets/input_prompts_inline/` alike — the two mirror each other's coverage exactly, one
-/// downscaled copy per full-size original.
+/// Which (tier, control) pairs have art under `assets/input_prompts/`.
 ///
 /// Parsed once from the manifest `scripts/import_input_prompts.py` writes, so resolution never
 /// opens a file to discover one is missing.
@@ -345,12 +348,13 @@ fn tier_str(tier: GlyphTier) -> &'static str {
     }
 }
 
-/// Where a resolved glyph's art lives, for `AssetServer::load`: full size for a block prompt, which
-/// scales it to the height it is given, and pre-scaled for an inline one.
-///
-/// At 0.20.0-rc.1, Bevy's `InlineImage` sizes itself from the loaded image's own pixel dimensions
-/// with no resize hook (bevyengine/bevy#25767 adds one on `main`), so an inline glyph needs art already small enough to sit in a line
-/// of text rather than tower over it.
+/// How tall an inline icon stands against its span's font size. Kenney's art draws each glyph in
+/// the middle three quarters of its square, so this puts the glyph itself a little taller than the
+/// letters beside it.
+const INLINE_ICON_SCALE: f32 = 5.0 / 3.0;
+
+/// Where a resolved glyph's art lives, for `AssetServer::load`. Block and inline prompts draw the
+/// same art, each scaling it to its own height; only a backend's art may differ between the two.
 ///
 /// A Mac takes `macos/` first where it has an entry, for the keys it labels differently: Option
 /// for Alt, and Command for Super.
@@ -377,12 +381,7 @@ fn icon_path(
     } else {
         format!("{}/{name}", tier_str(*tier))
     };
-    let dir = if block {
-        "input_prompts"
-    } else {
-        "input_prompts_inline"
-    };
-    Some(format!("{dir}/{key}.png").into())
+    Some(format!("input_prompts/{key}.png").into())
 }
 
 /// Everything one icon prompt needs in order to ask its question — mirrors [`PromptQuery`].
@@ -534,12 +533,22 @@ fn swap_in_icons(
         &TextColor,
         Has<IconPrompt>,
     )>,
+    parents: Query<&ChildOf>,
+    targets: Query<&ComputedUiRenderTargetInfo>,
+    rem: Option<Res<RemSize>>,
     images: Res<Assets<Image>>,
 ) {
+    let rem = rem.map_or_else(RemSize::default, |rem| *rem);
     for (entity, pending, font, color, block) in &spans {
         if !pending.0.iter().all(|icon| images.contains(icon)) {
             continue;
         }
+        // Against the text's own target, which is what Bevy resolves the font against.
+        let viewport = parents
+            .iter_ancestors(entity)
+            .find_map(|ancestor| targets.get(ancestor).ok())
+            .map_or(Vec2::ZERO, ComputedUiRenderTargetInfo::logical_size);
+        let height = INLINE_ICON_SCALE * font.font_size.eval(viewport, rem);
         let mut span = commands.entity(entity);
         span.remove::<PendingIcons>().despawn_related::<Children>();
         if !block {
@@ -566,6 +575,7 @@ fn swap_in_icons(
                     }
                     chord.spawn(InlineImage {
                         image: icon,
+                        height: Some(height),
                         ..default()
                     });
                 }

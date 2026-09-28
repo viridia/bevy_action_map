@@ -224,6 +224,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 181d | The affected-bindings index                                           |
 | 181e | A binding's pipeline records each reading once                        |
 | 183  | Bevy 0.20.0-rc.2, and the driver's gamepad message registration gone  |
+| 184  | Inline prompts from the block art                                     |
 
 ---
 
@@ -409,28 +410,6 @@ going through a catalogue. The crate's half of R19.14 is done, but the claim tha
   thing it would genuinely test is whether our key syntax collides with its identifier grammar, and
   that is a reading of the spec rather than a dependency.
 - **Review surface:** whether the key is the one an author would actually want to type.
-
-### 184. Inline prompts from the block art · E[2]
-
-Deferred until bevy#25767, which rc.2 carries: `InlineImage` takes a fixed `width` and `height`.
-Until then an inline image sized itself from the loaded image's pixels, so `prompt_ui.rs` loads
-inline glyphs from a second, pre-scaled `input_prompts_inline/` tree.
-
-- **What it is:** the inline prompt loads the block art and sets its height from the line's font
-  size. `icon_path` loses its `block` split for Kenney's art, and the 175 files under
-  `input_prompts_inline/` go.
-- **With them:** `scripts/import_input_prompts.py` stops producing the inline tree, the asset
-  manifest drops its entries, and `crates/bevy_action_map/tests/prompt_ui.rs` stops expecting it.
-- **Steam's art is the same case.** Its smallest glyph is 32 pixels against the inline tree's 25, so
-  the Steam build's inline prompts stand taller than the line today, and sized from the line they
-  stop. `ExternalArt` keeps its `block` argument, since a backend may still ship two sizes.
-- **After 183**, which moves the pin. **Before 170**, which moves `icon_path` into a Kenney provider
-  and has one tree less to carry once this lands.
-- **Not doing:** the providers, which are 170; any change to block prompts.
-- **Verified by:** `crates/bevy_action_map/tests/prompt_ui.rs`; a driver screenshot of
-  `prompt_gallery` and of Disasteroids' inline hints, compared against the same at rc.2 before the
-  change; `scripts/verify.sh --full` for the Steam build, and the author running it to see the pad
-  glyphs sit in the line.
 
 ### 170. Prompt art from an ordered list of providers · E[2]
 

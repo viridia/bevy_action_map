@@ -296,9 +296,9 @@ fn an_icon_prompt_draws_every_control_in_a_chord() {
 
     let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
     let chord = [
-        "input_prompts_inline/keyboard_mouse/mod/ctrl.png",
+        "input_prompts/keyboard_mouse/mod/ctrl.png",
         "+",
-        "input_prompts_inline/keyboard_mouse/key/KeyS.png",
+        "input_prompts/keyboard_mouse/key/KeyS.png",
     ];
     assert_eq!(icons(&mut app, span), chord);
     assert_eq!(caption(&mut app, span), "");
@@ -308,6 +308,36 @@ fn an_icon_prompt_draws_every_control_in_a_chord() {
         .resource_mut::<PromptGeneration>()
         .set_changed();
     assert_eq!(icons(&mut app, span), chord);
+}
+
+/// An inline icon stands as tall as its line's font calls for, whatever size the art was drawn at.
+#[test]
+fn an_inline_icon_is_sized_from_its_font() {
+    let mut app = app();
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
+    app.add_context::<Flying>(|controls| {
+        controls.bind::<Jump>(KeyCode::Space);
+    });
+    app.world_mut().spawn(Flying);
+
+    let span = app
+        .world_mut()
+        .spawn((
+            IconPromptSpan(Jump::id()),
+            TextFont {
+                font_size: 24.0.into(),
+                ..default()
+            },
+        ))
+        .id();
+    icons(&mut app, span);
+    let world = app.world();
+    let height = world
+        .get::<Children>(span)
+        .and_then(|children| world.get::<InlineImage>(children[0]))
+        .and_then(|icon| icon.height)
+        .expect("an inline icon has a height");
+    assert!((height - 40.0).abs() < 1e-3, "{height}");
 }
 
 /// A chord is not a keyboard thing, and a pad chord draws in the pad's own art.
@@ -330,9 +360,9 @@ fn an_icon_prompt_draws_a_pad_chord_in_the_pads_art() {
     assert_eq!(
         icons(&mut app, span),
         [
-            "input_prompts_inline/playstation/pad/LeftTrigger.png",
+            "input_prompts/playstation/pad/LeftTrigger.png",
             "+",
-            "input_prompts_inline/playstation/pad/RightTrigger.png",
+            "input_prompts/playstation/pad/RightTrigger.png",
         ]
     );
 }
@@ -367,13 +397,13 @@ fn an_icon_prompt_draws_a_macs_own_modifier_keys_on_a_mac() {
 
     let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
     let alt = if cfg!(target_os = "macos") {
-        "input_prompts_inline/macos/mod/alt.png"
+        "input_prompts/macos/mod/alt.png"
     } else {
-        "input_prompts_inline/keyboard_mouse/mod/alt.png"
+        "input_prompts/keyboard_mouse/mod/alt.png"
     };
     assert_eq!(
         icons(&mut app, span),
-        [alt, "+", "input_prompts_inline/keyboard_mouse/key/KeyQ.png"]
+        [alt, "+", "input_prompts/keyboard_mouse/key/KeyQ.png"]
     );
 }
 
@@ -397,9 +427,9 @@ fn an_icon_prompt_keeps_its_old_chord_until_the_new_art_loads() {
 
     let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
     let xbox = [
-        "input_prompts_inline/xbox/pad/LeftTrigger.png",
+        "input_prompts/xbox/pad/LeftTrigger.png",
         "+",
-        "input_prompts_inline/xbox/pad/RightTrigger.png",
+        "input_prompts/xbox/pad/RightTrigger.png",
     ];
     assert_eq!(icons(&mut app, span), xbox);
 
@@ -424,9 +454,9 @@ fn an_icon_prompt_keeps_its_old_chord_until_the_new_art_loads() {
     assert_eq!(
         drawn(&app, span),
         [
-            "input_prompts_inline/nintendo/pad/LeftTrigger.png",
+            "input_prompts/nintendo/pad/LeftTrigger.png",
             "+",
-            "input_prompts_inline/nintendo/pad/RightTrigger.png",
+            "input_prompts/nintendo/pad/RightTrigger.png",
         ]
     );
 }

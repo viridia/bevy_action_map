@@ -55,9 +55,9 @@ pub fn plugin(app: &mut App) {
 /// draws at.
 ///
 /// Steam always answers with the 128-pixel art, `<theme>/<name>_md.png`. An inline prompt takes the
-/// 32-pixel `_sm` beside it, since an inline image draws at its own size. Only the file's name is
-/// kept, relative to the source's root: the asset server refuses an absolute path from any source.
-/// A path in any other shape is not loaded.
+/// 32-pixel `_sm` beside it, which is nearer the height of a line and scales down to it more
+/// cleanly. Only the file's name is kept, relative to the source's root: the asset server refuses
+/// an absolute path from any source. A path in any other shape is not loaded.
 fn art(path: &str, block: bool) -> Option<AssetPath<'static>> {
     let stem = Path::new(path)
         .file_name()

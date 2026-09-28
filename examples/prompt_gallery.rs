@@ -43,8 +43,8 @@ const PROMPT: Color = Color::srgb(0.75, 0.82, 0.85);
 const FONT_SIZE: f32 = 15.0;
 const LABEL_WIDTH: f32 = 180.0;
 const CELL_WIDTH: f32 = 220.0;
-/// The height a block icon is scaled to: the size of the pre-scaled inline art, so the two columns
-/// compare like for like.
+/// The height a block icon is scaled to: the height an inline icon takes at `FONT_SIZE`, so the two
+/// columns compare like for like.
 const BLOCK_ICON: f32 = 25.0;
 
 #[derive(InputAction)]
