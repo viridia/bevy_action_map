@@ -607,8 +607,6 @@ that the lower context never saw the key go down.
 one path and not another, and an observer of `Canceled` would have to know which mechanism took the
 key away to interpret it.
 
-**Remainder.** A claim lifting does not follow the rule yet (chunk 179e).
-
 ### D97 — A tick's time is charged once, to the state it ends in
 
 **Decided.** A tick replays its events one at a time, and only the fold after the last one is handed

@@ -19,7 +19,7 @@ part that stays good. Re-verify before acting on one.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 tier, and never reused. A gap in the sequence is a retired entry.
 
-**Next: 1076.**
+**Next: 1077.**
 
 **What the tiers mean.**
 
@@ -35,7 +35,20 @@ tier, and never reused. A gap in the sequence is a retired entry.
 
 ## 1. Live — an ordinary build gets a wrong answer
 
-None open.
+### 1076 `why_not` on an analog action reports a release it will never wait for
+
+`context/state.rs` `why_not_id` and `activate_with_reset`; `eval.rs` `fold`, where the latch lifts ·
+reasoned from the code, **not probed**
+
+Activation sets require-reset on every slot, and `sample_authority` marks every intent, but `fold`
+applies and lifts the latch for `Button` slots alone. An analog slot's bit therefore stays set for
+the life of the activation, and `why_not` checks the bit without the intent: a `Move` at rest after
+the context activates answers `AwaitingRelease` rather than `NoInput`, whatever the player does. A
+debug overlay is the observer, not play.
+
+_Fix, sketched (E[1]):_ `why_not_id` tests `intent_for_slot(slot) == ActionIntent::Button` beside
+the bit, the same condition `fold` uses; or the arming sites mark `Button` slots only. The first is
+one line and leaves the arming sites alone.
 
 ---
 

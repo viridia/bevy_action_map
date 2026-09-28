@@ -647,6 +647,8 @@ dispatch level. Unity: no arbitration for PassThrough actions, first-match for o
 
   - _(D94)_ A claim arriving on a control still held ends what that control was firing in the lower
     context as `Canceled`, not `Completed`.
+  - _(D94)_ A claim lifting off a control still held must not fire a `Button` action in the lower
+    context until the control is released; an analog action takes its value at once.
 - **R8.2a (MUST)** Consumption governs what reaches other _contexts_, and cannot govern what reaches
   a consumer outside this crate that reads device events directly — `bevy_ui_widgets` activating a
   button on `Space` while a menu context consumes it is R8.2 met on paper and unmet in the game. See

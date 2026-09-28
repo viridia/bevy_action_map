@@ -1030,7 +1030,12 @@ impl<C: InputContext> InputContextState<C> {
                 combined = combined.add(value, intent);
                 binding_index += 1;
             }
-            if awaiting_release && !still_held {
+            // A control taken while down is still down when the claim lifts, and would arrive as a
+            // press the player never made (D94). Latched on every taken tick rather than when the
+            // claim goes, so no memory of last tick's claims is needed.
+            if taken && intent == ActionIntent::Button {
+                require_reset.set(slot, true);
+            } else if awaiting_release && !still_held {
                 require_reset.set(slot, false);
             }
 
@@ -2658,6 +2663,38 @@ mod tests {
         assert_eq!(script.tick(0.1, []), [ActionPhase::Fired]);
     }
 
+    /// A claim lifting off a key still held hands it back already down, which is held over until
+    /// the player lets go, as on activation (D94). A hold is the binding the latch has to reach:
+    /// held long enough, the returning key would otherwise charge it through to firing.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_claim_lifting_waits_for_a_release() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut script = Script::new(|controls| {
+            controls.bind::<Jump>(KeyCode::Space).hold(0.25);
+        });
+        script.consumed.claim::<bevy_app::PreUpdate>(
+            Control::PhysicalKey(KeyCode::Space),
+            None,
+            "eval_tests.vehicle",
+        );
+
+        assert!(script.tick(0.1, [key(ButtonState::Pressed)]).is_empty());
+        script.consumed = ConsumedControls::default();
+        for _ in 0..4 {
+            assert!(script.tick(0.1, []).is_empty(), "the key came back down");
+        }
+        assert!(script.tick(0.1, [key(ButtonState::Released)]).is_empty());
+
+        assert_eq!(
+            script.tick(0.1, [key(ButtonState::Pressed)]),
+            [ActionPhase::Started]
+        );
+        assert!(script.tick(0.1, []).is_empty());
+        assert_eq!(script.tick(0.1, []), [ActionPhase::Fired]);
+    }
+
     /// Events inside one tick carry no time between them, so a press and a release in the same tick
     /// are as quick as a press can be, even when the tick itself was long.
     #[cfg(feature = "keyboard")]
@@ -3235,6 +3272,8 @@ mod tests {
     struct Script {
         state: InputContextState<Flying>,
         frame: InputFrame,
+        /// What contexts above have claimed, standing until a test changes it.
+        consumed: ConsumedControls,
     }
 
     #[cfg(feature = "keyboard")]
@@ -3243,6 +3282,7 @@ mod tests {
             Self {
                 state: context_declaring(declare),
                 frame: InputFrame::default(),
+                consumed: ConsumedControls::default(),
             }
         }
 
@@ -3260,7 +3300,7 @@ mod tests {
                 &self.frame,
                 &ButtonThreshold::default(),
                 delta,
-                &ConsumedControls::default(),
+                &self.consumed,
                 &mut Vec::new(),
                 None,
             );

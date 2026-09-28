@@ -308,9 +308,11 @@ A claim can arrive under a control the player is still holding, which from the c
 like a release. The fold tells the two apart from held state alone: a binding whose control is
 claimed and still physically down is *taken*, and an action with a taken binding commits as
 `FoldKind::Interrupted`, so what it was firing ends `Canceled` rather than `Completed` (D94). A
-binding held back by its chord is not counted, since it reads rest either way. Keeping no memory of
-last tick's claims costs one case: an action whose second binding sits held and claimed throughout
-reports `Canceled` when the player releases the first.
+`Button` action with a taken binding also has its require-reset latch (TD7.2) set on every such
+fold, so when the claim lifts the control comes back already down and is ignored until released, as
+on activation. A binding held back by its chord is not counted, since it reads rest either way.
+Keeping no memory of last tick's claims costs one case: while an action's second binding sits held
+and claimed, its first cannot fire, and ends `Canceled` if it was firing when the claim arrived.
 
 Consumption is recorded per schedule and cleared at two points:
 

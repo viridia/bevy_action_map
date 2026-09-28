@@ -216,6 +216,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 179b | A hold charges once per tick                                          |
 | 179c | Require-reset holds through a time condition                          |
 | 179d | A claim arriving cancels what it took                                 |
+| 179e | A claim lifting waits for a release                                   |
 | 180  | `fold`'s names say what they span                                     |
 
 ---
@@ -242,23 +243,6 @@ an interruption. What happens once per tick has to land on exactly one of them, 
 that wrong in different places. They are lettered because each part's tests assume the one before.
 Each part writes its tests on `Script`, the tick-script fixture in `eval.rs`'s tests, extending it
 where a part needs more than events and a `delta` per tick.
-
-### 179e. A claim lifting waits for a release · E[1]
-
-When a claim stops with the key still held (the hold completes or is abandoned, its chord breaks,
-the higher context deactivates), the lower context's plain binding on that key fires. Probed: Space
-claimed on one tick, unclaimed on the next, never released: `Jump` `Fired`. In play: a dialog
-confirms on A and closes while A is still down, and the character jumps; or Shift+Space held for a
-vehicle boost, Shift released first, and the on-foot context jumps. D94 rules it: a key that arrives
-already down is ignored by `Button` actions until released.
-
-- **The fix:** on every fold where a `Button` binding is taken (TD5.2: claimed and still physically
-  down), its slot gets 179c's latch, so it stands when the claim lifts and holds until the release;
-  analog actions resume. No memory of last tick's claims is needed. A claim covers a binding's
-  primary control, not its chord, so a chord's other keys never return and are untouched.
-- **The lift rule joins R8.2**, beside the arrival rule.
-- **Depends on 179c**: without it, a returning key whose binding has a hold slips through the latch
-  as it does on activation.
 
 ### 181. `fold` split into functions · E[2]
 

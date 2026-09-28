@@ -2040,6 +2040,68 @@ mod tests {
         assert_eq!(app.world().resource::<Heard>().0, ["canceled"]);
     }
 
+    /// Shift+Space held for the vehicle's boost, Shift let go first: Space comes back to the
+    /// on-foot context still down, and the character must not jump until it is pressed again.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_claim_lifting_off_a_held_key_waits_for_a_release() {
+        use crate::event::Fired;
+        use bevy_ecs::observer::On;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.boost", output = bool, intent = Button)]
+        struct Boost;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.vehicle", tick = Render, priority = 10)]
+        struct Vehicle;
+
+        #[derive(Resource, Default)]
+        struct Jumps(usize);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Vehicle>(|context| {
+            context
+                .bind::<Boost>(KeyCode::Space)
+                .with(KeyCode::ShiftLeft)
+                .consume();
+        });
+        app.add_context::<FreeLook>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        app.init_resource::<Jumps>();
+        app.add_observer(
+            |_: On<Fired<Jump>>, mut jumps: bevy_ecs::system::ResMut<'_, Jumps>| jumps.0 += 1,
+        );
+        app.world_mut().spawn(Vehicle);
+        app.world_mut().spawn(FreeLook);
+
+        app.world_mut()
+            .write_message(press(KeyCode::ShiftLeft, Key::Shift, ButtonState::Pressed));
+        app.update();
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        app.world_mut()
+            .write_message(press(KeyCode::ShiftLeft, Key::Shift, ButtonState::Released));
+        app.update();
+        app.update();
+        assert_eq!(
+            app.world().resource::<Jumps>().0,
+            0,
+            "Space was never pressed for Jump"
+        );
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Released));
+        app.update();
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        assert_eq!(app.world().resource::<Jumps>().0, 1);
+    }
+
     /// Each obstacle the query can currently reach, provoked one at a time.
     #[cfg(feature = "keyboard")]
     #[test]
