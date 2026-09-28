@@ -218,6 +218,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 179d | A claim arriving cancels what it took                                 |
 | 179e | A claim lifting waits for a release                                   |
 | 180  | `fold`'s names say what they span                                     |
+| 181a | The evaluator's benchmark, and a probe for unrelated events           |
 
 ---
 
@@ -311,22 +312,8 @@ way a control change does. Nothing is built for it now, and nothing is built tha
 **Where the work happens.** On the `chunk-181` branch, one commit per part, with `main` as the old
 evaluator to compare against. The benchmark is `crates/bevy_action_map/benches/eval.rs`, and each
 part after 181a compares with `cargo bench -p bevy_action_map --bench eval -- --baseline pre181`.
-Tests go on `Script`, the tick-script fixture in `eval.rs`'s tests. When 181e lands, this model moves
-into TD5 and a new decision D98, and this introduction is deleted.
-
-### 181a. The measurement lands · E[1]
-
-- `crates/bevy_action_map/benches/eval.rs`, from the scratch harness, with `criterion` as a
-  dev-dependency. The harness is a standalone crate at
-  `/private/tmp/claude-501/-Users-talin-Projects-games-bevy-action-map/5cbcc474-33fe-4400-bd13-c9320c573ce2/scratchpad/evalbench/`:
-  `benches/eval.rs` is the benchmark, `tests/unrelated.rs` the probe, and `run1.log` to `run3.log`
-  the measured runs that issues 1075 and 1077 quote. It is under `/tmp`, so if a reboot has cleared
-  it, rebuild it from the description below and re-measure. This line goes when 181a lands. Small (11-binding) and large (48-binding) contexts; idle, key-burst and
-  mouse-motion loads; 0, 1 and 8 instances; a binding-count sweep; chords on and off. The baseline
-  `pre181` is saved from it.
-- The issue 1077 probe as a `Script` test, `#[ignore]`d until 181e.
-- `docs/issues.md`: issue 1077 added, and 1075 corrected and measured, both routed here.
-- **Not done:** any change to evaluation code.
+Tests go on `Script`, the tick-script fixture in `eval.rs`'s tests. When 181e lands, this model
+moves into TD5 and a new decision, and this introduction is deleted.
 
 ### 181b. `eval.rs` split along the lines that do not change · E[2]
 
@@ -365,10 +352,11 @@ into TD5 and a new decision D98, and this introduction is deleted.
   called each time the binding's input changes within a tick and once at the end of it, with a
   non-zero `delta` only at the end.
 - Forced documents: TD5 rewritten (diagram, replay and time), TD5.1's chord paragraph and TD5.2's
-  claimed-while-held paragraph adjusted, D97 amended, D98 "A binding's pipeline runs once per
-  reading" added, issues 1075 and 1077 closed, a line on X54 saying its main obstacle is gone.
+  claimed-while-held paragraph adjusted, D97 amended, a new decision "A binding's pipeline runs once
+  per reading" added, issues 1075 and 1077 closed, a line on X54 saying its main obstacle is gone.
 - Every test whose expectation changes is listed in the commit, classified "the old evaluator was
-  wrong" or "the new one is wrong". The 181a probe is un-ignored.
+  wrong" or "the new one is wrong". The issue 1077 probe, `an_unbound_key_changes_nothing_reported`,
+  is un-ignored.
 - **Split before writing** if the diff runs past a day's reading: first the new order with the
   three interruption mechanisms mapped one-to-one onto `Withdrawn` and `ClaimedWhileDown`, then
   their collapse into one rule.

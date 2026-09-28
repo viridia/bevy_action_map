@@ -46,6 +46,12 @@ trybuild = "1.0"
 # Picked as the concrete format for chunk 55's golden persistence test — a format this crate never
 # learns about outside that one test (§10.1).
 toml = "0.8"
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "eval"
+harness = false
+required-features = ["std", "mouse"]
 
 [features]
 default = ["std", "bevy_reflect", "keyboard", "mouse", "gamepad", "state"]

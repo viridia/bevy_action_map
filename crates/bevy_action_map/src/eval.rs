@@ -2695,6 +2695,38 @@ mod tests {
         assert_eq!(script.tick(0.1, []), [ActionPhase::Fired]);
     }
 
+    /// A key bound nowhere in the context changes nothing it reports. Space and F go down in one
+    /// tick, once alone and once with A beside them, and both ticks must log the same phases and
+    /// end in the same ones.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    #[ignore = "issue 1077: every event re-runs every binding's phase machine"]
+    fn an_unbound_key_changes_nothing_reported() {
+        use bevy_input::keyboard::KeyCode;
+
+        let tick = |unbound: bool| {
+            let mut script = Script::new(|controls| {
+                controls.bind::<Jump>(KeyCode::Space).press();
+                controls.bind::<Serve>(KeyCode::KeyF).pulse(10.0);
+            });
+            let mut events = alloc::vec![
+                key(ButtonState::Pressed),
+                layout_key(KeyCode::KeyF, "f", ButtonState::Pressed),
+            ];
+            if unbound {
+                events.push(layout_key(KeyCode::KeyA, "a", ButtonState::Pressed));
+            }
+            let logged = script.tick(0.1, events);
+            (
+                logged,
+                script.state.phase::<Jump>(),
+                script.state.phase::<Serve>(),
+            )
+        };
+
+        assert_eq!(tick(false), tick(true));
+    }
+
     /// Events inside one tick carry no time between them, so a press and a release in the same tick
     /// are as quick as a press can be, even when the tick itself was long.
     #[cfg(feature = "keyboard")]

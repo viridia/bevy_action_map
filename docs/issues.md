@@ -19,7 +19,7 @@ part that stays good. Re-verify before acting on one.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 tier, and never reused. A gap in the sequence is a retired entry.
 
-**Next: 1077.**
+**Next: 1078.**
 
 **What the tiers mean.**
 
@@ -49,6 +49,25 @@ debug overlay is the observer, not play.
 _Fix, sketched (E[1]):_ `why_not_id` tests `intent_for_slot(slot) == ActionIntent::Button` beside
 the bit, the same condition `fold` uses; or the arming sites mark `Button` slots only. The first is
 one line and leaves the arming sites alone.
+
+### 1077 An event on an unrelated control changes what an action reports
+
+`eval.rs`, `apply_frame`'s replay loop, and `fold` · **confirmed by a probe**
+
+Every level event a tick replays is followed by a whole `fold`, and every fold steps every action's
+phase machine, whether the event touched its bindings or not. So an action's phase depends on how
+many other events its tick carried. 179b–e made the extra folds leave time, require-reset and claims
+as they found them; the phase machine and `Scratch::prev` were never made to.
+
+Probed by `an_unbound_key_changes_nothing_reported`: `Jump` on Space with `press()`, `Serve` on F
+with `pulse(10.0)`, both keys going down in one tick. Alone, that tick logs
+`Fired, Completed, Fired` and ends with `Jump` at `Completed` and `Serve` at `Fired`. With A, bound
+nowhere, going down in the same tick, it logs a second `Completed` and ends with `Jump` at `Idle`
+and `Serve` at `Completed`, F still held. The tick without A is already affected: `Jump` completes
+on F's fold, one event after it fired.
+
+_Routed to chunk 181._ The probe is `#[ignore]`d until 181e, whose evaluation order runs a binding's
+pipeline once per change in its input and once at the end of the tick, and closes this entry.
 
 ---
 
@@ -341,7 +360,7 @@ behind it," as the register puts it, does not only fail to prevent them.
 
 ### 1075 A tick costs every binding once per event, bound or not
 
-`apply_frame`'s replay loop (`eval.rs`), and `fold` · reasoned from the loop, **not measured**
+`apply_frame`'s replay loop (`eval.rs`), and `fold` · **measured** by `benches/eval.rs`
 
 Each level event a context replays is followed by a whole fold: the chord pre-pass, the shared
 toggles, and every binding of every action. So one context's tick costs its events times its
@@ -350,23 +369,31 @@ do not, and a steered pad sends four to six events a frame. That is a few dozen 
 play. After a hitch it is every event since the stall, replayed in one tick, which is the frame
 least able to afford it. The queue holds 4096.
 
-Most of those folds are for a control the context binds nowhere. Since 179b such a fold is handed a
-zero `delta` and reads the same input as the one before it, so it can change almost nothing: the
-exception is a phase stepping from `Fired` to `Firing` on it, which ties that step to unrelated
-keys.
+Most of those folds are for a control the context binds nowhere, and they are not harmless: each
+steps every phase machine, which is issue 1077.
 
-_Fix, sketched (E[2]):_ measure first. An `#[ignore]`d test beside `Script` drives `apply_frame`
-directly in a release build and prints the median time per tick, bindings (10, 50, 200) against
-events per tick (1, 30, 300, 4096), with folds run and bindings visited beside it as counts that do
-not jitter. Then skip the fold for an event on a control the plan does not read. `indexed_controls`
-is nearly that set but omits chord keys, which need adding. Focus loss and a disconnect name no
-control and always fold, the class-binding dispatch still runs per event, and 179b's count covers
-only the folds that run. Probe the `Fired` to `Firing` change before landing it. Rerun the
-measurement after.
+Measured on the 48-binding context, one instance, the empty app subtracted:
+
+| Case | Per tick |
+| --- | --- |
+| Idle: one level fold and the delta fold | 7.5 µs |
+| The same, its 12 chords removed | 1.35 µs |
+| 16 key events: seventeen folds | 68 µs |
+| The same, 8 instances | 101 µs each |
+
+A fold costs about 4 µs here, and the chords are most of it. Once a plan has any chord, the pre-pass
+enters every binding whose chord is held, plain bindings included, into a list it searches linearly,
+then searches it again for every binding: quadratic in bindings. Doubling the bindings from 24 to 48
+costs 2.9 times as much with chords and 1.9 times without. Under a burst, where the folds multiply,
+it costs 5.3 times. Extrapolated rather than measured: a hitch that leaves the queue's 4096 events
+for one tick costs this context about 16 ms, a whole frame at 60 Hz, per instance.
+
+_Routed to chunk 181._ 181c replaces the pre-pass with rivals computed at plan build, 181e runs a
+binding only when its input changes and once at the end of the tick, and each part compares against
+the benchmark's saved `pre181` baseline. 181e closes this entry.
 
 Rejected for now: collapsing one axis's readings within a tick, which loses a trigger crossing its
-press point and back inside a tick, the edge R9.3 protects for buttons; and folding only the actions
-an event touches, which gives each action a different count of folds per tick.
+press point and back inside a tick, the edge R9.3 protects for buttons.
 
 ### 1054 Deriving a pane's persistent identity is boilerplate every game rewrites
 
