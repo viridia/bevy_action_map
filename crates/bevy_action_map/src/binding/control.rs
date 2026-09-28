@@ -122,6 +122,22 @@ pub enum ChordEntry {
 }
 
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+impl ChordEntry {
+    /// Every control whose change can decide whether this entry is held: both keys of a modifier.
+    pub(crate) fn for_each_control(self, mut visit: impl FnMut(Control)) {
+        match self {
+            Self::Control(control) => visit(control.into()),
+            #[cfg(feature = "keyboard")]
+            Self::Modifier(modifier) => {
+                for key in modifier.keys() {
+                    visit(Control::PhysicalKey(key));
+                }
+            }
+        }
+    }
+}
+
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 impl From<ButtonControl> for ChordEntry {
     fn from(control: ButtonControl) -> Self {
         Self::Control(control)

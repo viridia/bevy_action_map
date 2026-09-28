@@ -1,6 +1,7 @@
 //! Compiling bindings into the plan the evaluator runs against.
 
 use alloc::{collections::BTreeMap, vec::Vec};
+use bevy_platform::collections::HashMap;
 
 use crate::action::{ActionId, ActionIntent, ChannelShape};
 use crate::binding::{
@@ -770,6 +771,10 @@ pub(crate) struct Plan {
         allow(dead_code)
     )]
     chord_rivals: Vec<u32>,
+    // For each control, the bindings whose reading its change can move, as ascending indices into
+    // `bindings`. Keyed by control alone for now: a condition reading another action (X54) would
+    // add a key for the action, since its commit marks dependents the way a control change does.
+    affected_by_control: HashMap<Control, Vec<u32>>,
     // TD5.4's second structure: consulted only when `indexed_controls` doesn't already claim the
     // control an event arrived on.
     class_bindings: Vec<CompiledClassBinding>,
@@ -957,6 +962,33 @@ impl Plan {
             compiled[index].rivals = start..chord_rivals.len() as u32;
         }
 
+        // A binding is affected by what it reads, by its chord, and by each rival's chord, which
+        // out-ranks it when held. A rival's own control is not among them: out-ranking reads the
+        // chord alone. Not `indexed_controls`, which leaves chords out.
+        let mut affected_by_control: HashMap<Control, Vec<u32>> = HashMap::default();
+        for (index, binding) in compiled.iter().enumerate() {
+            let index = index as u32;
+            let mut affects = |control: Control| {
+                let affected = affected_by_control.entry(control).or_default();
+                // Bindings are visited in order, so a binding reached twice is the last entry.
+                if affected.last() != Some(&index) {
+                    affected.push(index);
+                }
+            };
+            binding.input.for_each_control(&mut affects);
+            #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+            {
+                let rivals =
+                    &chord_rivals[binding.rivals.start as usize..binding.rivals.end as usize];
+                let chords = core::iter::once(binding)
+                    .chain(rivals.iter().map(|&rival| &compiled[rival as usize]))
+                    .flat_map(|binding| &binding.chord);
+                for entry in chords {
+                    entry.for_each_control(&mut affects);
+                }
+            }
+        }
+
         // Recomputed on every compile, including a variant's: an override rewrites which controls
         // these bindings read, so a rebind has to move a control between "indexed" and "not" along
         // with everything else — unlike `class_bindings`, which is never part of that diff.
@@ -978,6 +1010,7 @@ impl Plan {
             class_bindings: Vec::new(),
             indexed_controls,
             chord_rivals,
+            affected_by_control,
         }
     }
 
@@ -1012,6 +1045,18 @@ impl Plan {
         self.chord_rivals[binding.rivals.start as usize..binding.rivals.end as usize]
             .iter()
             .map(|&index| &self.bindings[index as usize])
+    }
+
+    /// The bindings whose reading a change to `control` can move: those reading it, those chorded on
+    /// it, and those a rival chorded on it out-ranks. Ascending indices into `bindings`.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the per-event evaluation is its first reader")
+    )]
+    pub(crate) fn bindings_affected_by(&self, control: Control) -> &[u32] {
+        self.affected_by_control
+            .get(&control)
+            .map_or(&[], Vec::as_slice)
     }
 
     pub(crate) fn intent_for_slot(&self, slot: usize) -> ActionIntent {
@@ -1319,6 +1364,114 @@ mod tests {
 
         assert!(plan.is_indexed(Control::PhysicalKey(KeyCode::Space)));
         assert!(!plan.is_indexed(Control::PhysicalKey(KeyCode::KeyA)));
+    }
+
+    /// The paths of the actions whose bindings `control` affects, one per binding, sorted.
+    fn affected_paths(plan: &Plan, control: Control) -> Vec<&'static str> {
+        let mut paths: Vec<_> = plan
+            .bindings_affected_by(control)
+            .iter()
+            .map(|&index| plan.slots()[plan.bindings()[index as usize].slot].path)
+            .collect();
+        paths.sort_unstable();
+        paths
+    }
+
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_binding_is_affected_by_the_control_it_reads() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<Jump>(KeyCode::Space);
+        let (bindings, class_bindings) = builder.finish();
+        let plan = Plan::from_bindings(bindings, class_bindings);
+
+        assert_eq!(
+            affected_paths(&plan, Control::PhysicalKey(KeyCode::Space)),
+            ["plan_tests.jump"]
+        );
+        assert!(affected_paths(&plan, Control::PhysicalKey(KeyCode::KeyA)).is_empty());
+    }
+
+    // `TypeS` is never chorded on Ctrl or Shift, but either one completes a chord that out-ranks
+    // it, so a change to either can move its reading. `Sprint` reads Shift, but no chord shares its
+    // control, so Ctrl leaves it alone.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_binding_is_affected_by_its_chord_and_its_rivals_chords() {
+        use bevy_input::keyboard::KeyCode;
+
+        #[derive(crate::InputAction)]
+        #[action(path = "plan_tests.type_s", output = bool, intent = Button)]
+        struct TypeS;
+        #[derive(crate::InputAction)]
+        #[action(path = "plan_tests.save", output = bool, intent = Button)]
+        struct Save;
+        #[derive(crate::InputAction)]
+        #[action(path = "plan_tests.save_as", output = bool, intent = Button)]
+        struct SaveAs;
+        #[derive(crate::InputAction)]
+        #[action(path = "plan_tests.sprint", output = bool, intent = Button)]
+        struct Sprint;
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder.bind::<TypeS>(KeyCode::KeyS);
+        builder
+            .bind::<Save>(KeyCode::KeyS)
+            .with(KeyCode::ControlLeft);
+        builder
+            .bind::<SaveAs>(KeyCode::KeyS)
+            .with(KeyCode::ControlLeft)
+            .with(KeyCode::ShiftLeft);
+        builder.bind::<Sprint>(KeyCode::ShiftLeft);
+        builder.bind::<Jump>(KeyCode::Space);
+        let (bindings, class_bindings) = builder.finish();
+        let plan = Plan::from_bindings(bindings, class_bindings);
+
+        let three = ["plan_tests.save", "plan_tests.save_as", "plan_tests.type_s"];
+        assert_eq!(
+            affected_paths(&plan, Control::PhysicalKey(KeyCode::KeyS)),
+            three
+        );
+        // `TypeS` is out-ranked by two rivals chorded on Ctrl, and listed once.
+        assert_eq!(
+            affected_paths(&plan, Control::PhysicalKey(KeyCode::ControlLeft)),
+            three
+        );
+        assert_eq!(
+            affected_paths(&plan, Control::PhysicalKey(KeyCode::ShiftLeft)),
+            [
+                "plan_tests.save",
+                "plan_tests.save_as",
+                "plan_tests.sprint",
+                "plan_tests.type_s",
+            ]
+        );
+        assert_eq!(
+            affected_paths(&plan, Control::PhysicalKey(KeyCode::Space)),
+            ["plan_tests.jump"]
+        );
+    }
+
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn either_key_of_a_modifier_affects_its_chord() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut builder = InputContextBuilder::<()>::default();
+        builder
+            .bind::<MenuToggle>(KeyCode::KeyM)
+            .with(crate::binding::ModifierKey::Ctrl);
+        let (bindings, class_bindings) = builder.finish();
+        let plan = Plan::from_bindings(bindings, class_bindings);
+
+        for key in [KeyCode::ControlLeft, KeyCode::ControlRight] {
+            assert_eq!(
+                affected_paths(&plan, Control::PhysicalKey(key)),
+                ["plan_tests.menu"]
+            );
+        }
     }
 
     // Two class bindings watching the same filter: the second can never fire, and that should be

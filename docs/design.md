@@ -182,6 +182,7 @@ Bindings are authored as data and compiled once per context into a `Plan`.
 | scratch slot assignment per condition and stateful modifier | TD6 |
 | each action's stage after the fold, its scratch placed after every binding's | TD5.5 |
 | each binding's chord length, and its longer-chord rivals | chord arbitration, TD5.1 |
+| for each control, the bindings reading it, chorded on it, or out-ranked by a rival chorded on it | finding what one event can change, TD5 |
 | the set of controls any binding indexes | class-binding fallback, TD5.4 |
 | resolved dispatch per slot | turning a transition into a typed event |
 | diagnostics | reported before the context is installed |

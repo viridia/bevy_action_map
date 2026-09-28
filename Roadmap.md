@@ -221,6 +221,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 181a | The evaluator's benchmark, and a probe for unrelated events           |
 | 181b | `eval.rs` split along the lines that do not change                    |
 | 181c | Longer-chord rivals replace the chord pre-pass                        |
+| 181d | The affected-bindings index                                           |
 
 ---
 
@@ -317,14 +318,6 @@ part after 181a compares with `cargo bench -p bevy_action_map --bench eval -- --
 Tests go on `Script`, the tick-script fixture in `eval/mod.rs`'s tests. When 181e lands, this model
 moves into TD5 and a new decision, and this introduction is deleted.
 
-### 181d. The affected-bindings index · E[1]
-
-- `Plan::bindings_affected_by(control)`: the bindings reading a control, the bindings chorded on
-  it, and their longer-chord rivals. `indexed_controls` omits chord keys, which is why it is not
-  reused. The key is a control, written so it could later also be an action (X54).
-- **Not done:** any reader. Could fold into 181e; it stands alone only because its tests do.
-- **Verified by** unit tests on the index.
-
 ### 181e. Binding readings, the per-binding pipeline, and one rule for controls that go away · E[4]
 
 - `binding_reading.rs`, `binding_pipeline.rs`, `action_commit.rs`, `tick_evaluation.rs`, as the
@@ -332,7 +325,8 @@ moves into TD5 and a new decision, and this introduction is deleted.
   deleted; `sample_authority` produces `Withdrawn` readings.
 - Left by 181b, which moved the device state alone: `HeldControlState` takes the mouse-motion
   accumulator and the sampled authority values, and `apply_event` returns the controls it changed.
-  Each has its first reader here.
+  Each has its first reader here, as does 181d's `Plan::bindings_affected_by`, whose `expect` on
+  `dead_code` comes off.
 - `Condition::evaluate` and `Modifier::apply` keep their signatures. Their doc comments say they are
   called each time the binding's input changes within a tick and once at the end of it, with a
   non-zero `delta` only at the end.
