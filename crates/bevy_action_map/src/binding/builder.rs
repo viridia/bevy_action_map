@@ -51,7 +51,7 @@ pub(crate) struct BindingSpec {
 }
 
 /// What [`InputContextBuilder::combined`] declared for one action: a chain run on the value its
-/// bindings fold to, rather than on any one binding's.
+/// bindings combine into, rather than on any one binding's.
 ///
 /// Deliberately not a `BindingSpec`: it reads no control, so there is nothing to chord, consume,
 /// list or tune.

@@ -130,7 +130,7 @@ pub(crate) fn evaluate_context<
 
         // An instance's claims land scoped to its own devices, so the instance evaluated next
         // reads them only where the two players overlap.
-        // Sampled once a tick, before the frame, so every fold in it reads the same level: the
+        // Sampled once a tick, before the frame, so every run in it reads the same level: the
         // authority is polled rather than replayed.
         if instance.is_active() {
             instance.sample_authority(authority);

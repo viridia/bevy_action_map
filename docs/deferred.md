@@ -514,6 +514,11 @@ a remote player's resolved action to inject and a later correction to reconcile 
 **Gate:** the crate public (X43), and its users asked on the Bevy Discord whether a game wants a
 condition that reads another action rather than a control.
 
+The evaluator removed the main obstacle (D98): an action's state changes only when it commits, so a
+commit can mark its dependents affected the way a control change does. Left are the condition that
+reads another action, its builder method, commits ordered by dependency, and a cycle diagnostic at
+plan build: a new mechanism with public API and a `TD` section, E[3], where it was E[4] before.
+
 A chord may require another *control* but not another *action*, and `BlockedBy` does not exist. Both
 read a neighbouring slot rather than their own value, which needs the operand evaluated first: slots
 ordered topologically, and a cycle rejected at plan build with a diagnostic naming the loop. This
@@ -577,6 +582,18 @@ Kenney's generic set is blank, unlabeled buttons, so each generic face button ne
 stamp authored onto it by hand: content work with a known answer, and no code. Until then an
 unrecognized pad's face buttons resolve to text, which is also where the fallback chain shows itself
 in tree, on Disasteroids' Cancel and Confirm and in the gallery's Generic brand.
+
+### X55 — Skipping the closing run for a binding that did not change
+
+**Gate:** a game's profile, or the `eval` benchmark on a plan larger than its own, showing the
+closing step as the evaluator's cost.
+
+The closing step runs every enabled binding's pipeline, changed or not (D98), because a
+time-dependent stage (a hold, a pulse, a tap window) has to see the tick's `delta`. A binding whose
+reading did not change and whose stages hold no time could skip it and keep its last output. After
+chunk 181e an idle tick is level with 181c's, and the remaining cost is small plans with many
+instances, about 3 to 5 percent over 181c. The work is a per-binding flag at plan build for "no
+time-dependent stage", and the closing step honouring it: E[2].
 
 ## 7. Tooling, and other projects
 

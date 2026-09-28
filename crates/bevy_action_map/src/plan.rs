@@ -606,7 +606,8 @@ pub(crate) fn diagnose_classes(bindings: &[ClassBindingSpec]) -> Vec<BindingDiag
     found
 }
 
-/// Whether a `combined` declaration has anything to combine, and whether its chain rescales twice.
+/// Whether a `combined` declaration has anything to combine, and whether its modifiers rescale
+/// twice.
 ///
 /// Refused rather than ignored: a clamp that silently never runs is the mistake most worth hearing
 /// about.
@@ -633,8 +634,9 @@ pub(crate) fn diagnose_combined(
             found.push(at(DiagnosticKind::CombinedWithoutBindings));
             continue;
         };
-        // The stage is the tail of every binding's chain, so it rescales twice if it rescales after
-        // a binding that already did. A binding's own double is `diagnose`'s to report.
+        // The stage is the tail of every binding's modifier chain, so it rescales twice if it
+        // rescales after a binding that already did. A binding's own double is `diagnose`'s to
+        // report.
         let stage = rescales(&spec.modifiers);
         if stage > 0 && upstream + stage > 1 {
             found.push(at(DiagnosticKind::ChainedRescaling {
@@ -645,7 +647,10 @@ pub(crate) fn diagnose_combined(
     found
 }
 
-/// What `combined` declared for one slot, with its working memory placed.
+/// One action's stage: a modifier chain and conditions run on the value its bindings combine into,
+/// once per commit, after the bindings and before the action's phase moves. Declared through
+/// `combined::<A>()` so that a clamp or a condition applies to the action as a whole rather than to
+/// each binding. Empty for an action that declared none, which costs one check.
 // `Default` is the slot that declared nothing: two empty `Vec`s, which allocate nothing.
 #[derive(Clone, Default)]
 pub(crate) struct CompiledStage {
@@ -744,13 +749,13 @@ pub(crate) struct CompiledSlot {
     pub(crate) path: &'static str,
     // And its identity, for the reads that walk a context rather than naming what they want.
     pub(crate) action: ActionId,
-    // What `combined` runs on the folded value.
+    // What `combined` runs on the combined value.
     pub(crate) stage: CompiledStage,
 }
 
 /// The plan is the immutable runtime view of a context's authored bindings.
 // One slot per action, not per binding: an action may be bound several times, and all of those
-// bindings write the same state. Bindings are grouped by slot so the evaluator can fold each
+// bindings write the same state. Bindings are grouped by slot so the evaluator can combine each
 // action's contributions in a single pass with no per-frame bookkeeping.
 pub(crate) struct Plan {
     bindings: Vec<CompiledBinding>,
@@ -936,7 +941,8 @@ impl Plan {
             });
         }
 
-        // Contiguous per slot, which is how the fold visits one action's bindings together.
+        // Contiguous per slot, which is how an action's commit and the closing step find its
+        // bindings.
         compiled.sort_by_key(|binding| binding.slot);
 
         // After the sort, since a rival is named by its index. A rival may hold the same slot: `S`
@@ -1049,14 +1055,19 @@ impl Plan {
 
     /// The bindings whose reading a change to `control` can move: those reading it, those chorded on
     /// it, and those a rival chorded on it out-ranks. Ascending indices into `bindings`.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the per-event evaluation is its first reader")
-    )]
     pub(crate) fn bindings_affected_by(&self, control: Control) -> &[u32] {
         self.affected_by_control
             .get(&control)
             .map_or(&[], Vec::as_slice)
+    }
+
+    /// The positions in `bindings` of one slot's bindings, which sit together.
+    pub(crate) fn bindings_of(&self, slot: usize) -> core::ops::Range<usize> {
+        let start = self.bindings.partition_point(|binding| binding.slot < slot);
+        let end = self
+            .bindings
+            .partition_point(|binding| binding.slot <= slot);
+        start..end
     }
 
     pub(crate) fn intent_for_slot(&self, slot: usize) -> ActionIntent {
@@ -1518,7 +1529,7 @@ mod tests {
         }
     }
 
-    // The stage runs after every binding's chain, so a rescale there stacks on one a binding
+    // The stage runs after every binding's modifier chain, so a rescale there stacks on one a binding
     // already did. Neither declaration is wrong on its own.
     #[cfg(feature = "keyboard")]
     #[test]

@@ -131,7 +131,7 @@ refused when the context is declared. The derive checks output against intent in
 assertion.
 
 A directional **composite** is four buttons written as one `bind` call and declared as four bindings
-(TD8.1), each part reporting `Axis2` as the unit vector it pushes, which the fold of TD5.5 turns
+(TD8.1), each part reporting `Axis2` as the unit vector it pushes, which combining (TD5.5) turns
 back into one direction. A gamepad stick is a single `Control::GamepadStick` reporting a position
 the same way `MouseMotion` reports a displacement.
 
@@ -180,7 +180,7 @@ Bindings are authored as data and compiled once per context into a `Plan`.
 | --- | --- |
 | action → slot assignment, and the reverse as a direct index | O(1) state access without hashing |
 | scratch slot assignment per condition and stateful modifier | TD6 |
-| each action's stage after the fold, its scratch placed after every binding's | TD5.5 |
+| each action's stage after combining, its scratch placed after every binding's | TD5.5 |
 | each binding's chord length, and its longer-chord rivals | chord arbitration, TD5.1 |
 | for each control, the bindings reading it, chorded on it, or out-ranked by a rival chorded on it | finding what one event can change, TD5 |
 | the set of controls any binding indexes | class-binding fallback, TD5.4 |
@@ -221,33 +221,66 @@ pub enum DiagnosticKind {
 
 ## 5. Evaluation
 
-One pass per context per tick: raw events in, action state and a transition log out.
+One pass per context instance per tick: raw events in, action state and a transition log out. The
+code is `eval/`, one module per concern: `held_control_state`, `binding_reading`,
+`binding_pipeline`, `action_commit` and `tick_evaluation`.
 
 ```
-raw event, one at a time
-  → held-state update
-  → shared toggle latch   once per fold, per shared hold_or_toggle key
-  → per binding
-      chord               its own unheld, or a longer-chord rival's held: reads as rest
-      read the control    a consumed control reads as untouched
-      modifier chain      negate · swizzle · scale · dead zone · curve · clamp · compass · custom
-      press threshold     a Button action fed by a non-bool value, remembered per binding
-      require-reset       a latched Button action hands rest on, noting whether it read pressed
-      conditions          explicit: any satisfies · implicit: all hold · blocking: any vetoes
-      consume?            Building or Satisfied adds its controls to the instance's claims
-  → fold by intent        several bindings, one action
-  → stage after fold      modifiers · conditions, declared once per action
-  → write ActionState, mark dirty, append transition
+refresh readings          only where one can have moved with no event
+each event, in order
+  → held-state update     reports the controls it changed
+  → affected bindings     the plan's index: reads the control, chorded on it, or out-ranked by it
+  → per affected binding  take a fresh reading; a superseded one not yet recorded is recorded now
+  → commit each action touched, once, with delta zero
   → class dispatch        the event itself, if no plain binding indexes its control
+closing step
+  → shared toggle latches resolved
+  → per binding           record its latest reading with the tick's delta
+  → commit every action   combine outputs · stage · phase machine · dirty · transition
+
+a binding's pipeline, recording one reading
+  modifier chain          negate · swizzle · scale · dead zone · curve · clamp · compass · custom
+  press threshold         a Button action fed by a non-bool value, remembered per binding
+  require-reset latch     a Button action awaiting release hands rest on, noting if it read pressed
+  conditions              explicit: any satisfies · implicit: all hold · blocking: any vetoes
+  consume?                Building or Satisfied adds its controls to the instance's claims
 ```
 
-Level events are replayed one at a time, each followed by a whole fold, so a press and a release
-inside one tick are two readings rather than none. Time is charged once per tick: the fold after the
-last event replayed is handed the tick's `delta`, and every fold before it is handed zero. So a hold
-advances by one tick however many events arrive, and a press and a release inside one tick read as a
-tap. A tick with no level event still folds once, so time-driven conditions advance. Mouse motion is
-summed across the tick and read by one further fold at the end, in which only `Delta2` actions take
-part. An inactive context applies the held-state update and nothing after it.
+**A binding reading** (`BindingReading`) is what one binding's input shows at one moment, taken from
+held state, the claims against it and the plan: a value, and a `ReadingAvailability` saying whether
+it counts. The first that applies wins, in this order: `Withdrawn` (its control went away while
+down, through focus loss, a disconnect, or an authority no longer supplying it), `HeldBackByChord`,
+`OutrankedByLongerChord` (TD5.1), `ClaimedWhileDown` (TD5.2), `Live`. A reading held back or
+out-ranked reads rest; a claimed control reads as untouched.
+
+**The invariant.** A binding's pipeline records a reading once each time the reading changes within
+a tick, and once at the end. Each pass is a *run*. Only the run at the end is handed the tick's
+`delta`, every other run zero, so a hold advances by one tick however many events arrive, and a
+press and a release inside one tick read as a tap (D97). A reading changed by an event before it was
+recorded is *superseded*, and recorded then, so the press is seen though the tick ends released. A
+binding whose reading does not change runs once, and no reading is recorded twice: the stateful
+stages would count it again. Per binding, `BindingProgress` holds the latest reading, whether it is
+pending, and the output of the last run.
+
+**A commit** combines an action's bindings' latest outputs (TD5.5), runs its stage, and moves its
+phase. An action committing partway through a tick takes its other bindings' outputs as they stand,
+without running them. It goes from firing to idle as `Canceled`, not `Completed`, when one of its
+bindings, having had something to say, ran on a `ClaimedWhileDown` or `Withdrawn` reading since it
+last committed (D94). That is the one rule for a control that goes away (TD5.7).
+
+**Refreshing readings.** A reading can move between ticks with no event: a claim arriving or
+lifting, an authority value changing (TD5.8), an action disabled, or a withdrawal ending at the tick
+before. Any of these has every reading taken afresh before the next tick's events, and one that
+differs from where the last tick ended becomes pending. Otherwise the stored readings stand, which
+keeps an idle tick to one pass over the bindings. Readings stored before a spell inactive, a plan
+adopted or an action enabled predate the held state, so the next tick takes its readings as they
+stand with none pending: a difference from them is no change the instance saw, and recording it
+could clear a require-reset latch the player never earned.
+
+**Mouse motion** is summed across the tick in held state and read once, at the closing step. **A
+shared `hold_or_toggle` latch** resolves at the start of the closing step, and whenever a member's
+superseded reading is recorded mid-tick, each time from every member's latest reading. An inactive
+context applies the held-state update and nothing after it.
 
 Claims gather in a list local to the instance and reach `ConsumedControls` once it has finished, so
 an instance never reads back its own claim partway through a tick.
@@ -273,8 +306,8 @@ here that they are not.
 *longer-chord rivals*: the bindings sharing a control with it whose chord is strictly longer,
 disabled or not. While any enabled rival's chord is held, the binding reads as at rest, whether or
 not the rival's own control is. Whether a chord is held is a pure function of held state, a consumed
-control counting as released, so the answer needs no state between folds. `Ctrl+S` beats a bare `S`
-with nothing declared for it.
+control counting as released, so the answer needs no state between readings. Each binding's rivals
+are computed at plan build. `Ctrl+S` beats a bare `S` with nothing declared for it.
 
 **A chord entry is a control or a modifier.** `ChordEntry::Control` names one control and is
 satisfied by that control alone. `ChordEntry::Modifier` names one of `ModifierKey`'s four pairs and
@@ -308,14 +341,12 @@ capture claims under its own session's `Paired` for the same reason, so two rebi
 answer each other's presses.
 
 A claim can arrive under a control the player is still holding, which from the context below looks
-like a release. The fold tells the two apart from held state alone: a binding whose control is
-claimed and still physically down is *taken*, and an action with a taken binding commits as
-`FoldKind::Interrupted`, so what it was firing ends `Canceled` rather than `Completed` (D94). A
-`Button` action with a taken binding also has its require-reset latch (TD7.2) set on every such
-fold, so when the claim lifts the control comes back already down and is ignored until released, as
-on activation. A binding held back by its chord is not counted, since it reads rest either way.
-Keeping no memory of last tick's claims costs one case: while an action's second binding sits held
-and claimed, its first cannot fire, and ends `Canceled` if it was firing when the claim arrived.
+like a release. Held state tells the two apart: a binding whose control is grabbed and still
+physically down reads `ClaimedWhileDown`, so what its action was firing ends `Canceled` rather than
+`Completed` (D94, TD5). When the claim lifts, a `Button` action's reading leaving `ClaimedWhileDown`
+sets its require-reset latch (TD7.2), so the control, back already down, is ignored until released,
+as on activation. A binding held back by its chord is not counted, since it reads rest either way.
+Only the claimed binding is affected: the action's other bindings fire and end as they would.
 
 Consumption is recorded per schedule and cleared at two points:
 
@@ -362,37 +393,37 @@ focused text field's own case. Membership there is a property of the *event* a c
 of the control's identity: the same key is a dead key on one press and a plain letter on the next, so
 it is a separate method rather than a fourth `ControlClass` variant.
 
-The plan carries both kinds as a second, separate list. Evaluation consults it only for an event on a
-control no plain binding in that context indexes. What is dispatched is the original `RawEvent`, not
-a folded value — there is no lifecycle to fold it into — as a `ClassFired<A>` event on the context
-entity.
+The plan carries both kinds as a second, separate list. Evaluation consults it only for an event on
+a control no plain binding in that context indexes. What is dispatched is the original `RawEvent`,
+not a combined value — there is no lifecycle to combine it into — as a `ClassFired<A>` event on the
+context entity.
 
-### 5.5 Folding several bindings into one action
+### 5.5 Combining several bindings into one action
 
-State is allocated per action, so several bindings feeding one action have to be folded into one
+State is allocated per action, so several bindings feeding one action have to be combined into one
 value. The action's `ActionIntent` decides the rule:
 
-| Intent | Fold |
+| Intent | Combined as |
 | --- | --- |
 | `Button` | strongest contribution wins |
 | `Analog1`, `Directional2` | per axis, the strongest positive contribution plus the strongest negative one |
 | `Delta2` | contributions are summed |
 
-Contributions are widened to three components and split by sign on each, into two accumulators that
-are locals of the loop. `Button` contributions are always `Bool` by then, so its per-sign maximum is
-strongest-wins, and `Delta2` adds into the same two. The result takes the widest shape any
-contribution had, so neither the value nor its shape depends on declaration order. The fold does not
-clamp: no axis can exceed its strongest contributor, and a diagonal's length is the stage's
-business.
+Contributions are each binding's latest output, widened to three components and split by sign on
+each, into the two accumulators of `CombinedBindingValues`. `Button` contributions are always `Bool`
+by then, so its per-sign maximum is strongest-wins, and `Delta2` adds into the same two. The result
+takes the widest shape any contribution had, so neither the value nor its shape depends on
+declaration order. Combining does not clamp: no axis can exceed its strongest contributor, and a
+diagonal's length is the stage's business.
 
-**The stage after the fold.** `combined::<A>()` declares a modifier chain and conditions that run on
-the folded value rather than on one binding's. It is held per slot, so an action that declares
+**The stage after combining.** `combined::<A>()` declares a modifier chain and conditions that run
+on the combined value rather than on one binding's. It is held per slot, so an action that declares
 nothing costs one emptiness check, and it sits after every binding in the scratch layout, so a
 variant whose bindings shrank moves it down rather than rebuilding it. Its conditions replace the
 bindings' combined state, with one exception: a binding still `Building` keeps the action there when
-the stage alone would read `Idle`, since a hold in progress contributes rest to the fold. A stage on
-an action with no bindings in the context is refused, and a rescale in it counts against the most
-any one of the action's bindings already did.
+the stage alone would read `Idle`, since a hold in progress contributes rest to the combined value.
+A stage on an action with no bindings in the context is refused, and a rescale in it counts against
+the most any one of the action's bindings already did.
 
 ### 5.6 Transitions and observers
 
@@ -428,6 +459,13 @@ flight on that source — `Canceled`, not the `Completed` an ordinary release pr
 an unaffected device is untouched. An authority that stops supplying an action is the same case
 (TD5.8), and so is a higher context claiming a control while it is down (TD5.2).
 
+All four arrive as one rule (TD5). Held state records the controls that were down when focus loss or
+a disconnect took them away, and `sample_authority` the sources that stopped being supplied while
+held, for the rest of that tick. A binding on one reads `Withdrawn`, or `ClaimedWhileDown` for a
+claim, and an action one of whose bindings reaches rest through such a reading ends `Canceled`. A
+control at rest when its source went away is not recorded, so an idle binding never turns another
+binding's release into a cancel.
+
 ### 5.8 Authority bindings
 
 `controls.bind::<A>(Authority(family))` binds an action to the value an outside authority supplies
@@ -441,21 +479,21 @@ written before the action it binds is known, so it carries placeholders and `pus
 both; D7's check runs on the shape unchanged. A follower copies its leader's input already stamped
 and keeps it, so it reads the leader's value, and `leader_of` matches the two by input as it would
 two bindings of one control. A `Delta2` action refuses one (`DeltaFromAuthority`), since a delta is
-counted once and a level is read on every fold.
+counted once and a level is read at every run.
 
 The value is held state, as a control's is. Once a tick, before `apply_frame`, an active instance
-copies the entity's `AuthorityValues` into its own (`sample_authority`), and the fold's `Authority`
-arm reads the binding's source from that copy, or rest where nothing was written. Before copying, a
+copies the entity's `AuthorityValues` into held state (`sample_authority`), and the binding's
+reading takes its source from that copy, or rest where nothing was written. Before copying, a
 binding whose source was absent from the old copy and is held in the new one is marked
 `require_reset`, which gives R7.5's hold-over to an instance's first sample and to an action the
 authority resumes supplying, a Steam action set changing under a held button among them. The mirror
-case, a source present in the old copy and absent from the new, sets `authority_lost`, and the next
-`apply_frame` folds once as `Fold::Interrupted` before replaying its events, as a disconnect event
-would be folded: an action that was firing and now reads at rest is `Canceled`, and one another
-binding still holds is untouched. From there it is an ordinary binding: its modifiers and conditions
-run, it folds with the action's other bindings by intent (TD5.5), and `commit_slot` turns its level
-into `Fired`, `Firing` and `Completed`. An authority reporting only a level, sampled when asked, is
-what this is shaped for; nothing on the wire or in the platform API needs to carry an edge.
+case, a source held in the old copy and absent from the new, is recorded as withdrawn for that tick:
+its binding reads `Withdrawn`, so an action it was firing is `Canceled`, and one another binding
+still holds is untouched (TD5.7). Any change in a value marks the readings for refresh, since no
+event reports it. From there it is an ordinary binding: its pipeline records its readings, it
+combines with the action's other bindings by intent (TD5.5), and the commit turns its level into
+`Fired`, `Firing` and `Completed`. An authority reporting only a level, sampled when asked, is what
+this is shaped for; nothing on the wire or in the platform API needs to carry an edge.
 
 Holding no control, it claims nothing and cannot be claimed, and has no prompt of its own, since the
 backend's `Prompts` answer for its family. Its mapping row is `Delegated` and holds no slots
@@ -501,7 +539,15 @@ what keeps the shape uniform across every built-in condition and stateful modifi
 - `transitions` and `class_fires`, appended by evaluation and drained by dispatch;
 - `read_through`, this instance's frame cursor, seeded at spawn so a context added mid-session
   starts from the present;
-- held keyboard, mouse and gamepad state, behind their respective features.
+- held keyboard, mouse and gamepad state, behind their respective features, with the mouse motion
+  summed this tick, the authority's sampled values, and what was withdrawn this tick;
+- `binding_progress`, parallel to the plan's bindings: each one's latest reading, whether it is
+  pending, and its last output (TD5); with `readings_stale`, `readings_moved` and
+  `claimed_last_tick`, which decide when the readings are refreshed; and `interrupted`, per action.
+
+`binding_progress` is derived from held state and stays out of a snapshot. The first tick after a
+restore can therefore compare against readings from before it, and skip recording one superseded
+reading.
 
 The struct holds no ECS references, so a test or replay harness can drive one directly. Activation
 flips a flag: no spawn, despawn, insert or remove.
@@ -543,14 +589,14 @@ press, and must be released once first. The latch holds back `Button` actions on
 action has no synthesized fire to guard against, and its value simply resumes. It sits between the
 press threshold and the conditions, so a latched binding's conditions see rest: a hold does not
 charge on the held key, a tap does not fire on its release, and the binding claims nothing. The
-latch lifts on the first fold in which every binding of the action reads rest.
-`activate_including_held` skips the arming, which is what a context taking over from another driving
-the same controls wants. Deactivation cancels whatever is in flight.
+latch lifts at the first commit in which every binding of the action has run this tick and reads
+rest. `activate_including_held` skips the arming, which is what a context taking over from another
+driving the same controls wants. Deactivation cancels whatever is in flight.
 
 One action can be switched off on its own with `disable::<A>()`, and back on with `enable::<A>()`,
-without unbinding it. Disabling cancels that action's in-flight state and takes its slot out of the
-fold entirely, so it consumes nothing and out-ranks no chord; enabling arms require-reset for that
-slot alone. `ActionObstacle::Disabled` reports it.
+without unbinding it. Disabling cancels that action's in-flight state and takes its slot out of
+evaluation entirely, so it consumes nothing and out-ranks no chord; enabling arms require-reset for
+that slot alone. `ActionObstacle::Disabled` reports it.
 
 ### 7.3 Reading
 
@@ -840,7 +886,7 @@ Two further builder entry points:
   matching binding per device found, so a follower can ride some of a leader's devices by being
   declared before the rest. Every generated binding reads exactly the control it copied, which is
   what makes a rebind move both.
-- `combined::<A>()` returns a `CombinedBuilder` for the stage after the fold of TD5.5. It carries
+- `combined::<A>()` returns a `CombinedBuilder` for the stage after combining (TD5.5). It carries
   the modifiers and conditions that mean the same on a combined value as on one control, and leaves
   out `hold`, `hold_once`, `hold_and_release` and `multi_tap`, whose descriptor a prompt reads per
   binding, as well as `dead_zone`, `rescale`, `per_second` and everything that names a control.
@@ -1352,11 +1398,15 @@ crates/bevy_action_map/src/
     state.rs         one instance's live state, and the params that read it
     declare.rs       the app wiring, the records declaration writes, the type-erased reads
   plan.rs            compilation, slot allocation, diagnostics
-  eval/mod.rs        the evaluator: replay, the fold, combining, the phase machine
+  eval/              the evaluator: readings, the binding pipeline, commits, the tick
     consumed_controls.rs   what has been claimed this frame, and the systems that clear it
     exclusion_ceiling.rs   which exclusive contexts are shadowing the ones below
     context_systems.rs     evaluate_context, and dispatch of transitions and class fires
-    held_control_state.rs  what one instance knows is held: press, travel, actuation
+    held_control_state.rs  what one instance knows is held: press, travel, motion, authority
+    binding_reading.rs     a binding's reading and whether it counts
+    binding_pipeline.rs    the stateful stages that record one reading
+    action_commit.rs       combining an action's outputs, its stage, its phase machine
+    tick_evaluation.rs     the tick: refresh, the event loop, the closing step, class dispatch
   event.rs           Fired/Started/Completed/Canceled, class bindings
   player.rs          the Paired component
   join.rs        L3  is_claimed

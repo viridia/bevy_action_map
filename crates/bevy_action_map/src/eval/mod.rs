@@ -1,10 +1,16 @@
 //! The evaluator: a plan and an input frame in, action state and a transition log out.
 
+mod action_commit;
+mod binding_pipeline;
+mod binding_reading;
 mod consumed_controls;
 mod context_systems;
 mod exclusion_ceiling;
 mod held_control_state;
+mod tick_evaluation;
 
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+pub(crate) use binding_reading::chord_held;
 pub use consumed_controls::ConsumedControls;
 pub(crate) use consumed_controls::{release_consumed_controls, release_consumed_in};
 pub(crate) use context_systems::{
@@ -12,791 +18,28 @@ pub(crate) use context_systems::{
 };
 pub(crate) use exclusion_ceiling::{ExclusionCeiling, reset_exclusion_ceiling};
 pub(crate) use held_control_state::HeldControlState;
-
-use alloc::vec::Vec;
-
-#[cfg(feature = "gamepad")]
-use bevy_input::gamepad::{GamepadConnection, RawGamepadEvent};
-use bevy_math::{Vec2, Vec3};
-use fixedbitset::FixedBitSet;
-
-use crate::action::{ActionIntent, ActionPhase, ActionValue, InputContext};
-#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-use crate::binding::ButtonControl;
-#[cfg(feature = "gamepad")]
-use crate::binding::Stick;
-use crate::binding::{BindingInput, ButtonThreshold, Control};
-use crate::condition::ConditionState;
-use crate::context::InputContextState;
-use crate::device::DeviceHandleSet;
-use crate::frame::{InputFrame, RawEvent, TimedRawEvent};
-
-/// Which half of the plan a fold pass is for.
-///
-/// The two kinds of input have different temporal semantics, and the split is what lets a fast tap
-/// be seen without disturbing a mouse delta.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FoldKind {
-    /// Controls with a value at every instant — buttons, axes, sticks. Sampled at each change, so a
-    /// press and a release inside one window are two separate readings.
-    Level,
-    /// Controls with no value at an instant, only a total over an interval — mouse motion. Summed
-    /// across the whole window and read once, because half of a movement is not a position.
-    Delta,
-    /// A level pass triggered by a source disappearing — focus loss, a device disconnect, or an
-    /// authority no longer supplying an action — rather than a player releasing a control. Reads like `Level`, except that a binding which was firing
-    /// and reads at rest this pass reports `Canceled` rather than `Completed`, since nothing was let
-    /// go. A binding on an unaffected device is untouched.
-    ///
-    /// Also how one action commits when another context claims its control while it is down, which
-    /// is the same thing seen from inside a single pass.
-    Interrupted,
-}
-
-/// Whether this event means the source is gone — a window losing focus or a device disconnecting —
-/// rather than an ordinary press, release, or motion.
-fn interruption_kind(event: &RawEvent) -> FoldKind {
-    match event {
-        #[cfg(any(feature = "keyboard", feature = "mouse"))]
-        RawEvent::FocusLost => FoldKind::Interrupted,
-        #[cfg(feature = "gamepad")]
-        RawEvent::Gamepad(RawGamepadEvent::Connection(connection))
-            if matches!(connection.connection, GamepadConnection::Disconnected) =>
-        {
-            FoldKind::Interrupted
-        }
-        _ => FoldKind::Level,
-    }
-}
-
-/// Whether every entry of a chord is held. A control another context has taken reads as
-/// untouched.
-// A modifier entry is a disjunction: either key of the pair satisfies it, and both being live at
-// once is why it cannot be expanded at bind time into one entry per side.
-#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-pub(crate) fn chord_held(
-    chord: &[crate::binding::ChordEntry],
-    held: &HeldControlState,
-    consumed: &ConsumedControls,
-    devices: Option<&DeviceHandleSet>,
-) -> bool {
-    let is_pressed = |control: ButtonControl| {
-        !consumed.contains(control.into(), devices) && held.is_pressed(control)
-    };
-    chord.iter().all(|&entry| match entry {
-        crate::binding::ChordEntry::Control(control) => is_pressed(control),
-        #[cfg(feature = "keyboard")]
-        crate::binding::ChordEntry::Modifier(modifier) => modifier
-            .keys()
-            .into_iter()
-            .any(|key| is_pressed(ButtonControl::PhysicalKey(key))),
-    })
-}
-
-impl<C: InputContext> InputContextState<C> {
-    pub(crate) fn apply_frame(
-        &mut self,
-        frame: &InputFrame,
-        threshold: &ButtonThreshold,
-        delta: f32,
-        consumed: &ConsumedControls,
-        claims: &mut Vec<Control>,
-        devices: Option<&DeviceHandleSet>,
-    ) {
-        // Only what has arrived since this context last looked: re-reading the whole queue counts
-        // one mouse delta once per fixed tick in the frame. The cursor advances past the full
-        // unfiltered slice — including another device's events an unpaired viewer never touches
-        // below — so every event is offered exactly once.
-        let unread = frame.events_after(self.read_through);
-        if let Some(last) = unread.last() {
-            self.read_through = Some(last.timestamp);
-        }
-        // A device's input must not reach a context paired to someone else (R15.3); a context
-        // nobody paired hears every device, which is today's exact behaviour.
-        let owns =
-            |event: &TimedRawEvent| devices.is_none_or(|set| set.contains(event.event.device()));
-
-        // An inactive context still tracks its devices, shadowed or not. Skipping that would leave
-        // the held state stale, so reactivating would need a rebuild — and R7.6 wants activation to
-        // be free.
-        if !self.is_active() {
-            for event in unread.iter().filter(|e| owns(e)) {
-                self.held.apply_event(&event.event, threshold);
-            }
-            return;
-        }
-
-        let mut mouse_delta = Vec2::ZERO;
-        let mut level_changes = 0usize;
-
-        // Time is charged once per tick: the fold after the last event replayed below is handed
-        // `delta`, and every fold before it zero. Events in a tick carry no time between them, so
-        // the state the tick ends in is taken to have lasted it; handing each fold `delta` would
-        // charge a hold once per event.
-        let mut levels_left = unread
-            .iter()
-            .filter(|e| owns(e) && e.event.control() != Some(Control::MouseMotion))
-            .count();
-
-        // Folded as a disconnect event would be, and before the events, so a key this tick
-        // releases still holds its action here.
-        if core::mem::take(&mut self.authority_lost) {
-            self.fold(
-                threshold,
-                Vec2::ZERO,
-                if levels_left == 0 { delta } else { 0.0 },
-                FoldKind::Interrupted,
-                consumed,
-                claims,
-                devices,
-            );
-            level_changes += 1;
-        }
-
-        // Replayed one at a time rather than collapsed: a press and a release inside one window
-        // cancel in the held state, and a single fold afterwards sees neither (R9.3).
-        for event in unread.iter().filter(|e| owns(e)) {
-            // `MouseMotion` is the one variant `RawEvent` keeps with every device feature off, so
-            // there this is the only arm there is.
-            #[cfg_attr(
-                not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")),
-                allow(irrefutable_let_patterns)
-            )]
-            if let RawEvent::MouseMotion(delta) = &event.event {
-                mouse_delta += *delta;
-                continue;
-            }
-            self.held.apply_event(&event.event, threshold);
-            levels_left -= 1;
-            self.fold(
-                threshold,
-                Vec2::ZERO,
-                if levels_left == 0 { delta } else { 0.0 },
-                interruption_kind(&event.event),
-                consumed,
-                claims,
-                devices,
-            );
-            // After the fold, not before: TD5.4's ordering. Checked once here rather
-            // than woven into the fold.
-            self.class_dispatch(&event.event, consumed, claims, devices);
-            level_changes += 1;
-        }
-
-        // Time passes even when nothing arrives: a phase has to reach `Firing` from `Fired` on its
-        // own, and without an event to prompt it nothing else would.
-        if level_changes == 0 {
-            self.fold(
-                threshold,
-                Vec2::ZERO,
-                delta,
-                FoldKind::Level,
-                consumed,
-                claims,
-                devices,
-            );
-        }
-
-        self.fold(
-            threshold,
-            mouse_delta,
-            delta,
-            FoldKind::Delta,
-            consumed,
-            claims,
-            devices,
-        );
-    }
-
-    /// Tests one raw event against the plan's class list.
-    ///
-    /// Called once per level event, after the fold: only a control no plain binding in this context
-    /// indexes reaches here, and only while it reads as actuated and no one else has already
-    /// consumed it this schedule.
-    fn class_dispatch(
-        &mut self,
-        event: &RawEvent,
-        consumed: &ConsumedControls,
-        claims: &mut Vec<Control>,
-        devices: Option<&DeviceHandleSet>,
-    ) {
-        let Some(control) = event.control() else {
-            return;
-        };
-        if !self.held.actuated(event)
-            || consumed.contains(control, devices)
-            || self.plan.is_indexed(control)
-        {
-            return;
-        }
-        let Some(binding_index) = self
-            .plan
-            .class_bindings()
-            .iter()
-            .position(|binding| binding.filter.matches(event))
-        else {
-            return;
-        };
-        self.class_fires.push(ClassFire {
-            binding_index,
-            event: event.clone(),
-        });
-        if self.plan.class_bindings()[binding_index].consume {
-            claims.push(control);
-        }
-    }
-
-    /// Resolves one half of the plan against the current device state.
-    // The last three are one question in three parts — what others took, whose devices this
-    // instance reads, what it takes in turn — and a claim only means anything against the devices
-    // that made it. Bundling them to satisfy a count would name something the code does not have.
-    #[allow(clippy::too_many_arguments)]
-    fn fold(
-        &mut self,
-        threshold: &ButtonThreshold,
-        mouse_delta: Vec2,
-        delta: f32,
-        fold_kind: FoldKind,
-        consumed: &ConsumedControls,
-        claims: &mut Vec<Control>,
-        devices: Option<&DeviceHandleSet>,
-    ) {
-        let Self {
-            plan,
-            actions,
-            dirty,
-            transitions,
-            require_reset,
-            disabled,
-            scratch,
-            tunable_scratch,
-            held,
-            authority,
-            ..
-        } = self;
-
-        // A control another context has taken reads as untouched, rather than being skipped.
-        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-        let is_pressed = |control: ButtonControl| {
-            !consumed.contains(control.into(), devices) && held.is_pressed(control)
-        };
-        let any_claim = !consumed.is_empty();
-
-        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-        let chord_held = |binding: &crate::plan::CompiledBinding| {
-            chord_held(&binding.chord, held, consumed, devices)
-        };
-
-        let bindings = plan.bindings();
-
-        // Every group of bindings sharing a `hold_or_toggle` key resolves its latch once per tick,
-        // from the combined actuation of every member — computed here, before any binding's own
-        // evaluation: a binding cannot resolve a fact about the whole group from partway through
-        // visiting it. See `resolve_shared_toggle`'s own doc for what goes wrong resolving this per
-        // binding instead. Most plans share none, and this loop then runs zero times.
-        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-        for (scratch_index, cell) in tunable_scratch.iter_mut().enumerate() {
-            let mut actuated = false;
-            let mut active = false;
-            for binding in bindings.iter().filter(|binding| {
-                binding.tunable_shared == Some(scratch_index) && !disabled[binding.slot]
-            }) {
-                active = crate::binding::toggle_active(&binding.modifiers);
-                if crate::binding::as_button_control(&binding.input).is_some_and(&is_pressed) {
-                    actuated = true;
-                }
-            }
-            crate::binding::resolve_shared_toggle(actuated, active, cell);
-        }
-
-        let mut binding_index = 0;
-        while binding_index < bindings.len() {
-            let slot = bindings[binding_index].slot;
-            let intent = plan.intent_for_slot(slot);
-
-            // A slot belongs to exactly one half, and `ActionIntent::accepts` is what guarantees
-            // it: a `Delta2` action admits only delta-shaped inputs and every other intent admits
-            // none, so no slot can want both passes.
-            let wanted = match fold_kind {
-                FoldKind::Delta => intent == ActionIntent::Delta2,
-                FoldKind::Level | FoldKind::Interrupted => intent != ActionIntent::Delta2,
-            };
-            if !wanted || disabled[slot] {
-                while binding_index < bindings.len() && bindings[binding_index].slot == slot {
-                    binding_index += 1;
-                }
-                continue;
-            }
-
-            let mut combined = Combined::default();
-            let mut strongest_condition = ConditionState::Idle;
-
-            // Held over from before this context activated: every binding reads rest until the
-            // player lets go once, then the action behaves normally (R7.5). Decided before the
-            // conditions rather than on the action's value after them, which a hold still charging
-            // reports as rest, and a tap or a hold-and-release would fire on the release.
-            //
-            // Button intents only. What R7.5 guards is a *press* synthesized from a control the
-            // player was already holding, and an analog action has no press to synthesize, only a
-            // value that resumes. Holding one back until it reads exactly rest can wedge it
-            // forever, because an axis is not obliged to ever read rest: a drifting stick whose
-            // deadzone the player has taken to zero never does, and the action never recovers.
-            let awaiting_release = require_reset[slot] && intent == ActionIntent::Button;
-            let mut still_held = false;
-            let mut taken = false;
-
-            while binding_index < bindings.len() && bindings[binding_index].slot == slot {
-                let binding = &bindings[binding_index];
-
-                // Two ways to be out of the running before the control is even read: the chord this
-                // binding needs is not held, or a longer one on the same control is (R8.1).
-                #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-                let held_back = !chord_held(binding)
-                    || plan
-                        .rivals(binding)
-                        .any(|rival| !disabled[rival.slot] && chord_held(rival));
-                #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
-                let held_back = false;
-
-                // Only a binding that could be driving the action: one held back reads rest
-                // whether or not its control is claimed.
-                if any_claim && !held_back {
-                    binding.input.for_each_control(|control| {
-                        taken |= consumed.contains(control, devices) && held.is_down(control);
-                    });
-                }
-
-                let value = match binding.input {
-                    #[cfg(feature = "keyboard")]
-                    BindingInput::Button(key_code) => {
-                        ActionValue::Bool(is_pressed(ButtonControl::PhysicalKey(key_code)))
-                    }
-                    #[cfg(feature = "keyboard")]
-                    BindingInput::LogicalKey(character) => {
-                        ActionValue::Bool(is_pressed(ButtonControl::LogicalKey(character)))
-                    }
-                    #[cfg(feature = "mouse")]
-                    BindingInput::MouseButton(button) => {
-                        ActionValue::Bool(is_pressed(ButtonControl::MouseButton(button)))
-                    }
-                    // Four keys and a D-pad reach an action through this same arm, and the fold
-                    // is what turns their parts back into one direction.
-                    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-                    BindingInput::Part(button, part) => part_value(part, is_pressed(button)),
-                    BindingInput::MouseMotion => {
-                        ActionValue::Axis2(if consumed.contains(Control::MouseMotion, devices) {
-                            Vec2::ZERO
-                        } else {
-                            mouse_delta
-                        })
-                    }
-                    // Both views of a button channel, chosen by what the action asked for. A
-                    // trigger carries a fraction, so an analog action gets the travel and a
-                    // button action gets the thresholded press — R2.10's case, and the reason a
-                    // binding cannot be resolved from the input alone.
-                    #[cfg(feature = "gamepad")]
-                    BindingInput::GamepadButton(button) => match intent {
-                        ActionIntent::Button => {
-                            ActionValue::Bool(is_pressed(ButtonControl::GamepadButton(button)))
-                        }
-                        _ => ActionValue::Axis1(
-                            if consumed.contains(Control::GamepadButton(button), devices) {
-                                0.0
-                            } else {
-                                held.gamepad_button_value(button)
-                            },
-                        ),
-                    },
-                    #[cfg(feature = "gamepad")]
-                    BindingInput::GamepadAxis(axis) => ActionValue::Axis1(
-                        if consumed.contains(Control::GamepadAxis(axis), devices) {
-                            0.0
-                        } else {
-                            held.gamepad_axis_value(axis)
-                        },
-                    ),
-                    #[cfg(feature = "gamepad")]
-                    BindingInput::GamepadStick(stick) => {
-                        ActionValue::Axis2(gamepad_stick_value(held, stick, consumed, devices))
-                    }
-                    // A follower's source is its leader, not the slot's own action.
-                    BindingInput::Authority(_, _, source) => authority
-                        .value_of(source)
-                        .unwrap_or_else(|| at_rest(intent)),
-                };
-
-                // This binding's working memory, split into the three disjoint pieces
-                // `CompiledBinding::scratch_base` allocates.
-                let binding_scratch = &mut scratch
-                    [binding.scratch_base..binding.scratch_base + binding.scratch_len()];
-                let (modifier_scratch, rest) =
-                    binding_scratch.split_at_mut(binding.modifiers.len());
-                let (condition_scratch, press_scratch) =
-                    rest.split_at_mut(binding.conditions.len());
-
-                // Conditions still run: a hold that loses its control has to be told, or it would
-                // resume from where it left off when the control came back.
-                let value = if held_back {
-                    ActionValue::Bool(false)
-                } else {
-                    value
-                };
-                // With the group's toggle on, a binding whose tunable is shared reads back the
-                // latch the pre-pass above resolved rather than running its own modifier chain:
-                // running each chain independently against its own private scratch lets one
-                // binding's evaluation order clobber another's edge detection.
-                //
-                // In hold mode there is no latch to share: each binding is an ordinary momentary
-                // control again, so it falls through to the same modifier chain an unshared binding
-                // runs, whose own `Toggle { active: false }` is identity.
-                let value = match binding.tunable_shared {
-                    Some(scratch_index) if crate::binding::toggle_active(&binding.modifiers) => {
-                        ActionValue::Bool(crate::binding::toggle_latch(
-                            &tunable_scratch[scratch_index],
-                        ))
-                    }
-                    _ => apply_modifiers(value, &binding.modifiers, modifier_scratch, delta),
-                };
-                // Where a press comes from something that was not already a press, the threshold
-                // has to settle it here. Reading it later cannot: by then the only question a
-                // stored value can answer is whether it is off centre, and a resting stick always
-                // is. Modifiers run first so that a deadzone gets to define centre.
-                //
-                // Hysteretic like the button channel's own, but remembered per *binding* rather
-                // than per control: the value here was assembled from a deadzone, a composite, or
-                // whatever else the chain did, and no single control owns the answer.
-                let value = match (intent, value) {
-                    (ActionIntent::Button, ActionValue::Bool(_)) => value,
-                    (ActionIntent::Button, _) => {
-                        let memory = &mut press_scratch[0];
-                        let pressed =
-                            threshold.pressed(value.to_axis1().abs(), memory.prev.to_bool());
-                        memory.prev = ActionValue::Bool(pressed);
-                        ActionValue::Bool(pressed)
-                    }
-                    _ => value,
-                };
-                // Rest reaches the conditions too, so a hold does not charge and a latched binding
-                // never claims its control from a context below.
-                let value = if awaiting_release {
-                    still_held |= value.to_bool();
-                    ActionValue::Bool(false)
-                } else {
-                    value
-                };
-                // Conditions decide *whether* this binding is firing; the value it contributes is
-                // rest until it is. A hold half-finished must not move the ship.
-                let condition_state =
-                    crate::condition::combine(&binding.conditions, value, condition_scratch, delta);
-                if condition_state > strongest_condition {
-                    strongest_condition = condition_state;
-                }
-                // Claimed while the binding has something to say, so a binding that is merely bound
-                // to a control does not hold it against everyone else all the time — but one whose
-                // condition is part way through does. Firing alone is too narrow: a menu binding
-                // that fires once per direction entered would hand the stick back to the game
-                // between two crossings, and a charging hold would leak its key to whatever is
-                // underneath until it completed.
-                if binding.consume && condition_state >= ConditionState::Building {
-                    claims.extend(binding.input.controls());
-                }
-                let value = if condition_state == ConditionState::Satisfied {
-                    value
-                } else {
-                    ActionValue::Bool(false)
-                };
-
-                combined = combined.add(value, intent);
-                binding_index += 1;
-            }
-            // A control taken while down is still down when the claim lifts, and would arrive as a
-            // press the player never made (D94). Latched on every taken tick rather than when the
-            // claim goes, so no memory of last tick's claims is needed.
-            if taken && intent == ActionIntent::Button {
-                require_reset.set(slot, true);
-            } else if awaiting_release && !still_held {
-                require_reset.set(slot, false);
-            }
-
-            let value = combined.value();
-            let (value, condition_state) = match plan.stage(slot) {
-                stage if stage.is_empty() => (value, strongest_condition),
-                stage => {
-                    let stage_scratch = &mut scratch[stage.scratch_base
-                        ..stage.scratch_base + stage.modifiers.len() + stage.conditions.len()];
-                    let (modifier_scratch, condition_scratch) =
-                        stage_scratch.split_at_mut(stage.modifiers.len());
-                    let value = apply_modifiers(value, &stage.modifiers, modifier_scratch, delta);
-                    if stage.conditions.is_empty() {
-                        (value, strongest_condition)
-                    } else {
-                        let judged = crate::condition::combine(
-                            &stage.conditions,
-                            value,
-                            condition_scratch,
-                            delta,
-                        );
-                        // A binding part way through a hold contributes rest, which the stage alone
-                        // would read as nothing happening, and the action would lose its `Started`.
-                        let judged = match (judged, strongest_condition) {
-                            (ConditionState::Idle, ConditionState::Building) => strongest_condition,
-                            _ => judged,
-                        };
-                        let value = if judged == ConditionState::Satisfied {
-                            value
-                        } else {
-                            ActionValue::Bool(false)
-                        };
-                        (value, judged)
-                    }
-                }
-            };
-            commit_slot(
-                Commit {
-                    slot,
-                    value,
-                    condition_state,
-                    fold_kind: if taken {
-                        FoldKind::Interrupted
-                    } else {
-                        fold_kind
-                    },
-                },
-                actions,
-                dirty,
-                transitions,
-            );
-        }
-    }
-}
-
-/// One slot's resolved value.
-struct Commit {
-    slot: usize,
-    value: ActionValue,
-    condition_state: ConditionState,
-    fold_kind: FoldKind,
-}
-
-/// Moves one action's state on, and records the change and the edge.
-fn commit_slot(
-    commit: Commit,
-    actions: &mut [crate::action::ActionState],
-    dirty: &mut FixedBitSet,
-    transitions: &mut Vec<Transition>,
-) {
-    let Commit {
-        slot,
-        value,
-        condition_state,
-        fold_kind,
-    } = commit;
-
-    // Compared rather than inferred from the phase: a held stick reports `Firing` every tick while
-    // its value moves, and an action whose value moved has changed as surely as one that started or
-    // stopped.
-    let before = actions[slot];
-    let phase = update_action_state(&mut actions[slot], value, condition_state, fold_kind);
-    if actions[slot] != before {
-        dirty.set(slot, true);
-    }
-    // Only the edges. The level phases say that nothing changed, and an observer firing every tick
-    // for a held button would be noise rather than information.
-    if matches!(
-        phase,
-        ActionPhase::Started | ActionPhase::Fired | ActionPhase::Completed | ActionPhase::Canceled
-    ) {
-        transitions.push(Transition { slot, phase, value });
-    }
-}
-
-/// What an action of this intent reads when nothing is driving it.
-fn at_rest(intent: ActionIntent) -> ActionValue {
-    match intent {
-        ActionIntent::Button => ActionValue::Bool(false),
-        ActionIntent::Analog1 => ActionValue::Axis1(0.0),
-        ActionIntent::Directional2 | ActionIntent::Delta2 => ActionValue::Axis2(Vec2::ZERO),
-    }
-}
-
-/// An action's value part way through combining its bindings, split by sign on each axis (D76).
-#[derive(Clone, Copy, Default)]
-struct Combined {
-    positive: Vec3,
-    negative: Vec3,
-    /// The most components any contribution carried, so the result does not take its shape from
-    /// whichever binding was declared first.
-    rank: u8,
-}
-
-impl Combined {
-    /// Combines one more binding's contribution.
-    ///
-    /// A delta is a displacement, so two of them add. Everything else is a position or a press,
-    /// where adding would be a units error: each sign keeps its strongest contribution, so opposite
-    /// directions cancel and like ones do not add. A `Button` contribution is always a `Bool` by
-    /// now, which makes that strongest-wins.
-    fn add(self, contribution: ActionValue, intent: ActionIntent) -> Self {
-        let value = widen(contribution);
-        let (positive, negative) = match intent {
-            ActionIntent::Delta2 => (
-                self.positive + value.max(Vec3::ZERO),
-                self.negative + value.min(Vec3::ZERO),
-            ),
-            ActionIntent::Button | ActionIntent::Analog1 | ActionIntent::Directional2 => {
-                (self.positive.max(value), self.negative.min(value))
-            }
-        };
-        Self {
-            positive,
-            negative,
-            rank: self.rank.max(rank(contribution)),
-        }
-    }
-
-    fn value(self) -> ActionValue {
-        let total = self.positive + self.negative;
-        match self.rank {
-            0 => ActionValue::Bool(total != Vec3::ZERO),
-            1 => ActionValue::Axis1(total.x),
-            2 => ActionValue::Axis2(total.truncate()),
-            _ => ActionValue::Axis3(total),
-        }
-    }
-}
-
-fn rank(value: ActionValue) -> u8 {
-    match value {
-        ActionValue::Bool(_) => 0,
-        ActionValue::Axis1(_) => 1,
-        ActionValue::Axis2(_) => 2,
-        ActionValue::Axis3(_) => 3,
-    }
-}
-
-fn widen(value: ActionValue) -> Vec3 {
-    value.to_axis3()
-}
-
-#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-fn part_value(part: crate::binding::BindingPart, pressed: bool) -> ActionValue {
-    use crate::binding::BindingPart;
-    match (part, pressed) {
-        (BindingPart::Negative | BindingPart::Positive, false) => ActionValue::Axis1(0.0),
-        (BindingPart::Negative, true) => ActionValue::Axis1(-1.0),
-        (BindingPart::Positive, true) => ActionValue::Axis1(1.0),
-        (_, false) => ActionValue::Axis2(Vec2::ZERO),
-        (BindingPart::Up, true) => ActionValue::Axis2(Vec2::Y),
-        (BindingPart::Down, true) => ActionValue::Axis2(Vec2::NEG_Y),
-        (BindingPart::Left, true) => ActionValue::Axis2(Vec2::NEG_X),
-        (BindingPart::Right, true) => ActionValue::Axis2(Vec2::X),
-        // Expansion never builds one.
-        (BindingPart::Whole, true) => ActionValue::Bool(false),
-    }
-}
-
-fn apply_modifiers(
-    mut value: ActionValue,
-    modifiers: &[crate::binding::BindingModifier],
-    scratch: &mut [crate::action::Scratch],
-    delta: f32,
-) -> ActionValue {
-    for (modifier, scratch) in modifiers.iter().zip(scratch) {
-        value = modifier.apply(value, scratch, delta);
-    }
-    value
-}
-
-/// Moves one action's state on by a tick, and reports the edge if there was one.
-///
-/// `condition_state` says what the bindings decided; this decides what that means given where the
-/// action already was. That is what makes giving up on a hold a `Canceled` rather than a
-/// `Completed` — the action never actually happened.
-///
-/// `fold_kind` decides which of `Completed` and `Canceled` a firing-then-idle transition is — see
-/// `FoldKind::Interrupted`.
-fn update_action_state(
-    action_state: &mut crate::action::ActionState,
-    value: ActionValue,
-    condition_state: ConditionState,
-    fold_kind: FoldKind,
-) -> ActionPhase {
-    let was_firing = matches!(action_state.phase, ActionPhase::Fired | ActionPhase::Firing);
-    let was_building = matches!(
-        action_state.phase,
-        ActionPhase::Started | ActionPhase::Building
-    );
-
-    let phase = match condition_state {
-        ConditionState::Satisfied => {
-            if was_firing {
-                ActionPhase::Firing
-            } else {
-                ActionPhase::Fired
-            }
-        }
-        ConditionState::Building => {
-            if was_firing {
-                // It was firing and has fallen back to merely building, which from the outside is
-                // the action ending.
-                ActionPhase::Completed
-            } else if was_building {
-                ActionPhase::Building
-            } else {
-                ActionPhase::Started
-            }
-        }
-        ConditionState::Idle => {
-            if was_firing {
-                if fold_kind == FoldKind::Interrupted {
-                    ActionPhase::Canceled
-                } else {
-                    ActionPhase::Completed
-                }
-            } else if was_building {
-                ActionPhase::Canceled
-            } else {
-                ActionPhase::Idle
-            }
-        }
-    };
-
-    action_state.value = value;
-    action_state.phase = phase;
-    phase
-}
-
-#[cfg(feature = "gamepad")]
-fn gamepad_stick_value(
-    held: &HeldControlState,
-    stick: Stick,
-    consumed: &ConsumedControls,
-    devices: Option<&DeviceHandleSet>,
-) -> Vec2 {
-    let read = |axis| {
-        if consumed.contains(Control::GamepadAxis(axis), devices) {
-            0.0
-        } else {
-            held.gamepad_axis_value(axis)
-        }
-    };
-    let (x_axis, y_axis) = stick.axes();
-    Vec2::new(read(x_axis), read(y_axis))
-}
+pub(crate) use tick_evaluation::BindingProgress;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::action::{InputAction, TickDomain};
+    use crate::action::{
+        ActionIntent, ActionPhase, ActionValue, InputAction, InputContext, TickDomain,
+    };
     use crate::backend::{Authority, AuthorityValues};
-    use crate::binding::InputContextBuilder;
+    #[cfg(feature = "gamepad")]
+    use crate::binding::Stick;
+    use crate::binding::{ButtonThreshold, Control, InputContextBuilder};
+    use crate::context::InputContextState;
     use crate::device::DeviceFamily;
+    use crate::frame::{InputFrame, RawEvent};
     use crate::plan::Plan;
     use alloc::vec::Vec;
     #[cfg(any(feature = "keyboard", feature = "mouse"))]
     use bevy_input::ButtonState;
     #[cfg(feature = "gamepad")]
-    use bevy_input::gamepad::GamepadAxis;
+    use bevy_input::gamepad::{GamepadAxis, RawGamepadEvent};
+    use bevy_math::Vec2;
     use bevy_platform::sync::Arc;
 
     struct Flying;
@@ -836,7 +79,7 @@ mod tests {
     }
 
     /// One tick with no device input, in the order `evaluate_context` runs it: the authority is
-    /// sampled first, then the frame folds.
+    /// sampled first, then the frame applied.
     fn tick(state: &mut InputContextState<Flying>, values: Option<&AuthorityValues>) {
         if state.is_active() {
             state.sample_authority(values);
@@ -1005,7 +248,7 @@ mod tests {
         let mut frame = InputFrame::default();
 
         values.set::<Jump>(true);
-        state.authority.hold(Some(&values));
+        state.held.authority.hold(Some(&values));
         press(&mut state, &mut frame, key(ButtonState::Pressed));
         assert_eq!(state.phase::<Jump>(), ActionPhase::Fired);
 
@@ -1032,7 +275,7 @@ mod tests {
         let mut frame = InputFrame::default();
 
         values.set::<Jump>(true);
-        state.authority.hold(Some(&values));
+        state.held.authority.hold(Some(&values));
         press(&mut state, &mut frame, key(ButtonState::Pressed));
         state.transitions.clear();
 
@@ -1597,9 +840,9 @@ mod tests {
         assert_eq!(state.phase::<Jump>(), ActionPhase::Fired);
     }
 
-    /// The gamepad half of the same policy: a disconnect leaves no release event to correct a stale
-    /// reading, so the crate has to notice the connection event itself and cancel what it was
-    /// holding rather than leave it stuck.
+    /// The gamepad half of the same policy: a disconnect leaves no release event to clear a button
+    /// still recorded down, so the crate has to notice the connection event itself and cancel what
+    /// it was holding rather than leave it stuck.
     #[cfg(feature = "gamepad")]
     #[test]
     fn gamepad_disconnect_cancels_what_it_was_holding() {
@@ -1653,8 +896,8 @@ mod tests {
         assert!(!state.value::<Jump>());
     }
 
-    /// Neither trigger reaches past the device it names. An action held through a surviving
-    /// binding must survive — over-cancelling a keyboard-driven `Jump` because an unrelated gamepad
+    /// Neither trigger reaches past the device it names. An action held through a surviving binding
+    /// must survive — over-cancelling a keyboard-driven `Jump` because an unrelated gamepad
     /// disconnected would be as much a bug as leaving a stuck key would be.
     #[cfg(all(feature = "keyboard", feature = "gamepad"))]
     #[test]
@@ -2147,7 +1390,7 @@ mod tests {
     }
 
     /// A claim lifting off a key still held hands it back already down, which is held over until
-    /// the player lets go, as on activation (D94). A hold is the binding the latch has to reach:
+    /// the player lets go, as on activation (D94). A hold is the binding the require-reset latch has to reach:
     /// held long enough, the returning key would otherwise charge it through to firing.
     #[cfg(feature = "keyboard")]
     #[test]
@@ -2178,12 +1421,41 @@ mod tests {
         assert_eq!(script.tick(0.1, []), [ActionPhase::Fired]);
     }
 
+    /// A claim reaches only the binding on the control it took. With Enter held and claimed, Space
+    /// on the same action still fires, and letting Space go is an ordinary release.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_claim_leaves_the_actions_other_bindings_alone() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut script = Script::new(|controls| {
+            controls.bind::<Jump>(KeyCode::Space);
+            controls.bind::<Jump>(KeyCode::Enter);
+        });
+        script.consumed.claim::<bevy_app::PreUpdate>(
+            Control::PhysicalKey(KeyCode::Enter),
+            None,
+            "eval_tests.vehicle",
+        );
+        let enter = layout_key(KeyCode::Enter, "", ButtonState::Pressed);
+
+        assert!(script.tick(TICK, [enter]).is_empty(), "Enter is taken");
+        assert_eq!(
+            script.tick(TICK, [key(ButtonState::Pressed)]),
+            [ActionPhase::Fired]
+        );
+        assert_eq!(
+            script.tick(TICK, [key(ButtonState::Released)]),
+            [ActionPhase::Completed],
+            "not Canceled: Space was let go"
+        );
+    }
+
     /// A key bound nowhere in the context changes nothing it reports. Space and F go down in one
     /// tick, once alone and once with A beside them, and both ticks must log the same phases and
     /// end in the same ones.
     #[cfg(feature = "keyboard")]
     #[test]
-    #[ignore = "issue 1077: every event re-runs every binding's phase machine"]
     fn an_unbound_key_changes_nothing_reported() {
         use bevy_input::keyboard::KeyCode;
 
@@ -2901,7 +2173,7 @@ mod tests {
         assert!(fired(&mut state), "letting go of both is a change");
     }
 
-    /// A binding part way through a hold contributes rest to the fold, and a condition on the
+    /// A binding part way through a hold contributes rest to its action, and a condition on the
     /// combined value must not read that as the player doing nothing.
     #[cfg(feature = "keyboard")]
     #[test]

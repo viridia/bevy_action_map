@@ -102,9 +102,14 @@ pub trait Modifier: Send + Sync + 'static {
     /// Applies the modifier to a runtime value.
     ///
     /// `scratch` is this modifier's own working memory, untouched by anything else, and persists
-    /// between ticks. `delta` is how long the owning context's last tick was, in its own seconds —
-    /// which is the fixed timestep for a fixed context and the frame time for a render one, and is
-    /// zero on the tick a context first evaluates.
+    /// between calls. `delta` is how much time this call accounts for, in the owning context's own
+    /// seconds.
+    ///
+    /// It is called each time the binding's input changes within a tick, so that a press and a
+    /// release inside one tick are both seen, and once more at the end of the tick. Only the call
+    /// at the end is handed the tick's length, the fixed timestep for a fixed context or the frame
+    /// time for a render one; the others, and the first tick a context evaluates, are handed zero.
+    /// A modifier that accumulates over time should therefore add `delta` rather than count calls.
     fn apply(&self, value: ActionValue, scratch: &mut Scratch, delta: f32) -> ActionValue;
 
     /// Whether this modifier stretches its input onto a different range.
@@ -344,11 +349,11 @@ const TOGGLE_LATCH: u8 = 1 << 0;
 /// `scratch.prev` is tracked whether or not the latch is live, so switching modes mid-press cannot
 /// manufacture a spurious edge the tick after the switch.
 ///
-/// Used only for a binding whose tunable is *not* shared with another. A shared one is resolved
-/// once per tick for the whole group instead — see `eval`'s `fold`, which reads `toggle_latch`
-/// rather than calling this at all, and the doc on `TunableShared` for why: running this
-/// independently per binding, against a scratch cell other bindings in the group also write,
-/// spuriously re-flips the latch on every tick a *different* member of the group is held.
+/// Used only for a binding whose tunable is *not* shared with another. A shared one is resolved for
+/// the whole group instead, by the evaluator's `resolve_shared_toggle`, and each member reads
+/// `toggle_latch` rather than calling this at all: running this independently per binding, against
+/// a scratch cell other bindings in the group also write, spuriously re-flips the latch on every
+/// tick a *different* member of the group is held.
 fn apply_toggle(value: ActionValue, scratch: &mut Scratch, active: bool) -> ActionValue {
     let actuated = value.to_bool();
     let was = scratch.prev.to_bool();
@@ -389,7 +394,7 @@ pub(crate) fn resolve_shared_toggle(actuated: bool, active: bool, scratch: &mut 
 /// application ([`apply_tunable_value`]) keep every sharing binding's own copy in lockstep, so
 /// which one answers does not matter.
 ///
-/// Not feature-gated like its neighbours: the fold's per-binding read reaches this unconditionally,
+/// Not feature-gated like its neighbours: each binding's run reaches this unconditionally,
 /// same as [`toggle_latch`], since which device features are enabled cannot change what a slice of
 /// already-compiled modifiers holds.
 pub(crate) fn toggle_active(modifiers: &[BindingModifier]) -> bool {

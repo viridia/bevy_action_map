@@ -37,37 +37,19 @@ tier, and never reused. A gap in the sequence is a retired entry.
 
 ### 1076 `why_not` on an analog action reports a release it will never wait for
 
-`context/state.rs` `why_not_id` and `activate_with_reset`; `eval/mod.rs` `fold`, where the latch
-lifts · reasoned from the code, **not probed**
+`context/state.rs` `why_not_id` and `activate_with_reset`; `eval/tick_evaluation.rs`
+`run_binding_pipeline`, where the latch applies, and `eval/action_commit.rs` `commit_action`, where
+it lifts · reasoned from the code, **not probed**
 
-Activation sets require-reset on every slot, and `sample_authority` marks every intent, but `fold`
-applies and lifts the latch for `Button` slots alone. An analog slot's bit therefore stays set for
-the life of the activation, and `why_not` checks the bit without the intent: a `Move` at rest after
-the context activates answers `AwaitingRelease` rather than `NoInput`, whatever the player does. A
-debug overlay is the observer, not play.
+Activation sets require-reset on every slot, and `sample_authority` marks every intent, but the
+evaluator applies and lifts the latch for `Button` slots alone. An analog slot's bit therefore stays
+set for the life of the activation, and `why_not` checks the bit without the intent: a `Move` at
+rest after the context activates answers `AwaitingRelease` rather than `NoInput`, whatever the
+player does. A debug overlay is the observer, not play.
 
 _Fix, sketched (E[1]):_ `why_not_id` tests `intent_for_slot(slot) == ActionIntent::Button` beside
-the bit, the same condition `fold` uses; or the arming sites mark `Button` slots only. The first is
-one line and leaves the arming sites alone.
-
-### 1077 An event on an unrelated control changes what an action reports
-
-`eval/mod.rs`, `apply_frame`'s replay loop, and `fold` · **confirmed by a probe**
-
-Every level event a tick replays is followed by a whole `fold`, and every fold steps every action's
-phase machine, whether the event touched its bindings or not. So an action's phase depends on how
-many other events its tick carried. 179b–e made the extra folds leave time, require-reset and claims
-as they found them; the phase machine and `Scratch::prev` were never made to.
-
-Probed by `an_unbound_key_changes_nothing_reported`: `Jump` on Space with `press()`, `Serve` on F
-with `pulse(10.0)`, both keys going down in one tick. Alone, that tick logs
-`Fired, Completed, Fired` and ends with `Jump` at `Completed` and `Serve` at `Fired`. With A, bound
-nowhere, going down in the same tick, it logs a second `Completed` and ends with `Jump` at `Idle`
-and `Serve` at `Completed`, F still held. The tick without A is already affected: `Jump` completes
-on F's fold, one event after it fired.
-
-_Routed to chunk 181._ The probe is `#[ignore]`d until 181e, whose evaluation order runs a binding's
-pipeline once per change in its input and once at the end of the tick, and closes this entry.
+the bit, the same condition the evaluator uses; or the arming sites mark `Button` slots only. The
+first is one line and leaves the arming sites alone.
 
 ---
 
@@ -81,8 +63,8 @@ against a false-fire**
 
 Found reaching for `ControlClass::AnyStick` to fix a real papercut: a player picking up a gamepad
 and wiggling the stick — the natural first move — has no way to join a game whose join gesture is a
-button. `AnyStick` looks like the fix, but a class binding's fold skips the modifier chain (TD8, no
-dead zone stage), and `actuated` (`eval/held_control_state.rs`) treats any nonzero axis reading as a
+button. `AnyStick` looks like the fix, but a class binding skips the modifier chain (TD8, no dead
+zone stage), and `actuated` (`eval/held_control_state.rs`) treats any nonzero axis reading as a
 match — so a stick whose rest position sits off true zero, which no calibration step catches before
 a device is paired, would fire on its own drift. The failure is silent: a device joins that nobody
 touched, and nothing says why.
@@ -356,43 +338,6 @@ This entry once recorded the second as gone, on a grep for `binding.source.contr
 it: the field was renamed to `input`, not removed. Which is the finding. Violations keep being found
 by reading, and then a reading finds them absent with equal confidence — "a rule with no tooling
 behind it," as the register puts it, does not only fail to prevent them.
-
-### 1075 A tick costs every binding once per event, bound or not
-
-`apply_frame`'s replay loop (`eval/mod.rs`), and `fold` · **measured** by `benches/eval.rs`
-
-Each level event a context replays is followed by a whole fold: the chord pre-pass, the shared
-toggles, and every binding of every action. So one context's tick costs its events times its
-bindings, and each context pays it separately. Mouse motion is summed and escapes this; gamepad axes
-do not, and a steered pad sends four to six events a frame. That is a few dozen folds a frame in
-play. After a hitch it is every event since the stall, replayed in one tick, which is the frame
-least able to afford it. The queue holds 4096.
-
-Most of those folds are for a control the context binds nowhere, and they are not harmless: each
-steps every phase machine, which is issue 1077.
-
-Measured on the 48-binding context, one instance, the empty app subtracted:
-
-| Case | Per tick |
-| --- | --- |
-| Idle: one level fold and the delta fold | 7.5 µs |
-| The same, its 12 chords removed | 1.35 µs |
-| 16 key events: seventeen folds | 68 µs |
-| The same, 8 instances | 101 µs each |
-
-A fold costs about 4 µs here, and the chords are most of it. Once a plan has any chord, the pre-pass
-enters every binding whose chord is held, plain bindings included, into a list it searches linearly,
-then searches it again for every binding: quadratic in bindings. Doubling the bindings from 24 to 48
-costs 2.9 times as much with chords and 1.9 times without. Under a burst, where the folds multiply,
-it costs 5.3 times. Extrapolated rather than measured: a hitch that leaves the queue's 4096 events
-for one tick costs this context about 16 ms, a whole frame at 60 Hz, per instance.
-
-_Routed to chunk 181._ 181c has replaced the pre-pass with rivals computed at plan build; 181e runs
-a binding only when its input changes and once at the end of the tick, and each part compares
-against the benchmark's saved `pre181` baseline. 181e closes this entry.
-
-Rejected for now: collapsing one axis's readings within a tick, which loses a trigger crossing its
-press point and back inside a tick, the edge R9.3 protects for buttons.
 
 ### 1054 Deriving a pane's persistent identity is boilerplate every game rewrites
 

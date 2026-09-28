@@ -25,6 +25,10 @@ pub struct ConsumedControls {
 }
 
 struct Claim {
+    /// The schedule the claim was made in, identified by its label's type: `PreUpdate`, say, or a
+    /// fixed-tick schedule. A schedule releases only its own claims when it next runs, so what
+    /// `PreUpdate` claimed still stands for every fixed tick later in the same frame. The label's
+    /// type is enough to tell the schedules apart, and needs no value to compare.
     schedule: core::any::TypeId,
     control: Control,
     /// The devices the claiming context reads; `None` for a context nobody paired, which reads

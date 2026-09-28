@@ -784,8 +784,8 @@ pub fn resolve_gamepad_identity(
 ///
 /// This crate reads raw gamepad messages, which Bevy emits before its own `GamepadSettings`
 /// deadzones and thresholds are applied: a clamp applied below you cannot be undone above you, and
-/// owning the whole chain is the only way a game can ask for a deadzone smaller than the one
-/// someone underneath already applied. A game that configures `GamepadSettings` and expects it to
+/// owning every step from the raw value to the action is the only way a game can ask for a
+/// deadzone smaller than the one someone underneath already applied. A game that configures `GamepadSettings` and expects it to
 /// reach a binding would otherwise get silence, so this says so once.
 #[cfg(feature = "gamepad")]
 pub(crate) fn warn_on_unread_gamepad_settings(

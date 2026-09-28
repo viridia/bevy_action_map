@@ -609,8 +609,8 @@ replacements) — the layer concept is underused elsewhere and is exactly right 
 - **R7.5 (MUST)** Activating a context must not fire actions for controls already physically held
   (require-reset), unless explicitly opted in — this is the "pressing E to close a menu instantly
   re-triggers Interact" bug class. This binds actions of `Button` intent. An analog action resumes
-  its value instead: it has no fire to suppress, and an axis need never report rest, so a latch
-  waiting for one may never lift.
+  its value instead: it has no fire to suppress, and an axis need never report rest, so a
+  require-reset latch waiting for one may never lift.
 - **R7.6 (SHOULD)** Context activation must be cheap enough to do per-frame (no rebuild of the whole
   binding graph); if a rebuild is needed it must be incremental and change-detection driven (R23).
 - **R7.7 (SHOULD)** A declarative way to express "these contexts are mutually exclusive" (a stack)

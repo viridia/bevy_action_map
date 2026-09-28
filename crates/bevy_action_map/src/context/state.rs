@@ -50,9 +50,9 @@ pub struct InputContextState<C> {
     // each binding's own private slot in `scratch` above — the mechanism `hold_or_toggle` needs so
     // that pressing any control it reaches agrees with every other about the latch.
     pub(crate) tunable_scratch: Vec<Scratch>,
-    // Parallel to `actions`: this action may not fire until it has been seen at rest once. Set when
-    // a context activates, so a control the player was already holding does not read as a fresh
-    // press.
+    // Parallel to `actions`: the require-reset latch. This action may not fire until it has been
+    // seen at rest once. Set when a context activates, so a control the player was already holding
+    // does not read as a fresh press.
     pub(crate) require_reset: FixedBitSet,
     // Parallel to `actions`: switched off one at a time by the game (R3.7). Evaluation skips these
     // slots on the same terms as it skips an inactive context.
@@ -68,13 +68,23 @@ pub struct InputContextState<C> {
     // added mid-session starts from the present instead of replaying whatever is still queued.
     pub(crate) read_through: Option<FrameTimestamp>,
     pub(crate) held: HeldControlState,
-    // What the entity's `AuthorityValues` said at the start of this tick, for authority bindings to
-    // read. Held like a control's state so the fold reads every binding the same way; refreshed
-    // only while active, since nothing reads it otherwise.
-    pub(crate) authority: crate::backend::AuthorityValues,
-    // Set by `sample_authority` when a source it was supplying goes absent, and taken by the next
-    // `apply_frame`, which folds once as an interruption before replaying the tick's events.
-    pub(crate) authority_lost: bool,
+    // Parallel to the plan's bindings: each one's latest reading and what its last run produced.
+    // Derived from held state, so it stays out of a snapshot; see `readings_stale`.
+    pub(crate) binding_progress: Vec<crate::eval::BindingProgress>,
+    // Set where `binding_progress` stopped following held state: at spawn, while inactive, on
+    // adopting a plan, and on enabling an action. The next tick takes its readings as they stand.
+    pub(crate) readings_stale: bool,
+    // Set where a reading may have moved with no event to report it: an authority value changing,
+    // an action disabled, a withdrawal ending. Claims are tracked by `claimed_last_tick` instead.
+    pub(crate) readings_moved: bool,
+    // Whether other contexts had claimed anything from this instance last tick, so that a claim
+    // lifting refreshes the readings as surely as one arriving does.
+    pub(crate) claimed_last_tick: bool,
+    // Parallel to `actions`: a binding of this action reached rest because its control went away
+    // while held, since the action last committed (D94).
+    pub(crate) interrupted: FixedBitSet,
+    // Reused by each event for the bindings it reaches, so an event allocates nothing.
+    pub(crate) affected_bindings: Vec<u32>,
     _marker: PhantomData<C>,
 }
 
@@ -83,6 +93,7 @@ impl<C: InputContext> InputContextState<C> {
         let slots = plan.slot_count();
         let scratch_slots = plan.scratch_count();
         let tunable_scratch_slots = plan.tunable_scratch_count();
+        let binding_count = plan.bindings().len();
         let actions = alloc::vec![ActionState::default(); slots];
 
         Self {
@@ -99,8 +110,12 @@ impl<C: InputContext> InputContextState<C> {
             class_fires: Vec::new(),
             read_through,
             held: HeldControlState::default(),
-            authority: crate::backend::AuthorityValues::new(),
-            authority_lost: false,
+            binding_progress: alloc::vec![Default::default(); binding_count],
+            readings_stale: true,
+            readings_moved: false,
+            claimed_last_tick: false,
+            interrupted: FixedBitSet::with_capacity(slots),
+            affected_bindings: Vec::new(),
             _marker: PhantomData,
         }
     }
@@ -353,9 +368,9 @@ impl<C: InputContext> InputContextState<C> {
                 return obstacle;
             }
         }
-        // A device that can never satisfy the binding beats "awaiting release": that latch can
-        // only clear from an event on an owned device, so reporting it here would describe a wait
-        // that never ends.
+        // A device that can never satisfy the binding beats "awaiting release": the require-reset
+        // latch can only clear from an event on an owned device, so reporting it here would
+        // describe a wait that never ends.
         if !reachable {
             return ActionObstacle::Unowned;
         }
@@ -419,25 +434,27 @@ impl<C: InputContext> InputContextState<C> {
     /// across a change of action set. A control gets this for free, since a press made before the
     /// context could see it never reaches it as an event; a level has no event to miss.
     ///
-    /// The mirror image is a source that stops being supplied, which is the authority's device
-    /// going away rather than the player letting go: what it held is canceled (R11.4), as a
+    /// The mirror image is a source that stops being supplied while held, which is the authority's
+    /// device going away rather than the player letting go: what it held is canceled (R11.4), as a
     /// disconnect cancels what a pad held.
     pub(crate) fn sample_authority(&mut self, source: Option<&crate::backend::AuthorityValues>) {
         for binding in self.plan.bindings() {
             let crate::binding::BindingInput::Authority(_, _, action) = binding.input else {
                 continue;
             };
-            let was = self.authority.value_of(action);
+            let was = self.held.authority.value_of(action);
             let now = source.and_then(|values| values.value_of(action));
-            // Every intent is marked; `fold` applies the latch to `Button` alone.
+            // A changed authority value moves its bindings' readings with no event to report it.
+            self.readings_moved |= was != now;
+            // Every intent is marked; evaluation applies the require-reset latch to `Button` alone.
             if was.is_none() && now.is_some_and(|value| value.to_bool()) {
                 self.require_reset.set(binding.slot, true);
             }
-            if was.is_some() && now.is_none() {
-                self.authority_lost = true;
+            if was.is_some_and(|value| value.to_bool()) && now.is_none() {
+                self.held.withdraw_source(action);
             }
         }
-        self.authority.hold(source);
+        self.held.authority.hold(source);
     }
 
     /// Starts driving actions again, letting controls already held fire immediately.
@@ -476,6 +493,10 @@ impl<C: InputContext> InputContextState<C> {
         self.tunable_scratch.clear();
         self.tunable_scratch
             .resize(plan.tunable_scratch_count(), Scratch::default());
+        self.binding_progress.clear();
+        self.binding_progress
+            .resize(plan.bindings().len(), Default::default());
+        self.readings_stale = true;
         self.plan = plan;
 
         // Set directly rather than through `activate`, which returns early on a context that is
@@ -518,6 +539,8 @@ impl<C: InputContext> InputContextState<C> {
             return;
         }
         self.disabled.set(slot, true);
+        // A disabled rival stops out-ranking the bindings it shares a control with.
+        self.readings_moved = true;
         self.cancel_slot(slot);
     }
 
@@ -543,6 +566,8 @@ impl<C: InputContext> InputContextState<C> {
         }
         self.disabled.set(slot, false);
         self.require_reset.set(slot, true);
+        // Its bindings' readings were not kept while it was off.
+        self.readings_stale = true;
     }
 
     /// Whether an action is switched on. See [`disable`](Self::disable).
@@ -591,6 +616,12 @@ impl<C: InputContext> InputContextState<C> {
     }
 
     fn cancel_slot(&mut self, slot: usize) {
+        // An action committing partway through a tick takes the outputs of bindings it did not run,
+        // so what they held before the cancel must not outlive it.
+        for progress in &mut self.binding_progress[self.plan.bindings_of(slot)] {
+            progress.output = Default::default();
+        }
+        self.interrupted.set(slot, false);
         let state = &mut self.actions[slot];
         if !matches!(
             state.phase,
@@ -2827,7 +2858,8 @@ mod tests {
     /// Applying an override re-arms require-reset, which holds an action back until it is seen at
     /// rest once, and an axis is under no obligation to ever be: a stick drifting at 0.05, with a
     /// player who has taken their own deadzone to zero, reads non-rest forever. Restricting the
-    /// latch to button intents is what keeps such an action from being held back for good.
+    /// require-reset latch to button intents is what keeps such an action from being held back for
+    /// good.
     #[cfg(feature = "gamepad")]
     #[test]
     fn an_analog_action_survives_an_axis_that_never_rests() {

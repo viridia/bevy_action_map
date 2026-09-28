@@ -609,9 +609,10 @@ key away to interpret it.
 
 ### D97 — A tick's time is charged once, to the state it ends in
 
-**Decided.** A tick replays its events one at a time, and only the fold after the last one is handed
-the tick's `delta`; the folds before it are handed zero. The state the tick ends in is taken to have
-lasted the tick, so a press and a release inside one tick read as a tap.
+**Decided.** A tick takes its events one at a time, and only the run of each binding's pipeline at
+the closing step is handed the tick's `delta`; a run recording a reading superseded partway through
+the tick is handed zero. The state the tick ends in is taken to have lasted the tick, so a press and
+a release inside one tick read as a tap.
 
 **Rules out.** Handing every fold the whole `delta`, which charges a hold once per event, so a pad
 hold charges two to three times faster while a stick is moving. Also splitting `delta` across the
@@ -620,12 +621,32 @@ events: they carry no time between them, so any split is invented.
 **Reversal.** After a hitch, a quick press would read as held for the whole long tick, turning a tap
 into a hold: a dodge becomes a sprint. That is the worse of the two errors a long tick can make.
 
+### D98 — A binding's pipeline runs once per reading
+
+**Decided.** A binding's *reading* is what its input shows at one moment, taken from held state, the
+claims and the plan, with an availability saying whether it counts. Its pipeline records a reading
+once each time the reading changes within a tick, and once at the closing step; only the bindings an
+event reaches are read, through an index the plan builds. An action commits after an event whose
+superseded readings reached it, and once at the closing step, taking its other bindings' outputs as
+they stand. A control going away while held, by claim, focus loss, disconnect or authority, is an
+availability of the reading, and one rule makes the action `Canceled` (D94). Chunk 181e built it.
+
+**Rules out.** Evaluating every binding after every event, which chunk 179 had to neutralise stage
+by stage for time, require-reset and claims, and which left the phase machine and a condition's
+previous value stepped by events on unrelated controls. Also a separate mechanism per way a control
+can go away. Also collapsing one axis's events within a tick, which loses a trigger crossing its
+press point and back, the edge R9.3 protects for buttons.
+
+**Reversal.** A tick costs events times bindings again, which measured 68 µs for sixteen key events
+on a 48-binding context. An unbound key changes what a bound action reports. Each stateful stage
+needs its own guard against running twice on one reading, and each interruption path its own flag.
+
 ### D77 — A disabled action is out of evaluation, as an inactive context is
 
-**Decided.** Disabling one action cancels what it had in flight and takes its slot out of the fold:
-its bindings read nothing, advance no scratch, claim no control and out-rank no chord, and an
-authority's value for it is ignored. Enabling re-arms require-reset on that slot alone, and only
-when it was disabled. The switch is per instance. Chunk 35 built it.
+**Decided.** Disabling one action cancels what it had in flight and takes its slot out of
+evaluation: its bindings read nothing, advance no scratch, claim no control and out-rank no chord,
+and an authority's value for it is ignored. Enabling re-arms require-reset on that slot alone, and
+only when it was disabled. The switch is per instance. Chunk 35 built it.
 
 **Rules out.** Evaluating a disabled action and discarding the result, which would keep a hold
 counting across the gap.

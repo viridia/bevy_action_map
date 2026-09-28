@@ -58,10 +58,16 @@ pub enum ConditionKind {
 /// Implement this for anything the built-in set does not cover. Like a modifier, a condition is a
 /// pure function of what it is handed, so a replay or a rollback reruns it to the same answer.
 pub trait Condition: Send + Sync + 'static {
-    /// Decides what this condition makes of the binding's value this tick.
+    /// Decides what this condition makes of the binding's value.
     ///
-    /// `scratch` is this condition's own working memory and persists between ticks; `delta` is how
-    /// long the owning context's tick was, in its own seconds.
+    /// `scratch` is this condition's own working memory and persists between calls; `delta` is how
+    /// much time this call accounts for, in the owning context's own seconds.
+    ///
+    /// It is called each time the binding's input changes within a tick, so that a press and a
+    /// release inside one tick are both seen, and once more at the end of the tick. Only the call
+    /// at the end is handed the tick's length; the others are handed zero. A hold should therefore
+    /// charge by adding `delta` rather than by counting calls, and a press inside one long tick
+    /// still reads as a tap.
     fn evaluate(&self, value: ActionValue, scratch: &mut Scratch, delta: f32) -> ConditionState;
 
     /// How this condition combines with the others on its binding.
