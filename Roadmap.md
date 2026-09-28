@@ -227,8 +227,6 @@ its identity rather than its position.
 
 ## Next
 
-* 179d: A claim arriving cancels what it took
-* 179e: A claim lifting waits for a release
 * 115: A timing declared as a tunable
 * 122: The wheel as a binding source
 * 28: Docs that run
@@ -238,25 +236,171 @@ Chunk 179 carries defects. The register of what is known to be wrong is
 
 ## The tick loop
 
-`apply_frame` turns one tick into several folds: one per level event, and one before the events for
-an interruption. What happens once per tick has to land on exactly one of them, and these parts get
-that wrong in different places. They are lettered because each part's tests assume the one before.
-Each part writes its tests on `Script`, the tick-script fixture in `eval.rs`'s tests, extending it
-where a part needs more than events and a `delta` per tick.
+### The problem
 
-### 181. `fold` split into functions · E[2]
+`apply_frame` replays a tick's raw events one at a time and calls `fold` after each. One call to
+`fold` runs every binding's whole pipeline: read the control, modifiers, press threshold,
+require-reset, conditions, per-action combining, and the action's phase machine. The stateful stages
+among these (conditions, the `Toggle` modifier, the threshold's hysteresis, require-reset, the phase
+machine) each assume one call is one tick. So every extra call made to catch an edge inside a tick
+has had to be *neutralised*: made to leave that stage's state as it found it. 179b neutralised time,
+179c require-reset, 179d and 179e claims. The previous-value memory in `Scratch::prev` never was, and
+an event on an unrelated control changes what an action reports (issue 1077). The same design costs
+events × bindings per tick, and the chord pre-pass is quadratic once a plan has any chord (issue
+1075, now measured). Splitting `fold` into functions, which is what 181 first proposed, would have
+tidied the thing being replaced.
 
-Shrinks the scope instead of lengthening the names. The body splits into `read_control` (the
-per-input `match`), `evaluate_binding` (modifiers, threshold, require-reset, conditions, claim) and
-`apply_stage` (the `combined::<A>()` step), leaving `fold` the pre-passes and the slot loop.
+### The model the parts build toward
 
-- **Proposed before built:** `is_pressed` and `entry_held` close over six held-state fields plus
-  `consumed` and `devices`, so moving code out needs a borrowing view of them, such as a
-  `HeldInput<'a>` with those two as methods. The author settles the shape before code.
-- **Names the `value` stages:** one binding's body shadows `value` eight times, once per stage from
-  the raw reading to the gated result. Each gets a name where its extracted function still needs
-  one.
-- **Verified by** the tests and examples not changing (ground rule 3).
+A **binding reading** (`BindingReading`) is what one binding's input shows at one moment, before any
+stateful stage sees it: the raw value, and a `ReadingAvailability` saying whether it counts. The
+variants are `Live`, `HeldBackByChord`, `OutrankedByLongerChord`, `ClaimedWhileDown` (a
+higher-priority context took the control while it was held) and `Withdrawn` (focus lost, a gamepad
+disconnected, an input authority stopped supplying the action). A reading is a pure function of held
+state, cheap to compute and compare.
+
+**The invariant.** A binding's pipeline runs once each time its reading changes within a tick, and
+once at the end of the tick. The run at the end carries the tick's `delta`; every other run carries
+zero. A binding whose reading does not change runs exactly once, and no pipeline runs twice in a
+tick on the same reading.
+
+**Each tick:**
+
+1. Advance the read cursor. An inactive context updates held state and stops, as now.
+2. For each event: update held state, which reports the controls that changed; look up the bindings
+   affected by them in a plan index (a binding reads the control, has it in its chord, or can be
+   out-ranked by a chord that has it); compute each affected binding's reading. If it differs from
+   the binding's *pending reading* (the latest one not yet run), the pending one is superseded: run
+   it with `delta = 0`, commit its action, and make the new reading pending. Then class-binding
+   dispatch for the event, as now.
+3. The closing step: every enabled binding runs its pending or unchanged reading with `delta`, and
+   every action commits once. Mouse motion is summed during step 2 and read here.
+
+An action committing partway through a tick takes its other bindings' latest outputs without
+running them again.
+
+**One rule for controls that go away.** An action going from firing to idle commits `Canceled` if
+any of its bindings reached rest through a `ClaimedWhileDown` or `Withdrawn` reading, and
+`Completed` otherwise. This replaces `FoldKind::Interrupted`, the `authority_lost` flag and its extra
+fold, the `taken` flag, and `FoldKind::Delta`'s separate mouse fold. It is the rule D96 already
+states.
+
+**Shared `hold_or_toggle` groups** are one unit whose latch resolves when any member's reading
+changes. **Chords** use each binding's *longer-chord rivals*, computed at plan build: bindings on a
+shared control with a strictly longer chord. A binding is out-ranked when a rival's chord is held.
+This replaces the pre-pass and `chord_claims`.
+
+**Conditions that read other actions (X54)** stay deferred. They would need dependency-ordered
+commits, a cycle diagnostic and a builder method. The model removes their main obstacle, though:
+an action's state changes only when it commits, so a commit can mark its dependents affected the
+way a control change does. Nothing is built for it now, and nothing is built that blocks it.
+
+**Module layout.** `eval.rs` becomes `eval/`, each module owning one concern:
+
+| Module | Owns |
+| --- | --- |
+| `consumed_controls.rs` | `ConsumedControls`, `reaches`, the claim-clearing systems |
+| `exclusion_ceiling.rs` | `ExclusionCeiling` and its reset |
+| `context_systems.rs` | `evaluate_context`, `dispatch_transitions`, `dispatch_class_fires` |
+| `held_control_state.rs` | `HeldControlState`: every device's held state, the mouse accumulator, the sampled authority values; `apply_event` reports changed controls |
+| `binding_reading.rs` | `BindingReading`, `ReadingAvailability`, `read_binding` |
+| `binding_pipeline.rs` | `run_binding_pipeline`: modifiers, threshold, require-reset, conditions, the claim decision |
+| `action_commit.rs` | `CombinedBindingValues`, the `combined::<A>()` stage, the phase machine, `commit_action` |
+| `tick_evaluation.rs` | `apply_frame`: cursor, event loop, pending readings, closing step, class dispatch |
+
+**Where the work happens.** On the `chunk-181` branch, one commit per part, with `main` as the old
+evaluator to compare against. The benchmark is `crates/bevy_action_map/benches/eval.rs`, and each
+part after 181a compares with `cargo bench -p bevy_action_map --bench eval -- --baseline pre181`.
+Tests go on `Script`, the tick-script fixture in `eval.rs`'s tests. When 181e lands, this model moves
+into TD5 and a new decision D98, and this introduction is deleted.
+
+### 181a. The measurement lands · E[1]
+
+- `crates/bevy_action_map/benches/eval.rs`, from the scratch harness, with `criterion` as a
+  dev-dependency. The harness is a standalone crate at
+  `/private/tmp/claude-501/-Users-talin-Projects-games-bevy-action-map/5cbcc474-33fe-4400-bd13-c9320c573ce2/scratchpad/evalbench/`:
+  `benches/eval.rs` is the benchmark, `tests/unrelated.rs` the probe, and `run1.log` to `run3.log`
+  the measured runs that issues 1075 and 1077 quote. It is under `/tmp`, so if a reboot has cleared
+  it, rebuild it from the description below and re-measure. This line goes when 181a lands. Small (11-binding) and large (48-binding) contexts; idle, key-burst and
+  mouse-motion loads; 0, 1 and 8 instances; a binding-count sweep; chords on and off. The baseline
+  `pre181` is saved from it.
+- The issue 1077 probe as a `Script` test, `#[ignore]`d until 181e.
+- `docs/issues.md`: issue 1077 added, and 1075 corrected and measured, both routed here.
+- **Not done:** any change to evaluation code.
+
+### 181b. `eval.rs` split along the lines that do not change · E[2]
+
+- `consumed_controls.rs`, `exclusion_ceiling.rs` and `context_systems.rs` moved out verbatim.
+- `HeldControlState` extracted into `held_control_state.rs`: the held-state fields leave
+  `InputContextState` for one field, and `apply_level_event`, `actuated`, and `fold`'s `is_pressed`
+  and `is_down` closures become its methods. `fold` reads held state through it.
+- **Not done:** `fold`, the phase machine, per-action combining. They are what 181e replaces, so
+  giving them a module now would fix a boundary 181e has to work around.
+- **Verified by** the tests, the examples and the benchmark not changing (ground rule 3), and
+  `scripts/verify.sh --matrix`, since the device `cfg` groups move.
+
+### 181c. Longer-chord rivals replace the chord pre-pass · E[2]
+
+- `Plan::compile` computes each binding's longer-chord rivals, beside `has_chords`.
+- `fold`'s pre-pass and its `out_ranked` closure use them; `chord_claims` is deleted, and
+  `why_not`'s `Outranked` answer reads the rivals.
+- **Not done:** the evaluation order.
+- **Verified by** the tests not changing, and the benchmark's chords-on case costing about what
+  chords-off does.
+
+### 181d. The affected-bindings index · E[1]
+
+- `Plan::bindings_affected_by(control)`: the bindings reading a control, the bindings chorded on
+  it, and their longer-chord rivals. `indexed_controls` omits chord keys, which is why it is not
+  reused. The key is a control, written so it could later also be an action (X54).
+- **Not done:** any reader. Could fold into 181e; it stands alone only because its tests do.
+- **Verified by** unit tests on the index.
+
+### 181e. Binding readings, the per-binding pipeline, and one rule for controls that go away · E[4]
+
+- `binding_reading.rs`, `binding_pipeline.rs`, `action_commit.rs`, `tick_evaluation.rs`, as the
+  model above describes. `fold`, `FoldKind`, `authority_lost` and the `levels_left` counter are
+  deleted; `sample_authority` produces `Withdrawn` readings.
+- `Condition::evaluate` and `Modifier::apply` keep their signatures. Their doc comments say they are
+  called each time the binding's input changes within a tick and once at the end of it, with a
+  non-zero `delta` only at the end.
+- Forced documents: TD5 rewritten (diagram, replay and time), TD5.1's chord paragraph and TD5.2's
+  claimed-while-held paragraph adjusted, D97 amended, D98 "A binding's pipeline runs once per
+  reading" added, issues 1075 and 1077 closed, a line on X54 saying its main obstacle is gone.
+- Every test whose expectation changes is listed in the commit, classified "the old evaluator was
+  wrong" or "the new one is wrong". The 181a probe is un-ignored.
+- **Split before writing** if the diff runs past a day's reading: first the new order with the
+  three interruption mechanisms mapped one-to-one onto `Withdrawn` and `ClaimedWhileDown`, then
+  their collapse into one rule.
+- **Not done:** skipping the closing step for a binding with an unchanged reading and no
+  time-dependent stage, a later optimisation measured after this lands; any change to `Scratch` or a
+  trait signature; `docs/architecture.md`, which is 181f.
+- **Verified by** `scripts/verify.sh --matrix`; the benchmark against `pre181`; Disasteroids and
+  Split Friction launched for a minute each; one end-to-end run of
+  `crates/bevy_remote_driver/plans/disasteroids/rebind.py`; and the unit suite run on `main` and on
+  the branch, with the failing-test lists diffed.
+
+### 181f. `docs/architecture.md` brought up to date · E[2]
+
+A batch refresh under X44, called by the author because the new evaluator changes the tour's
+central diagrams. It covers everything since the tour was frozen at `2a432f5` (2026-09-25), not only
+181.
+
+- **The list of what moved** is X44's recipe: `git log 2a432f5..HEAD -- docs/design.md
+  crates/bevy_action_map/src/`. It showed 17 commits before 181 began. Among them are the crate
+  moving under `crates/` (171), which changes every path in "Finding your way in the code"; the
+  `gamepad` module (165), rumble (167) and calibration (72b); the Steam build (168); one `apply` for
+  the world or an entity (143); and all of 179 and 180. 181's own parts come on top.
+- **"Inside one evaluation"** is redrawn for the new model: the per-event fold diagram becomes the
+  event loop, pending readings and the closing step, and "a fold is one pass over every binding"
+  becomes the per-binding pipeline and its invariant. "Where state lives" and "The life of an
+  action" lose `fold`, `chord_claims` and the old interruption paths.
+- Every other section is checked against that list and corrected where it has drifted. The tour
+  keeps teaching shape and deferring detail to `TD` sections.
+- Every Mermaid block is rendered with `mmdc` through `npx`, as X44 asks, since GitHub shows a broken
+  one as source text with no error.
+- **Not done:** any change to X44 itself. The tour is frozen again afterwards.
+- **Verified by** `python3 scripts/xref.py` and the rendered diagrams.
 
 ## Bindings and conditions
 
