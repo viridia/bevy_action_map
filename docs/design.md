@@ -774,8 +774,8 @@ pub enum Control { PhysicalKey(KeyCode), LogicalKey(char), MouseButton(MouseButt
 
 A keyboard key is nameable two ways, and the choice is the caller's (R12.1). `PhysicalKey` names a
 position and `LogicalKey(char)` names the character the player's layout produces there, so
-`LogicalKey('z')` is the Z key on QWERTY and the W key on AZERTY. The evaluator keeps a second held
-map, `held_characters`, keyed by `KeyCode` and holding the character each held key reported — keyed
+`LogicalKey('z')` is the Z key on QWERTY and the W key on AZERTY. `HeldControlState` keeps a second
+held map, `characters`, keyed by `KeyCode` and holding the character each held key reported — keyed
 by position so that a release always finds its press, since pressing shift mid-hold changes the
 character the platform reports. A key qualifies only when its `logical_key` is a `Key::Character` of
 exactly one `char`, which excludes dead keys, IME compositions and the named variants; the character
@@ -1350,7 +1350,11 @@ crates/bevy_action_map/src/
     state.rs         one instance's live state, and the params that read it
     declare.rs       the app wiring, the records declaration writes, the type-erased reads
   plan.rs            compilation, slot allocation, diagnostics
-  eval.rs            the evaluator, consumption, the exclusion ceiling, dispatch
+  eval/mod.rs        the evaluator: replay, the fold, combining, the phase machine
+    consumed_controls.rs   what has been claimed this frame, and the systems that clear it
+    exclusion_ceiling.rs   which exclusive contexts are shadowing the ones below
+    context_systems.rs     evaluate_context, and dispatch of transitions and class fires
+    held_control_state.rs  what one instance knows is held: press, travel, actuation
   event.rs           Fired/Started/Completed/Canceled, class bindings
   player.rs          the Paired component
   join.rs        L3  is_claimed

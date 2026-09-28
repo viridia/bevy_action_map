@@ -1,24 +1,26 @@
 //! The evaluator: a plan and an input frame in, action state and a transition log out.
 
+mod consumed_controls;
+mod context_systems;
+mod exclusion_ceiling;
+mod held_control_state;
+
+pub use consumed_controls::ConsumedControls;
+pub(crate) use consumed_controls::{release_consumed_controls, release_consumed_in};
+pub(crate) use context_systems::{
+    ClassFire, Transition, dispatch_class_fires, dispatch_transitions, evaluate_context,
+};
+pub(crate) use exclusion_ceiling::{ExclusionCeiling, reset_exclusion_ceiling};
+pub(crate) use held_control_state::HeldControlState;
+
 use alloc::vec::Vec;
 
-use bevy_ecs::change_detection::DetectChangesMut;
-use bevy_ecs::component::Component;
-use bevy_ecs::entity::Entity;
-use bevy_ecs::prelude::{Commands, Query, Res};
-#[cfg(any(feature = "keyboard", feature = "mouse"))]
-use bevy_input::ButtonState;
 #[cfg(feature = "gamepad")]
-use bevy_input::gamepad::{GamepadAxis, GamepadConnection, RawGamepadEvent};
-#[cfg(feature = "keyboard")]
-use bevy_input::keyboard::KeyboardInput;
-#[cfg(feature = "mouse")]
-use bevy_input::mouse::MouseButtonInput;
+use bevy_input::gamepad::{GamepadConnection, RawGamepadEvent};
 use bevy_math::{Vec2, Vec3};
 use fixedbitset::FixedBitSet;
 
 use crate::action::{ActionIntent, ActionPhase, ActionValue, InputContext};
-use crate::backend::AuthorityValues;
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 use crate::binding::ButtonControl;
 #[cfg(feature = "gamepad")]
@@ -28,344 +30,6 @@ use crate::condition::ConditionState;
 use crate::context::InputContextState;
 use crate::device::DeviceHandleSet;
 use crate::frame::{InputFrame, RawEvent, TimedRawEvent};
-
-/// Which controls have already been claimed this frame, by which schedule, and for whose devices.
-///
-/// What `PreUpdate` claimed stays claimed for every fixed tick in the frame; what one fixed tick
-/// claimed does not bind the next; and a frame where no fixed tick runs starts clear regardless.
-///
-/// # A claim is scoped to the devices it was made for
-///
-/// A claim records the devices the claiming context reads. Two players pressing the same button on
-/// two different pads are pressing two different things, so one player's menu consuming `South`
-/// leaves the other player's gameplay context free to read it. A context with no
-/// [`Paired`](crate::player::Paired) reads every device, so its claims reach every reader and every
-/// claim reaches it — which is the single-player case, and it needs no opt-in.
-#[derive(bevy_ecs::resource::Resource, Default)]
-pub struct ConsumedControls {
-    // A flat list rather than a map: a read matches a control *and* an overlapping device set,
-    // which no single key expresses. A frame holds a handful of claims.
-    claims: Vec<Claim>,
-}
-
-struct Claim {
-    schedule: core::any::TypeId,
-    control: Control,
-    /// The devices the claiming context reads; `None` for a context nobody paired, which reads
-    /// every device. Not a `Paired`, which is how a context entity carries this and nothing else.
-    devices: Option<DeviceHandleSet>,
-    /// Which context took it, not merely that something did: "consumed" is one of five reasons an
-    /// action can silently not fire (R22.1), and the only useful form of the answer names the
-    /// taker.
-    by: &'static str,
-}
-
-/// Whether a claim made for `claimed` devices reaches a reader that reads `reader` devices.
-///
-/// One question: do the two device sets overlap, where `None` stands for all of them. A reader that
-/// owns nothing is the case worth spelling out — it cannot lose what it never heard, so no claim
-/// reaches it, not even one made by a context nobody paired.
-fn reaches(claimed: Option<&DeviceHandleSet>, reader: Option<&DeviceHandleSet>) -> bool {
-    match (claimed, reader) {
-        (_, None) => true,
-        (None, Some(reader)) => !reader.is_empty(),
-        (Some(claimed), Some(reader)) => claimed.intersects(reader),
-    }
-}
-
-impl ConsumedControls {
-    /// Whether this control has been claimed away from a reader that reads these devices.
-    ///
-    /// Pass the reader's [`Paired`](crate::player::Paired) devices, or `None` for a context that
-    /// reads every device.
-    pub fn contains(&self, control: Control, reader: Option<&DeviceHandleSet>) -> bool {
-        self.claimant(control, reader).is_some()
-    }
-
-    /// The path of the context that claimed this control away from such a reader, if one did.
-    ///
-    /// A stick counts as claimed when either of its axes is.
-    pub fn claimant(
-        &self,
-        control: Control,
-        reader: Option<&DeviceHandleSet>,
-    ) -> Option<&'static str> {
-        #[cfg(feature = "gamepad")]
-        if let Control::GamepadStick(stick) = control {
-            let (x, y) = stick.axes();
-            return self
-                .claimant(Control::GamepadAxis(x), reader)
-                .or_else(|| self.claimant(Control::GamepadAxis(y), reader));
-        }
-        self.claims
-            .iter()
-            .find(|claim| claim.control == control && reaches(claim.devices.as_ref(), reader))
-            .map(|claim| claim.by)
-    }
-
-    fn claim<S: bevy_ecs::schedule::ScheduleLabel>(
-        &mut self,
-        control: Control,
-        devices: Option<&DeviceHandleSet>,
-        by: &'static str,
-    ) {
-        // Stored as its two axes, which is how a context's claim on a stick already arrives and
-        // what every reader checks, so a capture's whole-stick claim is not the one they miss.
-        #[cfg(feature = "gamepad")]
-        if let Control::GamepadStick(stick) = control {
-            let (x, y) = stick.axes();
-            self.claim::<S>(Control::GamepadAxis(x), devices, by);
-            self.claim::<S>(Control::GamepadAxis(y), devices, by);
-            return;
-        }
-        self.claims.push(Claim {
-            schedule: core::any::TypeId::of::<S>(),
-            control,
-            devices: devices.cloned(),
-            by,
-        });
-    }
-
-    /// Takes a control on behalf of a live capture, so that what a player presses at a rebinding
-    /// screen does not also play the game.
-    ///
-    /// Scoped to the session's own devices for the same reason a context's claim is: two players
-    /// rebinding at once are pressing two different things.
-    ///
-    /// Claimed under `PreUpdate`, where capture runs, which is what carries it through to the fixed
-    /// schedules: a fixed tick releases only its own claims, so this one still stands when a
-    /// fixed-tick context evaluates later in the frame.
-    pub(crate) fn claim_for_capture(
-        &mut self,
-        control: Control,
-        devices: Option<&DeviceHandleSet>,
-    ) {
-        self.claim::<bevy_app::PreUpdate>(control, devices, "capture");
-    }
-
-    /// Forgets what one schedule claimed, which it does on entry so that each run decides afresh.
-    fn release<S: bevy_ecs::schedule::ScheduleLabel>(&mut self) {
-        let schedule = core::any::TypeId::of::<S>();
-        self.claims.retain(|claim| claim.schedule != schedule);
-    }
-
-    fn release_all(&mut self) {
-        self.claims.clear();
-    }
-}
-
-/// Starts a frame with nothing claimed.
-pub(crate) fn release_consumed_controls(
-    mut consumed: bevy_ecs::prelude::ResMut<'_, ConsumedControls>,
-) {
-    consumed.release_all();
-}
-
-/// The active exclusive contexts seen so far this frame, each with the devices it holds.
-///
-/// One ceiling for the whole world would let one player's pause menu deactivate another player's
-/// gameplay, so an entry carries the same device scope a claim does and shadows only a context that
-/// shares a device with it.
-///
-/// Unlike `ConsumedControls`, this needs no per-schedule bookkeeping: a context's activity does not
-/// reset between fixed ticks the way a control's actuation does, so an exclusive context re-raises
-/// the same entry every time it runs. Reset once at the top of the frame, set by whichever
-/// exclusive context runs first in priority order, and read by everything lower that runs after it
-/// for the rest of the frame. Render-tick contexts run before fixed-tick ones, so exclusion flows
-/// forward through the frame the same way consumption does.
-#[derive(bevy_ecs::resource::Resource, Default)]
-pub(crate) struct ExclusionCeiling(Vec<Exclusion>);
-
-struct Exclusion {
-    priority: i32,
-    /// As [`Claim::devices`]: `None` is a context nobody paired, which shadows everything below it.
-    devices: Option<DeviceHandleSet>,
-}
-
-impl ExclusionCeiling {
-    fn reset(&mut self) {
-        self.0.clear();
-    }
-
-    /// Records that an exclusive context at this priority is active over these devices. Every run
-    /// of that context re-asserts the same entry, so an identical one already standing is left
-    /// alone and the list stays a function of the world rather than of the frame's tick count.
-    fn raise(&mut self, priority: i32, devices: Option<&DeviceHandleSet>) {
-        if self
-            .0
-            .iter()
-            .any(|entry| entry.priority == priority && entry.devices.as_ref() == devices)
-        {
-            return;
-        }
-        self.0.push(Exclusion {
-            priority,
-            devices: devices.cloned(),
-        });
-    }
-
-    /// Whether a context at this priority reading these devices is shadowed by an exclusive one
-    /// that has already run and shares a device with it.
-    fn shadows(&self, priority: i32, reader: Option<&DeviceHandleSet>) -> bool {
-        self.0
-            .iter()
-            .any(|entry| priority < entry.priority && reaches(entry.devices.as_ref(), reader))
-    }
-}
-
-/// Starts a frame with no exclusion in effect — the same clear point as
-/// [`release_consumed_controls`], for the same reason.
-pub(crate) fn reset_exclusion_ceiling(
-    mut ceiling: bevy_ecs::prelude::ResMut<'_, ExclusionCeiling>,
-) {
-    ceiling.reset();
-}
-
-/// Starts one run of a schedule with nothing claimed *by that schedule*.
-pub(crate) fn release_consumed_in<S: bevy_ecs::schedule::ScheduleLabel>(
-    mut consumed: bevy_ecs::prelude::ResMut<'_, ConsumedControls>,
-) {
-    consumed.release::<S>();
-}
-
-/// One phase change, in the order it happened.
-///
-/// The log records transitions rather than final state: an action that fires and completes inside
-/// one tick has two of these, and a reader that only ever sees the current phase cannot express
-/// that.
-pub(crate) struct Transition {
-    pub(crate) slot: usize,
-    pub(crate) phase: ActionPhase,
-    pub(crate) value: ActionValue,
-}
-
-/// Turns each logged transition into its typed event.
-///
-/// Separate from evaluation because observers run arbitrary code with `&mut World`, and the
-/// evaluator has to stay a pure function of its inputs.
-pub(crate) fn dispatch_transitions<C: InputContext + Component>(
-    mut commands: Commands<'_, '_>,
-    mut states: Query<'_, '_, (Entity, &mut InputContextState<C>)>,
-) {
-    for (entity, mut state) in &mut states {
-        if state.transitions.is_empty() {
-            continue;
-        }
-        // Bypass change detection: draining the log is bookkeeping, not a meaningful state change.
-        // The evaluation that populated the log already triggered change detection at the right
-        // time; re-triggering it here would advance the change tick one system past the actual event.
-        let state = state.bypass_change_detection();
-
-        // Handed back afterwards so the allocation survives to the next tick.
-        let mut log = core::mem::take(&mut state.transitions);
-        for transition in log.drain(..) {
-            let dispatch = state.plan.dispatch_for_slot(transition.slot);
-            dispatch(&mut commands, entity, transition.phase, transition.value);
-        }
-        state.transitions = log;
-    }
-}
-
-/// A control matching a bound class arrived and nothing indexed claimed it, logged in the order it
-/// happened.
-pub(crate) struct ClassFire {
-    pub(crate) binding_index: usize,
-    pub(crate) event: RawEvent,
-}
-
-/// `ClassFire`'s counterpart to [`dispatch_transitions`], and separate for the same reason.
-pub(crate) fn dispatch_class_fires<C: InputContext + Component>(
-    mut commands: Commands<'_, '_>,
-    mut states: Query<'_, '_, (Entity, &mut InputContextState<C>)>,
-) {
-    for (entity, mut state) in &mut states {
-        if state.class_fires.is_empty() {
-            continue;
-        }
-        // A class binding writes no action state, so a fire is not something a subscriber to this
-        // component asked to hear about.
-        let state = state.bypass_change_detection();
-
-        let mut log = core::mem::take(&mut state.class_fires);
-        for fire in log.drain(..) {
-            let dispatch = state.plan.class_bindings()[fire.binding_index].dispatch;
-            dispatch(&mut commands, entity, fire.event);
-        }
-        state.class_fires = log;
-    }
-}
-
-/// Applies the current input frame to every instance of one context.
-pub(crate) fn evaluate_context<
-    C: InputContext + Component,
-    S: bevy_ecs::schedule::ScheduleLabel,
->(
-    frame: Res<'_, InputFrame>,
-    threshold: Res<'_, ButtonThreshold>,
-    mut consumed: bevy_ecs::prelude::ResMut<'_, ConsumedControls>,
-    mut ceiling: bevy_ecs::prelude::ResMut<'_, ExclusionCeiling>,
-    // The generic clock, which Bevy points at the fixed timestep inside the fixed schedules — so a
-    // context is told how long its own tick was rather than how long the frame was (R9.6).
-    time: Res<'_, bevy_time::Time>,
-    mut states: Query<
-        '_,
-        '_,
-        (
-            &mut InputContextState<C>,
-            Option<&crate::player::Paired>,
-            Option<&AuthorityValues>,
-        ),
-    >,
-) {
-    let delta = time.delta_secs();
-    // The ceiling is read inside the loop and raised only after it, so nothing this context does
-    // can affect its own shadowing — neither an instance shadowing its siblings, nor a context
-    // shadowing itself. Evaluation order is priority order (TD5.1, TD5.3), so what is standing
-    // here is what higher-priority exclusive contexts already did this frame.
-    let mut active_scopes: Vec<Option<DeviceHandleSet>> = Vec::new();
-    for (mut state, pairing, authority) in &mut states {
-        let devices = pairing.map(|paired| &**paired);
-        // Bypassed for the whole pass and re-marked at the end only if an action moved. Every tick
-        // writes *something* here — the read cursor at least — so taking the deref at face value
-        // would mark every instance changed every tick, which is the all-or-nothing wake-up R23.4
-        // asks us not to hand a subscriber.
-        let instance = state.bypass_change_detection();
-        instance.dirty.clear();
-
-        if ceiling.shadows(C::PRIORITY, devices) {
-            instance.shadow();
-        } else {
-            instance.unshadow();
-        }
-        if C::EXCLUSIVE && instance.is_active() {
-            active_scopes.push(devices.cloned());
-        }
-
-        // An instance's claims land scoped to its own devices, so the instance evaluated next
-        // reads them only where the two players overlap.
-        // Sampled once a tick, before the frame, so every fold in it reads the same level: the
-        // authority is polled rather than replayed.
-        if instance.is_active() {
-            instance.sample_authority(authority);
-        }
-        let mut claims = Vec::new();
-        instance.apply_frame(&frame, &threshold, delta, &consumed, &mut claims, devices);
-        let moved = !instance.dirty.is_clear();
-        for control in claims {
-            consumed.claim::<S>(control, devices, C::PATH);
-        }
-        if moved {
-            state.set_changed();
-        }
-    }
-
-    // Only a context that is itself active-and-unshadowed gets to shadow anything below it — which
-    // is what makes two stacked exclusive contexts compose correctly with nothing extra: a second
-    // exclusive context shadowed by a third does not also shadow whatever the second would have.
-    for devices in active_scopes {
-        ceiling.raise(C::PRIORITY, devices.as_ref());
-    }
-}
 
 /// Which half of the plan a fold pass is for.
 ///
@@ -405,22 +69,6 @@ fn interruption_kind(event: &RawEvent) -> FoldKind {
     }
 }
 
-/// The character a logical binding may name this key by, if it has one.
-///
-/// A key qualifies when it produces a character of its own. `Key::Character` carrying more than one
-/// is a composition rather than a key — an IME committing several keystrokes at once, or a Windows
-/// dead key that could not combine and reports both what it held and what followed (R12.6) — and
-/// belongs to text entry, not to a binding. Dead keys themselves have produced nothing yet, and the
-/// named variants are modifiers and the like, which sit in the same place on every layout and are
-/// bound by position.
-#[cfg(feature = "keyboard")]
-fn bound_character(logical_key: &bevy_input::keyboard::Key) -> Option<char> {
-    let bevy_input::keyboard::Key::Character(text) = logical_key else {
-        return None;
-    };
-    crate::binding::single_character(text)
-}
-
 impl<C: InputContext> InputContextState<C> {
     pub(crate) fn apply_frame(
         &mut self,
@@ -449,7 +97,7 @@ impl<C: InputContext> InputContextState<C> {
         // be free.
         if !self.is_active() {
             for event in unread.iter().filter(|e| owns(e)) {
-                self.apply_level_event(&event.event, threshold);
+                self.held.apply_event(&event.event, threshold);
             }
             return;
         }
@@ -494,7 +142,7 @@ impl<C: InputContext> InputContextState<C> {
                 mouse_delta += *delta;
                 continue;
             }
-            self.apply_level_event(&event.event, threshold);
+            self.held.apply_event(&event.event, threshold);
             levels_left -= 1;
             self.fold(
                 threshold,
@@ -536,105 +184,6 @@ impl<C: InputContext> InputContextState<C> {
         );
     }
 
-    /// Moves one control's held state, for the inputs that have a state to hold.
-    fn apply_level_event(&mut self, event: &RawEvent, threshold: &ButtonThreshold) {
-        #[cfg(not(feature = "gamepad"))]
-        let _ = threshold;
-
-        match event {
-            #[cfg(feature = "keyboard")]
-            RawEvent::Keyboard(KeyboardInput {
-                key_code,
-                logical_key,
-                state,
-                ..
-            }) => match state {
-                ButtonState::Pressed => {
-                    self.held_buttons.insert(*key_code);
-                    if let Some(character) = bound_character(logical_key) {
-                        self.held_characters.insert(*key_code, character);
-                    }
-                }
-                ButtonState::Released => {
-                    self.held_buttons.remove(key_code);
-                    self.held_characters.remove(key_code);
-                }
-            },
-            #[cfg(feature = "mouse")]
-            RawEvent::MouseButton(MouseButtonInput { button, state, .. }) => match state {
-                ButtonState::Pressed => {
-                    self.held_mouse_buttons.insert(*button);
-                }
-                ButtonState::Released => {
-                    self.held_mouse_buttons.remove(button);
-                }
-            },
-            // Accumulated by the caller: a delta is not a state.
-            RawEvent::MouseMotion(_) => {}
-            #[cfg(feature = "gamepad")]
-            RawEvent::Gamepad(event) => match event {
-                RawGamepadEvent::Axis(raw_axis) => {
-                    self.held_gamepad_axes.insert(raw_axis.axis, raw_axis.value);
-                }
-                RawGamepadEvent::Button(raw_button) => {
-                    // Our own threshold, deliberately ignoring whatever press or release the
-                    // backend synthesized at a threshold of its own (R14.2).
-                    let reading = self
-                        .held_gamepad_buttons
-                        .entry(raw_button.button)
-                        .or_default();
-                    reading.pressed = threshold.pressed(raw_button.value, reading.pressed);
-                    reading.value = raw_button.value;
-                }
-                // A disconnect leaves no release event to correct a stale reading — the backend has
-                // nothing left to send one from (R11.4). Connecting needs nothing: the device's own
-                // events repopulate these maps normally.
-                RawGamepadEvent::Connection(connection) => {
-                    if matches!(connection.connection, GamepadConnection::Disconnected) {
-                        self.held_gamepad_buttons.clear();
-                        self.held_gamepad_axes.clear();
-                    }
-                }
-            },
-            #[cfg(any(feature = "keyboard", feature = "mouse"))]
-            RawEvent::FocusLost => {
-                #[cfg(feature = "keyboard")]
-                {
-                    self.held_buttons.clear();
-                    self.held_characters.clear();
-                }
-                #[cfg(feature = "mouse")]
-                self.held_mouse_buttons.clear();
-            }
-        }
-    }
-
-    /// Whether the control this event names is actuated right now, using the held state
-    /// `apply_level_event` just updated — so a gamepad button reads through this crate's own
-    /// threshold hysteresis rather than the raw fraction the backend reported.
-    fn actuated(&self, event: &RawEvent) -> bool {
-        match event {
-            #[cfg(feature = "keyboard")]
-            RawEvent::Keyboard(KeyboardInput { state, .. }) => *state == ButtonState::Pressed,
-            #[cfg(feature = "mouse")]
-            RawEvent::MouseButton(MouseButtonInput { state, .. }) => *state == ButtonState::Pressed,
-            RawEvent::MouseMotion(_) => false,
-            #[cfg(feature = "gamepad")]
-            RawEvent::Gamepad(RawGamepadEvent::Button(raw_button)) => self
-                .held_gamepad_buttons
-                .get(&raw_button.button)
-                .is_some_and(|reading| reading.pressed),
-            #[cfg(feature = "gamepad")]
-            RawEvent::Gamepad(RawGamepadEvent::Axis(raw_axis)) => raw_axis.value != 0.0,
-            #[cfg(feature = "gamepad")]
-            RawEvent::Gamepad(RawGamepadEvent::Connection(_)) => false,
-            // Unreachable in practice: `control()` is `None` for this event, and `class_dispatch`
-            // returns before ever asking. Kept for exhaustiveness, same as the arm above.
-            #[cfg(any(feature = "keyboard", feature = "mouse"))]
-            RawEvent::FocusLost => false,
-        }
-    }
-
     /// Tests one raw event against the plan's class list.
     ///
     /// Called once per level event, after the fold: only a control no plain binding in this context
@@ -650,7 +199,7 @@ impl<C: InputContext> InputContextState<C> {
         let Some(control) = event.control() else {
             return;
         };
-        if !self.actuated(event)
+        if !self.held.actuated(event)
             || consumed.contains(control, devices)
             || self.plan.is_indexed(control)
         {
@@ -698,72 +247,17 @@ impl<C: InputContext> InputContextState<C> {
             scratch,
             tunable_scratch,
             chord_claims,
-            #[cfg(feature = "keyboard")]
-            held_buttons,
-            #[cfg(feature = "keyboard")]
-            held_characters,
-            #[cfg(feature = "mouse")]
-            held_mouse_buttons,
-            #[cfg(feature = "gamepad")]
-            held_gamepad_buttons,
-            #[cfg(feature = "gamepad")]
-            held_gamepad_axes,
+            held,
             authority,
             ..
         } = self;
 
-        // One predicate for every button-shaped part, so a composite's part and a plain button
-        // binding can never disagree about what "pressed" means.
+        // A control another context has taken reads as untouched, rather than being skipped.
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         let is_pressed = |control: ButtonControl| {
-            // A control another context has taken reads as untouched, rather than being skipped.
-            if consumed.contains(control.into(), devices) {
-                return false;
-            }
-            match control {
-                #[cfg(feature = "keyboard")]
-                ButtonControl::PhysicalKey(key) => held_buttons.contains(&key),
-                #[cfg(feature = "keyboard")]
-                ButtonControl::LogicalKey(character) => {
-                    held_characters.values().any(|&held| held == character)
-                }
-                #[cfg(feature = "mouse")]
-                ButtonControl::MouseButton(button) => held_mouse_buttons.contains(&button),
-                #[cfg(feature = "gamepad")]
-                ButtonControl::GamepadButton(button) => held_gamepad_buttons
-                    .get(&button)
-                    .is_some_and(|reading| reading.pressed),
-            }
+            !consumed.contains(control.into(), devices) && held.is_pressed(control)
         };
-
-        // Whether the player is holding a control, whoever has claimed it. Held and claimed is a
-        // control taken away rather than let go (D94).
-        let is_down = |control: Control| match control {
-            #[cfg(feature = "keyboard")]
-            Control::PhysicalKey(key) => held_buttons.contains(&key),
-            #[cfg(feature = "keyboard")]
-            Control::LogicalKey(character) => {
-                held_characters.values().any(|&held| held == character)
-            }
-            #[cfg(feature = "mouse")]
-            Control::MouseButton(button) => held_mouse_buttons.contains(&button),
-            // Any travel, not the threshold: an analog action reads a trigger below it.
-            #[cfg(feature = "gamepad")]
-            Control::GamepadButton(button) => held_gamepad_buttons
-                .get(&button)
-                .is_some_and(|reading| reading.value != 0.0),
-            #[cfg(feature = "gamepad")]
-            Control::GamepadAxis(axis) => held_gamepad_axes.get(&axis).is_some_and(|&v| v != 0.0),
-            #[cfg(feature = "gamepad")]
-            Control::GamepadStick(stick) => {
-                let (x, y) = stick.axes();
-                [x, y]
-                    .iter()
-                    .any(|axis| held_gamepad_axes.get(axis).is_some_and(|&v| v != 0.0))
-            }
-            Control::MouseMotion => false,
-        };
-        let any_claim = !consumed.claims.is_empty();
+        let any_claim = !consumed.is_empty();
 
         // A modifier entry is a disjunction: either key of the pair satisfies it, and both being
         // live at once is why this cannot be expanded at bind time into one entry per side.
@@ -880,71 +374,68 @@ impl<C: InputContext> InputContextState<C> {
                 // whether or not its control is claimed.
                 if any_claim && !held_back {
                     binding.input.for_each_control(|control| {
-                        taken |= consumed.contains(control, devices) && is_down(control);
+                        taken |= consumed.contains(control, devices) && held.is_down(control);
                     });
                 }
 
-                let value =
-                    match binding.input {
-                        #[cfg(feature = "keyboard")]
-                        BindingInput::Button(key_code) => {
-                            ActionValue::Bool(is_pressed(ButtonControl::PhysicalKey(key_code)))
+                let value = match binding.input {
+                    #[cfg(feature = "keyboard")]
+                    BindingInput::Button(key_code) => {
+                        ActionValue::Bool(is_pressed(ButtonControl::PhysicalKey(key_code)))
+                    }
+                    #[cfg(feature = "keyboard")]
+                    BindingInput::LogicalKey(character) => {
+                        ActionValue::Bool(is_pressed(ButtonControl::LogicalKey(character)))
+                    }
+                    #[cfg(feature = "mouse")]
+                    BindingInput::MouseButton(button) => {
+                        ActionValue::Bool(is_pressed(ButtonControl::MouseButton(button)))
+                    }
+                    // Four keys and a D-pad reach an action through this same arm, and the fold
+                    // is what turns their parts back into one direction.
+                    #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+                    BindingInput::Part(button, part) => part_value(part, is_pressed(button)),
+                    BindingInput::MouseMotion => {
+                        ActionValue::Axis2(if consumed.contains(Control::MouseMotion, devices) {
+                            Vec2::ZERO
+                        } else {
+                            mouse_delta
+                        })
+                    }
+                    // Both views of a button channel, chosen by what the action asked for. A
+                    // trigger carries a fraction, so an analog action gets the travel and a
+                    // button action gets the thresholded press — R2.10's case, and the reason a
+                    // binding cannot be resolved from the input alone.
+                    #[cfg(feature = "gamepad")]
+                    BindingInput::GamepadButton(button) => match intent {
+                        ActionIntent::Button => {
+                            ActionValue::Bool(is_pressed(ButtonControl::GamepadButton(button)))
                         }
-                        #[cfg(feature = "keyboard")]
-                        BindingInput::LogicalKey(character) => {
-                            ActionValue::Bool(is_pressed(ButtonControl::LogicalKey(character)))
-                        }
-                        #[cfg(feature = "mouse")]
-                        BindingInput::MouseButton(button) => {
-                            ActionValue::Bool(is_pressed(ButtonControl::MouseButton(button)))
-                        }
-                        // Four keys and a D-pad reach an action through this same arm, and the fold
-                        // is what turns their parts back into one direction.
-                        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-                        BindingInput::Part(button, part) => part_value(part, is_pressed(button)),
-                        BindingInput::MouseMotion => ActionValue::Axis2(
-                            if consumed.contains(Control::MouseMotion, devices) {
-                                Vec2::ZERO
-                            } else {
-                                mouse_delta
-                            },
-                        ),
-                        // Both views of a button channel, chosen by what the action asked for. A
-                        // trigger carries a fraction, so an analog action gets the travel and a
-                        // button action gets the thresholded press — R2.10's case, and the reason a
-                        // binding cannot be resolved from the input alone.
-                        #[cfg(feature = "gamepad")]
-                        BindingInput::GamepadButton(button) => match intent {
-                            ActionIntent::Button => {
-                                ActionValue::Bool(is_pressed(ButtonControl::GamepadButton(button)))
-                            }
-                            _ => ActionValue::Axis1(
-                                if consumed.contains(Control::GamepadButton(button), devices) {
-                                    0.0
-                                } else {
-                                    held_gamepad_buttons
-                                        .get(&button)
-                                        .map_or(0.0, |reading| reading.value)
-                                },
-                            ),
-                        },
-                        #[cfg(feature = "gamepad")]
-                        BindingInput::GamepadAxis(axis) => ActionValue::Axis1(
-                            if consumed.contains(Control::GamepadAxis(axis), devices) {
+                        _ => ActionValue::Axis1(
+                            if consumed.contains(Control::GamepadButton(button), devices) {
                                 0.0
                             } else {
-                                held_gamepad_axes.get(&axis).copied().unwrap_or(0.0)
+                                held.gamepad_button_value(button)
                             },
                         ),
-                        #[cfg(feature = "gamepad")]
-                        BindingInput::GamepadStick(stick) => ActionValue::Axis2(
-                            gamepad_stick_value(held_gamepad_axes, stick, consumed, devices),
-                        ),
-                        // A follower's source is its leader, not the slot's own action.
-                        BindingInput::Authority(_, _, source) => authority
-                            .value_of(source)
-                            .unwrap_or_else(|| at_rest(intent)),
-                    };
+                    },
+                    #[cfg(feature = "gamepad")]
+                    BindingInput::GamepadAxis(axis) => ActionValue::Axis1(
+                        if consumed.contains(Control::GamepadAxis(axis), devices) {
+                            0.0
+                        } else {
+                            held.gamepad_axis_value(axis)
+                        },
+                    ),
+                    #[cfg(feature = "gamepad")]
+                    BindingInput::GamepadStick(stick) => {
+                        ActionValue::Axis2(gamepad_stick_value(held, stick, consumed, devices))
+                    }
+                    // A follower's source is its leader, not the slot's own action.
+                    BindingInput::Authority(_, _, source) => authority
+                        .value_of(source)
+                        .unwrap_or_else(|| at_rest(intent)),
+                };
 
                 // This binding's working memory, split into the three disjoint pieces
                 // `CompiledBinding::scratch_base` allocates.
@@ -1289,7 +780,7 @@ fn update_action_state(
 
 #[cfg(feature = "gamepad")]
 fn gamepad_stick_value(
-    axes: &bevy_platform::collections::HashMap<GamepadAxis, f32>,
+    held: &HeldControlState,
     stick: Stick,
     consumed: &ConsumedControls,
     devices: Option<&DeviceHandleSet>,
@@ -1298,7 +789,7 @@ fn gamepad_stick_value(
         if consumed.contains(Control::GamepadAxis(axis), devices) {
             0.0
         } else {
-            axes.get(&axis).copied().unwrap_or(0.0)
+            held.gamepad_axis_value(axis)
         }
     };
     let (x_axis, y_axis) = stick.axes();
@@ -1309,11 +800,15 @@ fn gamepad_stick_value(
 mod tests {
     use super::*;
     use crate::action::{InputAction, TickDomain};
-    use crate::backend::Authority;
+    use crate::backend::{Authority, AuthorityValues};
     use crate::binding::InputContextBuilder;
     use crate::device::DeviceFamily;
     use crate::plan::Plan;
     use alloc::vec::Vec;
+    #[cfg(any(feature = "keyboard", feature = "mouse"))]
+    use bevy_input::ButtonState;
+    #[cfg(feature = "gamepad")]
+    use bevy_input::gamepad::GamepadAxis;
     use bevy_platform::sync::Arc;
 
     struct Flying;

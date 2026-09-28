@@ -179,7 +179,7 @@ places.
   another action.
 - **This crate** runs a pre-pass over the plan: the longest satisfied chord on each control is found
   before anything is read, and a shorter binding on that control reads as rest. Automatic, no
-  consumption involved, and general over any chord (`src/eval.rs`).
+  consumption involved, and general over any chord (`src/eval/`).
 
 **One context taking a control from another.** A pause menu should stop the ship hearing Escape.
 

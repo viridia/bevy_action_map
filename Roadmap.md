@@ -219,6 +219,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 179e | A claim lifting waits for a release                                   |
 | 180  | `fold`'s names say what they span                                     |
 | 181a | The evaluator's benchmark, and a probe for unrelated events           |
+| 181b | `eval.rs` split along the lines that do not change                    |
 
 ---
 
@@ -300,7 +301,7 @@ way a control change does. Nothing is built for it now, and nothing is built tha
 
 | Module | Owns |
 | --- | --- |
-| `consumed_controls.rs` | `ConsumedControls`, `reaches`, the claim-clearing systems |
+| `consumed_controls.rs` | `ConsumedControls`, `claim_reaches`, the claim-clearing systems |
 | `exclusion_ceiling.rs` | `ExclusionCeiling` and its reset |
 | `context_systems.rs` | `evaluate_context`, `dispatch_transitions`, `dispatch_class_fires` |
 | `held_control_state.rs` | `HeldControlState`: every device's held state, the mouse accumulator, the sampled authority values; `apply_event` reports changed controls |
@@ -312,19 +313,8 @@ way a control change does. Nothing is built for it now, and nothing is built tha
 **Where the work happens.** On the `chunk-181` branch, one commit per part, with `main` as the old
 evaluator to compare against. The benchmark is `crates/bevy_action_map/benches/eval.rs`, and each
 part after 181a compares with `cargo bench -p bevy_action_map --bench eval -- --baseline pre181`.
-Tests go on `Script`, the tick-script fixture in `eval.rs`'s tests. When 181e lands, this model
+Tests go on `Script`, the tick-script fixture in `eval/mod.rs`'s tests. When 181e lands, this model
 moves into TD5 and a new decision, and this introduction is deleted.
-
-### 181b. `eval.rs` split along the lines that do not change · E[2]
-
-- `consumed_controls.rs`, `exclusion_ceiling.rs` and `context_systems.rs` moved out verbatim.
-- `HeldControlState` extracted into `held_control_state.rs`: the held-state fields leave
-  `InputContextState` for one field, and `apply_level_event`, `actuated`, and `fold`'s `is_pressed`
-  and `is_down` closures become its methods. `fold` reads held state through it.
-- **Not done:** `fold`, the phase machine, per-action combining. They are what 181e replaces, so
-  giving them a module now would fix a boundary 181e has to work around.
-- **Verified by** the tests, the examples and the benchmark not changing (ground rule 3), and
-  `scripts/verify.sh --matrix`, since the device `cfg` groups move.
 
 ### 181c. Longer-chord rivals replace the chord pre-pass · E[2]
 
@@ -348,6 +338,9 @@ moves into TD5 and a new decision, and this introduction is deleted.
 - `binding_reading.rs`, `binding_pipeline.rs`, `action_commit.rs`, `tick_evaluation.rs`, as the
   model above describes. `fold`, `FoldKind`, `authority_lost` and the `levels_left` counter are
   deleted; `sample_authority` produces `Withdrawn` readings.
+- Left by 181b, which moved the device state alone: `HeldControlState` takes the mouse-motion
+  accumulator and the sampled authority values, and `apply_event` returns the controls it changed.
+  Each has its first reader here.
 - `Condition::evaluate` and `Modifier::apply` keep their signatures. Their doc comments say they are
   called each time the binding's input changes within a tick and once at the end of it, with a
   non-zero `delta` only at the end.

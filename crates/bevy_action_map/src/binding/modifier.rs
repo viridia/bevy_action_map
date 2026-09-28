@@ -335,8 +335,8 @@ fn compass_direction(value: Vec2, points: CompassPoints) -> Vec2 {
 }
 
 /// Bit position within `Scratch::flags` this modifier's latch lives at. Its own `Scratch` slot —
-/// see `apply_modifiers`' per-modifier split in `eval.rs` — so nothing else on the binding can
-/// collide with it.
+/// see `apply_modifiers`' per-modifier split in `eval` — so nothing else on the binding can collide
+/// with it.
 const TOGGLE_LATCH: u8 = 1 << 0;
 
 /// Converts a momentary button into a sustained latch, active only while `active` says so.
@@ -345,7 +345,7 @@ const TOGGLE_LATCH: u8 = 1 << 0;
 /// manufacture a spurious edge the tick after the switch.
 ///
 /// Used only for a binding whose tunable is *not* shared with another. A shared one is resolved
-/// once per tick for the whole group instead — see `eval.rs`'s `fold`, which reads `toggle_latch`
+/// once per tick for the whole group instead — see `eval`'s `fold`, which reads `toggle_latch`
 /// rather than calling this at all, and the doc on `TunableShared` for why: running this
 /// independently per binding, against a scratch cell other bindings in the group also write,
 /// spuriously re-flips the latch on every tick a *different* member of the group is held.

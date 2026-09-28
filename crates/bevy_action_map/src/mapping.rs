@@ -681,7 +681,7 @@ pub(crate) fn binding_family(input: &BindingInput) -> crate::device::DeviceFamil
 /// A key or a mouse button always qualifies — neither has anything but a press to report. A gamepad
 /// button is the interesting case (R2.10): the same control reads as `Bool` when the action wants
 /// a plain press and as a continuous `Axis1` fraction otherwise (see `BindingInput::GamepadButton`
-/// in `eval.rs`), so it qualifies only when `intent` is `ActionIntent::Button`. A composite's part,
+/// in `eval`), so it qualifies only when `intent` is `ActionIntent::Button`. A composite's part,
 /// an axis or motion reports something other than `Bool` outright and never qualifies.
 pub(crate) fn always_reports_bool(input: &BindingInput, intent: ActionIntent) -> bool {
     #[cfg(not(feature = "gamepad"))]

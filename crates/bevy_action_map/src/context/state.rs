@@ -1,7 +1,5 @@
 //! One context instance's live state, and the system parameters that read it.
 
-#[cfg(feature = "keyboard")]
-use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use fixedbitset::FixedBitSet;
@@ -16,25 +14,9 @@ use crate::action::{
     ActionId, ActionOutput, ActionPhase, ActionState, InputAction, InputContext, Scratch,
 };
 use crate::condition::BindingCondition;
-use crate::eval::Transition;
+use crate::eval::{HeldControlState, Transition};
 use crate::frame::FrameTimestamp;
 use crate::plan::Plan;
-#[cfg(feature = "gamepad")]
-use bevy_platform::collections::HashMap;
-#[cfg(feature = "mouse")]
-use bevy_platform::collections::HashSet;
-
-/// Both views of one button-shaped control.
-// A trigger has an analog position and a pressed sense, and the two are not derivable from each
-// other on demand: `pressed` is hysteretic, so it depends on what it was last time this control
-// was seen. Keeping it beside the value is what lets the button view be settled once per event
-// rather than recomputed per binding, and is why two bindings on one trigger cannot disagree.
-#[cfg(feature = "gamepad")]
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct ButtonReading {
-    pub(crate) value: f32,
-    pub(crate) pressed: bool,
-}
 
 /// The live state of one context on one entity: what every action it binds is currently doing.
 ///
@@ -88,22 +70,7 @@ pub struct InputContextState<C> {
     // The last event this context has read. Seeded at spawn rather than left empty, so a context
     // added mid-session starts from the present instead of replaying whatever is still queued.
     pub(crate) read_through: Option<FrameTimestamp>,
-    #[cfg(feature = "keyboard")]
-    pub(crate) held_buttons: BTreeSet<bevy_input::keyboard::KeyCode>,
-    // The character each held key reported, for the logical bindings to read. Keyed by position
-    // rather than by character so that a release always finds its press: holding a key and then
-    // pressing shift changes the character the platform reports, and matching on that would leave
-    // the entry stranded. Empty in the overwhelmingly common plan, which binds nothing logically.
-    #[cfg(feature = "keyboard")]
-    pub(crate) held_characters: BTreeMap<bevy_input::keyboard::KeyCode, char>,
-    // A `HashSet` rather than the `BTreeSet` the keys get, because `MouseButton` is `Hash` but not
-    // `Ord` upstream.
-    #[cfg(feature = "mouse")]
-    pub(crate) held_mouse_buttons: HashSet<bevy_input::mouse::MouseButton>,
-    #[cfg(feature = "gamepad")]
-    pub(crate) held_gamepad_buttons: HashMap<bevy_input::gamepad::GamepadButton, ButtonReading>,
-    #[cfg(feature = "gamepad")]
-    pub(crate) held_gamepad_axes: HashMap<bevy_input::gamepad::GamepadAxis, f32>,
+    pub(crate) held: HeldControlState,
     // What the entity's `AuthorityValues` said at the start of this tick, for authority bindings to
     // read. Held like a control's state so the fold reads every binding the same way; refreshed
     // only while active, since nothing reads it otherwise.
@@ -135,16 +102,7 @@ impl<C: InputContext> InputContextState<C> {
             transitions: Vec::new(),
             class_fires: Vec::new(),
             read_through,
-            #[cfg(feature = "keyboard")]
-            held_buttons: BTreeSet::new(),
-            #[cfg(feature = "keyboard")]
-            held_characters: BTreeMap::new(),
-            #[cfg(feature = "mouse")]
-            held_mouse_buttons: HashSet::default(),
-            #[cfg(feature = "gamepad")]
-            held_gamepad_buttons: HashMap::default(),
-            #[cfg(feature = "gamepad")]
-            held_gamepad_axes: HashMap::default(),
+            held: HeldControlState::default(),
             authority: crate::backend::AuthorityValues::new(),
             authority_lost: false,
             _marker: PhantomData,

@@ -37,8 +37,8 @@ tier, and never reused. A gap in the sequence is a retired entry.
 
 ### 1076 `why_not` on an analog action reports a release it will never wait for
 
-`context/state.rs` `why_not_id` and `activate_with_reset`; `eval.rs` `fold`, where the latch lifts ·
-reasoned from the code, **not probed**
+`context/state.rs` `why_not_id` and `activate_with_reset`; `eval/mod.rs` `fold`, where the latch
+lifts · reasoned from the code, **not probed**
 
 Activation sets require-reset on every slot, and `sample_authority` marks every intent, but `fold`
 applies and lifts the latch for `Button` slots alone. An analog slot's bit therefore stays set for
@@ -52,7 +52,7 @@ one line and leaves the arming sites alone.
 
 ### 1077 An event on an unrelated control changes what an action reports
 
-`eval.rs`, `apply_frame`'s replay loop, and `fold` · **confirmed by a probe**
+`eval/mod.rs`, `apply_frame`'s replay loop, and `fold` · **confirmed by a probe**
 
 Every level event a tick replays is followed by a whole `fold`, and every fold steps every action's
 phase machine, whether the event touched its bindings or not. So an action's phase depends on how
@@ -82,10 +82,10 @@ against a false-fire**
 Found reaching for `ControlClass::AnyStick` to fix a real papercut: a player picking up a gamepad
 and wiggling the stick — the natural first move — has no way to join a game whose join gesture is a
 button. `AnyStick` looks like the fix, but a class binding's fold skips the modifier chain (TD8, no
-dead zone stage), and `actuated` (`eval.rs`) treats any nonzero axis reading as a match — so a stick
-whose rest position sits off true zero, which no calibration step catches before a device is paired,
-would fire on its own drift. The failure is silent: a device joins that nobody touched, and nothing
-says why.
+dead zone stage), and `actuated` (`eval/held_control_state.rs`) treats any nonzero axis reading as a
+match — so a stick whose rest position sits off true zero, which no calibration step catches before
+a device is paired, would fire on its own drift. The failure is silent: a device joins that nobody
+touched, and nothing says why.
 
 No requirement asks for stick-triggered joining, and nothing in tree takes this path — Split
 Friction's `Join` is two concrete controls (`GamepadButton::South`, `KeyCode::Enter`) and no longer
@@ -345,11 +345,11 @@ No allocation and no synchronization on the per-tick path is a rule with no tool
 violations have reached that path and every one was caught by reading. Two were fixed; two are still
 there:
 
-- `evaluate_context` builds `let mut claims = Vec::new()` per instance per tick (`eval.rs`, in the
-  loop that calls `apply_frame`) and allocates the moment anything is claimed. `chord_claims` sits
-  on `InputContextState` and cites R23.2 in its comment for exactly this reason, and
-  `dispatch_transitions` takes and hands back its log to keep the allocation — so both idioms are
-  established in the same file and `claims` follows neither.
+- `evaluate_context` builds `let mut claims = Vec::new()` per instance per tick
+  (`eval/context_systems.rs`, in the loop that calls `apply_frame`) and allocates the moment
+  anything is claimed. `chord_claims` sits on `InputContextState` and cites R23.2 in its comment for
+  exactly this reason, and `dispatch_transitions` takes and hands back its log to keep the
+  allocation — so both idioms are established in the same file and `claims` follows neither.
 - `controls()` allocates a fresh `Vec<Control>` and is called per consuming binding per tick, in the
   same loop, to fill that vector.
 
@@ -360,7 +360,7 @@ behind it," as the register puts it, does not only fail to prevent them.
 
 ### 1075 A tick costs every binding once per event, bound or not
 
-`apply_frame`'s replay loop (`eval.rs`), and `fold` · **measured** by `benches/eval.rs`
+`apply_frame`'s replay loop (`eval/mod.rs`), and `fold` · **measured** by `benches/eval.rs`
 
 Each level event a context replays is followed by a whole fold: the chord pre-pass, the shared
 toggles, and every binding of every action. So one context's tick costs its events times its
