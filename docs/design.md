@@ -304,6 +304,14 @@ than naming a claimant. `contains` and `claimant` therefore take the reader's de
 capture claims under its own session's `Paired` for the same reason, so two rebinding panes do not
 answer each other's presses.
 
+A claim can arrive under a control the player is still holding, which from the context below looks
+like a release. The fold tells the two apart from held state alone: a binding whose control is
+claimed and still physically down is *taken*, and an action with a taken binding commits as
+`FoldKind::Interrupted`, so what it was firing ends `Canceled` rather than `Completed` (D94). A
+binding held back by its chord is not counted, since it reads rest either way. Keeping no memory of
+last tick's claims costs one case: an action whose second binding sits held and claimed throughout
+reports `Canceled` when the player releases the first.
+
 Consumption is recorded per schedule and cleared at two points:
 
 | | |
@@ -413,7 +421,7 @@ bsn! {
 A window losing focus (`RawEvent::FocusLost`) or a gamepad disconnecting cancels whatever was in
 flight on that source — `Canceled`, not the `Completed` an ordinary release produces. A binding on
 an unaffected device is untouched. An authority that stops supplying an action is the same case
-(TD5.8).
+(TD5.8), and so is a higher context claiming a control while it is down (TD5.2).
 
 ### 5.8 Authority bindings
 

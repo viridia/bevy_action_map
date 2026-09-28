@@ -215,6 +215,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 179a | `Started<A>` reaches observers, with a tick-script fixture            |
 | 179b | A hold charges once per tick                                          |
 | 179c | Require-reset holds through a time condition                          |
+| 179d | A claim arriving cancels what it took                                 |
 | 180  | `fold`'s names say what they span                                     |
 
 ---
@@ -225,8 +226,6 @@ its identity rather than its position.
 
 ## Next
 
-* 179b: A hold charges once per tick
-* 179c: Require-reset holds through a time condition
 * 179d: A claim arriving cancels what it took
 * 179e: A claim lifting waits for a release
 * 115: A timing declared as a tunable
@@ -244,25 +243,6 @@ that wrong in different places. They are lettered because each part's tests assu
 Each part writes its tests on `Script`, the tick-script fixture in `eval.rs`'s tests, extending it
 where a part needs more than events and a `delta` per tick.
 
-### 179d. A claim arriving cancels what it took · E[2]
-
-A consumed control reads as untouched, so a lower context cannot tell a claim arriving from the
-player letting go. Space held, `Jump` firing, Shift added for the vehicle's boost: on-foot's `Jump`
-completes as though the player had released. Read from `fold`, not yet probed:
-`FoldKind::Interrupted` is set for focus loss, a disconnect and authority loss, not for a claim. D94
-rules it, following the authority path (TD5.8): a key that goes away while down cancels what it was
-firing.
-
-- **Probe first:** `Jump` firing on Space, a higher context claiming Space the next tick, `Canceled`
-  expected.
-- **The context keeps last tick's claims**, and the difference from this tick's is the edge. 179e
-  reads the same difference.
-- **The fix:** each lower action with a binding on a newly claimed control folds as
-  `FoldKind::Interrupted`, beside the `authority_lost` fold and before the events, so it is handed
-  `delta` only when no event follows (D97).
-- **The arrival rule joins R8.2**, since R7.5 covers activation alone.
-- **Chunk 83 gains the kept claims** as state a restore must bring back.
-
 ### 179e. A claim lifting waits for a release · E[1]
 
 When a claim stops with the key still held (the hold completes or is abandoned, its chord breaks,
@@ -272,12 +252,13 @@ confirms on A and closes while A is still down, and the character jumps; or Shif
 vehicle boost, Shift released first, and the on-foot context jumps. D94 rules it: a key that arrives
 already down is ignored by `Button` actions until released.
 
-- **The fix:** on the claim difference 179d keeps, each lower `Button` action with a binding on the
-  returning control gets 179c's latch; analog actions resume. A claim covers a binding's primary
-  control, not its chord, so a chord's other keys never return and are untouched.
-- **The lift rule joins R8.2.**
-- **Depends on 179c and 179d**: without 179c, a returning key whose binding has a hold slips through
-  the latch as it does on activation.
+- **The fix:** on every fold where a `Button` binding is taken (TD5.2: claimed and still physically
+  down), its slot gets 179c's latch, so it stands when the claim lifts and holds until the release;
+  analog actions resume. No memory of last tick's claims is needed. A claim covers a binding's
+  primary control, not its chord, so a chord's other keys never return and are untouched.
+- **The lift rule joins R8.2**, beside the arrival rule.
+- **Depends on 179c**: without it, a returning key whose binding has a hold slips through the latch
+  as it does on activation.
 
 ### 181. `fold` split into functions · E[2]
 
@@ -547,8 +528,6 @@ the expensive part.
 - **What stays deferred:** injection and reconciliation — feeding a remote player's resolved action
   through the authority-backend seam (D69), and disagreeing with the authority about what happened.
   Those want a network; rewinding does not, and the injection point itself is already chunk 111's.
-- **A context's kept claims are state a restore must bring back**, once chunk 179d adds them: the
-  claims it read last tick, from which it tells a claim arriving or lifting.
 - **`disabled` is state a restore must bring back**, beside `require_reset`: chunk 35's per-action
   switch, parallel to the action table.
 - **Split if it grows.** Making the state snapshot-able with a differential test is separable from

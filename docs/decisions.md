@@ -607,7 +607,7 @@ that the lower context never saw the key go down.
 one path and not another, and an observer of `Canceled` would have to know which mechanism took the
 key away to interpret it.
 
-**Remainder.** Consumption does not follow the rule yet (chunks 179d and 179e).
+**Remainder.** A claim lifting does not follow the rule yet (chunk 179e).
 
 ### D97 — A tick's time is charged once, to the state it ends in
 

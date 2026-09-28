@@ -1987,6 +1987,59 @@ mod tests {
         assert!(!seen.walked, "and the game behind still does not see it");
     }
 
+    /// A vehicle's Shift+Space boost taking Space from under an on-foot jump the player is still
+    /// holding: the jump is canceled, since the player never let go.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_claim_arriving_under_a_held_key_cancels_rather_than_completes() {
+        use crate::event::{Canceled, Completed};
+        use bevy_ecs::observer::On;
+
+        #[derive(InputAction)]
+        #[action(path = "tests.boost", output = bool, intent = Button)]
+        struct Boost;
+
+        #[derive(InputContext)]
+        #[context(path = "tests.vehicle", tick = Render, priority = 10)]
+        struct Vehicle;
+
+        #[derive(Resource, Default)]
+        struct Heard(Vec<&'static str>);
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<Vehicle>(|context| {
+            context
+                .bind::<Boost>(KeyCode::Space)
+                .with(KeyCode::ShiftLeft)
+                .consume();
+        });
+        app.add_context::<FreeLook>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        app.init_resource::<Heard>();
+        app.add_observer(
+            |_: On<Completed<Jump>>, mut heard: bevy_ecs::system::ResMut<'_, Heard>| {
+                heard.0.push("completed");
+            },
+        );
+        app.add_observer(
+            |_: On<Canceled<Jump>>, mut heard: bevy_ecs::system::ResMut<'_, Heard>| {
+                heard.0.push("canceled");
+            },
+        );
+        app.world_mut().spawn(Vehicle);
+        app.world_mut().spawn(FreeLook);
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        app.world_mut()
+            .write_message(press(KeyCode::ShiftLeft, Key::Shift, ButtonState::Pressed));
+        app.update();
+        assert_eq!(app.world().resource::<Heard>().0, ["canceled"]);
+    }
+
     /// Each obstacle the query can currently reach, provoked one at a time.
     #[cfg(feature = "keyboard")]
     #[test]

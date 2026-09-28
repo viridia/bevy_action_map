@@ -644,6 +644,9 @@ dispatch level. Unity: no arbitration for PassThrough actions, first-match for o
   _(A claim lasts as long as the binding is `Building` or `Firing`, not only on the tick it fires —
   see D44. A charging `.hold()` or a part-way `.multi_tap()` claims its control on every such
   tick.)_
+
+  - _(D94)_ A claim arriving on a control still held ends what that control was firing in the lower
+    context as `Canceled`, not `Completed`.
 - **R8.2a (MUST)** Consumption governs what reaches other _contexts_, and cannot govern what reaches
   a consumer outside this crate that reads device events directly — `bevy_ui_widgets` activating a
   button on `Space` while a menu context consumes it is R8.2 met on paper and unmet in the game. See

@@ -383,6 +383,9 @@ enum FoldKind {
     /// authority no longer supplying an action — rather than a player releasing a control. Reads like `Level`, except that a binding which was firing
     /// and reads at rest this pass reports `Canceled` rather than `Completed`, since nothing was let
     /// go. A binding on an unaffected device is untouched.
+    ///
+    /// Also how one action commits when another context claims its control while it is down, which
+    /// is the same thing seen from inside a single pass.
     Interrupted,
 }
 
@@ -733,6 +736,35 @@ impl<C: InputContext> InputContextState<C> {
             }
         };
 
+        // Whether the player is holding a control, whoever has claimed it. Held and claimed is a
+        // control taken away rather than let go (D94).
+        let is_down = |control: Control| match control {
+            #[cfg(feature = "keyboard")]
+            Control::PhysicalKey(key) => held_buttons.contains(&key),
+            #[cfg(feature = "keyboard")]
+            Control::LogicalKey(character) => {
+                held_characters.values().any(|&held| held == character)
+            }
+            #[cfg(feature = "mouse")]
+            Control::MouseButton(button) => held_mouse_buttons.contains(&button),
+            // Any travel, not the threshold: an analog action reads a trigger below it.
+            #[cfg(feature = "gamepad")]
+            Control::GamepadButton(button) => held_gamepad_buttons
+                .get(&button)
+                .is_some_and(|reading| reading.value != 0.0),
+            #[cfg(feature = "gamepad")]
+            Control::GamepadAxis(axis) => held_gamepad_axes.get(&axis).is_some_and(|&v| v != 0.0),
+            #[cfg(feature = "gamepad")]
+            Control::GamepadStick(stick) => {
+                let (x, y) = stick.axes();
+                [x, y]
+                    .iter()
+                    .any(|axis| held_gamepad_axes.get(axis).is_some_and(|&v| v != 0.0))
+            }
+            Control::MouseMotion => false,
+        };
+        let any_claim = !consumed.claims.is_empty();
+
         // A modifier entry is a disjunction: either key of the pair satisfies it, and both being
         // live at once is why this cannot be expanded at bind time into one entry per side.
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
@@ -831,6 +863,7 @@ impl<C: InputContext> InputContextState<C> {
             // deadzone the player has taken to zero never does, and the action never recovers.
             let awaiting_release = require_reset[slot] && intent == ActionIntent::Button;
             let mut still_held = false;
+            let mut taken = false;
 
             while binding_index < bindings.len() && bindings[binding_index].slot == slot {
                 let binding = &bindings[binding_index];
@@ -842,6 +875,14 @@ impl<C: InputContext> InputContextState<C> {
                     || (plan.has_chords() && out_ranked(binding));
                 #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
                 let held_back = false;
+
+                // Only a binding that could be driving the action: one held back reads rest
+                // whether or not its control is claimed.
+                if any_claim && !held_back {
+                    binding.input.for_each_control(|control| {
+                        taken |= consumed.contains(control, devices) && is_down(control);
+                    });
+                }
 
                 let value =
                     match binding.input {
@@ -1031,7 +1072,11 @@ impl<C: InputContext> InputContextState<C> {
                     slot,
                     value,
                     condition_state,
-                    fold_kind,
+                    fold_kind: if taken {
+                        FoldKind::Interrupted
+                    } else {
+                        fold_kind
+                    },
                 },
                 actions,
                 dirty,
@@ -1958,6 +2003,51 @@ mod tests {
             "not Completed: nothing was let go"
         );
         assert!(!state.value::<Jump>());
+    }
+
+    /// A higher context claiming a held key takes it away without the player letting go, so what
+    /// the key was firing here is canceled, as focus loss cancels it (D94).
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_claim_arriving_cancels_what_it_took() {
+        use bevy_input::keyboard::KeyCode;
+
+        let mut state = jump_context();
+        let threshold = ButtonThreshold::default();
+        let mut frame = InputFrame::default();
+
+        frame.record(key(ButtonState::Pressed));
+        state.apply_frame(
+            &frame,
+            &threshold,
+            TICK,
+            &ConsumedControls::default(),
+            &mut Vec::new(),
+            None,
+        );
+        assert_eq!(state.phase::<Jump>(), ActionPhase::Fired);
+        state.transitions.clear();
+
+        let mut consumed = ConsumedControls::default();
+        consumed.claim::<bevy_app::PreUpdate>(
+            Control::PhysicalKey(KeyCode::Space),
+            None,
+            "eval_tests.vehicle",
+        );
+        state.apply_frame(&frame, &threshold, TICK, &consumed, &mut Vec::new(), None);
+
+        let phases: Vec<_> = state.transitions.iter().map(|t| t.phase).collect();
+        assert_eq!(
+            phases,
+            [ActionPhase::Canceled],
+            "not Completed: nothing was let go"
+        );
+        state.transitions.clear();
+
+        // Released under the claim: already canceled, so there is nothing left to end.
+        frame.record(key(ButtonState::Released));
+        state.apply_frame(&frame, &threshold, TICK, &consumed, &mut Vec::new(), None);
+        assert!(state.transitions.is_empty());
     }
 
     /// A control still physically held when focus returns must not re-fire on its own. Bevy never
