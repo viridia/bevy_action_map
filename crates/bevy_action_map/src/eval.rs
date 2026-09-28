@@ -372,7 +372,7 @@ pub(crate) fn evaluate_context<
 /// The two kinds of input have different temporal semantics, and the split is what lets a fast tap
 /// be seen without disturbing a mouse delta.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Fold {
+enum FoldKind {
     /// Controls with a value at every instant — buttons, axes, sticks. Sampled at each change, so a
     /// press and a release inside one window are two separate readings.
     Level,
@@ -388,17 +388,17 @@ enum Fold {
 
 /// Whether this event means the source is gone — a window losing focus or a device disconnecting —
 /// rather than an ordinary press, release, or motion.
-fn interruption_kind(event: &RawEvent) -> Fold {
+fn interruption_kind(event: &RawEvent) -> FoldKind {
     match event {
         #[cfg(any(feature = "keyboard", feature = "mouse"))]
-        RawEvent::FocusLost => Fold::Interrupted,
+        RawEvent::FocusLost => FoldKind::Interrupted,
         #[cfg(feature = "gamepad")]
         RawEvent::Gamepad(RawGamepadEvent::Connection(connection))
             if matches!(connection.connection, GamepadConnection::Disconnected) =>
         {
-            Fold::Interrupted
+            FoldKind::Interrupted
         }
-        _ => Fold::Level,
+        _ => FoldKind::Level,
     }
 }
 
@@ -470,7 +470,7 @@ impl<C: InputContext> InputContextState<C> {
                 threshold,
                 Vec2::ZERO,
                 if levels_left == 0 { delta } else { 0.0 },
-                Fold::Interrupted,
+                FoldKind::Interrupted,
                 consumed,
                 claims,
                 devices,
@@ -515,7 +515,7 @@ impl<C: InputContext> InputContextState<C> {
                 threshold,
                 Vec2::ZERO,
                 delta,
-                Fold::Level,
+                FoldKind::Level,
                 consumed,
                 claims,
                 devices,
@@ -526,7 +526,7 @@ impl<C: InputContext> InputContextState<C> {
             threshold,
             mouse_delta,
             delta,
-            Fold::Delta,
+            FoldKind::Delta,
             consumed,
             claims,
             devices,
@@ -680,7 +680,7 @@ impl<C: InputContext> InputContextState<C> {
         threshold: &ButtonThreshold,
         mouse_delta: Vec2,
         delta: f32,
-        kind: Fold,
+        fold_kind: FoldKind,
         consumed: &ConsumedControls,
         claims: &mut Vec<Control>,
         devices: Option<&DeviceHandleSet>,
@@ -797,27 +797,27 @@ impl<C: InputContext> InputContextState<C> {
             crate::binding::resolve_shared_toggle(actuated, active, cell);
         }
 
-        let mut index = 0;
-        while index < bindings.len() {
-            let slot = bindings[index].slot;
+        let mut binding_index = 0;
+        while binding_index < bindings.len() {
+            let slot = bindings[binding_index].slot;
             let intent = plan.intent_for_slot(slot);
 
             // A slot belongs to exactly one half, and `ActionIntent::accepts` is what guarantees
             // it: a `Delta2` action admits only delta-shaped inputs and every other intent admits
             // none, so no slot can want both passes.
-            let wanted = match kind {
-                Fold::Delta => intent == ActionIntent::Delta2,
-                Fold::Level | Fold::Interrupted => intent != ActionIntent::Delta2,
+            let wanted = match fold_kind {
+                FoldKind::Delta => intent == ActionIntent::Delta2,
+                FoldKind::Level | FoldKind::Interrupted => intent != ActionIntent::Delta2,
             };
             if !wanted || disabled[slot] {
-                while index < bindings.len() && bindings[index].slot == slot {
-                    index += 1;
+                while binding_index < bindings.len() && bindings[binding_index].slot == slot {
+                    binding_index += 1;
                 }
                 continue;
             }
 
-            let mut folded = Folded::default();
-            let mut best = ConditionState::Idle;
+            let mut combined = Combined::default();
+            let mut strongest_condition = ConditionState::Idle;
 
             // Held over from before this context activated: every binding reads rest until the
             // player lets go once, then the action behaves normally (R7.5). Decided before the
@@ -832,8 +832,8 @@ impl<C: InputContext> InputContextState<C> {
             let awaiting_release = require_reset[slot] && intent == ActionIntent::Button;
             let mut still_held = false;
 
-            while index < bindings.len() && bindings[index].slot == slot {
-                let binding = &bindings[index];
+            while binding_index < bindings.len() && bindings[binding_index].slot == slot {
+                let binding = &bindings[binding_index];
 
                 // Two ways to be out of the running before the control is even read: the chord this
                 // binding needs is not held, or a longer one on the same control is (R8.1).
@@ -907,9 +907,10 @@ impl<C: InputContext> InputContextState<C> {
 
                 // This binding's working memory, split into the three disjoint pieces
                 // `CompiledBinding::scratch_base` allocates.
-                let owned = &mut scratch
+                let binding_scratch = &mut scratch
                     [binding.scratch_base..binding.scratch_base + binding.scratch_len()];
-                let (modifier_scratch, rest) = owned.split_at_mut(binding.modifiers.len());
+                let (modifier_scratch, rest) =
+                    binding_scratch.split_at_mut(binding.modifiers.len());
                 let (condition_scratch, press_scratch) =
                     rest.split_at_mut(binding.conditions.len());
 
@@ -967,8 +968,8 @@ impl<C: InputContext> InputContextState<C> {
                 // rest until it is. A hold half-finished must not move the ship.
                 let condition_state =
                     crate::condition::combine(&binding.conditions, value, condition_scratch, delta);
-                if condition_state > best {
-                    best = condition_state;
+                if condition_state > strongest_condition {
+                    strongest_condition = condition_state;
                 }
                 // Claimed while the binding has something to say, so a binding that is merely bound
                 // to a control does not hold it against everyone else all the time — but one whose
@@ -985,24 +986,24 @@ impl<C: InputContext> InputContextState<C> {
                     ActionValue::Bool(false)
                 };
 
-                folded = folded.add(value, intent);
-                index += 1;
+                combined = combined.add(value, intent);
+                binding_index += 1;
             }
             if awaiting_release && !still_held {
                 require_reset.set(slot, false);
             }
 
-            let value = folded.value();
+            let value = combined.value();
             let (value, condition_state) = match plan.stage(slot) {
-                stage if stage.is_empty() => (value, best),
+                stage if stage.is_empty() => (value, strongest_condition),
                 stage => {
-                    let owned = &mut scratch[stage.scratch_base
+                    let stage_scratch = &mut scratch[stage.scratch_base
                         ..stage.scratch_base + stage.modifiers.len() + stage.conditions.len()];
                     let (modifier_scratch, condition_scratch) =
-                        owned.split_at_mut(stage.modifiers.len());
+                        stage_scratch.split_at_mut(stage.modifiers.len());
                     let value = apply_modifiers(value, &stage.modifiers, modifier_scratch, delta);
                     if stage.conditions.is_empty() {
-                        (value, best)
+                        (value, strongest_condition)
                     } else {
                         let judged = crate::condition::combine(
                             &stage.conditions,
@@ -1012,8 +1013,8 @@ impl<C: InputContext> InputContextState<C> {
                         );
                         // A binding part way through a hold contributes rest, which the stage alone
                         // would read as nothing happening, and the action would lose its `Started`.
-                        let judged = match (judged, best) {
-                            (ConditionState::Idle, ConditionState::Building) => best,
+                        let judged = match (judged, strongest_condition) {
+                            (ConditionState::Idle, ConditionState::Building) => strongest_condition,
                             _ => judged,
                         };
                         let value = if judged == ConditionState::Satisfied {
@@ -1030,7 +1031,7 @@ impl<C: InputContext> InputContextState<C> {
                     slot,
                     value,
                     condition_state,
-                    kind,
+                    fold_kind,
                 },
                 actions,
                 dirty,
@@ -1045,7 +1046,7 @@ struct Commit {
     slot: usize,
     value: ActionValue,
     condition_state: ConditionState,
-    kind: Fold,
+    fold_kind: FoldKind,
 }
 
 /// Moves one action's state on, and records the change and the edge.
@@ -1059,14 +1060,14 @@ fn commit_slot(
         slot,
         value,
         condition_state,
-        kind,
+        fold_kind,
     } = commit;
 
     // Compared rather than inferred from the phase: a held stick reports `Firing` every tick while
     // its value moves, and an action whose value moved has changed as surely as one that started or
     // stopped.
     let before = actions[slot];
-    let phase = update_action_state(&mut actions[slot], value, condition_state, kind);
+    let phase = update_action_state(&mut actions[slot], value, condition_state, fold_kind);
     if actions[slot] != before {
         dirty.set(slot, true);
     }
@@ -1089,9 +1090,9 @@ fn at_rest(intent: ActionIntent) -> ActionValue {
     }
 }
 
-/// An action's value part way through the fold, split by sign on each axis (D76).
+/// An action's value part way through combining its bindings, split by sign on each axis (D76).
 #[derive(Clone, Copy, Default)]
-struct Folded {
+struct Combined {
     positive: Vec3,
     negative: Vec3,
     /// The most components any contribution carried, so the result does not take its shape from
@@ -1099,7 +1100,7 @@ struct Folded {
     rank: u8,
 }
 
-impl Folded {
+impl Combined {
     /// Combines one more binding's contribution.
     ///
     /// A delta is a displacement, so two of them add. Everything else is a position or a press,
@@ -1183,13 +1184,13 @@ fn apply_modifiers(
 /// action already was. That is what makes giving up on a hold a `Canceled` rather than a
 /// `Completed` — the action never actually happened.
 ///
-/// `kind` decides which of `Completed` and `Canceled` a firing-then-idle transition is — see
-/// `Fold::Interrupted`.
+/// `fold_kind` decides which of `Completed` and `Canceled` a firing-then-idle transition is — see
+/// `FoldKind::Interrupted`.
 fn update_action_state(
     action_state: &mut crate::action::ActionState,
     value: ActionValue,
     condition_state: ConditionState,
-    kind: Fold,
+    fold_kind: FoldKind,
 ) -> ActionPhase {
     let was_firing = matches!(action_state.phase, ActionPhase::Fired | ActionPhase::Firing);
     let was_building = matches!(
@@ -1218,7 +1219,7 @@ fn update_action_state(
         }
         ConditionState::Idle => {
             if was_firing {
-                if kind == Fold::Interrupted {
+                if fold_kind == FoldKind::Interrupted {
                     ActionPhase::Canceled
                 } else {
                     ActionPhase::Completed

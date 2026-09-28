@@ -215,6 +215,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 179a | `Started<A>` reaches observers, with a tick-script fixture            |
 | 179b | A hold charges once per tick                                          |
 | 179c | Require-reset holds through a time condition                          |
+| 180  | `fold`'s names say what they span                                     |
 
 ---
 
@@ -247,16 +248,17 @@ where a part needs more than events and a `delta` per tick.
 
 A consumed control reads as untouched, so a lower context cannot tell a claim arriving from the
 player letting go. Space held, `Jump` firing, Shift added for the vehicle's boost: on-foot's `Jump`
-completes as though the player had released. Read from `fold`, not yet probed: `Fold::Interrupted`
-is set for focus loss, a disconnect and authority loss, not for a claim. D94 rules it, following the
-authority path (TD5.8): a key that goes away while down cancels what it was firing.
+completes as though the player had released. Read from `fold`, not yet probed:
+`FoldKind::Interrupted` is set for focus loss, a disconnect and authority loss, not for a claim. D94
+rules it, following the authority path (TD5.8): a key that goes away while down cancels what it was
+firing.
 
 - **Probe first:** `Jump` firing on Space, a higher context claiming Space the next tick, `Canceled`
   expected.
 - **The context keeps last tick's claims**, and the difference from this tick's is the edge. 179e
   reads the same difference.
 - **The fix:** each lower action with a binding on a newly claimed control folds as
-  `Fold::Interrupted`, beside the `authority_lost` fold and before the events, so it is handed
+  `FoldKind::Interrupted`, beside the `authority_lost` fold and before the events, so it is handed
   `delta` only when no event follows (D97).
 - **The arrival rule joins R8.2**, since R7.5 covers activation alone.
 - **Chunk 83 gains the kept claims** as state a restore must bring back.
@@ -277,19 +279,6 @@ already down is ignored by `Button` actions until released.
 - **Depends on 179c and 179d**: without 179c, a returning key whose binding has a hold slips through
   the latch as it does on activation.
 
-### 180. `fold`'s names say what they span · E[1]
-
-`fold` is about 360 lines, and names that read as local span a whole slot. "Fold" also names three
-things: the pass (`fold`), its kind (`Fold`), and one action's bindings summed (`Folded`), so
-`folded` reads as the pass's result.
-
-- **The renames:** `Fold` → `FoldKind` and `kind` → `fold_kind`; `Folded` → `Combined` and `folded`
-  → `combined`, matching the `combined::<A>()` stage it feeds; `best` → `strongest_condition`;
-  `owned` → `binding_scratch`; the slot loop's `index` → `binding_index`.
-- **Not here:** the eight successive `value`s in one binding's body. Which of them still need names
-  depends on the function 181 extracts them into, so 181 names them.
-- **Verified by** the tests and examples not changing (ground rule 3).
-
 ### 181. `fold` split into functions · E[2]
 
 Shrinks the scope instead of lengthening the names. The body splits into `read_control` (the
@@ -299,8 +288,9 @@ per-input `match`), `evaluate_binding` (modifiers, threshold, require-reset, con
 - **Proposed before built:** `is_pressed` and `entry_held` close over six held-state fields plus
   `consumed` and `devices`, so moving code out needs a borrowing view of them, such as a
   `HeldInput<'a>` with those two as methods. The author settles the shape before code.
-- **Names the `value` stages** 180 left, where the extracted functions still need them.
-- **Depends on 180**, so the extraction moves code that already has its names.
+- **Names the `value` stages:** one binding's body shadows `value` eight times, once per stage from
+  the raw reading to the gated result. Each gets a name where its extracted function still needs
+  one.
 - **Verified by** the tests and examples not changing (ground rule 3).
 
 ## Bindings and conditions
