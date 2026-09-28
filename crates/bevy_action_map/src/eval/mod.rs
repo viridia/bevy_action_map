@@ -69,6 +69,30 @@ fn interruption_kind(event: &RawEvent) -> FoldKind {
     }
 }
 
+/// Whether every entry of a chord is held. A control another context has taken reads as
+/// untouched.
+// A modifier entry is a disjunction: either key of the pair satisfies it, and both being live at
+// once is why it cannot be expanded at bind time into one entry per side.
+#[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+pub(crate) fn chord_held(
+    chord: &[crate::binding::ChordEntry],
+    held: &HeldControlState,
+    consumed: &ConsumedControls,
+    devices: Option<&DeviceHandleSet>,
+) -> bool {
+    let is_pressed = |control: ButtonControl| {
+        !consumed.contains(control.into(), devices) && held.is_pressed(control)
+    };
+    chord.iter().all(|&entry| match entry {
+        crate::binding::ChordEntry::Control(control) => is_pressed(control),
+        #[cfg(feature = "keyboard")]
+        crate::binding::ChordEntry::Modifier(modifier) => modifier
+            .keys()
+            .into_iter()
+            .any(|key| is_pressed(ButtonControl::PhysicalKey(key))),
+    })
+}
+
 impl<C: InputContext> InputContextState<C> {
     pub(crate) fn apply_frame(
         &mut self,
@@ -246,7 +270,6 @@ impl<C: InputContext> InputContextState<C> {
             disabled,
             scratch,
             tunable_scratch,
-            chord_claims,
             held,
             authority,
             ..
@@ -259,55 +282,18 @@ impl<C: InputContext> InputContextState<C> {
         };
         let any_claim = !consumed.is_empty();
 
-        // A modifier entry is a disjunction: either key of the pair satisfies it, and both being
-        // live at once is why this cannot be expanded at bind time into one entry per side.
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-        let entry_held = |entry: crate::binding::ChordEntry| match entry {
-            crate::binding::ChordEntry::Control(control) => is_pressed(control),
-            #[cfg(feature = "keyboard")]
-            crate::binding::ChordEntry::Modifier(modifier) => modifier
-                .keys()
-                .into_iter()
-                .any(|key| is_pressed(ButtonControl::PhysicalKey(key))),
-        };
-
-        // Which chord has the strongest claim on each control. Computed before anything is read,
-        // because a binding cannot know it is out-ranked without looking at the others — and it is
-        // a pure function of what is held, so it keeps no state and can be redone per fold.
-        chord_claims.clear();
-        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-        if plan.has_chords() {
-            for binding in plan.bindings() {
-                if disabled[binding.slot] || !binding.chord.iter().copied().all(&entry_held) {
-                    continue;
-                }
-                binding.input.for_each_control(|control| {
-                    match chord_claims.iter_mut().find(|(seen, _)| *seen == control) {
-                        Some((_, best)) => *best = (*best).max(binding.chord_len),
-                        None => chord_claims.push((control, binding.chord_len)),
-                    }
-                });
-            }
-        }
-        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-        let out_ranked = |binding: &crate::plan::CompiledBinding| {
-            let mut lost = false;
-            binding.input.for_each_control(|control| {
-                lost |= chord_claims
-                    .iter()
-                    .any(|&(seen, best)| seen == control && best > binding.chord_len);
-            });
-            lost
+        let chord_held = |binding: &crate::plan::CompiledBinding| {
+            chord_held(&binding.chord, held, consumed, devices)
         };
 
         let bindings = plan.bindings();
 
         // Every group of bindings sharing a `hold_or_toggle` key resolves its latch once per tick,
         // from the combined actuation of every member — computed here, before any binding's own
-        // evaluation, for the same reason `chord_claims` is: a binding cannot resolve a fact about
-        // the whole group from partway through visiting it. See `resolve_shared_toggle`'s own doc
-        // for what goes wrong resolving this per binding instead. Most plans share none, and this
-        // loop then runs zero times.
+        // evaluation: a binding cannot resolve a fact about the whole group from partway through
+        // visiting it. See `resolve_shared_toggle`'s own doc for what goes wrong resolving this per
+        // binding instead. Most plans share none, and this loop then runs zero times.
         #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
         for (scratch_index, cell) in tunable_scratch.iter_mut().enumerate() {
             let mut actuated = false;
@@ -365,8 +351,10 @@ impl<C: InputContext> InputContextState<C> {
                 // Two ways to be out of the running before the control is even read: the chord this
                 // binding needs is not held, or a longer one on the same control is (R8.1).
                 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-                let held_back = !binding.chord.iter().copied().all(&entry_held)
-                    || (plan.has_chords() && out_ranked(binding));
+                let held_back = !chord_held(binding)
+                    || plan
+                        .rivals(binding)
+                        .any(|rival| !disabled[rival.slot] && chord_held(rival));
                 #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
                 let held_back = false;
 

@@ -672,6 +672,12 @@ pub(crate) struct CompiledBinding {
     // How specific this binding is: one for the control it names, plus one per control it requires
     // alongside. The clash between two bindings on one control is decided by this and nothing else.
     pub(crate) chord_len: u8,
+    // This binding's longer-chord rivals: every binding sharing a control with it whose chord is
+    // strictly longer. One of them held out-ranks this one (R8.1). Stored as a span of positions in
+    // `Plan::chord_rivals`, a flat list where each binding's rivals sit together; the entries in
+    // that span are indices into `Plan::bindings`. An empty span is a binding with no rival, which
+    // is every binding of a plan without chords.
+    pub(crate) rivals: core::ops::Range<u32>,
     // Where this binding keeps its working memory: the modifiers, then the conditions, then the
     // press it derived. No two share a slot, even when they are the same kind.
     pub(crate) scratch_base: usize,
@@ -757,13 +763,13 @@ pub(crate) struct Plan {
     // One cell per group of bindings sharing a tunable — see `CompiledBinding::tunable_shared`.
     // Most plans have none.
     tunable_scratch_count: usize,
-    // Read only by the clash pass, which no build without device features has: no controls means no
-    // binding can carry a chord. Computed unconditionally so the builder needs no `cfg`.
+    // The storage behind `CompiledBinding::rivals`, whose note explains the layout. Unread in any
+    // build without device features, where no binding has a chord.
     #[cfg_attr(
         not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")),
         allow(dead_code)
     )]
-    has_chords: bool,
+    chord_rivals: Vec<u32>,
     // TD5.4's second structure: consulted only when `indexed_controls` doesn't already claim the
     // control an event arrived on.
     class_bindings: Vec<CompiledClassBinding>,
@@ -916,6 +922,7 @@ impl Plan {
                 chord_len: 1 + u8::try_from(binding.chord.len()).unwrap_or(u8::MAX),
                 #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
                 chord_len: 1,
+                rivals: 0..0,
                 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
                 chord: binding.chord,
                 scratch_base,
@@ -927,7 +934,28 @@ impl Plan {
         // Contiguous per slot, which is how the fold visits one action's bindings together.
         compiled.sort_by_key(|binding| binding.slot);
 
-        let has_chords = compiled.iter().any(|binding| binding.chord_len > 1);
+        // After the sort, since a rival is named by its index. A rival may hold the same slot: `S`
+        // and `Ctrl+S` bound to one action still clash.
+        let mut chord_rivals: Vec<u32> = Vec::new();
+        for index in 0..compiled.len() {
+            let start = chord_rivals.len() as u32;
+            let binding = &compiled[index];
+            for (other, rival) in compiled.iter().enumerate() {
+                if rival.chord_len <= binding.chord_len {
+                    continue;
+                }
+                let mut shared = false;
+                binding.input.for_each_control(|control| {
+                    rival
+                        .input
+                        .for_each_control(|theirs| shared |= theirs == control);
+                });
+                if shared {
+                    chord_rivals.push(other as u32);
+                }
+            }
+            compiled[index].rivals = start..chord_rivals.len() as u32;
+        }
 
         // Recomputed on every compile, including a variant's: an override rewrites which controls
         // these bindings read, so a rebind has to move a control between "indexed" and "not" along
@@ -949,7 +977,7 @@ impl Plan {
             tunable_scratch_count,
             class_bindings: Vec::new(),
             indexed_controls,
-            has_chords,
+            chord_rivals,
         }
     }
 
@@ -975,12 +1003,15 @@ impl Plan {
         self.tunable_scratch_count
     }
 
-    /// Whether any binding requires a control held alongside its own.
-    ///
-    /// A plan with none skips the clash pass entirely, which is most plans.
+    /// The bindings whose longer chord, held, out-ranks `binding` on a control they share.
     #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-    pub(crate) fn has_chords(&self) -> bool {
-        self.has_chords
+    pub(crate) fn rivals(
+        &self,
+        binding: &CompiledBinding,
+    ) -> impl Iterator<Item = &CompiledBinding> {
+        self.chord_rivals[binding.rivals.start as usize..binding.rivals.end as usize]
+            .iter()
+            .map(|&index| &self.bindings[index as usize])
     }
 
     pub(crate) fn intent_for_slot(&self, slot: usize) -> ActionIntent {

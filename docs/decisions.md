@@ -38,7 +38,7 @@ here, so there is one `D`-numbering in the project.
 | **D8**  | Action state is two dense tables; actions are not entities                    | TD6       |
 | **D9**  | A context declares one tick domain and is evaluated once                      | TD1, TD3   |
 | **D10** | Bindings compile once into an immutable, shared plan                          | TD4       |
-| **D11** | Arbitration splits: priority is system ordering, chord length is a pre-pass   | TD5.1     |
+| **D11** | Arbitration splits: priority is system ordering, chord length is plan data    | TD5.1     |
 | **D12** | Consumption is recorded per schedule and flows forward                        | TD5.2     |
 | **D13** | Exclusivity is a ceiling, not a third context state                           | TD5.3     |
 | **D14** | A class binding is a second list, not an expanded set of controls             | TD5.4     |
@@ -301,16 +301,16 @@ the next patch's revised defaults would never reach a player who never touched t
 multiplies plans rather than only tables. The state tables are the part that scales with players, so
 this was judged acceptable rather than free.
 
-### D11 — Arbitration splits: priority is system ordering, chord length is a pre-pass
+### D11 — Arbitration splits: priority is system ordering, chord length is plan data
 
 **Decided.** The obvious shape — one list of every binding touching a control, sorted by context
-priority and chord length — is not built. Priority becomes system ordering, fixed at app build:
-each distinct priority gets its own system set, ordered against the others in its schedule. Two
-contexts declared at the same priority get their own nested set in turn, ordered after the one
-before it — declaration order breaks the tie a priority number left open, the same way it already
-does everywhere else two things read together (D15's fold, D36's prompt scan). Chord length is
-resolved by a pre-pass within one evaluation, finding the longest satisfied chord on each control
-before any binding is read.
+priority and chord length — is not built. Priority becomes system ordering, fixed at app build: each
+distinct priority gets its own system set, ordered against the others in its schedule. Two contexts
+declared at the same priority get their own nested set in turn, ordered after the one before it —
+declaration order breaks the tie a priority number left open, the same way it already does
+everywhere else two things read together (D15's fold, D36's prompt scan). Chord length is resolved
+within one evaluation, against rivals the plan computes at build: each binding knows the longer
+chords on its controls, and reads as rest while one of them is held.
 
 **Rules out.** The single sorted list. It cannot be built: a plan belongs to one context and cannot
 see another's bindings, and one list cannot span two schedules.

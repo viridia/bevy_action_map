@@ -181,7 +181,7 @@ Bindings are authored as data and compiled once per context into a `Plan`.
 | action → slot assignment, and the reverse as a direct index | O(1) state access without hashing |
 | scratch slot assignment per condition and stateful modifier | TD6 |
 | each action's stage after the fold, its scratch placed after every binding's | TD5.5 |
-| each binding's chord length, and whether the plan has any | the clash pre-pass, skipped when there are no chords |
+| each binding's chord length, and its longer-chord rivals | chord arbitration, TD5.1 |
 | the set of controls any binding indexes | class-binding fallback, TD5.4 |
 | resolved dispatch per slot | turning a transition into a typed event |
 | diagnostics | reported before the context is installed |
@@ -225,9 +225,9 @@ One pass per context per tick: raw events in, action state and a transition log 
 ```
 raw event, one at a time
   → held-state update
-  → chord clash pre-pass  once per fold, if the plan has chords
   → shared toggle latch   once per fold, per shared hold_or_toggle key
   → per binding
+      chord               its own unheld, or a longer-chord rival's held: reads as rest
       read the control    a consumed control reads as untouched
       modifier chain      negate · swizzle · scale · dead zone · curve · clamp · compass · custom
       press threshold     a Button action fed by a non-bool value, remembered per binding
@@ -268,10 +268,12 @@ tiebreak. Registration order becoming meaningful this way is easy to miss, since
 usually independent of each other's ordering: two contexts at the same priority are the one place
 here that they are not.
 
-**Chord length is a pre-pass inside one evaluation.** Whether a chord is satisfied is a pure
-function of what is held, so before any binding is read the longest satisfied chord on each control
-is found. A binding shorter than the winner on any of its controls reads as at rest. `Ctrl+S` beats
-a bare `S` with nothing declared for it.
+**Chord length is decided inside one evaluation.** Plan compilation gives each binding its
+*longer-chord rivals*: the bindings sharing a control with it whose chord is strictly longer,
+disabled or not. While any enabled rival's chord is held, the binding reads as at rest, whether or
+not the rival's own control is. Whether a chord is held is a pure function of held state, a consumed
+control counting as released, so the answer needs no state between folds. `Ctrl+S` beats a bare `S`
+with nothing declared for it.
 
 **A chord entry is a control or a modifier.** `ChordEntry::Control` names one control and is
 satisfied by that control alone. `ChordEntry::Modifier` names one of `ModifierKey`'s four pairs and
@@ -494,7 +496,6 @@ what keeps the shape uniform across every built-in condition and stateful modifi
 - `active` and `shadowed`;
 - `tunable_scratch`, one cell per group of bindings sharing a tunable, rather than a private slot
   per binding;
-- `chord_claims`, reused between folds;
 - `require_reset` and `disabled`, parallel to the action table;
 - `transitions` and `class_fires`, appended by evaluation and drained by dispatch;
 - `read_through`, this instance's frame cursor, seeded at spawn so a context added mid-session

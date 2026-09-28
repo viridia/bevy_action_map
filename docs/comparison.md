@@ -177,9 +177,9 @@ places.
   defaults, pressing Ctrl+S fires both. It also only understands `ModKeys` (Ctrl, Shift, Alt,
   Super), not a general chord — a general chord is the separate `Chord` condition, which references
   another action.
-- **This crate** runs a pre-pass over the plan: the longest satisfied chord on each control is found
-  before anything is read, and a shorter binding on that control reads as rest. Automatic, no
-  consumption involved, and general over any chord (`src/eval/`).
+- **This crate** finds, when a context's bindings are compiled, the longer chords on each binding's
+  controls; while one of them is held, the shorter binding reads as rest. Automatic, no consumption
+  involved, and general over any chord (`src/plan.rs`, `src/eval/`).
 
 **One context taking a control from another.** A pause menu should stop the ship hearing Escape.
 

@@ -347,9 +347,8 @@ there:
 
 - `evaluate_context` builds `let mut claims = Vec::new()` per instance per tick
   (`eval/context_systems.rs`, in the loop that calls `apply_frame`) and allocates the moment
-  anything is claimed. `chord_claims` sits on `InputContextState` and cites R23.2 in its comment for
-  exactly this reason, and `dispatch_transitions` takes and hands back its log to keep the
-  allocation — so both idioms are established in the same file and `claims` follows neither.
+  anything is claimed. `dispatch_transitions` takes and hands back its log to keep the allocation,
+  so the idiom is established in the same file and `claims` does not follow it.
 - `controls()` allocates a fresh `Vec<Control>` and is called per consuming binding per tick, in the
   same loop, to fill that vector.
 
@@ -388,9 +387,9 @@ costs 2.9 times as much with chords and 1.9 times without. Under a burst, where 
 it costs 5.3 times. Extrapolated rather than measured: a hitch that leaves the queue's 4096 events
 for one tick costs this context about 16 ms, a whole frame at 60 Hz, per instance.
 
-_Routed to chunk 181._ 181c replaces the pre-pass with rivals computed at plan build, 181e runs a
-binding only when its input changes and once at the end of the tick, and each part compares against
-the benchmark's saved `pre181` baseline. 181e closes this entry.
+_Routed to chunk 181._ 181c has replaced the pre-pass with rivals computed at plan build; 181e runs
+a binding only when its input changes and once at the end of the tick, and each part compares
+against the benchmark's saved `pre181` baseline. 181e closes this entry.
 
 Rejected for now: collapsing one axis's readings within a tick, which loses a trigger crossing its
 press point and back inside a tick, the edge R9.3 protects for buttons.

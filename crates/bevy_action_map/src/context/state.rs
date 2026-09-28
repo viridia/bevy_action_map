@@ -50,9 +50,6 @@ pub struct InputContextState<C> {
     // each binding's own private slot in `scratch` above — the mechanism `hold_or_toggle` needs so
     // that pressing any control it reaches agrees with every other about the latch.
     pub(crate) tunable_scratch: Vec<Scratch>,
-    // Reused between folds: the longest satisfied chord found on each control. Kept here rather
-    // than allocated per fold, since a plan that uses chords uses them every tick (R23.2).
-    pub(crate) chord_claims: Vec<(crate::binding::Control, u8)>,
     // Parallel to `actions`: this action may not fire until it has been seen at rest once. Set when
     // a context activates, so a control the player was already holding does not read as a fresh
     // press.
@@ -96,7 +93,6 @@ impl<C: InputContext> InputContextState<C> {
             shadowed: false,
             scratch: alloc::vec![Scratch::default(); scratch_slots],
             tunable_scratch: alloc::vec![Scratch::default(); tunable_scratch_slots],
-            chord_claims: Vec::new(),
             require_reset: FixedBitSet::with_capacity(slots),
             disabled: FixedBitSet::with_capacity(slots),
             transitions: Vec::new(),
@@ -313,6 +309,10 @@ impl<C: InputContext> InputContextState<C> {
         let mut reachable = devices.is_none();
         for binding in self.plan.bindings().iter().filter(|b| b.slot == slot) {
             let mut taken = None;
+            #[cfg_attr(
+                not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")),
+                allow(unused_mut)
+            )]
             let mut outranked = None;
             binding.input.for_each_control(|control| {
                 if devices.is_some_and(|set| set.owner_for(control.family()).is_some()) {
@@ -323,11 +323,28 @@ impl<C: InputContext> InputContextState<C> {
                 {
                     taken = Some(ActionObstacle::Consumed { control, by });
                 }
+                // Several rivals may be held on one control; the longest is the one reported.
+                #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
                 if outranked.is_none()
-                    && let Some(&(_, chord)) = self
-                        .chord_claims
-                        .iter()
-                        .find(|&&(seen, best)| seen == control && best > binding.chord_len)
+                    && let Some(chord) = self
+                        .plan
+                        .rivals(binding)
+                        .filter(|rival| {
+                            let mut shared = false;
+                            rival
+                                .input
+                                .for_each_control(|theirs| shared |= theirs == control);
+                            shared
+                                && !self.disabled[rival.slot]
+                                && crate::eval::chord_held(
+                                    &rival.chord,
+                                    &self.held,
+                                    consumed,
+                                    devices,
+                                )
+                        })
+                        .map(|rival| rival.chord_len)
+                        .max()
                 {
                     outranked = Some(ActionObstacle::Outranked { control, chord });
                 }
@@ -459,7 +476,6 @@ impl<C: InputContext> InputContextState<C> {
         self.tunable_scratch.clear();
         self.tunable_scratch
             .resize(plan.tunable_scratch_count(), Scratch::default());
-        self.chord_claims.clear();
         self.plan = plan;
 
         // Set directly rather than through `activate`, which returns early on a context that is

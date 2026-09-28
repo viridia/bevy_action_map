@@ -220,6 +220,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 180  | `fold`'s names say what they span                                     |
 | 181a | The evaluator's benchmark, and a probe for unrelated events           |
 | 181b | `eval.rs` split along the lines that do not change                    |
+| 181c | Longer-chord rivals replace the chord pre-pass                        |
 
 ---
 
@@ -316,15 +317,6 @@ part after 181a compares with `cargo bench -p bevy_action_map --bench eval -- --
 Tests go on `Script`, the tick-script fixture in `eval/mod.rs`'s tests. When 181e lands, this model
 moves into TD5 and a new decision, and this introduction is deleted.
 
-### 181c. Longer-chord rivals replace the chord pre-pass · E[2]
-
-- `Plan::compile` computes each binding's longer-chord rivals, beside `has_chords`.
-- `fold`'s pre-pass and its `out_ranked` closure use them; `chord_claims` is deleted, and
-  `why_not`'s `Outranked` answer reads the rivals.
-- **Not done:** the evaluation order.
-- **Verified by** the tests not changing, and the benchmark's chords-on case costing about what
-  chords-off does.
-
 ### 181d. The affected-bindings index · E[1]
 
 - `Plan::bindings_affected_by(control)`: the bindings reading a control, the bindings chorded on
@@ -344,9 +336,9 @@ moves into TD5 and a new decision, and this introduction is deleted.
 - `Condition::evaluate` and `Modifier::apply` keep their signatures. Their doc comments say they are
   called each time the binding's input changes within a tick and once at the end of it, with a
   non-zero `delta` only at the end.
-- Forced documents: TD5 rewritten (diagram, replay and time), TD5.1's chord paragraph and TD5.2's
-  claimed-while-held paragraph adjusted, D97 amended, a new decision "A binding's pipeline runs once
-  per reading" added, issues 1075 and 1077 closed, a line on X54 saying its main obstacle is gone.
+- Forced documents: TD5 rewritten (diagram, replay and time), TD5.2's claimed-while-held paragraph
+  adjusted, D97 amended, a new decision "A binding's pipeline runs once per reading" added, issues
+  1075 and 1077 closed, a line on X54 saying its main obstacle is gone.
 - Every test whose expectation changes is listed in the commit, classified "the old evaluator was
   wrong" or "the new one is wrong". The issue 1077 probe, `an_unbound_key_changes_nothing_reported`,
   is un-ignored.
@@ -356,10 +348,10 @@ moves into TD5 and a new decision, and this introduction is deleted.
 - **Not done:** skipping the closing step for a binding with an unchanged reading and no
   time-dependent stage, a later optimisation measured after this lands; any change to `Scratch` or a
   trait signature; `docs/architecture.md`, which is 181f.
-- **Verified by** `scripts/verify.sh --matrix`; the benchmark against `pre181`; Disasteroids and
-  Split Friction launched for a minute each; one end-to-end run of
-  `crates/bevy_remote_driver/plans/disasteroids/rebind.py`; and the unit suite run on `main` and on
-  the branch, with the failing-test lists diffed.
+- **Verified by** `scripts/verify.sh --matrix`; the benchmark against `pre181`, and against
+  `post181c` to separate this part's gain from 181c's; Disasteroids and Split Friction launched for
+  a minute each; one end-to-end run of `crates/bevy_remote_driver/plans/disasteroids/rebind.py`; and
+  the unit suite run on `main` and on the branch, with the failing-test lists diffed.
 
 ### 181f. `docs/architecture.md` brought up to date · E[2]
 
@@ -378,6 +370,10 @@ central diagrams. It covers everything since the tour was frozen at `2a432f5` (2
   action" lose `fold`, `chord_claims` and the old interruption paths.
 - Every other section is checked against that list and corrected where it has drifted. The tour
   keeps teaching shape and deferring detail to `TD` sections.
+- `docs/one-way-doors.md`'s specificity entry argues that longest-chord-wins needs a pre-pass over
+  the bindings, walking binding entities twice per tick in an entity model. Since 181c the rivals
+  are computed at plan build, which weakens that half of why the door is one-way; the entry is
+  re-argued or its claim narrowed.
 - Every Mermaid block is rendered with `mmdc` through `npx`, as X44 asks, since GitHub shows a broken
   one as source text with no error.
 - **Not done:** any change to X44 itself. The tour is frozen again afterwards.
