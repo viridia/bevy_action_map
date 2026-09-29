@@ -223,6 +223,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 181c | Longer-chord rivals replace the chord pre-pass                        |
 | 181d | The affected-bindings index                                           |
 | 181e | A binding's pipeline records each reading once                        |
+| 181f | `docs/architecture.md` brought up to date                             |
 | 183  | Bevy 0.20.0-rc.2, and the driver's gamepad message registration gone  |
 | 184  | Inline prompts from the block art                                     |
 
@@ -240,34 +241,6 @@ its identity rather than its position.
 
 Chunk 179 carries defects. The register of what is known to be wrong is
 [docs/issues.md](./docs/issues.md), and an entry there that acquires a chunk gets a section here.
-
-## The tick loop
-
-### 181f. `docs/architecture.md` brought up to date · E[2]
-
-A batch refresh under X44, called by the author because the new evaluator changes the tour's
-central diagrams. It covers everything since the tour was frozen at `2a432f5` (2026-09-25), not only
-181.
-
-- **The list of what moved** is X44's recipe: `git log 2a432f5..HEAD -- docs/design.md
-  crates/bevy_action_map/src/`. It showed 17 commits before 181 began. Among them are the crate
-  moving under `crates/` (171), which changes every path in "Finding your way in the code"; the
-  `gamepad` module (165), rumble (167) and calibration (72b); the Steam build (168); one `apply` for
-  the world or an entity (143); and all of 179 and 180. 181's own parts come on top.
-- **"Inside one evaluation"** is redrawn for the new model: the per-event fold diagram becomes the
-  event loop, pending readings and the closing step, and "a fold is one pass over every binding"
-  becomes the per-binding pipeline and its invariant. "Where state lives" and "The life of an
-  action" lose `fold`, `chord_claims` and the old interruption paths.
-- Every other section is checked against that list and corrected where it has drifted. The tour
-  keeps teaching shape and deferring detail to `TD` sections.
-- `docs/one-way-doors.md`'s specificity entry argues that longest-chord-wins needs a pre-pass over
-  the bindings, walking binding entities twice per tick in an entity model. Since 181c the rivals
-  are computed at plan build, which weakens that half of why the door is one-way; the entry is
-  re-argued or its claim narrowed.
-- Every Mermaid block is rendered with `mmdc` through `npx`, as X44 asks, since GitHub shows a broken
-  one as source text with no error.
-- **Not done:** any change to X44 itself. The tour is frozen again afterwards.
-- **Verified by** `python3 scripts/xref.py` and the rendered diagrams.
 
 ## Bindings and conditions
 

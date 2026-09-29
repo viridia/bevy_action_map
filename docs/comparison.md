@@ -78,6 +78,176 @@ neither the variant nor the type. Section 9 has it.
 
 ---
 
+## What it looks like
+
+The same small game in each crate: `Jump` on Space or gamepad South, `Move` on WASD or the left
+stick, and a pause menu whose `Confirm` is also on South, which gameplay must not hear while the
+menu is up. The three share a state and a player component, and imports are left out:
+
+```rust
+#[derive(States, Default, Clone, PartialEq, Eq, Hash, Debug)]
+enum GameState { #[default] Playing, Paused }
+
+#[derive(Component)]
+struct Player;
+```
+
+**LWIM**, after its `default_controls` example:
+
+```rust
+#[derive(Actionlike, PartialEq, Eq, Hash, Clone, Copy, Debug, Reflect)]
+enum PlayerAction {
+    Jump,
+    #[actionlike(DualAxis)]
+    Move,
+}
+
+#[derive(Actionlike, PartialEq, Eq, Hash, Clone, Copy, Debug, Reflect)]
+enum MenuAction { Confirm }
+
+app.add_plugins((
+    InputManagerPlugin::<PlayerAction>::default(),
+    InputManagerPlugin::<MenuAction>::default(),
+))
+.add_systems(Update, (
+    jump.run_if(in_state(GameState::Playing)),
+    confirm.run_if(in_state(GameState::Paused)),
+));
+
+// at spawn
+let mut player = InputMap::default();
+player
+    .insert(PlayerAction::Jump, KeyCode::Space)
+    .insert(PlayerAction::Jump, GamepadButton::South)
+    .insert_dual_axis(PlayerAction::Move, VirtualDPad::wasd())
+    .insert_dual_axis(PlayerAction::Move, GamepadStick::LEFT);
+commands.spawn((Player, player));
+
+let mut menu = InputMap::default();
+menu.insert(MenuAction::Confirm, KeyCode::Enter)
+    .insert(MenuAction::Confirm, GamepadButton::South);
+commands.spawn(menu);
+
+fn jump(actions: Single<&ActionState<PlayerAction>, With<Player>>) {
+    if actions.just_pressed(&PlayerAction::Jump) { /* ... */ }
+}
+```
+
+**BEI**, after its crate docs and `state` module:
+
+```rust
+#[derive(InputAction)]
+#[action_output(bool)]
+struct Jump;
+
+#[derive(InputAction)]
+#[action_output(Vec2)]
+struct Move;
+
+#[derive(InputAction)]
+#[action_output(bool)]
+struct Confirm;
+
+#[derive(Component)]
+struct PauseMenu;
+
+app.add_plugins(EnhancedInputPlugin)
+    .add_input_context::<Player>()
+    .add_input_context::<PauseMenu>()
+    .sync_context_to_state::<Player, GameState>()
+    .sync_context_to_state::<PauseMenu, GameState>()
+    .add_observer(jump);
+
+// at spawn
+commands.spawn((
+    Player,
+    ActiveInStates::<Player, _>::single(GameState::Playing),
+    actions!(Player[
+        (Action::<Jump>::new(), bindings![KeyCode::Space, GamepadButton::South]),
+        (
+            Action::<Move>::new(),
+            DeadZone::default(),
+            Bindings::spawn((Cardinal::wasd_keys(), Axial::left_stick())),
+        ),
+    ]),
+));
+commands.spawn((
+    PauseMenu,
+    ActiveInStates::<PauseMenu, _>::single(GameState::Paused),
+    actions!(PauseMenu[
+        (Action::<Confirm>::new(), bindings![KeyCode::Enter, GamepadButton::South]),
+    ]),
+));
+
+fn jump(jump: On<Start<Jump>>) { /* jump.context is the player */ }
+```
+
+**This crate**, after its `minimal` example and Disasteroids' menu:
+
+```rust
+#[derive(InputAction)]
+#[action(path = "gameplay.jump", output = bool, intent = Button)]
+struct Jump;
+
+#[derive(InputAction)]
+#[action(path = "gameplay.move", output = Vec2, intent = Directional2)]
+struct Move;
+
+#[derive(InputAction)]
+#[action(path = "menu.confirm", output = bool, intent = Button)]
+struct Confirm;
+
+#[derive(InputContext)]
+#[context(path = "gameplay.on_foot", tick = Render)]
+struct OnFoot;
+
+#[derive(InputContext)]
+#[context(path = "menu.pause", tick = Render, priority = 10, exclusive)]
+struct PauseMenu;
+
+app.add_plugins(ActionMapPlugin)
+    .add_context::<OnFoot>(|context| {
+        context.bind::<Jump>(KeyCode::Space);
+        context.bind::<Jump>(GamepadButton::South);
+        context.bind::<Move>(DirectionalButtons::wasd());
+        context.bind::<Move>(Stick::Left).dead_zone(DeadZone::radial(0.15));
+    })
+    .add_context::<PauseMenu>(|context| {
+        context.active_in_state(GameState::Paused);
+        context.bind::<Confirm>(KeyCode::Enter);
+        context.bind::<Confirm>(GamepadButton::South);
+    })
+    .add_systems(Update, jump);
+
+// at spawn
+commands.spawn((Player, OnFoot));
+commands.spawn(PauseMenu);
+
+fn jump(input: ContextActions<OnFoot>) {
+    if input.fired::<Jump>() { /* ... */ }
+}
+```
+
+What each asks of you, read off the snippets:
+
+- **LWIM** is the least to write: one derive per enum, and bindings are a value built wherever is
+  convenient. It has no notion of a context being off, so pausing is the reading system's run
+  condition: South still sets both `Jump` and `Confirm`, and `jump` simply does not run. Each enum
+  is its own plugin.
+- **BEI** puts the bindings on the entity, as components in its spawn. Two players can therefore
+  hold different bindings with nothing extra, and a scene can carry them; the price is the
+  `actions!`/`bindings!` nesting, and a `Move` whose keys and stick need a preset or per-key
+  `SwizzleAxis` and `Negate`. Each context type and state pair is registered for syncing, and
+  gameplay is kept off South by its own `ActiveInStates`, not by the menu.
+- **This crate** declares bindings once per context type at app build, and an entity gets them by
+  carrying the component. Every action names a `path`, an `output` and an `intent`, and every
+  context a `path` and a `tick`, which is more to write up front than either of the others; the path
+  is what a settings file stores. The menu is `exclusive`, so gameplay is shadowed while it is up
+  whatever either context binds, and gameplay needs no state of its own. Bindings that differ per
+  player are an override applied to one entity (`apply_overrides_for`), not a second declaration.
+
+---
+
 ## 1. What the crate reads: levels or edges
 
 This is the difference the rest of the timing story follows from, so it goes first.
@@ -86,7 +256,7 @@ This is the difference the rest of the timing story follows from, so it goes fir
 | --- | --- |
 | LWIM | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, `Gamepad` components, `AccumulatedMouseMotion` — sampled into a `CentralInputStore` resource in `PreUpdate` (`src/user_input/keyboard.rs`, `updating.rs`) |
 | BEI | the same resources, sampled inline by an `InputReader` system param during evaluation (`src/context/input_reader.rs`) |
-| this crate | the `KeyboardInput`, `MouseButtonInput`, `MouseMotion` and `RawGamepadEvent` message streams, into a timestamped queue drained by time window (`src/frame.rs`) |
+| this crate | the `KeyboardInput`, `MouseButtonInput`, `MouseMotion` and `RawGamepadEvent` message streams, into a timestamped queue each context reads from its own cursor (`src/frame.rs`) |
 
 Bevy's `ButtonInput` is a **level**: `keyboard_input_system` clears it each frame and replays that
 frame's events into it, so a key pressed *and* released within one frame leaves `pressed()` false.
@@ -145,8 +315,8 @@ in `RunFixedMainLoop::BeforeFixedMainLoop`, the fixed state is updated once per 
 rather than only the first — which is usually what a fixed-tick reader wants.
 
 **This crate** makes the tick domain a property of the context type (`#[context(tick = Fixed)]`),
-evaluates each context exactly once in its domain, and drains the timestamped event queue by time
-window, so each fixed tick sees the events belonging to its own window.
+evaluates each context exactly once in its domain, and each instance reads the timestamped event
+queue from its own cursor, so a fixed tick sees every event sampled since the last one ran.
 
 The remaining difference is not "has a story" but **what happens to the input in the gaps**:
 
@@ -154,7 +324,7 @@ The remaining difference is not "has a story" but **what happens to the input in
 | --- | --- | --- | --- |
 | LWIM | lost (level sampling) | held state carries to the next tick that runs; a tap is lost | every tick reads the same frame's state |
 | BEI | lost in 0.26.0; on `main`, seen as a one-evaluation press, with two taps counting as one | held state carries to the next tick that runs; a tap is lost | every tick reads the same frame's state; consumption is per-run |
-| this crate | preserved, as two transitions | its events wait in the queue for the next tick's window | each tick drains its own window; no event seen twice, none skipped |
+| this crate | preserved, as two transitions | its events wait in the queue for the next tick that runs | the first tick reads the frame's events, later ones the held state it left; no event seen twice, none skipped |
 
 The cost of the last row is stated in [decisions.md](./decisions.md) D9 and is real: an action
 needed at both rates must be declared in two contexts, because a context is evaluated in exactly one
@@ -203,7 +373,7 @@ player. It scopes its gamepad reads per context but not its consumption. This cr
 claim and an exclusion each carry the devices of the instance that made them, and reach only a
 context sharing one.
 
-## 4. Folding several bindings into one action
+## 4. Combining several bindings into one action
 
 `Jump` on both Space and gamepad South; `Move` on both WASD and the left stick. What is the value
 when two contribute at once?
@@ -212,7 +382,8 @@ when two contribute at once?
 - **BEI** takes the contributions with the most significant `TriggerState` and combines them by
   `ActionSettings::accumulation`: `Cumulative` (sum, the default) or `MaxAbs`.
 - **This crate** keys the rule off the action's declared **intent** — a property BEI and LWIM do not
-  have. `Button`, `Analog1` and `Directional2` take the strongest contribution; `Delta2` sums.
+  have. `Button` takes the strongest contribution; `Analog1` and `Directional2` take the strongest
+  in each direction per axis, so opposite directions cancel; `Delta2` sums.
 
 The reason for the third of those is that shape does not distinguish a stick from a mouse — both are
 `Vec2` — but summing is right for one and wrong for the other. A mouse delta is a displacement that
@@ -242,11 +413,11 @@ Broadly comparable between BEI and this crate, and much richer in both than in L
 | Third-party extension | `dyn` trait objects, registered | `add_input_condition` / `add_input_modifier`, as components | enum with a `Custom(Arc<dyn …>)` arm |
 | Attached at | the input | the binding **or** the action | the binding **or** the action (`combined::<A>()`) |
 
-Both BEI and this crate can attach modifiers and conditions after the bindings are folded, which is
-what makes BEI's `Cardinal::wasd_keys()` + action-level `DeadZone` idiom work. Here the action-level
-builder carries scale, clamp, curve and the like, and conditions such as `.pulse(t)` for menu
-repeat, but not a dead zone: a dead zone belongs to one physical control, so it stays on the
-binding.
+Both BEI and this crate can attach modifiers and conditions after the bindings are combined, which
+is what makes BEI's `Cardinal::wasd_keys()` + action-level `DeadZone` idiom work. Here the
+action-level builder carries scale, clamp, curve and the like, and conditions such as `.pulse(t)`
+for menu repeat, but not a dead zone: a dead zone belongs to one physical control, so it stays on
+the binding.
 
 BEI has more conditions than this crate, `Flick` and `Cooldown` in particular.
 

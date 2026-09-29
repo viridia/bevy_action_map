@@ -325,14 +325,18 @@ per action, and only for modifier keys. LWIM's `ClashStrategy::PrioritizeLongest
 default, and general over its `BasicInputs` decomposition, so the alternative is not hypothetical.
 
 **Why it is partly one-way.** The default is flippable in a major version; that part is ordinary
-evolution. What is harder is that deciding "the longest satisfied chord on this control wins" before
-anything is read requires a pre-pass over the bindings, which in an entity model means walking
-binding entities twice per context per tick. Doable, but a different evaluation shape than the
-current single ordered pass, so the further the ecosystem gets built on consumption-as-specificity,
-the more expensive.
+evolution. The evaluation shape is not the obstacle it first looks: "the longest held chord on this
+control wins" needs each binding to know its longer-chord rivals, which are a property of the
+binding set rather than of the tick. This crate computes them when a context's plan is built and
+evaluates in a single pass. In an entity model the same list has to be kept in step as binding
+entities come and go, which is bookkeeping, not a second walk per tick. What stays expensive is
+behavioural: a game that relies on `Ctrl+S` also firing `S` changes meaning when specificity becomes
+automatic, and the further the ecosystem gets built on consumption-as-specificity, the more such
+games there are.
 
 **The cheap hedge.** Document consumption and specificity as distinct concerns even while one
-implements the other. That alone keeps a later pre-pass from being a behavioural surprise.
+implements the other. That alone keeps automatic specificity, when it comes, from being a
+behavioural surprise.
 
 ---
 

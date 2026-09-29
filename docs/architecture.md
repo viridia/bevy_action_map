@@ -69,14 +69,15 @@ A handful of words carry most of the design. They are worth learning before the 
 | **intent** | What an action's value means: `Button`, `Analog1`, `Directional2`, `Delta2`. It decides how several bindings combine. |
 | **tick domain** | Whether a context evaluates once per rendered frame (`Render`) or once per fixed step (`Fixed`). |
 | **plan** | A context's bindings, compiled once and shared by every instance. |
+| **reading** | What one binding's control shows at one moment: a value, and whether it counts. |
 | **mapping** | A row on a settings screen: one action in one device family. |
 
 **Slot** has two meanings, and the code uses both. In a plan, an action's *slot* is its index into
 the dense state arrays. In a mapping, a *slot* is one cell of the row, the primary or secondary
-control. Context tells them apart: `plan.rs` and `eval.rs` mean the first, `mapping.rs` and
+control. Context tells them apart: `plan.rs` and `eval/` mean the first, `mapping.rs` and
 `overrides.rs` the second.
 
-Detail: TD3, TD4, TD9.1.
+Detail: TD3, TD4, TD5, TD9.1.
 
 ---
 
@@ -180,7 +181,7 @@ Why: D2, D3, D4, D9. Detail: TD1, TD2.
 ## Inside one evaluation
 
 `evaluate_context::<C, S>` walks every instance of context `C`. For each instance it decides whether
-the instance is live, then replays the frame into it.
+the instance is live, then takes the frame's events into it one at a time.
 
 ```mermaid
 flowchart TB
@@ -194,33 +195,63 @@ flowchart TB
         direction TB
         filter["drop events from devices<br/>outside this instance's Paired"] --> active
         active{"is_active?"} -- no --> held["update held state only"]
-        active -- yes --> e1["for each level event:<br/>update held state, then fold"]
-        e1 --> e2["sum mouse motion,<br/>fold once for Delta2 actions"]
+        active -- yes --> refresh["refresh readings, where<br/>something other than an event<br/>moved them: a claim, an authority"]
+        refresh --> e1["for each event: update held state,<br/>read the bindings it reaches,<br/>commit the actions they feed"]
+        e1 --> close["closing step: record every<br/>binding's reading with the<br/>tick's delta, commit every action"]
     end
     held --> next([next instance])
-    e2 --> claims["publish this instance's claims<br/>to ConsumedControls"]
+    close --> claims["publish this instance's claims<br/>to ConsumedControls"]
     claims --> next
 ```
 
-A tick with no events still folds once, so a hold's timer keeps advancing while nothing changes.
+An event does not visit every binding. The plan indexes, for each control, the bindings an event on
+it can change: those reading it, those chorded on it, and those a longer chord on it out-ranks. A
+tick with no events still runs the closing step, so a hold's timer keeps advancing while nothing
+changes.
 
-A **fold** is one pass over every binding in the plan, producing one value and one phase per action.
-It is the heart of the evaluator:
+A binding's **reading** is what its control shows at one moment, and whether that counts. It is
+worked out from held state, the claims against it and the plan, so it keeps no state of its own.
+Several rules meet here, each as a reason a reading does not count: a chord not held, a control
+another context claimed, a control that went away while down. Chord length is one of them. Each
+binding's longer-chord rivals are worked out when the plan is built, and while one is held the
+binding reads rest, so `Ctrl+S` beats `S`.
+
+A binding's **pipeline** turns a reading into an output, and holds all of the binding's state. An
+action's **commit** combines its bindings' latest outputs and moves its phase:
 
 ```mermaid
 flowchart LR
-    pre["chord pre-pass<br/>longest satisfied chord<br/>on each control wins"] --> bind
-    subgraph bind["per binding"]
+    reading["reading<br/>value · availability"] --> pipe
+    subgraph pipe["per binding: the pipeline"]
         direction TB
-        read["read control<br/>(consumed → at rest)"] --> mods["modifier chain<br/>negate · swizzle · scale ·<br/>dead zone · curve · clamp ..."]
-        mods --> thr["press threshold<br/>(analog → Button)"]
-        thr --> cond["conditions<br/>explicit · implicit · blocking"]
+        mods["modifier chain<br/>negate · swizzle · scale ·<br/>dead zone · curve · clamp ..."] --> thr["press threshold<br/>(analog → Button)"]
+        thr --> rr["require-reset latch<br/>(Button awaiting release)"]
+        rr --> cond["conditions<br/>explicit · implicit · blocking"]
         cond --> cons["consume?<br/>record a claim"]
     end
-    bind --> fold["combine bindings<br/>by intent"]
-    fold --> stage["stage after the fold<br/>combined::&lt;A&gt;()"]
-    stage --> commit["commit_slot<br/>require-reset · phase ·<br/>dirty bit · transition"]
+    pipe --> commit
+    subgraph commit["per action: the commit"]
+        direction TB
+        comb["combine outputs<br/>by intent"] --> stage["stage after combining<br/>combined::&lt;A&gt;()"]
+        stage --> phase["phase · dirty bit ·<br/>transition"]
+    end
 ```
+
+One rule holds this together: **a pipeline records each reading once.** Within a tick, a binding
+runs when an event changes its reading, and once more at the closing step. Only the closing run is
+handed the tick's `delta`, so a hold charges once per tick however many events arrive. A reading the
+next event replaces before it was recorded is recorded then, with `delta` zero, so a press and a
+release inside one tick still read as a tap:
+
+```
+events this tick      ↓Space                ↑Space                     closing step
+Jump's reading        pressed, pending      released; the pending      released recorded,
+                                            press is recorded, δ = 0   δ = the tick
+Move's reading        (no event reaches it)                            recorded, δ = the tick
+```
+
+Running a pipeline twice on one reading would count it twice: a tap would be two taps, and a hold
+would charge double. That is why the stateful stages live after the reading rather than in it.
 
 How bindings combine depends on the action's intent:
 
@@ -270,15 +301,17 @@ stateDiagram-v2
 A plain key press with no conditions goes straight from `Idle` to `Fired`, then `Firing` while held,
 then `Completed` on release. A `hold(0.5)` passes through `Started` and `Building` while it charges.
 
-**Interrupted** means the source went away rather than the player letting go: the window lost focus,
-the gamepad disconnected, or an authority stopped supplying the action. Deactivating or shadowing a
-context cancels everything in flight the same way.
+**Interrupted** means the control went away while the player was still holding it: the window lost
+focus, the gamepad disconnected, an authority stopped supplying the action, or a higher context
+claimed the control. All four reach the binding as its reading, withdrawn or claimed while down, so
+one rule covers them. Deactivating or shadowing a context cancels everything in flight the same way.
 
-**Require-reset** is the other rule to know. When a context activates, a button the player is
-already holding does not count as a fresh press; it must be released first. Analog actions are
-exempt, since there is no synthesized press to guard against.
+**Require-reset** is the mirror rule, for a control that arrives already down. When a context
+activates, a button the player is already holding does not count as a fresh press; it must be
+released first. The same holds when a claim on it lifts or an authority resumes supplying it. Analog
+actions are exempt, since there is no synthesized press to guard against.
 
-Why: D18, D62, D63. Detail: TD3.2, TD5.6, TD5.7, TD7.2.
+Why: D18, D62, D63, D94. Detail: TD3.2, TD5, TD5.6, TD5.7, TD7.2.
 
 ---
 
@@ -309,9 +342,9 @@ flowchart TB
     S -- "cursor" --> F
 ```
 
-Inside `InputContextState`, action state is two dense arrays of `Copy` values indexed by plan slot.
-The plan holds every parameter (durations, thresholds, curves), so the per-tick state stays small
-and uniform:
+Inside `InputContextState`, state is dense arrays of `Copy` values: per action indexed by plan slot,
+per condition or stateful modifier by scratch slot, and per binding in plan order. The plan holds
+every parameter (durations, thresholds, curves), so the per-tick state stays small and uniform:
 
 ```
 plan slot          0            1            2
@@ -326,13 +359,23 @@ scratch slot       0            1            2
                 ┌────────────┬────────────┬────────────┐
 Scratch         │ hold timer │ tap count  │ toggle     │   one per condition or stateful
                 │            │            │ latch      │   modifier, then one per action's
-                └────────────┴────────────┴────────────┘   stage after the fold
+                └────────────┴────────────┴────────────┘   stage after combining
+
+binding            0            1            2
+                ┌────────────┬────────────┬────────────┐
+BindingProgress │ Space      │ W          │ Shift+W    │   latest reading, whether it is
+                │ pressed    │ at rest    │ at rest    │   pending, output of the last run
+                └────────────┴────────────┴────────────┘
 ```
+
+Beside these sit the instance's held state (which keys, buttons and axes are down, the mouse motion
+summed this tick, the authority's sampled values) and its cursor into the frame. Readings are
+derived from held state, so `BindingProgress` is left out of a snapshot.
 
 `InputContextState` holds no ECS references, so a test can drive one directly. Activation flips a
 flag: nothing is spawned, inserted or removed.
 
-Why: D8, D10. Detail: TD4, TD6.
+Why: D8, D10, D98. Detail: TD4, TD6.
 
 ---
 
@@ -553,20 +596,37 @@ exactly like hardware.
 An **authority** backend supplies already-resolved values for one device family, in place of this
 crate's bindings for that family. The game declares this with `bind::<A>(Authority(family))`. Such a
 binding reads the authority's value and then behaves like any other: its modifiers and conditions
-run, and it folds with the action's other bindings. It has no control, so it cannot be consumed or
-captured, and its mapping row is `Delegated` to the backend's own binding screen.
+run, and it combines with the action's other bindings. It has no control, so it cannot be consumed
+or captured, and its mapping row is `Delegated` to the backend's own binding screen.
 
-Gamepad entities also carry facts a backend can supply: `ConnectedGamepad` (it is available),
-`Brand` (whose button names to use), and `Identity` (which physical device this is, for a save
-file).
+A gamepad entity carries facts a backend supplies, and one it acts on. `ConnectedGamepad` says the
+pad is available, `Brand` whose button names to use, and `Identity` which physical device this is,
+for a save file. `Rumble` goes the other way: the game sets a level on the pad's entity and the
+backend drives the motors from it. All but `Identity` live in the `gamepad` module, which depends on
+Bevy alone, so that a backend other than Bevy's own (the Steam build of Disasteroids is one) can
+fill and drive them its own way.
 
-Why: D22, D51, D71, D92. Detail: TD5.8, TD7.5–TD7.7.
+```mermaid
+flowchart LR
+    subgraph pad["gamepad entity"]
+        cg["ConnectedGamepad"]
+        br["Brand"]
+        ru["Rumble"]
+    end
+    backend["the pad's backend<br/>gilrs, or e.g. Steam"] -- "fills" --> cg & br
+    backend -- "drives the motors from" --> ru
+    game["game"] -- "sets a level" --> ru
+```
+
+Why: D22, D51, D71, D92, D95, D96. Detail: TD5.8, TD7.5–TD7.8.
 
 ---
 
 ## Finding your way in the code
 
-Modules grouped by role. The layer labels match the first diagram.
+The crate lives in `crates/bevy_action_map/`, beside its derive macros and the remote test driver,
+and the paths below are relative to its `src/`. Modules are grouped by role, and the layer labels
+match the first diagram.
 
 ```mermaid
 flowchart TB
@@ -576,12 +636,13 @@ flowchart TB
         condition["condition.rs"]
     end
     subgraph low["L0 · L1"]
-        device["device.rs<br/>families, handles, calibration, brand"]
+        device["device.rs<br/>families, handles, calibration, identity"]
+        gamepad["gamepad/<br/>connection, brand, rumble"]
         frame["frame.rs<br/>queue, sampling, retirement"]
     end
     subgraph core["L2"]
         plan["plan.rs<br/>compilation, diagnostics"]
-        eval["eval.rs<br/>evaluator, consumption, dispatch"]
+        eval["eval/<br/>readings · pipeline · commit ·<br/>tick · consumption · systems"]
         context["context/<br/>declare · state"]
         event["event.rs"]
         player["player.rs<br/>Paired"]
@@ -607,12 +668,16 @@ A reading order that follows a keypress through the code:
 2. `add_context` in `context/declare.rs`: what declaring a context produces.
 3. `Plan::from_bindings` and `Plan::compile` in `plan.rs`: slots and scratch.
 4. `sample_input` in `frame.rs`: how messages become the queue.
-5. `evaluate_context`, then `apply_frame`, then `commit_slot` in `eval.rs`: the fold and its phases.
-6. `dispatch_for` in `event.rs`: from a transition to an observer event.
-7. `mapping.rs`, then `overrides.rs`: the presentation surface and the way back in.
+5. `evaluate_context` in `eval/context_systems.rs`, then `apply_frame` in `eval/tick_evaluation.rs`:
+   the event loop and the closing step.
+6. `read_binding` in `eval/binding_reading.rs`, `record_reading` in `eval/binding_pipeline.rs`, and
+   `commit_action` in `eval/action_commit.rs`: a reading, the pipeline, and the phases.
+7. `dispatch_for` in `event.rs`: from a transition to an observer event.
+8. `mapping.rs`, then `overrides.rs`: the presentation surface and the way back in.
 
-The derives live in `macros/`. The examples are the acceptance tests: `minimal` is the smallest
-complete program, and `disasteroids` exercises nearly everything, including a full controls screen.
+The derives live in `crates/bevy_action_map_macros/`. The examples are the acceptance tests:
+`minimal` is the smallest complete program, and `disasteroids` exercises nearly everything,
+including a full controls screen.
 
 Detail: TD11.
 

@@ -985,7 +985,7 @@ impl ButtonThreshold {
 
 /// A binding's input, converted to the control [`is_pressed`](crate::eval)-style raw actuation
 /// checks read — `None` for anything [`always_reports_bool`] would already have refused, which is
-/// every input a shared toggle's pre-pass ever needs to ask about.
+/// every input a shared toggle's resolution ever needs to ask about.
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
 pub(crate) fn as_button_control(input: &BindingInput) -> Option<ButtonControl> {
     match input {
