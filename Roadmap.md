@@ -241,7 +241,6 @@ its identity rather than its position.
 * 122: The wheel as a binding source
 * 172a: `bevy_action_map_ui`, starting with prompts
 * 112: Filtering raw input at L0
-* 159: Compressing `docs/decisions.md`
 * 28: Docs that run
 
 Chunk 179 carries defects. The register of what is known to be wrong is
@@ -434,11 +433,11 @@ providers, and neither is special.
 
 ### 172a. `bevy_action_map_ui`, starting with prompts · E[3]
 
-`prompt_ui.rs` and `widget_focus.rs` are the layer door 3 of `docs/one-way-doors.md` says an input
-crate cannot own: drawing prompts, and a `bevy_ui_widgets` bridge for a controls screen. Both are
-written against the public API and reach their users by `#[path]`, the Steam build included. They
-become `crates/bevy_action_map_ui/`, published beside the base crate, a layer at a time. Prompts
-come first: neither file uses the other, and prompts are the half with tests.
+`prompt_ui.rs` and `widget_focus.rs` are a layer an input crate cannot own: drawing prompts, and a
+`bevy_ui_widgets` bridge for a controls screen. Both are written against the public API and reach
+their users by `#[path]`, the Steam build included. They become `crates/bevy_action_map_ui/`,
+published beside the base crate, a layer at a time. Prompts come first: neither file uses the other,
+and prompts are the half with tests.
 
 - **Depends on chunks 170 and 171**: 170 leaves `prompt_ui.rs` with no path into `assets/`, and 171
   leaves a workspace for the crate to join.
@@ -453,8 +452,7 @@ come first: neither file uses the other, and prompts are the half with tests.
 - **Both published crates carry the license files.** The base stopped shipping `LICENSE-MIT` and
   `LICENSE-APACHE` when it moved under `crates/`, and the ui crate starts without them; whether each
   crate gets copies or links is settled here.
-- **Not the focus bridge**, which is 172b, and with it door 3's path: the layer is half moved until
-  then.
+- **Not the focus bridge**, which is 172b: the layer is half moved until then.
 - **Not upstreaming it**, which is X48.
 - **Verified by:** `scripts/verify.sh --full --doc`, `prompt_gallery`, Disasteroids and Split
   Friction drawing the prompts they drew before, the author running the Steam build, and
@@ -475,9 +473,9 @@ crate's second module, completing the layer 172a started.
 - **Its docs owe a game the warning** `widget_focus.rs` carries today: `InputDispatchPlugin` in
   `DefaultPlugins` activates a focused `Button` on a key a context has consumed, so a game using
   both disables it.
-- **Paths that follow it:** X2 and X5 name `widget_focus.rs`, and door 3 names `examples/common/` as
-  where the layer sits. R22.7 and R22.8's annotations name the file too, and R22.8's calls the
-  focus-kind contexts example-side for want of X8, which this makes crate API of the ui crate.
+- **Paths that follow it:** X2 and X5 name `widget_focus.rs`. R22.7 and R22.8's annotations name the
+  file too, and R22.8's calls the focus-kind contexts example-side for want of X8, which this makes
+  crate API of the ui crate.
 - **Not upstreaming it**, which is X48.
 - **Verified by:** `scripts/verify.sh --full --doc`, the controls screens and menus of Disasteroids
   and Split Friction navigating as before, `disasteroids/rebind.py` and `disasteroids/pad.py`

@@ -359,12 +359,11 @@ rather than in an issue tracker. Each document answers one question:
 | [Roadmap.md](./Roadmap.md) | What's left and what's broken. **Start here to see current status** |
 | [Requirements.md](./Requirements.md) | The numbered requirements, with prior art surveyed from LWIM, `bevy_enhanced_input`, Unreal, Unity, Steam Input, and Godot |
 
-Two more, for readers who want the comparison rather than the specification:
+One more, for readers who want the comparison rather than the specification:
 
 | Document | What it is |
 | --- | --- |
 | [docs/comparison.md](./docs/comparison.md) | For choosing an input crate: how this one differs from `bevy_enhanced_input` and `leafwing-input-manager`, claim by claim, checked against both crates' source, and why most projects today should pick `bevy_enhanced_input` |
-| [docs/one-way-doors.md](./docs/one-way-doors.md) | For Bevy's reviewers, ahead of `bevy_enhanced_input` going upstream: which of its decisions stop being revisable once it is the engine's answer, and what is cheap to do now that would be expensive later |
 
 `archive/` holds the superseded `Design.md` and the work logs. They describe the crate as it was;
 `docs/design.md` and `docs/decisions.md` are what replaced them.

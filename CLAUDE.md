@@ -31,7 +31,6 @@ Use that for lookups; see "Context" below for when not to.
 | `Roadmap.md` | what is left, what is broken, the chunk sequence | **start here for any chunk** |
 | `Requirements.md` | numbered requirements, `R<section>.<n>` | you need to know what must be true, or a chunk cites an R-number |
 | `docs/comparison.md` | how this crate differs from BEI and LWIM | someone asks why this exists |
-| `docs/one-way-doors.md` | what stops being revisable if an input crate goes upstream | upstreaming comes up |
 | `docs/issues.md` | findings awaiting routing, in five tiers by severity | a finding needs routing, or you are about to re-find one |
 | `docs/guidelines.md` | how this project judges scope and shapes code, in entries `G<n>` | you are about to scope a chunk or write code |
 | `docs/deferred.md` | work decided against for now, in entries `X<n>`, each with its gate | a gate may have fired (a Bevy bump is the first group), or you are about to defer something |
