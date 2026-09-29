@@ -236,7 +236,11 @@ its identity rather than its position.
 ## Next
 
 * 115: A timing declared as a tunable
+* 121: A camera that takes the mouse, and gives it back
 * 122: The wheel as a binding source
+* 172a: `bevy_action_map_ui`, starting with prompts
+* 112: Filtering raw input at L0
+* 159: Compressing `docs/decisions.md`
 * 28: Docs that run
 
 Chunk 179 carries defects. The register of what is known to be wrong is
@@ -565,27 +569,7 @@ Steam Disasteroids serving a Steam launch and a direct one from one binary.
   per-device interruption would be the first of its kind and is machinery this does not justify.
 - **Not doing: Steam's emulated keyboard and mouse** (S27). Nothing tells their events from the real
   devices', so no filter reaches them.
-- **Not doing: a player-facing ignore list**, which is chunk 178.
-
-### 178. "Ignore this controller" · E[2]
-
-The second author of an L0 filter (D93), and the one per device: a player marks a controller the
-game should never hear from. The case is measured, not hypothetical — a Switch-protocol clone
-decodes its timer byte as ~500 phantom presses a second (the R14 notes), and a phantom press
-captures every rebinding.
-
-- **Keyed by `Identity`**, as calibration is: under gilrs it names a model rather than a unit, so
-  ignoring one pad ignores every pad of its model. Said in the setting's doc comment, as
-  calibration's says it.
-- **On the Disasteroids controls screen**, persisted with the rest of the settings. An ignored pad
-  stays listed, so it can be un-ignored from the keyboard or another pad.
-- **Follows chunk 112's guidelines**: records `FocusLost` when the list changes, and unpairs the
-  ignored pad.
-- **Verified by** a headless test that an ignored identity's events leave the frame, and by hand
-  with the clone on the bench.
-- **Not doing: telling two identical pads apart.** That needs an identity per unit, which Bevy's
-  gamepad backend does not provide.
-- **Depends on chunk 112.**
+- **Not doing: a player-facing ignore list**, deferred as X56.
 
 ### 28. Docs that run · E[4]
 
