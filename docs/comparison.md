@@ -237,13 +237,18 @@ What each asks of you, read off the snippets:
 - **BEI** puts the bindings on the entity, as components in its spawn. Two players can therefore
   hold different bindings with nothing extra, and a scene can carry them; the price is the
   `actions!`/`bindings!` nesting, and a `Move` whose keys and stick need a preset or per-key
-  `SwizzleAxis` and `Negate`. Each context type and state pair is registered for syncing, and
-  gameplay is kept off South by its own `ActiveInStates`, not by the menu.
+  `SwizzleAxis` and `Negate`. The editor helps less, too: a binding's modifiers and conditions are
+  components in a tuple, which accepts any bundle, so completion cannot offer the ones that mean
+  something there, and the bracketed `Player[...]` syntax inside `actions!` is macro input rather
+  than an expression the editor can complete into. Each context type and state pair is registered
+  for syncing, and gameplay is kept off South by its own `ActiveInStates`, not by the menu.
 - **This crate** declares bindings once per context type at app build, and an entity gets them by
   carrying the component. Every action names a `path`, an `output` and an `intent`, and every
   context a `path` and a `tick`, which is more to write up front than either of the others; the path
-  is what a settings file stores. The menu is `exclusive`, so gameplay is shadowed while it is up
-  whatever either context binds, and gameplay needs no state of its own. Bindings that differ per
+  is what a settings file stores. Those attribute arguments do not complete in an editor either,
+  though everything after `bind` is a method on a builder, so the modifiers and conditions a binding
+  can take are what completion lists. The menu is `exclusive`, so gameplay is shadowed while it is
+  up whatever either context binds, and gameplay needs no state of its own. Bindings that differ per
   player are an override applied to one entity (`apply_overrides_for`), not a second declaration.
 
 ---
