@@ -637,12 +637,12 @@ dispatch level. Unity: no arbitration for PassThrough actions, first-match for o
 
 - **R8.1 (MUST)** Define and document a default clash strategy across bindings on the same control;
   longest/most-specific chord wins is the recommended default (`Ctrl+S` suppresses `S`).
-- **R8.2 (MUST)** _(D44)_ Higher-priority contexts must be able to _consume_ a control so
+- **R8.2 (MUST)** _(D102)_ Higher-priority contexts must be able to _consume_ a control so
   lower-priority contexts do not see it, and this must be opt-in per binding (a menu consumes
   `Escape`, but the "screenshot" global hotkey should still see `F12`).
 
   _(A claim lasts as long as the binding is `Building` or `Firing`, not only on the tick it fires —
-  see D44. A charging `.hold()` or a part-way `.multi_tap()` claims its control on every such
+  see D102. A charging `.hold()` or a part-way `.multi_tap()` claims its control on every such
   tick.)_
 
   - _(D94)_ A claim arriving on a control still held ends what that control was firing in the lower
@@ -681,9 +681,9 @@ the same problem for events in [bevy#7691][bevy-7691].
 
 - **R9.1 (MUST)** Define one canonical sampling point (in `PreUpdate`, ordered after
   `bevy_input::InputSystems`) that produces the L1 input frame.
-- **R9.2 (MUST)** Render-rate and fixed-rate action state must both be available, and reading the
-  wrong one must not be an easy mistake. _(A guarantee, not a layout: what must hold is that the two
-  rates stay distinct and are not silently interchangeable.)_
+- **R9.2 (MUST)** Render-rate and fixed-rate action state must both be available, and the two rates
+  must not be silently interchangeable: each piece of action state has exactly one rate, and a
+  reader specifies which by what it names.
 - **R9.3 (MUST)** Edges must not be lost when `FixedUpdate` runs zero times in a frame — a press and
   release inside one frame must still be observable by fixed-rate consumers.
 - **R9.4 (MUST)** Edges must not be duplicated when `FixedUpdate` runs multiple times — a single

@@ -103,9 +103,9 @@ root only with `--exclude-lockfile`.
 The release itself runs in this order, once everything else is done:
 
 1. A final refresh of `docs/one-way-doors.md` against BEI's current release.
-2. The document moves out of the repo, with its rows in the README and `CLAUDE.md`, and the two
-   citations in `Roadmap.md` and `docs/decisions.md` re-pointed or cut. It critiques BEI for Bevy's
-   reviewers, which is a different audience from this crate's users.
+2. The document moves out of the repo, with its rows in the README and `CLAUDE.md`, and the citation
+   in `Roadmap.md` re-pointed or cut. It critiques BEI for Bevy's reviewers, which is a different
+   audience from this crate's users.
 3. The publish, then an announcement on the Bevy Discord. X54's question goes to the users that
    announcement reaches.
 
@@ -197,12 +197,6 @@ lookup.
 
 Gamepad stays frame-quantized regardless until gilrs polling is rewritten, so mixed fidelity across
 sources is permanent for now rather than an artifact.
-
-### X11 — Schedule enforcement for tick domains (D9's remainder)
-
-**Gate:** Bevy giving a `SystemParam` a way to know its own schedule.
-
-A plugin-time validation pass and a debug assertion stand in.
 
 ### X12 — A physical binding's label matching the current layout (R12.2, R12.7)
 
@@ -510,6 +504,8 @@ state, and `pong_countdown` already gates that by disabling `Serve` from a syste
 - **What to ask:** whether a game gates one action on another's state in the mapper, or in a system
   as `pong_countdown` does, and what the case was. An answer naming game state is R6.5's argument
   and argues for withdrawing R6.1's two clauses.
+- **One answer so far** (September 2026, asked before X43): `leafwing-input-manager`'s maintainer
+  prefers gating one action on another at the simulation level, not in the mapper.
 
 ### X47 — Measuring a stick's rest envelope
 

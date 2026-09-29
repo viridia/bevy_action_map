@@ -106,27 +106,27 @@ here, so there is one `D`-numbering in the project.
 **Decided.** Sources, input frame, mapping, consumers. The mapping layer never reads
 `ButtonInput`, `Axis`, or a raw message stream; it consumes the frame and nothing else.
 
-**Rules out.** Reading device state from inside the evaluator, which is the shortest path to every
-feature in this list and the one that forecloses the rest of them.
+**Rules out.** Reading device state from inside the evaluator.
 
-**Reversal.** Determinism, replay, headless testing, and both backend seams stop being one mechanism
-and become four features, each needing its own way in. This is the rule the others are built on;
-reversing it is not a change to the crate, it is a different crate.
+**Reversal.** Determinism, replay, headless testing and both backend seams (D22) stop sharing one
+way in and each needs its own. Every other entry here assumes this one; reversing it is a different
+crate.
 
 ### D2 — L1 is an event queue, not a level snapshot
 
 **Decided.** The frame is an ordered queue of raw events with a position stamped on each, not a
 per-frame snapshot of which controls are down.
 
-**Rules out.** The model `bevy_enhanced_input` and `leafwing-input-manager` both use — sampling
-`pressed()` inside the evaluator. That model is simpler and more universal: anything that can write
-`ButtonInput` becomes an input source with no adapter, which for an engine-level crate is a serious
-virtue that this crate gives up.
+**Rules out.** Sampling `pressed()` inside the evaluator, which `bevy_enhanced_input` and
+`leafwing-input-manager` both do.
 
 **Reversal.** A press and release inside one rendered frame collapse to nothing, so a fixed tick
 spanning them sees neither. `InputFrame`, `RawEvent`, `FrameTimestamp` and the whole capture path
 go with it, and the frame stops being the serializable per-tick record that replay and rollback
 need.
+
+**Accepted cost.** Under the snapshot model anything that writes `ButtonInput` is an input source
+with no adapter. Here it is invisible until it writes the frame.
 
 ### D3 — Each context reads by cursor; retirement is separate and later
 
@@ -136,11 +136,11 @@ evaluation.
 
 **Rules out.** A single global read position, and retiring at sample time.
 
-**Reversal.** The two halves look redundant and are not. Retirement alone fails when the simulation
-does not step: nothing is retired, the next frame appends to what is still queued, and a render
-context reads events it has already acted on. Cursors alone fail by unbounded growth. Retiring at
-sample time — which is what this did originally — discards events before a fixed tick that has not
-yet run can see them, and is what made a frame with zero fixed ticks lose edges.
+**Reversal.** Retirement alone fails when the simulation does not step: nothing is retired, the next
+frame appends to what is still queued, and a render context reads events it has already acted on.
+Cursors alone fill the queue to its cap, which then drops events oldest-first whether read or not.
+Retiring at sample time discards events before a fixed tick that has not yet run can see them, so a
+frame with zero fixed ticks loses edges.
 
 **Accepted cost.** The invariant is not local to the frame module: it holds only while evaluation
 stays in `PreUpdate` and `FixedPreUpdate`. Moving either schedule breaks it silently. A system
@@ -155,14 +155,13 @@ event is sampled.
 to the fixed tick it truly fell in. Bevy's input events carry no time of their own, so there is
 nothing to stamp with.
 
-**Reversal.** Cheap, and expected. Every event in a frame compares equal on the only axis a time
-window could split, so the first fixed tick to run takes all of them and later ticks in that frame
-take none. Magnitude is conserved and each edge is seen exactly once either way; what changes when
-real timestamps arrive is the attribution policy alone, not the shape of anything public.
+**Reversal.** Cheap, and expected. Today the first fixed tick in a frame takes all of that frame's
+events (TD2); real timestamps would spread them across the ticks they fell in. Magnitude is
+conserved and each edge is seen once either way, so only the attribution policy changes, and nothing
+public.
 
-**Still open.** Gamepad events are coarser again, because gilrs is polled once per frame, so they
-arrive as a batch regardless of what keyboard and mouse gain. Timing-sensitive conditions are
-therefore less precise on a pad than on a keyboard.
+**Still open.** gilrs is polled once per frame, so gamepad events arrive as a batch whatever
+keyboard and mouse gain, and timing-sensitive conditions are less precise on a pad.
 
 ---
 
@@ -219,18 +218,17 @@ rebinding UI filters candidate controls on, so the capture path loses its constr
 per stateful modifier, both dense arrays of `Copy` types indexed by plan slot, plus a per-action
 dirty bitset. Parameters — durations, thresholds — live in the immutable plan and never in state.
 
-**Rules out.** Action-as-entity, a packed byte buffer, and a typed tuple per action. The framing
-that made the last two look necessary was the error: the half that appeared to need a variable size
-belongs to _bindings_ rather than to actions, and once its parameters move into the plan what is
-left is uniform.
+**Rules out.** Action-as-entity, a packed byte buffer, and a typed tuple per action. The last two
+serve state of varying size, and there is none: what varies belongs to _bindings_, and with its
+parameters in the plan the rest is uniform.
 
 **Reversal.** Snapshot and restore stop being two slice copies and become an archetype traversal.
 Activation stops being a flag and costs an insert or a removal per action. Per-action change
 granularity, which the bitset gives, is not something a single component's change tick can express.
 
-**Accepted cost.** None that was measured. The one criterion action-as-entity was uniquely strong on
-turned out not to exist: a generic entity event carries the action identity in its type parameter
-and targets the context entity, so every layout supports per-action observers equally.
+**Accepted cost.** None measured. Per-action observers, which action-as-entity looks uniquely suited
+to, work on any layout: a generic entity event carries the action in its type parameter and targets
+the context entity (D17).
 
 ### D9 — A context declares one tick domain and is evaluated once
 
@@ -247,37 +245,32 @@ the domain, so reading a fixed-rate action from a render-rate system stops being
 falls where the semantics already differ — a camera wants the newest delta every frame, movement
 wants one sample per simulation tick.
 
-**Still open.** Enforcement is not airtight. `ContextActions<OnFoot>` where `OnFoot` is `Fixed`
-should be unreadable from `Update`, but Bevy gives a `SystemParam` no way to know its own schedule.
-What stands in is a plugin-time validation pass and a debug assertion.
+**Not enforced, by design.** Reading a `Fixed` context from `Update` is allowed and sees state as of
+the last fixed tick, which is what a HUD or render-side interpolation wants. A `SystemParam` cannot
+learn its schedule, so a check would be unreliable, and it would reject legitimate reads.
 
-### D62 — `ActionPhase::Ongoing` splits into `Building` and `Firing`, named by part of speech
+### D62 — An ongoing phase is `Building` or `Firing`, named by part of speech
 
-**Decided.** `Ongoing` becomes two variants: `Building`, a condition still short of firing, and
-`Firing`, an action still active. The split follows a rule now stated in R3.1: a gerund or adjective
-names a level, true again next tick; a past participle names an edge, true for one tick only.
+**Decided.** Two phases, not one `Ongoing`: `Building`, a condition still short of firing, and
+`Firing`, an action still active. The names follow R3.1: a gerund or adjective names a level, true
+again next tick; a past participle names an edge, true for one tick only.
 
-**Rules out.** Reading a phase and then re-reading the action's *value* to tell the two apart, which
-`update_action_state`, `why_not_id`, and Disasteroids' exhaust flame each did — the value test is
-gone from all three, not just moved.
+**Rules out.** One `Ongoing` phase, which a caller tells apart by re-reading the action's _value_;
+`update_action_state`, `why_not_id` and Disasteroids' exhaust flame each needed to.
 
-**Reversal.** Re-merging the two brings the value test back to every call site it was removed from,
-in this crate and in any app that has since matched on `Building` or `Firing` separately —
-`ActionPhase` is not `#[non_exhaustive]`, so those matches would stop compiling rather than
-silently misbehave.
+**Reversal.** The value test returns to those call sites, and any app matching `Building` or
+`Firing` stops compiling, since `ActionPhase` is not `#[non_exhaustive]`.
 
 ### D63 — `cancel_in_flight` also cancels `Started`
 
 **Decided.** Deactivating or shadowing a context cancels `Started` alongside `Fired`/`Firing`/
 `Building`.
 
-**Rules out.** The narrower match kept until now, `Fired | Ongoing`, which left a hold canceled on
-the very tick it began sitting at `Started` rather than `Canceled`.
+**Rules out.** Canceling only `Fired`, `Firing` and `Building`, which leaves a hold interrupted on
+the tick it began at `Started` rather than `Canceled`.
 
-**Reversal.** `Started` stops being canceled again, and a hold interrupted on its first tick reads
-as still building for as long as the context stays inactive — R7.4's "never left stuck as held
-forever" holds everywhere except this one-tick window, which is exactly narrow enough to have gone
-unnoticed until read rather than run.
+**Reversal.** That hold reads as still building for as long as the context stays inactive, breaking
+R7.4's "never left stuck as held forever" in a one-tick window narrow enough that no run found it.
 
 ---
 
@@ -396,56 +389,48 @@ negative contribution on each axis, and declaration order is no longer a tiebrea
 Each expands at declaration into one binding per part, and the part is both the binding's name and
 the direction it contributes. `Analog1` and `Directional2` fold per axis, as the strongest positive
 contribution plus the strongest negative one, which reverses D15 for those two intents; `Button`
-keeps strongest-wins and `Delta2` still sums. A stage after the fold, declared once per action, is
-where anything that shapes the combined value goes. Chunks 125–127 built it: 125 the stage, 126 the
-fold, and 127 the expansion.
+keeps strongest-wins and `Delta2` still sums.
 
-**Rules out.** A composite the evaluator or the override path can see; a direction held as `negate`
-and `swizzle` modifiers, which is BEI's form; and a clamp built into the fold.
+The fold is the rule both alternatives get wrong. Under strongest-wins, opposite contributions do
+not cancel and W with D loses the diagonal: each reads as whichever binding was declared first.
+Under a sum, same-direction contributions add: A and Left reach -2, and two half-deflected sticks
+read as one full deflection, which is D15's objection. Within one sign the strongest wins, so a
+maximum does not depend on declaration order.
 
-**Reversal.** The player is already shown one row per part (R19.9, D27), and a composite underneath
-four independent rows is a model the player sees and cannot use: a row that is one part can neither
-take another control nor be emptied, because the binding behind it is the other directions too.
-Reinstating the composite reinstates `CompositeCannotGrow` and `CompositeCannotEmpty`, and the
-Disasteroids screen that shows a cleared cell which Confirm then refuses. The fold is the other half
-and is not separable: under strongest-wins, W and D held together read as whichever was declared
-first, so split parts lose the diagonal.
+**Rules out.**
 
-**The player's side of it.** Shipped games show four movement rows that behave independently, and a
-player has no reason to think Forward and Back are joined because they share a column. BEI's
-`Cardinal` spawns four bindings and sums by default (`Accumulation::Cumulative`), as Unreal's
-Enhanced Input does. Unity keeps a composite with addressable parts, and carries the same inability
-to grow one part. The fold has no precedent found: Unity's per-composite choice of which side wins
-is its nearest relative.
+- **A composite the evaluator or the override path can see.** The player is shown one row per part
+  (R19.9, D27), and a row that is one part of a composite can neither take another control nor be
+  emptied. Unity's composites carry the same limit; BEI's `Cardinal` and Unreal's Enhanced Input
+  expand to separate bindings.
+- **A direction held as `negate` and `swizzle` modifiers**, BEI's form. The part names the row, and
+  modifiers would have to be read back into a name, which a custom modifier defeats.
+- **A clamp in the fold.** No sign can exceed its strongest contributor, and a per-binding `scale`
+  is legitimate, so a clamp would cap it silently. A diagonal's length was never automatic: W and D
+  give (1, 1), and `clamp_magnitude` in the stage after the fold normalizes it (D100).
 
-**Why the fold splits by sign.** It is the rule that answers every case the other two each got
-wrong. Opposite contributions cancel, which strongest-wins does not: A and D on separate bindings
-read as whichever was declared first. Same-direction contributions do not add, which a sum does: A
-and Left together reach -2, and two half-deflected sticks read as one full deflection, which is
-D15's own objection. Within one sign the strongest wins as before, so a player holding one key per
-direction sees what the composite gave, and a maximum does not depend on declaration order.
+**Reversal.** The composite returns with `CompositeCannotGrow` and `CompositeCannotEmpty`, and a
+controls screen shows a cleared cell that Confirm then refuses. The fold cannot be reversed alone:
+under strongest-wins, split parts lose the diagonal.
 
-**Why the direction is not a modifier.** The part names the row. A direction held as modifiers would
-have to be read back into a name, which a custom modifier defeats, and it costs two modifier calls
-per key per tick where one match arm does.
-
-**Why the fold does not clamp.** It has no need to on an axis, since no sign can exceed its
-strongest contributor. And modifiers run per binding before the fold, so a `scale` on an analog
-binding is legitimate and a fold clamping to unit length would cap it silently. The length of a
-diagonal is a different matter and was never automatic: W and D give (1, 1), as a four-key composite
-does today, and `clamp_magnitude` in the stage after the fold is what normalizes it.
-
-**Accepted price.** Taking each axis's maximum separately can bend the direction when two analog
-vectors combine, which nothing in tree does; a button-sourced part feeds one axis and cannot. The
-fold keeps two accumulators rather than one, which are locals of the loop and never state. A
-composite costs four passes of per-binding bookkeeping rather than one; the control lookups, which
+**Accepted cost.** Taking each axis's maximum separately can bend the direction when two analog
+vectors combine, which nothing in tree does; a button-sourced part feeds one axis and cannot. A
+composite runs per-binding bookkeeping four times rather than once; the control lookups, which
 dominate, are unchanged.
 
-**The stage takes conditions as well as modifiers.** Settled by driving the menu's bindings
-headless: arrow keys under `on_change().pulse(0.25)`, as one composite and as four single-key
-bindings. Up held then Right pressed fired the diagonal and repeated it on one timer as a composite;
-split, it fired Right alone, then alternated Up and Right on two timers, and releasing Right moved
-nothing. A condition per part judges a key, and a menu is asking about a direction.
+### D100 — An action has one stage after the fold, and it takes conditions
+
+**Decided.** Whatever shapes an action's combined value goes in one stage after the fold, declared
+with `combined::<A>()`: a modifier chain and conditions, run on the combined value rather than on
+one binding's.
+
+**Rules out.** Conditions only per binding. A condition per part judges a key, and a menu asks about
+a direction. Measured headless, with arrow keys under `on_change().pulse(0.25)`: as one composite,
+Up held then Right pressed fired the diagonal and repeated it on one timer; as four bindings, it
+fired Right alone, then alternated Up and Right on two timers, and releasing Right moved nothing.
+
+**Reversal.** `combined` is public; without it a composite has no way to normalize a diagonal, and a
+menu repeating on a direction repeats per key instead.
 
 ### D78 — A modifier is a chord entry the runtime reads, not shorthand that expands
 
@@ -454,39 +439,33 @@ plan intact, as a `ChordEntry::Modifier` satisfied at read time by either key of
 length counts entries, so a modifier contributes one however many keys satisfy it.
 `ControlOrigin::Modifier` carries it to presentation and is the only variant answering `None` to
 `control()`. Side-agnostic is the short spelling and a `KeyCode` is how one physical key is named,
-because either-side is the case a chord almost always wants. Chunk 94b built it.
+because either-side is the case a chord almost always wants.
 
-**Rules out.** D76's treatment, applied to modifiers: expansion at declaration would double the
-*binding* rather than the entry, since both keys of a pair are live at once. A `Side` enum whose
-`Either` variant sits beside `Left` and `Right`, which would make the ordinary case the elaborate
-one. Naming a representative key in a caption.
+**Rules out.** A `Side` enum whose `Either` variant sits beside `Left` and `Right`, which makes the
+ordinary case the elaborate one; naming a representative key in a caption; and D76's treatment,
+expansion at declaration. Expansion is cheaper to evaluate, one lookup per entry rather than two,
+but both keys of a pair are live at once, so it doubles the *binding*: `Ctrl+S` becomes two bindings
+on one row, listed twice on a rebinding screen and captioned with a side the player is free to
+ignore. A composite's parts are alternatives the player rebinds separately; a modifier's two keys
+are one thing they press either of.
 
-**Reversal.** Expansion is cheaper to evaluate — one lookup per entry rather than two — and is what
-a plan with no presentation surface could afford. What it costs is that `Ctrl+S` becomes two
-bindings on one row, so a rebinding screen lists the shortcut twice and a caption names a side the
-player is free to ignore. This is the same question D76 answered the other way, and the answers
-differ because a composite's parts are alternatives the player rebinds separately while a modifier's
-two keys are one thing they press either of.
+**Reversal.** The doubled rows and captions return; `ChordEntry::Modifier` and
+`ControlOrigin::Modifier` are public.
 
 ### D79 — A rebinding row's chord rides inside the slot
 
 **Decided.** `ActionMapping::slots` holds `Option<BoundSlot>`, and a `BoundSlot` is a control plus
 the `ControlOrigin` list held with it. `ControlOrigin` rather than a control list for D78's reason —
 a modifier stands for either key of its pair — which also makes a row and a caption composable from
-the same values. Chunk 128 built it, with `Overrides` still in controls; chunk 129 made the same
-type what an override writes (D81), and `ActionMapping::controls()` is left as a bare view for
-reading.
+the same values. An override writes the same type (D81), and `ActionMapping::controls()` is a bare
+view for reading.
 
-**Rules out.** A parallel `chords` list beside `slots`, index-aligned. Chords are per slot rather
-than per row, so the two would have to stay aligned by convention, and "this slot is empty" would
-have a place to be said in each of them and a way to disagree — the same shape the saved format
-rejects for the same reason.
+**Rules out.** A parallel `chords` list beside `slots`, index-aligned. It would leave `.slots` call
+sites alone, but "this slot is empty" would have a place in each list and a way to disagree, the
+shape the saved format rejects for the same reason.
 
-**Reversal.** The parallel list leaves every `.slots` call site alone, which is most of what the
-change cost. What it buys back is the alignment invariant, and the point at which that bites is an
-override: a row with a gap in it needs its chord list gapped identically, and a list that drifts by
-one puts a chord on the wrong slot. With the chord inside the slot, an override has one list to
-write.
+**Reversal.** The alignment invariant returns, and it bites at an override: a row with a gap needs
+its chord list gapped identically, and a list that drifts by one puts a chord on the wrong slot.
 
 ### D80 — A chord is set, never captured
 
@@ -512,25 +491,27 @@ preserves it is the screen's to decide, by what it writes (D81).
 what is bound at its position. `rewrite` writes its chord onto the binding along with its control: a
 bare control binds with no chord, a grown slot takes its own chord rather than the primary's, and a
 follower takes its leader's. The saved string carries the chord ahead of the control under catalogue
-names, `mod/ctrl+key/KeyS`. Conflict detection compares slots — the same control with the same
-chord, order ignored. Chunk 129 built it.
+names, `mod/ctrl+key/KeyS`. Conflict detection compares slots: the same control with the same chord,
+order ignored.
 
-**Rules out.** An inherited chord — `with: Option<..>`, where absence keeps the declared one — and
-with it the crate choosing between Blender's reset and preserve on a game's behalf. A write type
-holding `ChordEntry` beside the read type, which would make an unholdable entry unrepresentable at
-the price of a fallible conversion at every edit and a `cfg` split for the no-devices build. The
-bare modifier words of the first sketch, `ctrl+key/KeyS`, which cannot spell a chord of two buttons
-without a second vocabulary.
+**Rules out.**
 
-**Reversal.** Explicit is what makes a saved row mean one thing. Under inheritance, `"key/KeyD"` on
-a row declared `Ctrl+S` means `Ctrl+D` today and whatever the next patch declares tomorrow, and
-"deliberately no chord" needs a spelling of its own. The cost is the same fact seen from the other
-side: a preset or a save naming a bare control on a chorded row drops the chord, and a patch that
-revises a declared chord does not reach a row the player rebound — as a revised control already does
-not. Every saved row is also read differently, so reversing this after a release is a format
+- **An inherited chord**, `with: Option<..>` where absence keeps the declared one, and with it the
+  crate choosing between Blender's reset and preserve on a game's behalf. Under inheritance,
+  `"key/KeyD"` on a row declared `Ctrl+S` means `Ctrl+D` today and whatever the next patch declares
+  tomorrow, and "deliberately no chord" needs a spelling of its own.
+- **A write type holding `ChordEntry` beside the read type.** It makes an unholdable entry
+  unrepresentable, at the price of a fallible conversion at every edit and a `cfg` split for the
+  no-devices build.
+- **Bare modifier words**, `ctrl+key/KeyS`, which cannot spell a chord of two buttons without a
+  second vocabulary.
+
+**Reversal.** Every saved row is read differently, so reversing this after a release is a format
 version.
 
-**Accepted price.** `ControlOrigin` admits entries nothing can hold, a `Foreign` control or a stick,
+**Accepted cost.** A preset or a save naming a bare control on a chorded row drops the chord, and a
+patch that revises a declared chord does not reach a row the player rebound, as a revised control
+already does not. `ControlOrigin` admits entries nothing can hold, a `Foreign` control or a stick,
 so `NotChordable` exists where a narrower type would have made it impossible. The clash rule misses
 two real clashes, stated in D43.
 
@@ -629,13 +610,13 @@ once each time the reading changes within a tick, and once at the closing step; 
 event reaches are read, through an index the plan builds. An action commits after an event whose
 superseded readings reached it, and once at the closing step, taking its other bindings' outputs as
 they stand. A control going away while held, by claim, focus loss, disconnect or authority, is an
-availability of the reading, and one rule makes the action `Canceled` (D94). Chunk 181e built it.
+availability of the reading, and one rule makes the action `Canceled` (D94).
 
-**Rules out.** Evaluating every binding after every event, which chunk 179 had to neutralise stage
-by stage for time, require-reset and claims, and which left the phase machine and a condition's
-previous value stepped by events on unrelated controls. Also a separate mechanism per way a control
-can go away. Also collapsing one axis's events within a tick, which loses a trigger crossing its
-press point and back, the edge R9.3 protects for buttons.
+**Rules out.** Evaluating every binding after every event, which needs each stateful stage guarded
+for time, require-reset and claims, and still steps the phase machine and a condition's previous
+value on events for unrelated controls. Also a separate mechanism per way a control can go away.
+Also collapsing one axis's events within a tick, which loses a trigger crossing its press point and
+back, the edge R9.3 protects for buttons.
 
 **Reversal.** A tick costs events times bindings again, which measured 68 µs for sixteen key events
 on a 48-binding context. An unbound key changes what a bound action reports. Each stateful stage
@@ -646,7 +627,7 @@ needs its own guard against running twice on one reading, and each interruption 
 **Decided.** Disabling one action cancels what it had in flight and takes its slot out of
 evaluation: its bindings read nothing, advance no scratch, claim no control and out-rank no chord,
 and an authority's value for it is ignored. Enabling re-arms require-reset on that slot alone, and
-only when it was disabled. The switch is per instance. Chunk 35 built it.
+only when it was disabled. The switch is per instance.
 
 **Rules out.** Evaluating a disabled action and discarding the result, which would keep a hold
 counting across the gap.
@@ -683,22 +664,17 @@ having any intention of installing them.
 ### D19 — Modifiers and conditions are enums with a `Custom` variant
 
 **Decided.** Built-in modifiers and conditions are enum variants; a third party implements the
-`Modifier` or `Condition` trait and arrives through a `Custom` variant holding an `Arc`. Built-ins
-dispatch statically and stay exhaustively matchable; extensions work.
+`Modifier` or `Condition` trait and arrives through a `Custom` variant holding an `Arc`, which
+survives the clone an override's apply makes of the authored bindings (D48). Built-ins dispatch
+statically and stay exhaustively matchable; extensions work. `Modifier` and `Condition` carry no
+`Reflect` bound: they are developer data and never reach a save file, which stores controls, what is
+held with them, and tunable values.
 
 **Rules out.** A closed enum, which blocks third-party modifiers outright, and trait objects
 throughout, which cost dispatch on every binding every tick.
 
-**Reversal.** The boxes are allocated during plan compilation, never in the steady state. Going to
+**Reversal.** The `Arc`s are allocated during plan compilation, never in the steady state. Going to
 trait objects throughout moves that cost into the per-tick path.
-
-**How the framing changed.** This was posed as a trade of ergonomics against _serializability_ —
-trait objects versus a reflected registry. That trade turned out not to apply. An override stores
-controls, what is held with them, and tunable values; modifiers and conditions are developer data
-and never reach a save file. So `Modifier` and `Condition` carry no `Reflect` bound and custom
-extensions are not serialized, because nothing asks them to be. The `Arc` rather than a `Box` is for
-an unrelated reason: applying an override clones the authored bindings and rewrites their inputs,
-and the originals have to survive that intact.
 
 ### D65 — The device model is closed; a third-party device kind needs one in hand to design against
 
@@ -808,48 +784,30 @@ build on. Allowing a filter to rewrite or insert events would break the queue's 
 
 ### D23 — Focus integrates by activation, and interception is static
 
-**Decided.** Focus _type_ activates a context; what a claim does once made is ordinary context
-composition. There is no suppression mechanism and no second, bubbling arbitration. A
-focus-activated context claims a control before dispatch, and a widget never decides at handling
-time whether to let an input fall through.
+**Decided.** The kind of widget that has focus activates a context, and what that context claims is
+ordinary context composition. It claims a control before dispatch; a widget never decides at
+handling time whether to let an input fall through. A game replaces `InputDispatchPlugin` with a
+context per widget kind, activated by an ordinary run condition, and needs no crate support to do
+it.
 
-**Rules out.** A bubbling interception pass beside the mapper's own, and dynamic interception.
+**Rules out.**
 
-**Reversal.** A mapper that already has priority and consumption does not need a second arbitration,
-and adding one would give two mechanisms answering the same question differently. Dynamic
-interception would break the single deterministic pass D11 establishes.
+- **A bubbling interception pass beside the mapper's own.** `FocusedInput` bubbles because focus is
+  the only arbitration `bevy_input_focus` has. Here priority and consumption decide whether
+  something else claims a control before a focus-activated context runs.
+- **Dynamic interception, by a widget or an observer.** Consuming stops lower-priority contexts, not
+  the same action's other observers; an observer suppressing its peers makes the outcome depend on
+  which ran first. `Ctrl+Z` as undo-in-field while a text input has focus needs no election: the
+  field's context claims it, and with focus elsewhere that context is inactive and the global
+  binding wins.
 
-**The same rule one level down.** Consuming stops lower-priority contexts; it deliberately does not
-stop the same action's other observers. An observer electing at handling time to suppress its peers
-makes the outcome depend on which ran first — the same objection, and no more defensible for
-observers than for contexts. The motivating case is answered better by the half that was kept: the
-UI's context claims the control, so the gameplay action never fires at all, and `why_not` can name
-the context that took it.
+**Reversal.** Two arbitrations answer one question and can disagree, and dynamic interception breaks
+the single deterministic pass D11 establishes.
 
-**Why bubbling was never the requirement.** `FocusedInput` bubbles because focus is the only
-arbitration `bevy_input_focus` has of its own — a widget that declines a key lets it fall through to
-whatever is listening further up the entity chain. A mapper with priority and consumption already
-answers that question earlier: whether something else claims a control is decided by evaluation
-order before a focus-activated context ever runs. A drop-in replacement for `InputDispatchPlugin`
-was designed and built and then set aside, because building it with no widget in tree that needed it
-was the thing to avoid; what replaced it needed no crate change at all, and is a context per widget
-kind activated by an ordinary run condition.
-
-**Accepted cost.** A widget kind with no context of its own gets no keyboard or gamepad input at
-all, since the game disables the default dispatch plugin outright. That is the same additive bet the
-presentation surface makes elsewhere, and it is a real cost of being explicit rather than a free
-lunch.
-
-**The `Ctrl+Z` case.** `Ctrl+Z` meaning undo-in-field when a text input has focus and
-undo-in-document otherwise looks like it needs a widget to elect at runtime, and it does not: the
-text field's focus-activated context claims `Ctrl+Z`, and when focus is elsewhere that context is
-inactive and the global binding wins. The election is expressed by which context is active, a
-consequence of what has focus, not a runtime decision.
-
-**What static-only interception gives up.** Only a widget that claims a control conditionally on its
-own internal state — a text field that swallows `Ctrl+Z` only while its undo stack is non-empty. The
-workaround is to make that state part of context activation (a `TextFieldWithUndoHistory` context)
-rather than a runtime decision, keeping the claim inspectable by R22.1.
+**Accepted cost.** A widget kind with no context of its own gets no keyboard or gamepad input, since
+the default dispatch plugin is off. A widget that claims a control on its own internal state, such
+as a text field swallowing `Ctrl+Z` only while its undo stack is non-empty, makes that state part of
+activation (a `TextFieldWithUndoHistory` context), which keeps the claim inspectable by R22.1.
 
 ### D24 — One crate, feature-gated by source
 
@@ -870,27 +828,29 @@ speculative, and the module layout makes it a move rather than a rewrite.
 
 ### D25 — What must not move upstream
 
-**Decided.** Two things stay out of Bevy regardless of what else happens.
+**Decided.** Action mapping stays out of `bevy_input`, and focus-context activation stays out of
+`bevy_input_focus`, whatever else moves upstream. Focus activation is a `focus` feature here.
 
-**Action mapping does not belong in `bevy_input`.** It is a policy layer over a data layer, with a
-much larger API surface and far more contested design. Fusing them would make `bevy_input`
-unadoptable for anyone wanting only raw input.
+**Rules out.** Fusing mapping into `bevy_input`, a policy layer with a much larger and more
+contested API over a data layer; and focus activation in `bevy_input_focus`, which depends on the
+action and context model.
 
-**Focus-context activation does not belong in `bevy_input_focus`.** It depends on the action
-and context model, so putting it there inverts the dependency and drags the whole action system into
-a crate that today does one small thing well. A `focus` feature here is the correct direction.
+**Reversal.** `bevy_input` becomes unadoptable for anyone wanting only raw input, and
+`bevy_input_focus` depends on the whole action system.
 
-**Related, and enforced in the tree.** Nothing under `crates/bevy_action_map/src/` may name Steam —
-not a feature, not a variant, not a trait method. The real backend is `std`-only, `unsafe` FFI
-beneath, and wants the Steamworks redistributable at link time, where this crate is `no_std` and
-forbids unsafe. So it is someone else's crate, and the test of whether the seam is sufficient
-without being Steam-shaped is that the Steam backend in `steam_examples/` builds against the public
-API alone.
+### D101 — The crate names no backend and draws nothing
 
-**Also enforced.** Nothing in the crate depends on `bevy_ui`. `bevy_ui` already depends on
-`bevy_input` and `bevy_input_focus`, so depending on it would invert that layering and foreclose
-`bevy_ui` ever using action maps itself. Everything that draws lives in the examples until it earns
-a crate of its own.
+**Decided.** Nothing under `crates/bevy_action_map/src/` names Steam: not a feature, not a variant,
+not a trait method. Nothing in the crate depends on `bevy_ui`; what draws lives in the examples
+until it earns a crate of its own. Both are enforced in the tree.
+
+**Rules out.** A Steam backend inside this crate: it is `std`-only, `unsafe` FFI beneath, and wants
+the Steamworks redistributable at link time, where this crate is `no_std` and forbids unsafe. And a
+`bevy_ui` dependency, since `bevy_ui` already depends on `bevy_input` and `bevy_input_focus`.
+
+**Reversal.** The seam loses its test, which is that the Steam backend in `steam_examples/` builds
+against the public API alone. A `bevy_ui` dependency inverts the layering and forecloses `bevy_ui`
+ever using action maps itself.
 
 ---
 
@@ -913,13 +873,10 @@ game would be back to maintaining a parallel table of its actions, and each scre
 in the ecosystem would key that table its own way.
 
 **Accepted cost.** A declared path per action, a presentation declaration per rebindable binding,
-and a crate larger than a mapper alone. The work it removes is work every game with a controls
-screen does anyway, and doing it once makes it standard.
+and a crate larger than a mapper alone, for work every game with a controls screen does anyway.
 
-**Provenance.** An assumption rather than a choice: the LLM's first sketch of the API took it for
-granted, before the repository's first commit and probably from its survey of prior art, and the
-author went along with it. It is recorded as a decision in hindsight, because D6, D27 and D31 all
-rest on it and none of them states it.
+**Assumed, not weighed.** The first sketch of the API took this for granted, and it is recorded in
+hindsight because D6, D27 and D31 rest on it; no alternative was argued against.
 
 ### D27 — The presentation model is separate from the binding model
 
@@ -945,90 +902,70 @@ still gets a listed controls screen.
 **Decided.** A binding is listed and fixed unless it says otherwise. `mappable` makes it rebindable,
 `private` hides it, `follow` puts it on another row.
 
-**Rules out.** Making listing follow rebindability, which is what the first draft did.
+**Rules out.** Making listing follow rebindability.
 
-**Reversal.** Under opt-in listing a gamepad `Jump` with no mapping vanished from the screen
-entirely — backwards for the commonest gamepad screen there is, where the console or Steam owns the
-remapping and the game still wants to *show* the player what the pad does. The crate knew the
-binding and refused to say so. Rebindability is the developer's call because a fixed binding is a
-design decision; seeing the controls is the player's business, and the default belongs to them.
+**Reversal.** A gamepad `Jump` with no mapping vanishes from the screen, which is backwards for the
+commonest gamepad screen, where the console or Steam owns remapping and the game still shows what
+the pad does. Rebindability is the developer's call, since a fixed binding is a design decision;
+seeing the controls is the player's.
 
-**`mappable` takes no arguments, and both halves of that are decisions.** The parts of a composite
-name themselves, so the key derives as `gameplay.move.up` and a catalogue is where `up` becomes
-"Move Forward" — an author supplying "forward" would be naming the same part twice, in a place no
-translator will look. The family is inferred from the controls, because declaring it would be a
-third chance to disagree with what is actually bound.
+**`mappable` takes no arguments.** A composite's parts name themselves, so the key derives as
+`gameplay.move.up` and a catalogue turns `up` into "Move Forward"; an author-supplied name would
+name the part twice, where no translator looks. The family is inferred from the controls, since
+declaring it is one more chance to disagree with what is bound.
 
 ### D29 — A mapping is an ordered list of slots
 
 **Decided.** A *mapping* is the named thing a player rebinds; a *slot* is one position in it holding
-one control, **or nothing**; a screen draws one cell per slot. How many cells a screen draws is the
-screen's business, not the mapping's.
+one control, **or nothing**, as `None` in the list; a screen draws one cell per slot, and how many
+is the screen's business. A slot is addressed, not appended: `Overrides::with_cell` grows the row to
+reach whatever slot the screen names, leaving the slots it skips empty.
 
-**An empty slot is `None` in the list, not a variant of `Control`.** A `Control::Empty` would cost
-every consumer of a control an arm meaning "not a control" — the frame, prompts, labels,
-admissibility, conflict comparison — and conflict detection acquires a bug the first time two empty
-slots compare equal. With the container it cannot: `Some(control)` never matches an empty cell. A
-map keyed by index answers a sparse-at-index-9000 question nobody asked and gives up the scalar
-shorthand the save format keeps on purpose.
+**Rules out.**
 
-**Rules out.** One control per mapping, and a fixed two. Also a per-mapping capacity: how long a row
-*may* grow was once a property of the mapping, and it stopped being one when the width it expressed
-turned out to be read by no shipped screen — every caller that wanted a column count already had
-that count from the list itself, or from a constant of its own. A global ceiling on a row's length
-remains, as a resource the app sets, because a corrupt or hostile save is the one case where a
-boundary is the crate's business rather than the screen's.
+- **One control per mapping, and a fixed two.** One cannot express the two-cell row every shipped
+  game's keyboard table has, and forces a second row under an alias (`thrust`, `thrust_alt`) that
+  tells the player one thing is two. Two cannot express the "add shortcut" button tools grow.
+- **`Control::Empty`.** Every consumer of a control (the frame, prompts, labels, admissibility,
+  conflict comparison) gains an arm meaning "not a control", and two empty slots compare equal as a
+  conflict. `Some(control)` never matches an empty cell.
+- **A map keyed by index**, which answers a sparse question nobody asked and loses the scalar
+  shorthand the save format keeps.
+- **A per-mapping capacity.** No shipped screen read one; a caller wanting a column count has it
+  from the list or a constant of its own. A global ceiling on a row's length remains, as a resource
+  the app sets, because a corrupt or hostile save is the crate's business.
+- **Refusing a slot more than one past the end.** Once a hole is legal, that rule allows the primary
+  of an emptied two-cell row and refuses the secondary, on no principle a screen could explain.
 
-**Reversal.** One control per mapping cannot express the two-cell row every shipped game's keyboard
-table has. The workaround it forced was a second row under an alias name — `thrust` and
-`thrust_alt` — telling the player two things are separate when they are the same thing twice. A
-fixed two cannot express the "add shortcut" button that tools grow instead.
+**Reversal.** The row is save format: narrowing it orphans every saved secondary, and a
+`Control::Empty` changes a public enum.
 
-**A slot is addressed, not appended.** `Overrides::with_cell` takes whatever slot number the screen
-names and grows the row to reach it, leaving the slots skipped on the way empty — assignment, the
-way writing to index four of a JavaScript array gives you five. The rule it replaced refused
-anything more than one past the end, which existed to stop a capture leaving a hole and became
-arbitrary once a hole was legal: it allowed the primary of an emptied two-cell row and refused the
-secondary, on no principle a screen could explain. What bounds a row now is the number of cells the
-screen draws.
-
-**Save format.** A row holds a list because a mapping does, and position is which slot, so a cleared
-middle slot needs the cleared marker rather than a shortened list — which would silently promote the
-secondary to primary. It is the same word an emptied *row* uses, one level down, so a person opening
-the file has one thing to learn rather than two. Trailing empties are not written, because a row is
-as long as its last filled slot and a two-column table whose secondaries are mostly blank should not
-fill a settings file with the word.
-
-**Note on the nouns.** The first version called the row a slot and had to invent a second word for
-the position. "Cell" was what it reached for, and a cell belongs to the table a screen draws rather
-than to the model behind it.
+**Save format.** Position is which slot, so a cleared middle slot is written with the cleared marker
+an emptied row uses, rather than as a shorter list, which would promote the secondary to primary.
+Trailing empties are not written, so a two-column table with mostly blank secondaries does not fill
+a settings file with the marker.
 
 ### D30 — `follow` declares a shared control once, against the leader's bindings so far
 
 **Decided.** Two actions that deliberately share one control — tap to dodge, hold to sprint — are
 declared with `follow::<Follower, Leader>`, which reads whatever the leader has declared *at that
-point* and generates a matching binding per device found.
+point* and generates a matching binding per device found. "So far" is an ordering rule, which lets a
+follower ride only some of a leader's devices on purpose. A follower may ride a listed-and-fixed
+row, which has nothing to rewrite but still keeps a duplicate row off the screen.
 
-**Rules out.** Declaring the link per binding, which is what shipped first, and inferring it from
-two bindings happening to name one control.
+**Rules out.**
 
-**Reversal.** Per-binding declaration meant retyping a control the leader had already named, once
-per device, and nothing checked that the counts matched — so a forgotten repeat produced a follower
-that silently rode part of a row while being drawn as if it rode all of it. Left alone that is a
-gameplay bug rather than a display oddity: rebind the throttle and the afterburner stays on the old
-key, and whatever the player later puts there acquires an afterburner.
+- **Declaring the link per binding.** It retypes a control the leader already named, once per
+  device, and nothing checks that the counts match, so a forgotten repeat gives a follower that
+  rides part of a row while drawn as riding all of it. Rebind the throttle and the afterburner stays
+  on the old key, and whatever the player later puts there acquires an afterburner.
+- **Inferring the link** from two bindings naming one control, which is as often coincidence as
+  intention. Conflict detection cannot tell either: it looks for two rows holding one control, and
+  this failure is a separation.
+- **Requiring the leader's row to be `mappable`**, which fails the build of the game `follow` exists
+  for.
 
-**Why it is never inferred.** Two bindings reading one control are as often a coincidence as an
-intention, and conflict detection cannot tell the difference either — it looks for two rows holding
-one control, and this failure is a *separation* that should not have been possible.
-
-**Why "so far" rather than the leader's final shape.** It is an ordering rule, which is what lets a
-follower ride only some of a leader's devices on purpose. Declare it before the rest of the leader's
-bindings and only the ones already there are covered.
-
-**Riding a fixed row is the ordinary case.** A pad binding that is listed-and-fixed has nothing to
-rewrite, and keeping the duplicate row off the screen is worth having on its own. Requiring the
-target to be `mappable` would have failed the build of the game this exists for.
+**Reversal.** The per-binding form returns, and with it the afterburner bug.
 
 ### D31 — Every player-facing string is a key; the mapping owns the name
 
@@ -1068,17 +1005,14 @@ preset is active", in the crate or in what a screen keeps between visits.
 **Rules out.** A preset as a layer that reapplies later and reconciles against what the player has
 since changed.
 
-**Reversal.** A layer needs machinery this crate does not have, and it contradicts D47: applying
-always starts from the pristine declaration and never stacks. Keeping presets a starting point also
-keeps the persisted format exactly the `Overrides` shape it already has — which preset is selected
-is something a screen can *compute*, by comparing what is bound against each registered preset.
+**Reversal.** A layer contradicts D47, where applying starts from the pristine declaration and never
+stacks, and adds a "which preset" field to the persisted format. Today a screen computes the
+selected preset by comparing what is bound against each registered one.
 
-**Why applying one needed a second entry point.** The refusal that guards a capture — a `Fixed` row
-is a design decision the player's own screen must not override — is wrong for a preset, whose whole
-reason to exist is moving rows a capture screen never offers a button for. Every gamepad binding in
-a typical game is such a row. `apply_overrides_with_preset` exempts exactly the rows that preset
-names, and no others; a third `RebindPolicy` state would have forced every already-correct `Fixed`
-declaration in every game to be revisited for a fact that has not changed.
+**A preset may move a `Fixed` row.** Moving rows a capture screen offers no button for, such as
+every gamepad binding in a typical game, is what a preset is for. `apply_overrides_with_preset`
+exempts exactly the rows that preset names. A third `RebindPolicy` state would instead make every
+game revisit each correct `Fixed` declaration.
 
 ---
 
@@ -1165,7 +1099,10 @@ edited elsewhere. The crate cannot see those.
 
 **Decided.** One string per control serves as the stored identity and the localization key.
 `key/KeyW` is what a settings file holds and what an app's catalogue answers to. The table is
-written out rather than derived from Bevy's names.
+written out rather than derived from Bevy's names, and so are the fallback labels, which say what a
+control is: `LeftTrigger` shows as a bumper and `LeftTrigger2` as the trigger, and the stored
+`mouse/Back` and `mouse/Forward` show as **Mouse 4** and **Mouse 5**, as every other settings screen
+calls them.
 
 **Rules out.** `Debug`, serde on `KeyCode`, and deriving display text from upstream identifiers.
 
@@ -1173,53 +1110,33 @@ written out rather than derived from Bevy's names.
 binding. Owning the table costs about two hundred lines and turns an upstream rename into a compile
 error in an exhaustive match while the stored string stays what it was.
 
-**It also lets the labels say what the controls are.** `LeftTrigger` is a bumper and `LeftTrigger2`
-is the trigger, which is worth correcting in the one place a player reads. The mouse thumb buttons
-are the same call from the other direction: stored as `mouse/Back` and `mouse/Forward` because that
-is what the backend reports and the stored string must not drift, shown as **Mouse 4** and **Mouse
-5** because that is what every other settings screen calls them.
-
-**What the fallback cannot do.** It answers for a US keyboard, so a binding to a physical key shows
-an AZERTY player the wrong letter. Nothing in Bevy reports what a physical key produces on the
-current layout outside an event that has already happened, so the crate cannot fix this alone; an
-app supplies the control half of its catalogue per layout.
-
-**Checked upstream rather than assumed.** winit already builds the per-key table this would need —
-`ToUnicodeEx`/`MapVirtualKeyEx` on Windows, `UCKeyTranslate` on macOS, libxkbcommon state on
-Linux — but only to fill in a `KeyEvent`'s own fields, and none of it is public. Requesting the
-query is [rust-windowing/winit#4606](https://github.com/rust-windowing/winit/issues/4606); the
-broader tracking issue, [#2678](https://github.com/rust-windowing/winit/issues/2678), has been open
-since February 2023, assigned, and unimplemented. Not a gap to plan around closing soon.
+**Accepted cost.** The fallback answers for a US keyboard, so a binding to a physical key shows an
+AZERTY player the wrong letter, and an app supplies the control half of its catalogue per layout.
+Bevy reports what a physical key produces only in an event that has already happened, and winit
+builds the per-key table without exposing it; X12 carries the upstream request.
 
 ### D82 — A prompt names the control, and the condition belongs to the prose
 
 **Decided.** A prompt, as text or as an icon, draws the control that fires the action and whatever
 must be held with it, and nothing about how it has to be pressed. "Hold ⟨X⟩ to reload" is a sentence
-the game writes around a prompt that reads "X". Chunk 136's gallery found the two paths disagreeing;
-chunk 133 makes the text path agree with the icon one.
+the game writes around a prompt that reads "X". `Prompt::condition` still says which condition a
+binding has, and a rebinding screen still formats one: a row describes the binding, where a prompt
+names what to press.
 
-**Rules out.** Captioning a hold or a multi-tap in the prompt itself, as `fallback_format` did for
-`PromptSpan`, and giving an icon prompt a condition to draw.
-
-**Reversal.** Four things break.
+**Rules out.** Captioning a hold or a multi-tap in the prompt itself, and giving an icon prompt a
+condition to draw.
 
 - **A custom condition cannot be rendered.** `ConditionDescriptor` knows a hold and a multi-tap, and
-  a `Custom` condition describes as nothing, so a prompt that captions conditions is right for two
-  and silently wrong for the rest.
-- **How a condition is described is a choice, and the prose writer's.** "Hold", "press and hold",
-  "long-press", or a charge meter beside the prompt instead of any word at all. A button glyph
-  depicts what the player sees; a condition has no depiction, only a wording, and a prompt that
-  supplies one takes it from the game.
-- **A condition does not move, so its wording never goes stale.** A prompt exists to follow what can
-  change under it: a rebind, a preset, a brand, a context switching. Capture, overrides and presets
-  all move the control and leave the condition as declared, so the words describing it can be static
-  text. The one player-facing switch that does change how a control is pressed, `hold_or_toggle`,
-  was never in `ConditionDescriptor` either, and prose around it reads the tunable.
-- **A game may not want the condition shown at all.** A prompt that always captions it gives that
-  game no way to leave it out short of rewriting the prompt.
+  a `Custom` condition describes as nothing, so a captioning prompt is silently wrong for the rest.
+- **The wording is the game's.** A condition has no depiction, only a wording: "hold", "long-press",
+  or a charge meter and no word at all. A game may not want it shown.
+- **A condition does not move.** A prompt exists to follow what can change under it: a rebind, a
+  preset, a brand, a context. All of these move the control and leave the condition as declared, so
+  prose describing it can be static. `hold_or_toggle`, the one player-facing switch that changes how
+  a control is pressed, is read from the tunable by the prose around the prompt.
 
-**What stays.** `Prompt::condition` still says which condition a binding has, and a rebinding screen
-still formats one: a row describes the binding, where a prompt only names what to press.
+**Reversal.** Prompts caption conditions again, wrongly for every custom one, and a game loses the
+wording and the choice to omit it.
 
 ### D83 — Glyph resolution takes a `ControlOrigin`, and a platform is not a tier
 
@@ -1241,26 +1158,24 @@ given; that is the accepted price.
 
 **Decided.** `prompts` answers from every context something carries, whether or not it is active,
 shadowed by an exclusive context, or has a control consumed by a stronger one. A context nobody
-carries is still left out. Activation no longer raises `PromptGeneration`; arriving and leaving
-does. Chunk 134 built it, and withdrew R18.2 to do so.
+carries is left out. A context arriving or leaving raises `PromptGeneration`; activation does not.
+R18.2, which asked otherwise, is withdrawn.
 
 **Rules out.** A present-tense lookup in any form: a scope flag either way round, a second trait
 method, and a liveness field on `Prompt`.
 
-**Reversal.** The filtered answer was never usable on its own, for three reasons.
-
-- **A prompt never stands alone.** It is inside a sentence or a table row that only the app knows
-  when to show, so emptying the prompt leaves "— new game" on screen. The crate cannot remove the
-  prose, and an app hiding the hint from its own state has no use for a lookup that also hides it.
+- **A prompt never stands alone.** It sits in a sentence or a table row only the app knows when to
+  show, so an emptied prompt leaves "— new game" on screen, and an app hiding the hint from its own
+  state has no use for a lookup that also hides it.
 - **Players read a binding as what a control does in its mode.** A dialog over the game does not
   make "Ctrl+N: new game" false, and the rebinding screen already lists every gameplay binding while
   none of them can fire.
-- **Consumption only mattered for one binding of several.** Space consumed by an always-on context
-  and J beside it made the filtered answer "J". That is two actions on one control, which is a clash
-  for the bindings to resolve and `conflicts` to report (R19.3), not for a prompt to hide.
+- **Consumption mattered only for one binding of several.** Space consumed by an always-on context
+  and J beside it made the filtered answer "J". Two actions on one control is a clash for
+  `conflicts` to report (R19.3), not for a prompt to hide.
 
-A liveness predicate a hint can follow, for an app that wants one, is deferred as X9, gated on
-reactive UI, rather than a filter on this lookup.
+**Reversal.** Prompts go blank inside prose that stays on screen. A liveness predicate a hint can
+follow is deferred as X9, gated on reactive UI, rather than a filter on this lookup.
 
 ### D85 — An inline icon prompt and a block one are two components
 
@@ -1313,31 +1228,21 @@ one reached from a pause menu.
 
 **Decided.** Three refusals that look alike and are not. *Reserved* is declared on a binding and is
 loud. *Shape* and *family* are the mapping's own constraints. *Excluded* is the screen's own
-controls and is silent. Reserved is asked first, and one shared predicate answers for both a live
-capture and a control loaded from a file.
+controls and is silent: an excluded control is busy doing its normal job, which is how the key that
+cancels a capture reaches the thing that cancels it, and it is the one case capture decides alone.
+Reserved is asked first, so the settings key pressed at a rebinding screen is told it is spoken for,
+not that its channel is wrong. One predicate answers for a live capture and a control loaded from a
+file; the screen gets its answer from `Rebind::checked` at the write (D89).
+
+Reserving has two halves: a reserved binding takes no mapping, and its controls are refused by
+capture across the family. Without the second, a player cannot rebind the settings key away but can
+bind something else over it.
 
 **Rules out.** Asking in implementation order, and treating exclusion as a refusal.
 
-**Reversal.** Pressing the settings key should hear that it is spoken for, not that its channel is
-wrong. An excluded control is not being refused — it is busy doing its normal job, which is how the
-key that cancels a capture reaches the thing that cancels it. One predicate is what stops a control
-getting two different reasons depending on which direction it arrived from; before the two were
-merged they genuinely disagreed, and no test noticed.
-
-**Where the loudness comes out changed, and the order did not.** D89 moved the refusal from an event
-the crate fires to an answer the screen gets from `Rebind::checked` at the write. The ordering here
-is what that predicate still does, so pressing the settings key is still answered with the reason it
-cannot be bound rather than a complaint about its channel; *excluded* is still the silent case, and
-still the only one capture decides by itself.
-
-**Reserving has two halves and the second is the one that matters.** A reserved binding takes no
-mapping *and* its controls are refused by capture across the family. Without the second half a
-player cannot rebind the settings key away but can still bind something else over it, which is the
-same trap through another door.
-
-**Only deliberate arrivals are refused out loud.** A stick drifts and a mouse twitches. A press is
-refused loudly, a continuous reading past its threshold is dropped quietly, and both are claimed so
-that neither also plays the game.
+**Reversal.** Two predicates give a control two reasons depending on which way it arrived; before
+they were merged they disagreed, and no test noticed. Asked in implementation order, the settings
+key is refused for its channel.
 
 ### D43 — Conflicts are detected, never resolved
 
@@ -1346,22 +1251,23 @@ before anything is committed. What to *do* about a clash — reject, swap, unbin
 duplicate — is the app's.
 
 **Rules out.** A crate-owned `ConflictPolicy`, and an `Overrides::rebind` that resolves conflicts
-and writes several rows on the app's behalf. Both were built and rejected on review.
+and writes several rows on the app's behalf. `Overrides::bind`, `set` and `get` already express
+every policy: reject is not writing, allow-the-duplicate is writing anyway, and swap and
+unbind-the-other are reading the conflicting row and writing it back with one control removed or
+traded. The four are worked examples in a doc comment.
 
-**Reversal.** `Overrides::bind`, `set` and `get` already say everything a policy needs to say:
-reject is not writing, allow-the-duplicate is writing anyway, and swap and unbind-the-other are the
-app reading the conflicting row's current list and writing it back with one control removed or
-traded. The four policies are worked examples in a doc comment instead of an enum.
+**Reversal.** A policy enum becomes public API that has to cover every game's rule.
 
-**Three limits, stated rather than hidden.** Comparison is of whole slots: the same control with the
-same chord, order ignored (D81). It used to be at control granularity, which over-reported `S`
-beside `Ctrl+S` — harmless while chords were fixed, and a false steal once a player could author
-both. Two real clashes now go unreported instead: `Ctrl+S` beside a chord naming one Control key by
-`KeyCode`, and two same-length chords a player holding both sets satisfies at once. A clash across
-two contexts is *possible* rather than certain, because whether two contexts are ever live together
-is a question about the game's activation rules. And the whole target mapping is excluded rather
-than the one slot, so a control repeated across two slots of one row is invisible here; a caller
-about to write a row already holds that list and needs no help spotting a duplicate in it.
+**Accepted cost: three limits.**
+
+- **Comparison is of whole slots**, the same control with the same chord, order ignored (D81).
+  Comparing controls alone reports `S` beside `Ctrl+S` as a steal. Two real clashes go unreported:
+  `Ctrl+S` beside a chord naming one Control key by `KeyCode`, and two same-length chords a player
+  holding both sets satisfies at once.
+- **A clash across two contexts is possible, not certain**: whether they are ever live together is
+  the game's activation rules.
+- **The whole target mapping is excluded**, not the one slot, so a control repeated within one row
+  is invisible here. A caller about to write that row already holds its list.
 
 ---
 
@@ -1372,27 +1278,26 @@ about to write a row already holds that list and needs no help spotting a duplic
 **Decided.** The crate adds `compass`, which rounds a 2D value to four or eight points and discards
 the magnitude, and `on_change`, which fires on the ticks the value differs from the tick before.
 Neither is about navigation. Together they fire once per compass point *entered*; with `pulse` after
-them, that is auto-repeat.
+them, that is auto-repeat. The crate stops at the value: it does not call `bevy_input_focus`. The
+observer turning a direction into a focus move is four lines in the app, because only whoever
+depends on both a widget library and an input mapper may associate them.
 
-**Rules out.** A virtual cursor, and a bespoke navigation input path beside the mapper.
+**Rules out.** A virtual cursor, which is slow to use, and a bespoke navigation path beside the
+mapper, which puts a game's most-pressed controls where the rebinding screen cannot see them.
 
 **Reversal.** A stick held off centre is off centre every tick, so a naive binding runs a menu off
-the end of the list before the player has let go. Of the two usual fixes, the cursor is slow to use
-and the separate path puts a game's most-pressed controls somewhere the rebinding screen cannot see
-them. Three combinators that all exist for other reasons cover it instead.
+the end of the list before the player lets go; one of the two alternatives above returns.
 
-**Where the crate stops is the value.** It rounds the direction and says when it changed. It does
-not call `bevy_input_focus` and does not know the focus exists — the observer turning a direction
-into a focus move is four lines and lives in the app, because the association between a widget
-library and an input mapper may only be expressed by whoever depends on both.
+### D102 — A claim lasts while its binding is `Building` or `Firing`
 
-**Two consequences that were not obvious.** The previous value has to be the whole value rather than
-a boolean, or two directions cannot be compared. And the claim on a control is held while the
-binding is `Building` or `Firing`, not only on the tick it fires, because a binding that fires once
-per direction entered says nothing in between — a claim scoped to the firing tick alone would hand
-the stick back to the game underneath for exactly the ticks the player was still holding it. The
-same rule covers a charging `.hold()` and a part-way `.multi_tap()`: nothing about consumption is
-special to navigation, this is just where the gap was first found.
+**Decided.** A consuming binding claims its control on every tick it is `Building` or `Firing`, not
+only on the tick it fires. A charging `.hold()` and a part-way `.multi_tap()` claim throughout.
+
+**Rules out.** A claim scoped to the firing tick. A binding that fires once per compass point
+entered (D44) says nothing in between, so the stick would go back to the game underneath for exactly
+the ticks the player is still holding it.
+
+**Reversal.** Every multi-tick condition leaks its control to lower contexts while it builds.
 
 ---
 
@@ -1451,32 +1356,18 @@ deactivation and activation already do, and moves every follower riding a row th
 ### D48 — Applying rewrites the authored bindings; a variant keeps the declared slots
 
 **Decided.** The authored binding specs are retained beside the plan and cloned per apply, and the
-variant plan keeps the declared plan's slot allocation.
+variant plan keeps the declared plan's slot allocation; how each slot is rewritten is TD10.1.
+Presentation rows are re-derived from the rewritten bindings except for their holes: a binding list
+says what is bound and never in which column, so an emptied primary and a row that only ever held a
+secondary compile alike, and the accepted override's own list is carried through to the row.
 
 **Rules out.** Patching the compiled bindings, and deriving a fresh slot allocation.
 
 **Reversal.** Rewriting authored bindings is what makes loading the pure function D50 requires, and
-it is why the custom modifier and condition variants hold an `Arc` rather than a `Box`. Keeping the
-slot allocation is not an optimization: an action whose every binding the player cleared would
-otherwise lose its slot and read as *unbound*, firing the "not bound in this context" diagnostic —
-which exists to catch a typo and is precisely wrong for a control somebody deliberately emptied.
-Keeping the table also means an instance's action states and require-reset flags stay aligned across
-the swap, so only the scratch is rebuilt.
-
-**Four slot cases, and the last two bite.** A slot the defaults fill has its source rewritten. A
-slot they left empty is filled by *copying* the binding beside it, so a secondary carries the same
-modifiers and conditions as the primary rather than arriving bare. A slot the override no longer has
-takes its binding away, and so does a slot the override *emptied* while a later one still holds
-something. Copying only works where a binding reads one control — copy a binding that read four and
-its other three directions would land in their own rows a second time — which is one reason a
-composite expands into a binding per part (D76).
-
-**A gap survives the rewrite only because it is carried, not derived.** Rows are otherwise
-re-derived from the rewritten bindings so that the two cannot disagree, but a binding list says what
-is bound and never in which column — an emptied primary and a row that only ever held a secondary
-compile to the same single binding. So the accepted override's own list is carried through to the
-presentation row. The derivation stays the authority on which controls are bound; only the override
-knows where the holes are.
+why the custom modifier and condition variants hold an `Arc` rather than a `Box`. A fresh allocation
+loses the slot of an action whose every binding the player cleared, so it reads as unbound and fires
+the "not bound in this context" diagnostic meant for a typo; and an instance's action states and
+require-reset flags no longer stay aligned across the swap.
 
 ### D49 — The control encoding is a format we own
 
@@ -1510,35 +1401,26 @@ back in the same diagnostic shape the plan-build tier produces.
 ### D58 — An unrecognized version refuses the set; no migration exists yet
 
 **Decided.** `resolve_saved` requires `SavedOverrides::action_map_version` to equal the one format
-this crate has ever shipped; any other value returns `UnsupportedVersion` rather than resolving
-anything. There is no migration mechanism, because no second version has ever existed to say what it
-would convert from.
+this crate has shipped; any other value returns `UnsupportedVersion` and resolves nothing. There is
+no migration mechanism, since no second version exists to say what one would convert from.
 
-**Rules out.** Silently reinterpreting a newer or otherwise unrecognized set as the current version —
-resolving whatever rows happen to look familiar and discarding the rest without saying so.
+**Rules out.** Silently reinterpreting an unrecognized set as the current version, resolving the
+rows that look familiar and discarding the rest.
 
-**Reversal.** A migration path designed now would be designed against a guess, since nothing has
-ever shipped a second version to specify what changed. Refusing is what a version field is for in
-the meantime: rejecting with a stated reason costs nothing to undo once a real second version needs
-a real migration, where guessing wrong now would already have shipped a converter for the wrong
-shape.
+**Reversal.** Cheap: a real second version replaces the refusal with a migration. One designed now
+would be designed against a guess.
 
-**Accepted.** A save from a build that came later — a rollback, a second machine on a newer patch, a
-Steam beta branch — is rejected outright rather than partially salvaged. That is a stricter tolerance
-than R17.2 gives an unresolved row, and deliberately so: a resolved row from the wrong version's
-default is a mismatch the game cannot see the way it can see an `Unresolved`.
+**Accepted cost.** A save from a later build (a rollback, a second machine on a newer patch, a Steam
+beta branch) is rejected outright. That is stricter than R17.2's tolerance for an unresolved row,
+because a row resolved against the wrong version's meaning is a mismatch the game cannot see, as it
+can see an `Unresolved`.
 
-**What forces a bump, and what doesn't.** Growing the vocabulary never does: a new `Control` name, a
-new family, a new mapping or tunable name, or a third row-state word all fail safely on an older
-build, because unknown text in any of those positions is already reported rather than guessed at —
-an `UnknownControl`, an `Unresolved`, a skipped family table. A new row-state word is safe
-only because it cannot be mistaken for a control name (every real one carries a `/`); the two words
-that exist and the control-name table are exactly the vocabulary this crate must never redefine.
-What forces a bump is reusing one of those with a new meaning, or changing a row's shape rather than
-its vocabulary — redefining what `"cleared"` means, reassigning a control-name string to a different
-physical control, or moving a row from a scalar-or-list to some other shape. The first kind an old
-build silently gets wrong; the second it fails on with an unlabeled parse error instead of a labeled
-refusal. Either is what the version field exists to catch.
+**What forces a bump.** Growing the vocabulary never does: a new control, family, mapping, tunable
+or row-state word fails safely on an older build, as an `UnknownControl`, an `Unresolved` or a
+skipped family table. A new row-state word is safe only because every control name carries a `/`. A
+bump is forced by giving an existing word a new meaning, such as redefining `"cleared"` or
+reassigning a control name to a different physical control, which an old build silently gets wrong;
+or by changing a row's shape, which it fails on with an unlabeled parse error.
 
 ### D59 — Persistence goes through a separate, reflectable type
 
@@ -1551,22 +1433,16 @@ beside an unrelated struct's under one shared table (R17.10).
 **Rules out.** Deriving `Reflect` on `Overrides` itself. A hand-rolled `Serialize`/`Deserialize` pair
 on `Overrides` as the crate's only persistence path, with no plain-data type standing in for it.
 
-**Reversal.** `Overrides`'s own fields hold a `MappingKey`, constructible only from a `&'static str`
-the game already compiled in (D50), and no generic reflection walk can manufacture one from loaded
-data — the same reason `OverridesLoader` was a `DeserializeSeed` rather than a plain `Deserialize`
-before this decision replaced it. A settings crate that lets several resources share one TOML table
-by name (rather than one file per resource) turns every bare field name `SavedOverrides` has into a
-claim against whatever else lands in the same table — the same problem R1.8 solves for action paths
-by requiring a namespacing convention, except here there is no author to apply one: the app picks the
-shared table, not this crate. Two crates both wanting a field named `version` is far likelier than
-both wanting one named `bindings`, which is why only the generic name is renamed.
+**Reversal.** `Overrides` holds `MappingKey`s, constructible only from a `&'static str` the game
+compiled in (D50), which no generic reflection walk can manufacture from loaded data. And a settings
+crate that lets several resources share one TOML table turns every bare field name into a claim
+against whatever else lands there; R1.8 answers that for action paths with a namespacing convention,
+but here the app picks the shared table, not this crate.
 
-**Accepted.** `bindings` and `tunables` are themselves unprefixed field names and carry the same
-collision risk in principle — accepted as unlikely rather than eliminated, since prefixing every field
-this crate ever writes would cost legibility for a risk this small. Structural reflection also costs
-two things a hand-rolled encoding controlled: `bindings`' family tables sort alphabetically by name
-rather than in `DeviceFamily`'s own declared order, and an empty `tunables` table still gets written
-rather than omitted.
+**Accepted cost.** `bindings` and `tunables` are unprefixed and carry the same risk, far smaller
+than another crate's `version`, which is why only that name is prefixed. Structural reflection sorts
+`bindings`' family tables alphabetically rather than in `DeviceFamily`'s order, and writes an empty
+`tunables` table rather than omitting it.
 
 ---
 
@@ -1574,58 +1450,29 @@ rather than omitted.
 
 ### D51 — An authority backend writes a value, not a state
 
-**Decided.** Extends D22 with how the second seam actually works. An authority backend supplies the
-value the fold would otherwise have produced, entering at the button state machine rather than after
-it, and the existing transition code diffs it and synthesizes the edges. Bindings, modifiers and
-conditions are skipped; the dead-zone stages are not reapplied, because there is no binding to apply
-them from.
+**Decided.** An authority backend supplies a level, sampled once a tick, and this crate's own state
+machine diffs it and synthesizes the edges. The backend never writes action state. Where the value
+enters, and which of the game's conditions run on it, is D92.
 
 **Rules out.** A second write path into action state.
 
 **Reversal.** Steam returns a level, sampled when asked, with no edge and no timestamp, so this
-crate's timing is unsatisfiable from it — but `fired()` and `ActionPhase` have to keep working or
-the promise that a consumer need not know which backend produced a value is false. A second write
-path would have to reimplement the state machine, and two implementations of the lifecycle is
-exactly the drift that promise forbids.
+crate's timing is unsatisfiable from it; yet `fired()` and `ActionPhase` must keep working, or a
+consumer has to know which backend produced a value. A second write path would reimplement the state
+machine, and two implementations of the lifecycle drift.
 
-**A condition on a backend-owned action was to be a plan-build error.** The backend has its own
-activators and will not deliver a hold or a multi-tap, so the game asked for behaviour it will not
-get and nothing else would tell it. What shipped needs no diagnostic: `delegate` takes no input and
-returns no builder, so there is nothing to chain a condition onto in the first place (D71). The one
-contradiction the declarations can still express — binding an action the same context delegates — is
-the error that remains.
-
-**A context is a layer.** Steam allows one action set active per controller plus a stack of layers,
-where this crate runs any number of contexts at once. **Measured** (`docs/steam.md` S19):
-`ActivateActionSet` is exclusive and last-call-wins, so two sets genuinely cannot be live together.
-But a set per context was never required (S20): one control can drive several actions in one set and
-Steam picks no winner, so a backend may declare every delegated action in a single set and let this
-crate's own contexts, priorities and consumption do the arbitrating. Sets then partition contexts by
-what can be live together, not one per context — and mutually exclusive contexts, which `EXCLUSIVE`
-and the exclusion ceiling already name, are exactly where a set boundary can fall. Layers stack and
-override in the direction priorities already do, so a backend activates one base set and pushes a
-layer per active context — and an action bound in several contexts is one action declared once in
-the base set. Consumption is the part layers cannot express: a lower layer's action is shadowed or
-it is not, and there is no equivalent of one context claiming a control for a frame.
-
-**Checked against `steamworks` 0.13.** Layers are real in the Steamworks SDK
-(`ActivateActionSetLayer`/`DeactivateActionSetLayer`), but the safe Rust binding exposes only the
-base set — `activate_action_set_handle` and nothing for layers. The function exists in the SDK a
-real backend links against, so this is a binding gap rather than a platform one: reachable by a
-patch upstream to that crate, or by a direct FFI call past it. Chunk 151b does not need them: S20's
-single set covers one player.
-
-**Superseded in part by D92**: the value enters the fold as a binding's input rather than at the
-state machine after it, and the game's conditions and modifiers on that binding run. The
-level-to-edges half stands, and so does "no second write path".
+**Steam's action sets are not contexts.** One set is live per controller and the last activation
+wins (`docs/steam.md` S19), but one control can drive several actions in one set with no winner
+picked (S20), so a backend declares every authority action in one set and this crate's contexts,
+priorities and consumption arbitrate. Layers, which would let sets stack, are in the Steamworks SDK
+and not in `steamworks` 0.13 (S10).
 
 ### D69 — Netcode replication targets L2, not L1
 
-**Decided.** A network peer's actions are replicated through the authority-backend seam (D22, D51)
-— an already-resolved `ActionValue`, keyed by the action's own stable path (R1.1) — not by shipping
-raw `InputFrame`s for a remote peer to run back through bindings and conditions. Local replay,
-record/replay CI tests (R10.8) and chunk 83's rewind stay on L1, where re-deriving through the
-mapping layer is the point; a network peer is treated as just another authority backend.
+**Decided.** A network peer's actions are replicated through the authority-backend seam (D22, D51),
+as an already-resolved `ActionValue` keyed by the action's stable path (R1.1), not as raw
+`InputFrame`s a remote peer runs back through bindings and conditions. Local replay, record/replay
+tests (R10.8) and rewind stay on L1, where re-deriving through the mapping layer is the point.
 
 **Rules out.** A raw-frame wire protocol as netcode's default path, and any design that assumes two
 peers share a `Plan`.
@@ -1637,9 +1484,8 @@ resimulation silently diverges, and the wire carries device and calibration deta
 needs. Authority-backend replication carries none of that: whichever `Plan` produced the value stays
 local, and the receiving peer never re-derives anything from it.
 
-**Note.** The record/replay argument for L1 — a replay re-derives through bindings and conditions,
-an action-level mock cannot — is real, but it argues for testing rigor, not for a network wire
-format. R10 conflated the two before this decision separated them.
+**Note.** That a replay re-derives through bindings and conditions, where an action-level mock
+cannot, argues for L1 in testing, not for a network wire format.
 
 ### D70 — `mouse`'s feature entry also asks for `bevy_input/keyboard`
 
@@ -1663,8 +1509,8 @@ closed.
 
 **Decided.** The value an authority backend supplies reaches the evaluator through
 `AuthorityValues`, a component on the context entity, written by an ordinary system ordered before
-evaluation. Actions it drives are named by `controls.delegate::<A>()`, which allocates a plan slot
-with no binding behind it. There is no `dyn AuthorityBackend` the evaluator calls.
+evaluation, which samples once a tick as a pulled call would. There is no `dyn AuthorityBackend` the
+evaluator calls.
 
 **Rules out.** A backend resource the evaluator asks — the `World` singleton R0.3 forbids, and with
 it any game whose two players are on two different backends — and a boxed trait object held per
@@ -1677,16 +1523,9 @@ ordinary system parameters. A trait object the evaluator pulls from has access t
 every implementor would have to carry its own way in — which is the interior mutability and the
 hidden channel a `&self` call inside a system forces.
 
-**Note.** D51's "sampled when asked" survives the change of direction: a system ordered immediately
-before evaluation samples once a tick, which is what a pulled call would have done. What a trait is
-still the right shape for is the half this does not cover — origins, glyphs, whether an action is
-bound at all, and delegating a rebind to the backend's own UI (R18.8, R19.8). Those are asked on
-demand by a settings screen rather than once a tick by the evaluator. `Prompts` is already that
-trait for the first three; chunks 151c and 151f are where a real backend implements it and delegates
-a rebind.
-
-**Superseded in part by D92**: `delegate` and the whole-action slot it allocates. The component
-survives, and is what an authority binding reads.
+**Where a trait is right.** For what a settings screen asks on demand rather than the evaluator once
+a tick: origins, glyphs, whether an action is bound, and delegating a rebind to the backend's own UI
+(R18.8, R19.8). `Prompts` is that trait for the first three.
 
 ### D92 — An authority is a binding source for one device family
 
@@ -1696,77 +1535,58 @@ beside the context's own bindings for other families. Conditions and modifiers c
 binding run on it as on any other. Binding the authority's own family as well is the contradiction
 that remains an error.
 
-**Rules out.** An action owned whole by one source, which is what `delegate` expressed; and skipping
-the game's conditions for an authority's value.
+**Rules out.** An action owned whole by one source, which `delegate` expressed; and skipping the
+game's conditions for an authority's value.
 
 **Reversal.** Steam Input owns the gamepad and nothing else, so a Steam game's `Thrust` comes from
 the keyboard and the pad at once. Under whole-action ownership that cannot be declared: a context
 may not both bind and delegate one action, and a second context is a second type the gameplay code
 does not read. Reverting puts every Steam game back to choosing between the keyboard and the pad.
 
-**Conditions come in two kinds, and only one is the backend's.** A hold or a double-tap as a way of
+**Conditions come in two kinds, and the game says which.** A hold or a double-tap as a way of
 pressing is the player's, and under Steam the player sets it in Steam's layout. A rate of fire or a
-bomb's charge time is the game's rule, declared on a binding because that is where conditions go.
-D51 skipped both, so a Steam player holding fire got one shot. The crate does not tell the two
-apart; the game says per binding what the authority's input carries. What stays skipped is the stick
-shaping the backend has already applied (R14.10) — a game does not chain a deadzone onto an
-authority binding.
+bomb's charge time is the game's rule, declared on a binding. Skipping both gave a Steam player
+holding fire one shot. The crate does not tell the two apart; the game says per binding what the
+authority's input carries. Stick shaping the backend has already applied stays skipped (R14.10): a
+game does not chain a dead zone onto an authority binding.
 
-**What survives from D51 and D71.** The value is a level sampled once a tick, and the state machine
-synthesizes the edges. It arrives through `AuthorityValues` on the context entity, written by a
-system ordered before evaluation, with no trait object. So an authority's resolution is its own
-poll: R9.3's press and release inside one frame stops at the queue, and D51's "timing is
-unsatisfiable" holds here unchanged. R9.4 survives, since the state machine makes one edge where the
-level changes. A level has no event for a new instance to miss, so R7.5's hold-over is applied where
-the authority starts supplying an action while it is held: an instance's first sample, and an action
-resuming after going unsupplied, as Steam's do across a change of action set. Absence is therefore
-"not supplied", distinct from rest, and a backend writes every action it supplies every tick, at
-rest included; a first write that is already held waits for a release (chunk 154).
+**A level has a level's limits.** An authority's resolution is its own poll (D51), so R9.3's press
+and release inside one frame stops at the queue; R9.4 holds, since the state machine makes one edge
+where the level changes. A level has no event for a new instance to miss, so R7.5's hold-over
+applies where the authority starts supplying an action while it is held: an instance's first sample,
+and an action resuming after going unsupplied, as Steam's do across a change of action set. Absence
+therefore means "not supplied", distinct from rest: a backend writes every action it supplies every
+tick, at rest included, and a first write already held waits for a release.
 
 **A follower rides its leader's value.** An authority binding is an input, so `follow` copies it as
 it copies a control: the follower reads the value the backend wrote for the leader, and its own
 conditions run on that. Reading the follower's own id instead would make the backend write every
 follower separately, break `follow`'s promise that a rebind of the leader carries its followers, and
-have a network peer send an already-held value that the follower's hold then runs over again (chunk
-152).
+have a network peer send an already-held value that the follower's hold then runs over again.
 
 **The family is what presentation reads.** An authority binding is a mapping row whose rebind goes
 to the backend (R19.8), so a controls screen shows the keyboard rebindable here and the pad
 delegated, from the declarations alone. Prompts for that family come from the backend's `Prompts`
 (R18.8).
 
-**How it was missed.** R0.4 split authority per action and R0.6 had a backend own a device, and the
-two were never checked against each other. `pong_robot` fit the first, because its two owners are
-two players. Steam, the case both requirements were written for, is the second.
-
 ### D52 — Pairing is a runtime handle, filtered at the frame
 
 **Decided.** `DeviceHandle` models keyboard and mouse as one value, a gamepad as the backend's own
-entity — nothing a save file should ever compare across a restart. Filtering happens once, at the
-earliest point a raw event reaches a context, before anything else sees it.
+entity, and nothing a save file compares across a restart. Filtering happens once, at the earliest
+point a raw event reaches a context, before anything else sees it; a context with no pairing reads
+every device. What pairing does to claims and the exclusion ceiling is D88.
 
-**Rules out.** Treating the runtime handle as persistent identity, and layering pairing onto the
-consumption or exclusion machinery.
+**Rules out.** Treating the runtime handle as persistent identity, and a second, per-device
+evaluation cycle beside the main one.
 
-**Reversal.** A backend reassigns gamepad entities on reconnect. Filtering at the frame is what
-keeps consumption and the exclusion ceiling computed once per context *type* and untouched by
-pairing, and a context with no pairing reads every device, so nothing that predates the component
-changed behaviour.
+**Reversal.** A backend reassigns gamepad entities on reconnect, so a stored handle names the wrong
+pad or none.
 
-**The join gesture needed no new evaluation path**, and chunk 116 narrowed which existing one it
-takes. The design both replace proposed evaluating a designated context against every unassigned
-device — a second per-device evaluation cycle running parallel to the main one. What shipped first
-was an ordinary action bound with `bind_class` on a context with no pairing of its own, reading
-every device as any unpaired context does and taking the presser off the raw event. What ships now
-is that same ordinary action on a context spawned once per available device, each `Paired` to its
-own, so the entity a press arrives on already names who pressed it.
-
-**Why the narrowing.** A class binding answers only while input is hardware events. A backend that
-supplies action values directly reports no control it read, so there is no raw event to take a
-device from and the recipe has no answer at all — which is the one backend this crate means to
-support. The paired listener asks the pairing instead of the event, so it holds under either. The
-class-binding recipe survives in `join.rs` as the shorter option for a game that will never run that
-way, rather than as the one the crate teaches first.
+**Joining needs no evaluation path of its own.** A join gesture is an ordinary action on a context
+spawned once per available device, each `Paired` to its own, so the entity a press arrives on names
+who pressed it. A class binding on an unpaired context, taking the presser off the raw event, is
+shorter and survives in `join.rs`, but a backend that supplies values directly reports no raw event
+to take a device from.
 
 **Still open.** Owner-scoping consumption and the exclusion ceiling. Nothing in tree needs
 it: no game pairs two different-priority contexts to different devices where one's consumption would
@@ -1781,17 +1601,18 @@ pre-resolved. `Control::fallback_label_for_brand` reads face buttons, bumpers, t
 Select/Start and Mode in that brand's own current-generation words; sticks and the D-pad are
 unaffected.
 
-**Rules out.** Keying the override by device entity instead of vendor id; tracking which of a
-player's several paired gamepads is "the" one a prompt speaks for; and spanning more than one
-console generation's naming per brand.
+**Rules out.**
 
-**Reversal.** A per-entity override would handle a pad that misreports its own vendor id — a rarer
-case than an unlisted vendor, and not one anything in tree hits. Which device a prompt speaks for
-is D36's refusal already, extended to a new axis: an occupant with two gamepads paired is an edge
-case nothing here ranks, on the same terms as `PromptDevice` never being defaulted. Spanning
-generations would need a fourth axis — Xbox 360's "Back"/"Start" became Xbox One's "View"/"Menu",
-PS4's "Share" became PS5's "Create" — that R11.6 does not ask for and brand alone cannot resolve;
-committing to current-generation-only sidesteps guessing at it.
+- **Keying the override by device entity.** It handles only a pad that misreports its vendor id,
+  rarer than an unlisted vendor and not hit in tree.
+- **Tracking which of a player's paired gamepads a prompt speaks for.** That is D36's refusal to
+  rank devices, on a new axis.
+- **More than one console generation's naming per brand.** Xbox 360's "Back"/"Start" became Xbox
+  One's "View"/"Menu", and PS4's "Share" became PS5's "Create": a generation axis R11.6 does not ask
+  for and brand alone cannot resolve.
+
+**Reversal.** `GamepadBrands` and `fallback_label_for_brand` are public; a generation axis changes
+both.
 
 ### D72 — `Brand` is attached to the gamepad's own entity, by an observer on `Add<Gamepad>`
 
@@ -1803,53 +1624,43 @@ skipping an entity that already carries `Brand`.
 **Rules out.** A crate-owned device entity mirroring Bevy's, and a scheduled system filtered on
 `Added<Gamepad>` in place of the observer.
 
-**Reversal.** A crate-owned entity would need every consumer holding a `DeviceHandle::Gamepad` to go
-through a second mapping to reach it, and an authority backend would have to spawn and keep that
-mirror in sync instead of inserting one component on the entity it already controls — the
-`Query<&Brand>` read path D64 wants to survive an authority backend depends on there being no such
-indirection. The observer over the scheduled system is a smaller reversal: nothing outside this
-module can tell which one attached `Brand`, so switching back would touch only
-`resolve_gamepad_brand` and its registration, not any caller.
-
-**Note.** An observer fires the instant something inserts `Gamepad`, with no ordering to arrange
-against whichever system did the inserting — a scheduled `Added<Gamepad>` system would need either
-an explicit `.after` on that system or Bevy's own auto-inserted `apply_deferred` sync points, and
-would also run every frame rather than only when a gamepad connects.
+**Reversal.** A crate-owned entity puts a second mapping between every `DeviceHandle::Gamepad` and
+its brand, and has an authority backend keep a mirror in sync instead of inserting one component on
+the entity it already controls, which breaks the `Query<&Brand>` read path. The observer is local:
+switching to a scheduled system touches only `resolve_gamepad_brand`, which would then need ordering
+against whatever inserts `Gamepad` and would run every frame.
 
 ### D73 — Connection signals derive from the raw gamepad event, not Bevy's own
 
 **Decided.** `DeviceDisconnected` and `DeviceConnected` (R15.5) are raised from
-`RawGamepadEvent::Connection` reaching the frame — the same vehicle `apply_frame` already reads to
-clear held state on disconnect (chunk 62) — rather than from Bevy's own `GamepadConnectionEvent`,
-which only `gilrs`'s plugin writes.
+`RawGamepadEvent::Connection` reaching the frame, which also clears held state on disconnect, rather
+than from Bevy's own `GamepadConnectionEvent`. `DeviceDisconnected` targets the `Paired` entity the
+lost device belonged to; `DeviceConnected` is unscoped, since which pairing a new device is for is
+the app's judgement (D53).
 
-**Rules out.** An app reading `GamepadConnectionEvent` directly, which `docs/issues.md` 1020 had
-already declined to endorse.
+**Rules out.** An app reading `GamepadConnectionEvent` directly.
 
-**Reversal.** Under Steam no `GamepadConnectionEvent` is written at all, since only `gilrs`'s plugin
-writes one — reasoned in `docs/steam.md`'s appendix, and measured by chunk 151e; a backend already
-has to synthesize `RawGamepadEvent::Connection` to keep held-state clearing working under Steam.
-Reading Bevy's own event instead would leave every non-`gilrs` backend unable to raise either signal
-— the same one-backend trap D64 and D65 already refuse elsewhere in this group.
-
-**Note.** `DeviceDisconnected` is entity-targeted; `DeviceConnected` is not. The crate knows exactly
-which `Paired` a lost device belonged to, but not which pairing, if any, a newly connected one is
-*for* — per D53, that judgment is the app's, so the connect side is a plain, unscoped event rather
-than a guess.
+**Reversal.** Only `bevy_gilrs` writes `GamepadConnectionEvent`, so under Steam none arrives
+(`docs/steam.md`'s appendix), while a backend already synthesizes `RawGamepadEvent::Connection` for
+held-state clearing. Reading Bevy's event leaves every other backend unable to raise either signal.
 
 ### D74 — A persistent device identity carries the backend's own type, under a declared domain
 
 **Decided.** `DeviceId` wraps a payload the backend defines, and the backend declares a
 `DeviceIdentity` implementation carrying `const DOMAIN: &'static str`. The domain is the save key.
-Each backend keeps whatever guarantee its own identity actually has: Bevy's gamepad backend can
-offer only `GamepadModelId`, a vendor and product id, while Steam's `InputHandle_t` may survive a
-restart without colliding — `docs/steam.md` S14's layout suggests it does, and nothing has measured
-it.
+Each backend keeps whatever guarantee its own identity has: Bevy's gamepad backend can offer only
+`GamepadModelId`, a vendor and product id, while Steam's `InputHandle_t` may survive a restart
+without colliding (`docs/steam.md` S14 suggests it; unmeasured). Anything persisted stores
+`SavedDeviceId`, never `Option<DeviceId>`: a reflected `Option` writes its empty case as `none`,
+which TOML cannot spell, so a TOML settings layer fails on the whole file.
 
-`Clone`, `Eq` and `Hash` come from the trait's bounds and are captured as function pointers when a
-`DeviceId` is built — never from `reflect_clone`/`reflect_partial_eq`/`reflect_hash`.
+`Clone`, `Eq` and `Hash` come from the trait's bounds, captured as function pointers when a
+`DeviceId` is built, and never from reflection. The `Reflect` derive generates `Hash`, `PartialEq`
+and `Debug` into the type's own impl rather than storing them as type data, and registration cannot
+detect that a backend left them out: a reflection-sourced `Hash` compiles clean and panics the first
+time that device is plugged in. From the bounds, the same omission does not compile.
 
-**Rules out.** One identity type shared across backends — a string, an enum with a variant per
+**Rules out.** One identity type shared across backends: a string, an enum with a variant per
 backend, or any shape that averages a strong guarantee down to a weak one. Also the Rust type path
 as the save key, and `Option<DeviceId>` as a stored field.
 
@@ -1857,32 +1668,18 @@ as the save key, and `Option<DeviceId>` as a stored field.
 orphans every pairing and calibration a player has stored. The bounds are public API: a backend
 already implementing `DeviceIdentity` would stop compiling.
 
-**Why the bounds rather than reflection.** `Hash`, `PartialEq` and `Debug` are special-cased by the
-`Reflect` derive and generated into the type's own impl rather than stored as type data. Nothing can
-add them afterwards, and nothing can detect at registration that a backend left them out — so a
-reflection-sourced `Hash` compiles clean and panics the first time that device is plugged in. From
-the bounds, the same omission does not compile. This is the whole reason the trait has bounds at all
-rather than being a marker.
+**Accepted costs.**
 
-**Accepted: identical controllers collide.** A vendor and product id names a model, not a unit, so
-two of the same pad are indistinguishable. That is gilrs's gap rather than an OS limit — [gilrs#154]
-has a maintainer confirming no per-unit id survives an unplug, and [gilrs#158] shows Windows itself
-distinguishing two Joy-Cons that gilrs collapses. Neither has a fix in progress. A separate macOS
-bug, [gilrs#207], loses the runtime id across every Bluetooth reconnect; persistent identity is
-needed regardless, since nothing at the runtime-handle level survives a restart by definition.
-
-**Accepted: an unreadable entry costs its whole field.** A domain no running backend claims fails to
-deserialize, the failure propagates out of whatever collection held it, and a settings layer that
-swallows a failed field drops the readable entries beside it. Settings may drop what they cannot
-read and revert to defaults, so this is priced rather than designed out.
-
-**Accepted: identity requires `bevy_reflect`.** The trait requires `Reflect`, so a build without
-that feature has no persistent identity at all.
-
-**The empty case is a table, not a null.** `SavedDeviceId` exists because a reflected `Option`
-writes its empty case as `none`, which TOML cannot spell — a settings layer writing TOML fails on
-the whole file rather than omitting the field. Anything persisted stores `SavedDeviceId`, never
-`Option<DeviceId>`.
+- **Identical controllers collide.** A vendor and product id names a model, not a unit. That is
+  gilrs's gap, not the OS's: [gilrs#154] has a maintainer confirming no per-unit id survives an
+  unplug, and [gilrs#158] shows Windows distinguishing two Joy-Cons that gilrs collapses. Neither
+  has a fix in progress. [gilrs#207], on macOS, loses even the runtime id across a Bluetooth
+  reconnect.
+- **An unreadable entry costs its whole field.** A domain no running backend claims fails to
+  deserialize, the failure propagates out of the collection that held it, and a settings layer that
+  swallows a failed field drops the readable entries beside it. Settings may revert to defaults, so
+  this is priced rather than designed out.
+- **Identity requires `bevy_reflect`.** A build without it has no persistent identity.
 
 [gilrs#154]: https://gitlab.com/gilrs-project/gilrs/-/work_items/154
 [gilrs#158]: https://gitlab.com/gilrs-project/gilrs/-/work_items/158
@@ -1931,18 +1728,14 @@ bytes go.
 
 **Rules out.** A policy API for each of those.
 
-**Reversal.** Each was considered and most were built at least once. A `ConflictPolicy` enum and a
-resolving `rebind` were written and rejected on review as the crate accreting a decision that is the
-app's to make — not a hypothetical concern, but feedback already heard from collaborators about this
-crate taking on more than it needs to. The general shape of the error is that the crate's answer
-would be *plausible*, so an app that wanted something else would have to work around it rather than
-simply not use it.
+**Reversal.** The crate's answer would be *plausible*, so an app wanting something else works around
+it rather than simply not using it. Collaborators have already said this crate takes on more than it
+needs to.
 
-**The test that separates the two halves.** A fact the crate is uniquely placed to know — which
-mappings hold a control, which control an action is bound to, whether a row is rebindable — is the
-crate's. A decision that depends on what the game is — what to do about a clash, which device a
-prompt speaks for, how two controls read on one row — is the app's, and the crate's job is to make
-it cheap to answer rather than to answer it.
+**The test.** A fact the crate is uniquely placed to know, such as which mappings hold a control or
+whether a row is rebindable, is the crate's. A decision that depends on what the game is, such as
+what to do about a clash or which device a prompt speaks for, is the app's, and the crate makes it
+cheap to answer.
 
 ### D75 — The pointer is picking's pipeline, and the mapper carries what picking leaves
 
@@ -1956,20 +1749,15 @@ on this.
 is; click-vs-drag disambiguation derived from raw buttons; split-screen pointer-to-viewport mapping
 keyed on a player.
 
-**Reversal.** Two arguments, and the second is the one that holds. A mapper's contribution is the
-rebinding layer, and no game lets a player rebind where the mouse is — asked directly, LWIM's
-maintainer priced it at "extremely low, probably none. I don't think I've ever seen a game with that
-design." That is one maintainer's judgement and would be thin alone. What carries it is that a
-position means nothing except against a camera: a game wants the pointer in world or UI coordinates,
-and a mapper not owning the camera cannot supply them, so it would hand over a window coordinate
-that every caller converts itself. This crate's own rebinding screen is the demonstration — wholly
-pointer-driven, and it reaches none of it through the mapper.
+**Reversal.** A position means nothing except against a camera, which a mapper does not own, so it
+would hand over a window coordinate every caller converts itself. And a mapper's contribution is
+rebinding, which no game offers for where the mouse is: asked, LWIM's maintainer priced the demand
+at "extremely low, probably none." This crate's own rebinding screen is wholly pointer-driven and
+reaches none of it through the mapper.
 
-**What is left is coexistence, not a pipeline.** The two systems contend over one signal, the mouse
-buttons, which R13.0 makes bindable and picking reads as clicks. Keeping them off each other is
-suppression, and the levers are the app's: cursor grab, a barrier entity covering the screen,
-deactivating the context. R22.4 owns documenting that, so what the crate owes is an ordering rather
-than a mechanism.
+**Accepted cost.** The two systems contend over the mouse buttons, which R13.0 makes bindable and
+picking reads as clicks. Keeping them apart is the app's, by cursor grab, a barrier entity covering
+the screen, or deactivating the context; R22.4 owns documenting it.
 
 ### D86 — Registering a reflected type is the app's decision
 
@@ -2006,18 +1794,18 @@ with the greatest magnitude and `PassThrough` is the opt-out.
 **Reversal.** It is a second storage shape — N live values per action rather than one — carried on
 every action so that a few could use it, which is a change to D8's layout and to D15's fold.
 
-**Why the motivating cases did not need it.** All three turned out to be device-shaped rather than
-value-shaped: telling which of four pads pressed Start is device scoping, seeing every contributor
-in a debug overlay is the type-erased inspection dump reading the plan, and a value that remembers
-where it came from is its own smaller question. Each is answered by a mechanism that has to exist
-anyway. If a case appears that genuinely needs the distinction, it should arrive with that case
-attached rather than be reinstated on the strength of the original three.
+**The motivating cases are device-shaped.** Which of four pads pressed Start is device scoping;
+every contributor in a debug overlay is the inspection dump reading the plan; a value that remembers
+where it came from is its own smaller question. A case that needs the distinction should arrive with
+that case attached.
 
 ### D55 — State-driven activation runs inside `StateTransition`
 
 **Decided.** A context whose activation follows a game state is synchronised inside Bevy's
-`StateTransition`, not in `PreUpdate` with the general run-condition path. The state resource is
-read as an `Option`, because a substate or a computed state may have none.
+`StateTransition`; a general run condition, having no transition to sit behind, is polled in
+`PreUpdate` before evaluation. The state resource is read as an `Option`, because a substate or a
+computed state may have none, and reading it unconditionally panics for a pause menu written as a
+substate of playing.
 
 **Rules out.** One placement for both activation paths.
 
@@ -2031,14 +1819,6 @@ contexts and real for the other two cases:
 | a fixed context's next evaluation | frame N | frame N+1 |
 | what an `OnEnter` system sees | already in step | still the old answer |
 
-Reading the state resource unconditionally would panic the first time anyone declared a context in a
-nested state — and a pause menu as a substate of playing is the obvious way to write the example
-this crate ships.
-
-**One mechanism, two installers.** A general run condition has no transition to sit behind, so it is
-polled in `PreUpdate` before evaluation. A state keeps the placement its simulation half needs. The
-difference is a table rather than a caveat.
-
 ### D56 — Activation answers per context type, and is declared on the builder
 
 **Decided.** A run condition decides whether a context is live, answering once for the whole context
@@ -2048,11 +1828,10 @@ that declares the context. Per-instance activation stays a method on the instanc
 **Rules out.** A method per activation policy on the app extension trait, and binding activation to
 the entity so that two instances of one context can follow different conditions.
 
-**Reversal.** The extension trait would have grown a method per policy, and focus-driven activation
-is already a fourth; on the builder each policy is one method on the type that is already where a
-context says what it is. The per-entity decomposition — which `bevy_enhanced_input` chose, letting
-two instances follow different states and one context be live in several — is more capable at the
-cost of two places to get right, where this one cannot be half-declared.
+**Reversal.** The extension trait grows a method per policy, focus-driven activation already a
+fourth. Per-entity activation, `bevy_enhanced_input`'s choice, lets two instances follow different
+states, at the cost of two places to get right; declared on the builder, activation cannot be
+half-declared.
 
 **Accepted cost.** Mixing a condition with per-instance activation means the condition wins every
 frame. That is documented rather than prevented, since preventing it would mean tracking which door
@@ -2066,35 +1845,26 @@ stands.
 
 **Rules out.** A per-device map of held state in every context instance.
 
-**Reversal.** Per-device state was once scheduled, on the grounds that per-unit calibration needed
-it. It did not — calibration is applied where the raw message still names its own sender, before
-held state exists — so what was left was the merge alone, and a per-device map in every instance
-costs more than the symptom is worth.
+**Reversal.** A per-device map in every instance, for the merge alone: per-unit calibration does not
+need one, since it is applied where the raw message still names its sender, before held state exists
+(D20).
 
-**The whole observable consequence.** On an *unpaired* context driven by two pads, a still-held
-stick on the second pad reads zero until it next moves, and a disconnect clears every pad's readings
-rather than only that one's. A paired instance never sees this, because it reads one device by
-construction. `leafwing-input-manager` takes the same position, and its maintainer reports never
-having had a complaint.
+**Accepted cost.** On an *unpaired* context driven by two pads, a still-held stick on the second pad
+reads zero until it next moves, and a disconnect clears every pad's readings rather than that one's.
+A paired instance reads one device and never sees it. `leafwing-input-manager` takes the same
+position, and its maintainer reports no complaint.
 
 ### D61 — A gamepad stick is a `Control`, named whole
 
-**Decided.** `Control` gains `GamepadStick(Stick)`, reporting `ChannelShape::Axis2` on the same
-terms `MouseMotion` already reports `Delta2`. `ControlClass::of` becomes total — `AnyStick` fills
-the one gap `Axis2` used to leave — so a stick is admissible, capturable and rebindable exactly as
-the mouse already was: `part`, `set_part` and `arrival` all resolve a stick push to this one
-control, never to one of its two axes.
+**Decided.** `Control::GamepadStick(Stick)` reports `ChannelShape::Axis2`, as `MouseMotion` reports
+`Delta2`, and `ControlClass::AnyStick` makes `ControlClass::of` total. A stick is admissible,
+capturable and rebindable as the mouse is: `part`, `set_part` and `arrival` resolve a stick push to
+this one control, never to one of its axes. Consumption stays split: a stick binding decomposes into
+its two `GamepadAxis` atoms, which `ConsumedControls` and reservation key on, so
+`Control::GamepadStick`, the one `Control` naming what others name in part, is never a claim.
 
-**Rules out.** R19.12 as first written, which named sticks as the paradigm case of a device class
-with no per-mapping rebinding, presets the only way to move one. That premise is what left
-`ControlClass::of(Axis2)` with no answer, and `admissible` refused every control against it —
-R19.12 is revised alongside this decision.
-
-**What stays split.** Consumption does not follow: `for_each_control` still decomposes
-`BindingInput::GamepadStick` into its two `GamepadAxis` atoms, unchanged, which is the granularity
-`ConsumedControls` and reservation already key on. `Control::GamepadStick` is the first `Control`
-naming something another `Control` also names in part, and it stays confined to presentation,
-override and capture — it is never a claim.
+**Rules out.** Sticks as a device class with no per-mapping rebinding, moved only by presets.
+`admissible` then refuses every control against an `Axis2` row.
 
 **Reversal.** Every settings screen offering a capture button for a stick row would need to go back
 to not offering one, and a saved file's `stick/Left` row would need to be read as unrecognized rather
@@ -2110,19 +1880,15 @@ that is not a `ControlClass` variant.
 *event* a control produced rather than of the control itself — the same key is a dead key on one
 press and a plain letter on the next.
 
-**Reversal.** That variant shipped once (chunk 25) and had no caller until this one. Both places that
-took a bare `ControlClass` — `CaptureSession::accepting` and `PromptScope::of` — could not honor it:
-a capture accepting it refused every key and never ended, and a prompt scope narrowed to it came back
-empty. `contains` carried a variant it could never say yes to, and `contains_event` existed only to
-work around that. Reversing this brings all of it back.
+**Reversal.** Everything taking a bare `ControlClass` fails on the variant: a capture accepting it
+refuses every key and never ends, a prompt scope narrowed to it comes back empty, and `contains`
+carries a variant it can never say yes to.
 
-**Measured, not documented.** The filter's shape comes from `examples/ime_diagnostic.rs` on macOS
-rather than from Winit's documentation: a kana source delivers each keystroke as its own `Pressed`
-with `text: Some(...)`, and no `Pressed` carries `text: None` mid-composition. A dead key (Option+I
-then A) looked like a counterexample — through the bare diagnostic window it arrived as two plain
-letters — but the same keystroke through Bevy's own text-input example produced one composed
-character, so the gap was that window lacking IME composition, not a shape the filter misses.
-Committing a multi-candidate kana-to-kanji conversion from an IME popup was never measured.
+**Measured, not documented.** The filter's shape comes from `examples/ime_diagnostic.rs` on macOS: a
+kana source delivers each keystroke as its own `Pressed` with `text: Some(...)`, and no `Pressed`
+carries `text: None` mid-composition. A dead key (Option+I then A) composes to one character through
+Bevy's text-input example. Committing a multi-candidate kana-to-kanji conversion from an IME popup
+is unmeasured.
 
 ### D66 — Control classes are a closed set
 
@@ -2147,18 +1913,13 @@ default, logical binding returns on reset.
 **Rules out.** A per-session physical-or-logical flag on `CaptureSession`, and a rule that preserved
 the kind of the row being rebound.
 
-**Reversal.** The distinction exists because an author cannot know the player's layout. The player
-can — they are sitting at it, where the position and the character name the same key — so capture
-has no ambiguity to resolve and gains nothing from being told which kind to record. Where the two
-come apart is a layout change after the rebind, and there position is the better answer twice over:
-a player switching scripts (US to Cyrillic, the common case) keeps working bindings where a logical
-one would break outright, and a captured press *is* a position. Blender resolves letters logically
-and is the case study for the cost: its GHOST layer compiles out the physical mapping for letters,
-keeps it for digits — which AZERTY reaches only with shift — and the result is a long-running bug,
-an add-on written to undo it, and a user population that believes the software does the opposite of
-what it does. What makes that cheap for us to have got wrong is that only the *capture* default is
-at stake: an author wanting the Blender behaviour declares the row logical, which is what R12.1
-buys.
+**Reversal.** Cheap: only the capture default is at stake, and an author wanting logical rows
+declares them (R12.1). Against logical capture: at the moment of capture position and character name
+the same key, so there is no ambiguity to resolve; and after a layout change a player switching
+scripts (US to Cyrillic, the common case) keeps working positional bindings where logical ones
+break. Blender resolves letters logically and digits physically, which AZERTY reaches only with
+shift; the result is a long-running bug, an add-on written to undo it, and users who believe it does
+the opposite of what it does.
 
 ### D68 — One key, two control identities, and the crate does not reconcile them
 
@@ -2180,135 +1941,97 @@ shape an author chooses rather than one they fall into.
 
 ### D87 — Which widget an action was about is the game's to remember
 
-**Decided.** A game can bind one action inside a context that is active only while some widget has
-focus, and have the observer act on whichever entity `InputFocus` currently names. One `Activate`
-serves every button on the screen, and focus decides which button it meant.
-
-That holds as long as the observer asks the question once. It stops holding when the game keeps
-state between an action's `Fired` and its paired `Completed` or `Canceled`, which a pressed
-highlight is the usual reason to do: the observer adds `Pressed` to the focused entity on `Fired`
-and removes it from the focused entity on the paired event. Those are two separate reads of
-`InputFocus`, and if focus moved in between, the second names a different button — so the first
-keeps its highlight, with no event left anywhere that would clear it.
-
-Neither event carries a target, and the crate will not grow one. An action's events report what the
-action did, not which entity a game decided it was about. A game holding state across the pair
-records the entity when `Fired` arrives and addresses the paired event to that entity instead of
-reading focus a second time. A game that finishes its work at `Fired` and keeps nothing, as
-`widget_focus.rs` does, has no second read to disagree with the first.
+**Decided.** An action's events report what the action did, and carry no entity it was about. A game
+binds one `Activate` in a context active while a widget has focus, and the observer acts on
+whichever entity `InputFocus` names. A game keeping state from `Fired` to the paired `Completed` or
+`Canceled`, such as a pressed highlight, records the entity at `Fired` and addresses the paired
+event to it: read twice, focus that moved in between leaves the first button highlighted with no
+event to clear it. `widget_focus.rs` finishes at `Fired` and has no second read.
 
 **Rules out.** A schedule ordering that resolves focus before evaluation (R22.11, withdrawn); a
 target the crate supplies alongside the event; anything focus-shaped in this crate's own surface.
 
-**Reversal.** The crate cannot supply the target, because it cannot tell that a target exists.
-`active_if` takes an arbitrary run condition, and nothing marks one that reads `InputFocus` apart
-from one that reads the clock — there is no notion of focus in the crate's model at all. Reversing
-this means an activation condition grows a declared subject, which is a second activation mechanism
-beside the one contexts already have.
+**Reversal.** The crate cannot tell that a target exists: `active_if` takes any run condition, and
+one reading `InputFocus` looks like one reading the clock. Supplying one means an activation
+condition grows a declared subject, a second activation mechanism beside the one contexts have.
 
-**Why the game's share of this is small.** A mouse-driven button activates on release so that the
-press can be taken back: hold the button, slide off the widget, release, and nothing happens. That
-gesture needs a pointer that can move off a widget while held. Focus cannot — it jumps, and only
-when something moves it, so there is no equivalent to slide off with. A focus-driven activation can
-therefore settle at `Fired`, and nothing is left to decide when the control is released. What
-crosses the pair is presentation and only presentation, and removing a highlight from the entity
-that got it requires knowing nothing about what kind of widget it is.
+**Accepted cost.** Small, and presentation only. A pointer can slide off a held button to take the
+press back, which is why a mouse button activates on release; focus jumps instead, so a focus-driven
+activation settles at `Fired`. What crosses the pair is a highlight, and removing it from the entity
+that got it needs nothing about the widget.
 
 ### D88 — A claim names whose input it is
 
 **Decided.** A consumption claim, and an entry in the exclusion ceiling, carry the devices of the
-instance that made them. A reader sees a claim only where the two device sets intersect, so
-`ConsumedControls::contains` and `claimant` take the reader's devices as a parameter. One player's
-menu consuming `South` leaves another player's gameplay context free to read it; two instances of
-one context paired to two pads do not take controls from each other; one player's pause menu does
-not deactivate the other player's game. A live capture claims under its own session's pairing for
-the same reason.
+instance that made them, and a reader sees a claim only where its own devices intersect them:
+`ConsumedControls::contains` and `claimant` take the reader's devices. One player's menu consuming
+`South` leaves another player's gameplay free to read it, two instances of one context on two pads
+do not take controls from each other, and one player's pause menu does not deactivate the other's
+game. A live capture claims under its session's pairing. The devices travel as `DeviceHandleSet`,
+not `Paired`, which is a component; a caller holding a `Paired` derefs.
 
-**The type that travels is `DeviceHandleSet`, not `Paired`.** `Paired` derives `Component`, and a
-component type is used as a component and nothing else — what a function takes and a struct holds is
-the plain value type it wraps. A caller holding a `Paired` derefs at the call site.
-
-**No pairing and an empty pairing are different answers.** No pairing means every device: a
-single-player context claims against everyone and is claimed against by everyone, with no opt-in. An
-empty pairing means no device — a player entity spawned before a device reaches it, which is what a
-join flow produces — so such a context hears nothing, claims nothing and shadows nobody. Collapsing
-the two by reading an empty set as "unconstrained" is free in the evaluator, where a context that
-hears nothing never actuates a binding, and wrong in `why_not`, which would then name a claimant
-where the honest answer is `Unowned`.
+**No pairing and an empty pairing differ.** No pairing is every device: a single-player context
+claims against everyone, with no opt-in. An empty pairing is no device, a player spawned before a
+device reaches it: it hears nothing, claims nothing and shadows nobody. Reading empty as
+unconstrained is harmless in the evaluator and wrong in `why_not`, which would name a claimant where
+the answer is `Unowned`.
 
 **Rules out.** One priority ceiling for the world; a claim keyed by control alone;
 `ConsumedControls` as a map, since a lookup matches a control *and* an overlapping device set and no
 single key expresses both.
 
-**Reversal.** Cheap while no public API has shipped and expensive afterwards, which is the whole
-point of paying for it now: `contains` and `claimant` are public, and a third-party context that
-reasoned about a world-wide claim table breaks when the table stops being world-wide.
-`docs/one-way-doors.md` door 2 is this door seen from `bevy_enhanced_input`'s side, where it is
-still open.
+**Reversal.** A world-wide table puts every player behind every other player's menu, and changes
+`contains` and `claimant`, which are public.
 
-### D89 — A capture reports a control on the way up, and the store judges it
+### D89 — A capture reports what it took, and the store judges it
 
-**Decided.** `CaptureSession` carries a class and an exclusion list. It carries no target — no
-mapping, no slot — and makes no judgement about admissibility. A deliberate press ends the capture
-and is reported, whatever it was; whether it may be stored is asked once, at the write, through
-`Rebind::checked`. The row's own cell arithmetic is `Overrides::with_cell`, and `Rebind` is the
-token that writes a checked row.
+**Decided.** `CaptureSession` carries a class and an exclusion list, no target (no mapping, no
+slot), and makes no judgement about admissibility. A deliberate press ends the capture and is
+reported, whatever it was; whether it may be stored is asked once, at the write, through
+`Rebind::checked`, the predicate a save file meets when applied (D42). Capture still claims
+everything it takes, including a control the row cannot hold, so the settings key pressed at a
+rebinding screen neither binds nor re-opens the screen.
 
-**Rules out.** `CaptureSession::for_slot` and `within`; `CaptureSession::mapping`, `slot` and
-`family`; the target fields on `ControlCaptured`; `CaptureRefused` and a public `RefusedReason`; and
-the observer that warned when a screen opened a capture past `MaxSlots`, which needed a slot number
-to warn about.
+A refusal ends the session, as Blender's does, so the screen can say why while the player is still
+looking at the cell. An arrival nobody chose must then not end a capture, so a deliberate press
+always answers and a continuous reading past its threshold answers only a session listening for that
+class; otherwise a pad drifting on a desk cancels every keyboard rebind.
 
-**Reversal.** One question was being answered in three places. `for_slot` returned `None` for a row
-the player may not change, `run_captures` fired a refusal for a wrong shape, family or reserved
-control, and applying asked all of it again plus the row length and chordability the first two could
-not see. Only the last was authoritative, and it is a strict superset, so the crate was holding a
-write-time policy decided at listen time and could disagree with itself. Reversing this brings that
-back, and makes `for_mapping` fallible again for a reason unrelated to the control it is listening
-for.
+**Rules out.**
 
-**The target was an echo.** Both callers already correlate the answer through the entity the event
-fires on, because they must: a screen has to know which cell is listening before the answer arrives.
-Carrying the row and slot on the session as well meant two copies of one fact, of which the crate's
-was the one nobody read.
+- **A target on the session or on `ControlCaptured`.** The screen already correlates the answer
+  through the entity the event fires on, because it must know which cell is listening before the
+  answer arrives, so a second copy is one nobody reads.
+- **Judging at listen time**, by a constructor that refuses a row or by a refusal event. The write
+  must ask the row length and chordability as well, which listen time cannot see, so the write is a
+  strict superset and an earlier answer can only disagree with it.
+- **Leaving a refused session listening.** The row is then accepted into a working copy and turned
+  down at Confirm, minutes later.
 
-**Blender's rule, deliberately.** A refusal used to leave the session listening. It now ends, which
-is what lets the screen say why while the player is still looking at the cell — the alternative was
-a whole row silently accepted into a working copy and turned down minutes later at Confirm. The cost
-is that an arrival nobody chose must not end a capture either, so a deliberate press and a
-continuous reading past its threshold are treated differently: the press always answers, the reading
-only answers a session listening for that class. Without that split, a pad drifting on a desk
-cancels every keyboard rebind in the game.
+**Reversal.** The listen-time policy returns beside the write-time one and can disagree with it, and
+`for_mapping` becomes fallible for a reason unrelated to the control it listens for.
 
-**The answer comes on the release, and that is a fix rather than a flourish.** A claim is an
-instant; a held control is a level. `apply_level_event` records held state as events arrive and
-consumption is applied where that state is *read*, so a session claiming on the press and then
-vanishing left the control down with nothing claiming it — and the context underneath read it on the
-very next frame. Observed: a capture on a settings screen took the arrow key *and* moved the
-selection, because the menu's own navigation is a composite over those keys and `on_change` saw the
-direction appear one frame late. The session therefore holds the control it is waiting on and
-re-claims it every frame, so the claim lasts exactly as long as the press and the control is already
-up when it stops. The defect predates this chunk — it reproduces unchanged on the tree before it —
-and is folded in here because this is the chunk that decides when a capture ends.
+**Accepted cost.** A screen needs a line for the refusal's reason. One that wants silence drops the
+`Err` arm.
+
+### D99 — A capture answers on the release, and claims the control until then
+
+**Decided.** A session holds the control it has taken and re-claims it every frame until the
+release, and answers then, so the control is already up when the claim stops. Consumption applies
+where held state is read, and held state outlives an instant claim: a session answering on the press
+and vanishing left the control down and unclaimed, and the context underneath read it the next
+frame. Observed: a capture on a settings screen took the arrow key _and_ moved the selection,
+through the menu's navigation composite.
 
 **Rules out.** A claim that outlives the session, which would need an owner with a lifetime of its
 own; `ConsumedControls` learning about releases, which would put a level concept in a per-schedule
 claim table.
 
-**What it costs.** `CaptureSession` carries the pending control, a second press while one is held is
-ignored rather than latched, and every test that used to press now has to let go. The mouse's motion
-keeps answering immediately, since a displacement that has already happened is never held and there
-is nothing to wait for.
+**Reversal.** The observed defect returns for every control the game underneath binds.
 
-**What did not move.** The predicate itself, and the claim. `admissible` is still one function
-answering for a press and for a save file, which is D42's point and survives it; and capture still
-claims everything it takes, including a control the row cannot hold, so the settings key pressed at
-a rebinding screen neither binds nor re-opens the screen.
-
-**The screen pays for it, once.** A game now needs a line for the reason, where before it had an
-event it could ignore — and ignoring it is what `examples/disasteroids` did, which is why that
-silence was a known finding rather than a feature. A screen that wants the old silence drops the
-`Err` arm.
+**Accepted cost.** A second press while one is held is ignored rather than latched, and a test
+capturing a press has to release it. Mouse motion still answers at once: a displacement is never
+held.
 
 ---
 

@@ -226,6 +226,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 181f | `docs/architecture.md` brought up to date                             |
 | 183  | Bevy 0.20.0-rc.2, and the driver's gamepad message registration gone  |
 | 184  | Inline prompts from the block art                                     |
+| 159  | `docs/decisions.md` compressed, the longest entries first             |
 
 ---
 
@@ -677,23 +678,9 @@ Two players are two `InputHandle_t`s, not two action sets (`docs/steam.md`'s app
 ## Sweeps
 
 Each of these passes over a whole document or module. A sweep lands a unit at a time, as a lettered
-chunk (159a, 159b, …) small enough to finish in one session, and a unit is never left half done. A
+chunk (160a, 160b, …) small enough to finish in one session, and a unit is never left half done. A
 unit starts and ends with `scripts/growth.py`, so its effect is measured rather than asserted, and
 its section's **Done** line records it.
-
-### 159. Compressing `docs/decisions.md` · E[1]
-
-The preamble's "What an entry keeps", applied to every entry: each keeps what going back would cost
-and the facts that make a rejected alternative worse, and loses the argument for a choice between
-equals and the story of how a revised entry got where it is.
-
-- **A unit is one topical section**, or ten entries where a section is longer.
-- **An entry holding two decisions is split**, and every citation of it is re-pointed in the same
-  unit. A fact about an external system moves to `docs/steam.md` if it is not already there.
-- **Not doing:** changing a decision. An entry whose reasons no longer hold goes to
-  `docs/issues.md`, not into a rewrite.
-- **Verified by:** `scripts/xref.py`, and the unit's `growth.py` numbers.
-- **Done:** D22, the sample, which halved and became D22 and D93.
 
 ### 160. An editorial pass on `docs/design.md` · E[1]
 

@@ -244,9 +244,10 @@ pub mod backend;
 /// session, [`Evaluate`](ActionMapSystems::Evaluate) maps it onto action state, and
 /// [`Dispatch`](ActionMapSystems::Dispatch) delivers what changed to observers.
 ///
-/// Sampling runs in `PreUpdate`, after Bevy's own input systems. Evaluation runs in `PreUpdate`
-/// for render-tick contexts and in `FixedPreUpdate` for fixed-tick ones, so a system reading
-/// actions from `Update` or `FixedUpdate` always sees state that is current for its own schedule.
+/// Sampling runs in `PreUpdate`, after Bevy's own input systems. Evaluation runs in `PreUpdate` for
+/// render-tick contexts and in `FixedPreUpdate` for fixed-tick ones, so a render-tick context read
+/// from `Update`, or a fixed-tick one from `FixedUpdate`, is current for that schedule. A
+/// fixed-tick context read from `Update` shows its state as of the last fixed tick.
 #[derive(bevy_ecs::schedule::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ActionMapSystems {
     /// Collects raw device messages into the input frame.
