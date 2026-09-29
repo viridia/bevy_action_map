@@ -262,14 +262,26 @@ something draws the toggles; what they edit is `BoundSlot::with`, written back t
   player can never get back. With the toggles beside the key, Blender's reset becomes affordable;
   this chunk picks one and says why.
 
-- **Blender's arrangement is the one to copy**, and the screenshot is the argument: the row list
-  stays a list of composed labels, and only the expanded row grows a `Shift`/`Ctrl`/`Alt`/`Cmd`
-  strip. That is what makes it fit — the widgets are per *edit*, not per row, so a one-page table
-  stays one page.
-- **Where it lands is this chunk's decision.** Disasteroids' capture is in-cell — the cell flips its
-  background and listens — with no detail panel to grow, so this is new UI wherever it goes. A
-  second example risks being a feature vehicle rather than a game, which is the friction worth
-  weighing against complicating the one settings screen in tree.
+- **It lands on Disasteroids' settings screen, as a modifier row under the keyboard table.** The
+  keyboard `MappingColumn` gets a `below`, the slot the pad column already fills with
+  `pad_presets::remapping()`, so both columns are a binding table and a footer. The row holds one
+  toggle per `ModifierKey` (`Shift`, `Ctrl`, `Alt`, `Super`, the last labelled for the platform),
+  each lit when the cell's slot requires that modifier; pressing one adds or removes it from
+  `BoundSlot::with` and writes the slot back to the working copy. This keeps Blender's point, that
+  the widgets are per *edit* rather than per row so the table stays one page, without growing a row
+  in place.
+- **The row shows only for a bound keyboard cell.** It appears when a keyboard binding cell takes
+  focus and that cell holds a binding, and is absent for an empty cell. The cell it edits is the
+  last binding cell focused, and focus moving into the row keeps it shown, since navigating to a
+  toggle takes focus off the cell. Whether it hides or stays while the cell is capturing, and
+  whether it reserves its height so the column does not jump, are decided here.
+- **The row names the cell it edits**, as a leading label such as "Fire, primary:", redrawn when the
+  target changes. A toggle takes focus, so the cell loses its highlight, and the label stands in for
+  it.
+- **Not done: a second focus visual on the edited cell**, which would be its own mechanism. Toggles
+  beside the cell are out too, since that is a tree-view reorganization of the whole screen.
+- **`steam_examples/disasteroids` builds its own column list**, so it gets the same `below` or says
+  why not.
 - **A row the player can change only in part stops being a thing.** 128 shipped `Ctrl+N` as a fixed
   row precisely because no screen could edit it; with an editor, a chorded row can be `mappable` and
   mean it.
