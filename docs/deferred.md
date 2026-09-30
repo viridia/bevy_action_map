@@ -399,6 +399,17 @@ touches it. Run once with Steam absent and once with Steam, a pad and a bound la
 manual precondition the plan asserts on first. The plan never presses **Change in Steam**, which
 takes focus. Measured here: whether Steam's overlay toast appears in a game Steam did not launch.
 
+### X57 — The Steam build playing the pad without Steam
+
+**Gate:** a game asks to ship one binary with Steam optional.
+
+Chunk 112a made the bindings declarable: each pad action can bind the base game's control beside its
+authority. What is left is the example. It builds with `bevy_gilrs`, starts the Steam client before
+adding `DefaultPlugins` and disables `GilrsPlugin` if Steam Input starts, links `pad_presets.rs` so
+Southpaw applies in a direct launch, and under Steam draws the pad column as "Change in Steam" alone
+rather than the controls' rows. No filter: disabling the plugin keeps the pad out of Bevy's own
+entities too (D93).
+
 ## 5. The remote driver
 
 These leave with the driver, into its own documents, if it moves out of this repository.
@@ -567,15 +578,15 @@ time-dependent stage", and the closing step honouring it: E[2].
 **Gate:** someone asks for it.
 
 This was chunk 178: a setting keyed by `Identity`, as calibration is, so under gilrs ignoring one
-pad ignores its model, shown on the Disasteroids controls screen and written as an L0 filter (chunk
-112b) that records `FocusLost` and unpairs the pad when the list changes. An ignored pad stays
-listed so it can be un-ignored; telling two identical pads apart is out, since Bevy's gamepad
-backend has no identity per unit. Deferred on Discord feedback that a player can unplug a bad pad,
-which answers the measured case, the Switch-protocol clone's phantom presses (the R14 notes). It
-does not answer a device that stays plugged in: a virtual duplicate from DS4Windows, a wheel or
-stick kept for another game, a built-in HID device that reports itself as a joystick. Those reach
-players only if the setting ships without a developer building it, so it waits for a request rather
-than being written into an example.
+pad ignores its model, shown on the Disasteroids controls screen and written as an L0 filter
+(`ActionMapSystems::Filter`, built by chunk 112b) that unpairs the pad when the list changes. An
+ignored pad stays listed so it can be un-ignored; telling two identical pads apart is out, since
+Bevy's gamepad backend has no identity per unit. Deferred on Discord feedback that a player can
+unplug a bad pad, which answers the measured case, the Switch-protocol clone's phantom presses (the
+R14 notes). It does not answer a device that stays plugged in: a virtual duplicate from DS4Windows,
+a wheel or stick kept for another game, a built-in HID device that reports itself as a joystick.
+Those reach players only if the setting ships without a developer building it, so it waits for a
+request rather than being written into an example.
 
 ## 7. Tooling, and other projects
 

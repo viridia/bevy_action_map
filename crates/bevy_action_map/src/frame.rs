@@ -279,6 +279,27 @@ impl InputFrame {
 
         timestamp
     }
+
+    /// Removes the events sampled this frame that `keep` returns `false` for.
+    ///
+    /// This is what an input filter calls; see [`ActionMapSystems::Filter`](crate::ActionMapSystems::Filter)
+    /// for when to write one. Events from earlier frames are left as they are. A focus-loss event
+    /// is never offered to `keep` and always stays, since it is what releases every held key and
+    /// button.
+    pub fn retain_sampled(&mut self, mut keep: impl FnMut(&RawEvent) -> bool) {
+        let frame = self.frame;
+        // Removal keeps the rest in order, so `events_after` can still binary-search the queue.
+        self.events.retain(|timed| {
+            if timed.timestamp.frame() != frame {
+                return true;
+            }
+            #[cfg(any(feature = "keyboard", feature = "mouse"))]
+            if timed.event == RawEvent::FocusLost {
+                return true;
+            }
+            keep(&timed.event)
+        });
+    }
 }
 
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
@@ -533,5 +554,127 @@ mod tests {
         assert_eq!(frame.dropped(), 10);
         // The survivors are the newest, so what is lost is the input nobody got to in time.
         assert_eq!(frame.events()[0].timestamp, FrameTimestamp::new(1, 10));
+    }
+
+    #[cfg(feature = "gamepad")]
+    fn press(pad: bevy_ecs::entity::Entity) -> RawEvent {
+        RawEvent::Gamepad(RawGamepadEvent::Button(
+            bevy_input::gamepad::RawGamepadButtonChangedEvent::new(
+                pad,
+                bevy_input::gamepad::GamepadButton::South,
+                1.0,
+            ),
+        ))
+    }
+
+    #[cfg(feature = "gamepad")]
+    fn pads<const N: usize>() -> [bevy_ecs::entity::Entity; N] {
+        let mut world = bevy_ecs::world::World::new();
+        core::array::from_fn(|_| world.spawn_empty().id())
+    }
+
+    /// Rejecting one pad leaves the other's press, and a focus loss is kept without being offered.
+    #[cfg(all(feature = "gamepad", feature = "keyboard"))]
+    #[test]
+    fn a_filter_removes_only_what_it_rejects() {
+        use crate::device::DeviceHandle;
+
+        let [rejected, kept] = pads();
+        let mut frame = InputFrame::default();
+        frame.begin_sample();
+        frame.record(press(rejected));
+        frame.record(press(kept));
+        frame.record(RawEvent::FocusLost);
+
+        frame.retain_sampled(|event| event.device() == DeviceHandle::Gamepad(kept));
+
+        let left: Vec<_> = frame.events().iter().map(|timed| &timed.event).collect();
+        assert_eq!(left, [&press(kept), &RawEvent::FocusLost]);
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn two_filters_give_one_frame_in_either_order() {
+        let [a, b, c] = pads();
+        let sampled = || {
+            let mut frame = InputFrame::default();
+            frame.begin_sample();
+            for pad in [a, b, c, a] {
+                frame.record(press(pad));
+            }
+            frame
+        };
+        let not = |pad| move |event: &RawEvent| *event != press(pad);
+
+        let mut one = sampled();
+        one.retain_sampled(not(a));
+        one.retain_sampled(not(b));
+        let mut other = sampled();
+        other.retain_sampled(not(b));
+        other.retain_sampled(not(a));
+
+        assert_eq!(one, other);
+        assert_eq!(one.events().len(), 1);
+    }
+
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_filter_leaves_an_earlier_sample_alone() {
+        let [pad] = pads();
+        let mut frame = InputFrame::default();
+        frame.begin_sample();
+        frame.record(press(pad));
+        frame.begin_sample();
+        frame.record(press(pad));
+
+        frame.retain_sampled(|_| false);
+
+        let left: Vec<_> = frame.events().iter().map(|timed| timed.timestamp).collect();
+        assert_eq!(left, [FrameTimestamp::new(1, 0)]);
+    }
+
+    /// The set sits between sampling and the frame's first reader, so a filter sees the press and a
+    /// capture does not. A missing edge would pass here whenever the executor happened to order the
+    /// systems correctly anyway, so this checks the effect, not the constraint.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_filter_runs_between_sampling_and_capture() {
+        use bevy_ecs::prelude::{ResMut, Resource};
+
+        #[derive(Resource, Default)]
+        struct Seen {
+            at_filter: Option<usize>,
+            at_capture: Option<usize>,
+        }
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, crate::ActionMapPlugin));
+        app.init_resource::<Seen>();
+        app.add_systems(
+            PreUpdate,
+            (
+                (|mut frame: ResMut<InputFrame>, mut seen: ResMut<Seen>| {
+                    seen.at_filter = Some(frame.events().len());
+                    frame.retain_sampled(|_| false);
+                })
+                .in_set(crate::ActionMapSystems::Filter),
+                (|frame: bevy_ecs::system::Res<InputFrame>, mut seen: ResMut<Seen>| {
+                    seen.at_capture = Some(frame.events().len());
+                })
+                .in_set(crate::ActionMapSystems::Capture),
+            ),
+        );
+        app.world_mut().write_message(KeyboardInput {
+            key_code: bevy_input::keyboard::KeyCode::Space,
+            logical_key: bevy_input::keyboard::Key::Space,
+            state: bevy_input::ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: bevy_ecs::entity::Entity::PLACEHOLDER,
+        });
+        app.update();
+
+        let seen = app.world().resource::<Seen>();
+        assert_eq!((seen.at_filter, seen.at_capture), (Some(1), Some(0)));
     }
 }

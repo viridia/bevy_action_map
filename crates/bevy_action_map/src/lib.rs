@@ -238,10 +238,11 @@ pub mod backend;
 
 /// System sets for the stages of the input pipeline.
 ///
-/// Order your own systems against these when you need to run at a specific point relative to
-/// input. They run in this order: [`Sample`](ActionMapSystems::Sample) collects device messages
-/// into the input frame, [`Capture`](ActionMapSystems::Capture) offers it to a live rebinding
-/// session, [`Evaluate`](ActionMapSystems::Evaluate) maps it onto action state, and
+/// Order your own systems against these when you need to run at a specific point relative to input.
+/// They run in this order: [`Sample`](ActionMapSystems::Sample) collects device messages into the
+/// input frame, [`Filter`](ActionMapSystems::Filter) removes any a filter rejects,
+/// [`Capture`](ActionMapSystems::Capture) offers it to a live rebinding session,
+/// [`Evaluate`](ActionMapSystems::Evaluate) maps it onto action state, and
 /// [`Dispatch`](ActionMapSystems::Dispatch) delivers what changed to observers.
 ///
 /// Sampling runs in `PreUpdate`, after Bevy's own input systems. Evaluation runs in `PreUpdate` for
@@ -252,6 +253,61 @@ pub mod backend;
 pub enum ActionMapSystems {
     /// Collects raw device messages into the input frame.
     Sample,
+    /// Removes raw input before anything reads it. An advanced feature, which most games never
+    /// need.
+    ///
+    /// A filter is a system in this set that calls
+    /// [`InputFrame::retain_sampled`](frame::InputFrame::retain_sampled). It is for some of a
+    /// device family's input that must not reach the game at all, such as one pad among several.
+    ///
+    /// To keep out a whole family, leave its source out instead. A game that reads its pads through
+    /// Steam Input builds without Bevy's `bevy_gilrs` feature; one binary that runs with and
+    /// without Steam disables Bevy's `GilrsPlugin` when Steam Input starts. Either way Bevy never
+    /// sees the pad, which a filter cannot promise: it removes events from the input frame, and
+    /// Bevy's own gamepad entities are untouched.
+    ///
+    /// Here a player has chosen to ignore a pad that reports phantom presses:
+    ///
+    /// ```
+    /// use bevy::prelude::*;
+    /// use bevy_action_map::device::DeviceHandle;
+    /// use bevy_action_map::frame::InputFrame;
+    /// use bevy_action_map::prelude::*;
+    ///
+    /// /// The pads the player chose to ignore, from their settings.
+    /// #[derive(Resource, Default)]
+    /// struct IgnoredPads(Vec<Entity>);
+    ///
+    /// fn ignore_pads(mut frame: ResMut<InputFrame>, ignored: Res<IgnoredPads>) {
+    ///     frame.retain_sampled(|event| {
+    ///         !matches!(event.device(), DeviceHandle::Gamepad(pad) if ignored.0.contains(&pad))
+    ///     });
+    /// }
+    ///
+    /// let mut app = App::new();
+    /// app.add_plugins((MinimalPlugins, ActionMapPlugin));
+    /// app.init_resource::<IgnoredPads>();
+    /// app.add_systems(PreUpdate, ignore_pads.in_set(ActionMapSystems::Filter));
+    /// app.update();
+    /// ```
+    ///
+    /// A filter can only remove events, so filters from several plugins give the same result in any
+    /// order. A rebinding capture sees the filtered input, as the game does.
+    ///
+    /// A filter hides input from everything downstream, which makes its mistakes hard to trace.
+    /// Four habits avoid them:
+    ///
+    /// - **Filter by device, not by game state.** Ignoring input in a menu or a cutscene is what
+    ///   contexts are for.
+    /// - **Change a filter only while the devices it newly rejects are idle.** A button held as the
+    ///   filter starts rejecting it never sends its release, and stays held until the filter lets
+    ///   it through again. A filter set once at startup never meets this.
+    /// - **Unpair a gamepad as you start rejecting it.** Its connection and disconnection are
+    ///   rejected along with its buttons, so a player paired to it is never told it went away.
+    /// - **Decide from settled state, not by detecting noise.** A service having started or a
+    ///   player's setting is settled. A filter that switches itself on and off in response to the
+    ///   input it sees is the hardest kind of input bug to diagnose.
+    Filter,
     /// Maps the input frame onto action state.
     Evaluate,
     /// Delivers what changed to observers.
@@ -346,7 +402,8 @@ impl bevy_app::Plugin for ActionMapPlugin {
         app.configure_sets(
             bevy_app::PreUpdate,
             (
-                ActionMapSystems::Capture.after(ActionMapSystems::Sample),
+                ActionMapSystems::Filter.after(ActionMapSystems::Sample),
+                ActionMapSystems::Capture.after(ActionMapSystems::Filter),
                 ActionMapSystems::Evaluate.after(ActionMapSystems::Capture),
                 ActionMapSystems::Dispatch.after(ActionMapSystems::Evaluate),
             ),

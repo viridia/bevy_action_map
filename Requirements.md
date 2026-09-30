@@ -142,8 +142,7 @@ be delegable to the backend's own UI.
   The split must be per action and per family, not all-or-nothing — a game reading its pads through
   Steam Input still binds the keyboard to the same actions, and still maps its own debug and editor
   bindings. An action may bind controls of the authority's family beside it, for a launch without
-  the authority; while the authority runs, its backend keeps that family's input out of the frame
-  (R0.6).
+  the authority; while the authority runs, the game leaves that family's own source out.
 - **R0.5 (MUST)** Consumers of action state (gameplay code, prompts) must not need to know which
   backend produced it. Backend identity is queryable but never required at the call site.
 - **R0.6 (MUST)** _(D93)_ Raw input must be filterable at **L0**, after sampling and before anything

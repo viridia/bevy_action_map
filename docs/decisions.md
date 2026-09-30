@@ -782,6 +782,11 @@ Replay needs none: R10.4 injection already replaces live input for the player it
 build on. Allowing a filter to rewrite or insert events would break the queue's sort order, which
 `events_after` binary-searches, and make the result depend on filter order.
 
+**Revised by chunk 112b**, which built the filter and found the single binary is not its customer.
+Disabling `GilrsPlugin` when Steam Input starts keeps the pad out of Bevy altogether, which a filter
+cannot: Bevy's own gamepad entities, and anything polling them, are outside the frame. The filter
+ships with headless tests and no example; its case is per device, such as X56.
+
 ### D23 — Focus integrates by activation, and interception is static
 
 **Decided.** The kind of widget that has focus activates a context, and what that context claims is
@@ -1570,11 +1575,12 @@ delegated, from the declarations alone. Prompts for that family come from the ba
 
 **Revised by chunk 112a**, which withdrew the error for a control of the authority's own family on
 the same action. One binary serving a Steam launch and a direct one needs `Thrust` on both the
-authority and `RightTrigger2`, and the error made it undeclarable. R0.4 is met at L0 instead: the
-backend filters its family while it runs (R0.6), which also covers the actions it does not supply.
-The control's row stands for the family and the authority adds none, so an override or a preset
-lands on the control; a screen shows the pad delegated only where the game says its backend runs.
-Reversing it puts such a game back to shipping two builds.
+authority and `RightTrigger2`, and the error made it undeclarable. R0.4 is met at startup instead:
+when the authority starts, the game leaves the family's own source out, such as `GilrsPlugin`. An L0
+filter (R0.6) could drop the family's events, but not Bevy's own entities for the same pad. The
+control's row stands for the family and the authority adds none, so an override or a preset lands on
+the control; a screen shows the pad delegated only where the game says its backend runs. Reversing
+it puts such a game back to shipping two builds.
 
 ### D52 — Pairing is a runtime handle, filtered at the frame
 

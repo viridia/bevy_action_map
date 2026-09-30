@@ -76,6 +76,15 @@ acted on. The queue is capped at 4096 events, dropping oldest-first and counting
 **Calibration.** Gamepad axis values are corrected as they are recorded, not where they are read
 (TD8.4). A backend writing values into the frame directly enters past that point.
 
+**Filtering.** `ActionMapSystems::Filter` runs in `PreUpdate` after `Sample` and before `Capture`,
+so every reader, a rebinding capture included, sees the frame after it (R0.6). A filter is any
+system in the set calling `retain_sampled(keep)`, which drops the events stamped with the current
+frame that `keep` rejects. Earlier frames' events are never offered: a consumer may already hold a
+cursor into them. `FocusLost` is never offered either, since it is what releases held keys and
+buttons (R16.1). Removal keeps the queue sorted, and because a filter only removes, several compose
+as an AND in any order. A rejected gamepad's connection events go too, and pairing (TD7.4) reads the
+frame, so it never learns the pad went away.
+
 ---
 
 ## 3. Actions, contexts and values
@@ -503,7 +512,8 @@ a window losing focus is this crate's device going away, and the authority's has
 Controls of other families beside it are what the split is for. A control of the authority's own
 family may be bound beside it too, for a game that runs without the authority on some launches.
 Nothing in evaluation tells the two apart: keeping one press from reaching the action through both
-is the backend's, by keeping its family's raw input out of the frame while it runs (R0.4).
+is the game's, by leaving the family's own source out when the authority starts, such as disabling
+`GilrsPlugin` once Steam Input has (R0.4).
 
 ---
 

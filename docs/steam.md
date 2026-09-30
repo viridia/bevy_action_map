@@ -23,7 +23,7 @@ nothing about another, and Steam ships client updates continuously.
 
 | | |
 | --- | --- |
-| Measured | 2026-09-09, corrected and extended 2026-09-10, extended 2026-09-24 and 2026-09-26 |
+| Measured | 2026-09-09, corrected and extended 2026-09-10, extended 2026-09-24, 2026-09-26 and 2026-09-29 |
 | OS | macOS 15.7.4 (24G517), Apple M1 Pro |
 | Steam client | stable channel; exact build not recorded |
 | `steamworks` crate | 0.13.1 (`steamworks-sys` 0.13.0) |
@@ -250,8 +250,8 @@ the same layout.
 **Consequence for S3 and R0.6.** The correlation an emulation-aware suppression needs is not missing
 from Steam, only from its API. Per-device suppression is unavailable rather than impossible, which
 is the case to make upstream. Neither route is usable by a shipped game: reading another
-application's cache file is no more permissible than writing into its bundle (`S4`), so chunk 112b
-still ships per-family suppression.
+application's cache file is no more permissible than writing into its bundle (`S4`), so a game
+reading its pads through Steam leaves Bevy's gamepad support out for the whole family (D93).
 
 **And the identity it holds is Steam's, not the OS's.** The record above carried `0x0b13` while the
 pad was wired on `0x0b12`, and kept the same handle across a transport swap (`S8`). The join a
@@ -562,6 +562,18 @@ Measured in chunk 168, with an Xbox pad, through the Steam build of Disasteroids
 its home button and woken again, the pad left `GetConnectedControllers` and came back with the same
 handle, `0x45eb133e5f260`, within one run. Three launches of the game that day each reported that
 same handle. A restart of the Steam client is not measured.
+
+### S33 — A game using Steam Input natively gets no emulated pad, and gilrs still sees the real one
+
+Measured for chunk 112b, with the Xbox pad over Bluetooth rather than the bench's wired link.
+`padprobe --bevy` ran twice, once with the Steam build of Disasteroids running and once without it,
+Steam running both times. Each run listed one pad, "Xbox Series Controller", vendor `0x045e` and
+product `0x0b13`: the hardware itself. Its sticks reported normally in both.
+
+Steam's emulated pad (`S1`, product `0x028e`) did not appear. The one pad reaches a game reading
+Steam Input natively twice, through Steam and through gilrs, rather than as two devices (`S2`).
+Which of Steam's settings create the emulated pad is not measured. Buttons were not pressed, and the
+game did not have focus while the probe ran.
 
 ---
 
