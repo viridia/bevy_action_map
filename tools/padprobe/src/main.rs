@@ -73,10 +73,14 @@ fn main() {
 
     println!("mode: {}\n", mode.describe());
 
-    // gilrs discovers devices on its first poll, so drain briefly before enumerating.
+    // gilrs discovers devices on its first poll, so drain briefly before enumerating. The drain is
+    // printed, timestamped: whether an axis reports alongside a connection, before anything moves,
+    // decides whether a calibration restored on connect lands in time (D21).
     let warmup = Instant::now();
     while warmup.elapsed() < Duration::from_millis(300) {
-        while gilrs.next_event().is_some() {}
+        while let Some(Event { id, event, .. }) = gilrs.next_event() {
+            println!("{:>6}ms [{id}] warmup {event:?}", warmup.elapsed().as_millis());
+        }
         std::thread::sleep(Duration::from_millis(10));
     }
 
@@ -131,6 +135,7 @@ fn main() {
             let Some(Event { id, event, .. }) = ev else {
                 break;
             };
+            print!("{:>6}ms ", warmup.elapsed().as_millis());
             match event {
                 gilrs::EventType::AxisChanged(axis, v, code) => {
                     println!("[{id}] axis  {axis:?} = {v:+.4}   (code {code})");

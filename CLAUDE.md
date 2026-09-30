@@ -273,12 +273,12 @@ available and do not build in the no-devices configuration, so
 suite. Everything else is warning-free in every configuration above, so a warning is a regression —
 treat one as such rather than assuming it was already there.
 
-**Launch every example a chunk touched** before calling it done: `cargo run --example <x>` in the
-background for a minute, with the log grepped for `panicked|ERROR` (Disasteroids needs
-`--features serialize`). It catches what the recipe cannot, such as a system running before the
-entities it expects exist. Split Friction logs one `WARN` at startup, an unresolved import of
-`mesh2d::bindings`: that is Bevy's, bevy#25936, and harmless. Check at each Bevy bump whether it has
-gone.
+**Launch every example a chunk touched** before calling it done: `scripts/smoke.sh <example>...`
+runs each for ten seconds, longer where one has timers of its own, and fails it on a panic, an
+`ERROR` or unexpected `WARN` line, or an early exit. It catches what the recipe cannot, such as a
+system running before the entities it expects exist. The script holds each example's features and
+the warnings known to be harmless, and reports a known warning that has stopped appearing as stale,
+which is how a Bevy bump that fixes one shows.
 
 ## Context, and what not to economize on
 

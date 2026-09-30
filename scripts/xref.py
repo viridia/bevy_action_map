@@ -14,10 +14,15 @@ Each numbered document owns a prefix, so a reference resolves without knowing wh
 `docs/design.md`, `X12` an entry in `docs/deferred.md`, `G3` one in `docs/guidelines.md`. The
 remote driver's two documents own `DR` and `DD` the same way. The section sign these replaced is
 retired, and finding one is an error.
+
+A document whose entries are numbered from a counter carries its `**Next: <n>.**` line, and the
+counter must exceed every number the document has ever used, read from its git history as well as
+the working tree: an entry routed out leaves a gap that must not be reissued.
 """
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -41,6 +46,14 @@ DD_SECTION = re.compile(r"\bDD(\d+(?:\.\d+)?)\b")
 RETIRED = re.compile(r"§")
 H2_NUM = re.compile(r"^## (\d+)\.")
 H3_NUM = re.compile(r"^### (\d+\.\d+)\b")
+NEXT = re.compile(r"^\*\*Next: (\d+)\.\*\*")
+
+# Each counted document, and the heading that spends a number from its counter.
+COUNTERS = {
+    "docs/issues.md": re.compile(r"^### (\d+)\b"),
+    "docs/deferred.md": re.compile(r"^### X(\d+)\b"),
+    "docs/guidelines.md": re.compile(r"^### G(\d+)\b"),
+}
 
 
 def sources():
@@ -75,6 +88,17 @@ def prose(path):
 
 def headings(path, pattern):
     return {m.group(1) for _, l in prose(path) for m in [pattern.match(l)] if m}
+
+
+def highest_ever(rel, pattern):
+    """The highest number `pattern` has matched in `rel`, in the working tree or any commit."""
+    lines = (ROOT / rel).read_text(encoding="utf-8").split("\n")
+    log = subprocess.run(
+        ["git", "log", "-p", "--format=", "--", rel], cwd=ROOT, capture_output=True, text=True
+    )
+    # A diff line carries a one-character prefix, so the heading starts at column 1.
+    lines += [l[1:] for l in log.stdout.split("\n") if l[:1] in "+- " and l[1:4] == "###"]
+    return max((int(m.group(1)) for l in lines for m in [pattern.match(l)] if m), default=0)
 
 
 def main():
@@ -171,6 +195,17 @@ def main():
 
     for path, n, rid in r_dupes:
         fail(path, n, f"{rid} is defined more than once")
+
+    for rel, pattern in COUNTERS.items():
+        path = ROOT / rel
+        counter = next(((n, int(m.group(1))) for n, l in prose(path) for m in [NEXT.match(l)] if m), None)
+        if counter is None:
+            fail(path, 1, "has no **Next: <n>.** counter")
+            continue
+        n, value = counter
+        used = highest_ever(rel, pattern)
+        if value <= used:
+            fail(path, n, f"Next: {value} is stale; {used} has been used, so it should be {used + 1}")
 
     for line in fails:
         print(line)

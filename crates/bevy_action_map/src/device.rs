@@ -642,9 +642,13 @@ impl AxisCalibration {
 /// What each connected gamepad's axes do when nobody is touching them.
 ///
 /// Empty by default, which reads as "every axis is honest": a game that never touches this gets raw
-/// readings unchanged. [`set`](Self::set) a value for each axis that needs correcting. Entries are
-/// keyed by the pad's entity, so they last no longer than the entity does, which on some platforms
-/// is one connection.
+/// readings unchanged. [`set`](Self::set) a value for each axis that needs correcting.
+///
+/// Entries are keyed by the pad's entity and stay until you remove them, so
+/// [`clear_device`](Self::clear_device) a pad when it disconnects. Some platforms give a
+/// reconnecting pad a new entity, leaving the old entries behind; others give a disconnected pad's
+/// entity to the next pad of the same model, which would inherit values measured on a different
+/// stick.
 ///
 /// A dead-zone slider for the player does not belong here. That is the binding's own dead zone,
 /// made adjustable with [`tunable_dead_zone`](crate::binding::BindingBuilder::tunable_dead_zone),

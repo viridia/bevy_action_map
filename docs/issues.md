@@ -100,42 +100,6 @@ polish; not routed to a chunk, since nothing here is missing from the crate.
 
 Ordered by what a real game would miss first.
 
-### 1052 Naming a device to the player has no requirement and no support
-
-`split_screen.rs`'s `device_name` · R11, R18
-
-R18.3 forbids hard-coding English for a control's display string and the crate supplies
-`fallback_label` so a game does not have to. A *device* has no equivalent: nothing returns a
-descriptor or a key for "Xbox Controller", and R11.6 covers brand *resolution* without saying
-anything about naming the result. So Split Friction's pane label hard-codes four English strings off
-`GamepadBrand`, which is exactly the shape R18.3 exists to prevent one step to the left.
-
-The gap is in `Requirements.md` first: no requirement covers it, so the crate is not failing one.
-Whether a device name is R18's business (a display string, like a control's) or R11's (a fact about
-the device, like its brand) is the question to settle before anything is built.
-
-### 1074 Calibration has no vetted way to outlive a connection
-
-`GamepadCalibration`, keyed by entity · R11.7, D21 · **the first risk read from the schedule; the
-entity reuse read from gilrs's source; none probed**
-
-A game restoring a pad's calibration when it reconnects has to write the hook itself. Chunk 72b
-drafted one as a doc recipe, an observer on `DeviceConnected` that clears the entity's entries and
-restores from a store keyed by `Identity`, and withdrew it for these:
-
-- **The connect frame is uncorrected.** `DeviceConnected` is raised in `Dispatch`, after that
-  frame's axis readings were sampled and evaluated with the entity's old or empty entry.
-- **A reused entity can carry another unit's values.** gilrs on Linux hands a returning pad the slot
-  of any disconnected pad with the same UUID, which names a model; macOS spawns a new entity.
-  Restoring by `Identity` cannot tell identical units apart either.
-- **Entries accumulate.** On macOS every reconnect is a new entity, and the old one's entries stay.
-- **A pad without an `Identity`** (wasm, some Linux setups) is left uncalibrated, and silently.
-- **The store goes stale** if the game re-measures a connected pad and does not write it back.
-
-The fork is whether the crate owns the restore: `GamepadCalibration` holding entries by `DeviceId`
-as well, looked up in `sample_input` when the entity has none, removes the first and third and
-makes the fourth reportable. The alternative is a recipe that mitigates each by hand.
-
 ### 1021 A chord has no sequential alternative
 
 R20.3 (SHOULD) · uncited anywhere in tree
@@ -148,13 +112,6 @@ so the two requirements stand or fall together, and neither is decided.
 
 The rest of R20 is accounted for: R20.2 and R20.5 are built, R20.1 holds by construction, R20.4 is
 withdrawn, and R20.7 is chunk 115.
-
-### 1041 No way to stop the frame sampling itself
-
-R9.9 — a pumped sampling mode. `sample_input`, `begin_sample` and `record` are all public, so the
-pieces exist; what is missing is a way to stop `InputFramePlugin` scheduling sampling at all.
-Floated as a companion to chunk 83's rewind; chunk 83 says to confirm the need before routing it
-there.
 
 ### 1048 Virtual devices have no first-class support
 

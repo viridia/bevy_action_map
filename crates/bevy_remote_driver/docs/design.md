@@ -283,13 +283,11 @@ There is no injection at the level of a raw event, because none is needed: a mes
 sampled as a real one. The authority level exists for a context that delegates, and for nothing
 else. A test of an ordinary bound action sends a key.
 
-What this answers of `docs/issues.md`'s three candidates:
+What this answers of `docs/issues.md`'s two candidates:
 
 - **1048, virtual devices.** Resembles only. A test's key arrives as the real keyboard, which leaves
   a test fixture no special case to need, but on-screen sticks and bots are still the requirement's
   subject and still unserved.
-- **1041, pumped sampling.** Resembles only. Measuring in frames makes a test independent of frame
-  rate without stopping sampling. Rewind is still the case that would need it.
 - **1025, driving a context from outside.** Unrelated. That is an in-process harness with no world,
   and a remote driver always has one.
 

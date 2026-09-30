@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 57.**
+**Next: 59.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -485,6 +485,20 @@ restore, re-simulate — is chunk 83, which also takes the held-state containers
 no shared `Plan` across peers and no hold timers or tap counts on the wire. What is left here needs
 a remote player's resolved action to inject and a later correction to reconcile against it.
 
+### X58 — Pumped sampling (R9.9, withdrawn)
+
+**Gate:** a game that needs to choose when input is consumed, lockstep netcode the likeliest.
+
+Two ways exist without new API, neither tried. A run condition on `ActionMapSystems::Sample` stops
+sampling, but Bevy's messages expire after about two updates, so a pause longer than that loses a
+release and leaves the control held. A filter can hold back instead: it copies what `retain_sampled`
+rejects into its own buffer and `record`s it into a later frame. Nothing expires, calibration is
+already applied, and `FocusLost` still passes, but the events take the release frame's timestamps
+and the `Filter` docs describe dropping, not re-recording.
+
+- **What to ask:** which of the two fits their netcode, or what they would build instead. The answer
+  decides whether this is a doc recipe, a helper, or a mode.
+
 ### X54 — Conditions that read other actions
 
 **Gate:** the crate public (X43), and its users asked on the Bevy Discord whether a game wants a
@@ -577,10 +591,10 @@ time-dependent stage", and the closing step honouring it: E[2].
 
 **Gate:** someone asks for it.
 
-This was chunk 178: a setting keyed by `Identity`, as calibration is, so under gilrs ignoring one
-pad ignores its model, shown on the Disasteroids controls screen and written as an L0 filter
-(`ActionMapSystems::Filter`, built by chunk 112b) that unpairs the pad when the list changes. An
-ignored pad stays listed so it can be un-ignored; telling two identical pads apart is out, since
+This was chunk 178: a setting keyed by `Identity`, as a game's stored calibration is, so under gilrs
+ignoring one pad ignores its model, shown on the Disasteroids controls screen and written as an L0
+filter (`ActionMapSystems::Filter`, built by chunk 112b) that unpairs the pad when the list changes.
+An ignored pad stays listed so it can be un-ignored; telling two identical pads apart is out, since
 Bevy's gamepad backend has no identity per unit. Deferred on Discord feedback that a player can
 unplug a bad pad, which answers the measured case, the Switch-protocol clone's phantom presses (the
 R14 notes). It does not answer a device that stays plugged in: a virtual duplicate from DS4Windows,

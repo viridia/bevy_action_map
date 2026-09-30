@@ -699,9 +699,11 @@ the same problem for events in [bevy#7691][bevy-7691].
   must not be corrupted by coalescing.
 - **R9.8 (SHOULD)** Preserve per-event timestamps from the windowing layer where available, for
   sub-frame accuracy on high-polling-rate devices.
-- **R9.9 (SHOULD)** A manual/pumped mode where the app decides when sampling occurs — needed for
-  headless runs, tests, and lockstep networking (where every peer must consume an identical input
-  set for a given tick, so sampling cannot be tied to local frame timing).
+- **R9.9 (WITHDRAWN)** ~~A manual/pumped mode where the app decides when sampling occurs — needed
+  for headless runs, tests, and lockstep networking.~~ _Withdrawn: tests and headless runs are
+  served by counting frames, and an app can already gate sampling with a run condition on the
+  `Sample` set. A lockstep mode designed with no lockstep game in tree would prescribe one netcode's
+  answer to all of them. The approaches already possible wait on a customer, in X58._
 
 ---
 
@@ -925,10 +927,10 @@ answering **three different questions**, which belong at three different stages:
 | **2. Design**      | What deadzone shape and response curve does this mechanic want?                  | per binding/action | game developer                 |
 | **3. Preference**  | Scale the above for comfort, accessibility, or a worn thumbstick.                | per player         | player (R20.5)             |
 
-Stage 1 varies by individual unit, not just by model — drift is a wear characteristic — so it must
-be _measured_, capturing a center **offset** as well as a radius, not assumed symmetric about zero.
-Stage 2 is where radial-vs-axial and curves live (R5). Stage 3 modulates, and must not be able to
-reduce stage 1 below what the hardware actually needs.
+Stage 1 varies by individual unit, not just by model — drift is a wear characteristic — and is not
+symmetric about zero, so it carries a center **offset** as well as a radius. Obtaining it is the
+app's (R14.11). Stage 2 is where radial-vs-axial and curves live (R5). Stage 3 modulates, and must
+not be able to reduce stage 1 below what the hardware actually needs.
 
 **The rule that makes them compose: at most one stage may rescale.** If a lower stage removes a
 radius and remaps the remainder to full range, an upper stage's threshold no longer corresponds to

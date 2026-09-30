@@ -52,7 +52,7 @@ here, so there is one `D`-numbering in the project.
 | **D19** | Modifiers and conditions are enums with a `Custom` variant                    | TD8.2     |
 | **D65** | The device model is closed; a third-party kind needs one in hand             | —               |
 | **D20** | We own the whole dead-zone chain, in three stages, with one rescaling         | TD8.4     |
-| **D21** | Calibration is set by the app, never detected                                 | TD8.4     |
+| **D21** | Calibration is set by the app, never detected by the crate                    | TD8.4     |
 | **D22** | Backends enter at two seams, not one                                          | —               |
 | **D93** | Raw input is filtered at L0 by removal-only systems, and their authors declare | —               |
 | **D23** | Focus integrates by activation, and interception is static                    | —               |
@@ -715,14 +715,17 @@ and it means the evaluator never has to hold per-device state. It also puts cali
 correct side of the injection seam: a backend supplying its own values writes into the frame past
 it.
 
-### D21 — Calibration is set by the app, never detected
+### D21 — Calibration is set by the app, never detected by the crate
 
-**Decided.** Stage 1 is a manual API. The app sets each axis's calibration from code; measuring it,
-storing it and showing it to a player are the app's. The crate applies it and names the device, by
-`Identity`, so the app has a key to store it under.
+**Decided.** Stage 1 is a manual API. The app sets each axis's calibration from code. Where the
+values come from is the app's policy: per device or global, learned automatically or measured by a
+player-facing step, or left to the platform. So are storing them and restoring them on reconnect.
+The crate applies what it is given and names the device, by `Identity`, so the app has a key to
+store it under.
 
-**Rules out.** Learning a stick's centre while the game is running, and a measuring step in the
-crate.
+**Rules out.** A detector or measuring step in the crate, and a store or restore the crate owns.
+Either would pick a policy on the game's behalf, and a restore would also pick a key, when an
+`Identity` names a unit under some backends and a model under others.
 
 **Reversal.** A stick deflected while detection is running would be learned as centre, and hardware
 that misreports would poison the measurement silently — which is the failure mode this exists to
@@ -731,7 +734,15 @@ the one the crate shipped learned a released stick's deflection as rest, and doi
 expertise most game developers lack, while popular titles leave it to the platform.
 
 **Accepted cost.** A game that wants calibration to outlive a connection writes the store and the
-restore itself, and the crate offers no vetted way to do it yet (`docs/issues.md`, 1074).
+restore itself, and clears a pad's entries when it disconnects: macOS spawns a new entity on
+reconnect, orphaning the old one's, and gilrs on Linux hands a returning pad the entity of any
+disconnected pad of the same model (read from gilrs's source, not probed). A pad with no `Identity`
+has no key to restore under.
+
+**Restoring on `DeviceConnected` is in time**, though it is raised after that frame's readings are
+corrected: a pad reports no axis until a stick moves, even one resting off zero. Probed on macOS
+with an Xbox Series pad, both connected at launch and woken mid-run (`tools/padprobe`, September
+2026); a DualSense and Linux are unprobed.
 
 ---
 

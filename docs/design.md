@@ -933,10 +933,9 @@ At most one modifier in a chain may rescale. `BindingModifier::rescales` reports
 Calibration is per device unit and is applied once as the frame is assembled, so by the time held
 state exists the value has already been corrected by the right unit's calibration.
 `GamepadCalibration` holds it, keyed by the pad's entity, and `AxisCalibration` is one axis's worth.
-The app sets it from code; the crate neither measures nor stores it, and an entry lasts as long as
-the entity, which a platform may keep across a reconnect or replace. `GamepadCalibration`'s doc
-sets out the approaches a game can take, per device, global, automatic and interactive, without
-choosing one.
+The app sets it from code; the crate neither measures, stores nor removes it, so an entry lasts
+until the app clears it, even past its pad's disconnect (D21). `GamepadCalibration`'s doc sets out
+the approaches a game can take, per device, global, automatic and interactive, without choosing one.
 
 ---
 

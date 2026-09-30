@@ -229,6 +229,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 159  | `docs/decisions.md` compressed, the longest entries first             |
 | 112a | An authority beside its own family's controls                         |
 | 112b | Filtering raw input at L0, with no example using it                   |
+| 177  | An example, launched and checked                                      |
 
 ---
 
@@ -242,7 +243,6 @@ its identity rather than its position.
 * 121: A camera that takes the mouse, and gives it back
 * 122: The wheel as a binding source
 * 172a: `bevy_action_map_ui`, starting with prompts
-* 112: Filtering raw input at L0
 * 28: Docs that run
 
 Chunk 179 carries defects. The register of what is known to be wrong is
@@ -521,11 +521,9 @@ the expensive part.
   same paddle-and-ball simulation snapshotted and re-simulated forward, with the recorded and
   re-simulated transition logs compared. `pong_robot` has already shown the base can host one
   grafted concept without disturbing its own.
-- **Check whether `docs/issues.md` 1041 belongs here.** R9.9's pumped sampling mode (stopping
-  `InputFramePlugin` from scheduling its own sampling) was floated as a fit for a rewind demo, on
-  the theory that re-simulating forward wants control over exactly when a frame is sampled. Confirm
-  that before routing it here — if re-simulation does not actually need to suppress live sampling,
-  1041 stays unrouted rather than getting a home it does not need.
+- **Re-simulation leaves live sampling alone.** It replays recorded frames through `FixedMain`, and
+  sampling runs in `PreUpdate`, so no new API is needed. That holds only if the Pong base evaluates
+  on the fixed tick; if it evaluates on the render tick, gate the `Sample` set with a run condition.
 
 ---
 
@@ -699,21 +697,29 @@ boundaries with `pulldown-cmark`, and keeps devfmt's rewrap and `--diff` scoping
 - **Not done:** retiring devfmt, or rendering Markdown through the parser, which would restyle every
   document.
 
-### 177. An example, launched and checked · E[1]
+### 185. `show.py` takes an issue number · E[1]
 
-`scripts/smoke.sh <example>` is the launch `CLAUDE.md` asks of every example a chunk touches: run it
-for a minute and fail if the log has `panicked` or `ERROR`. It knows each example's features
-(Disasteroids needs `serialize`) and the warnings known to be harmless (Split Friction's
-`mesh2d::bindings` import, bevy#25936), so a clean run prints one line.
+An issue is looked up with a hand-written `awk` range today, since `show.py` takes every other
+anchor but not this one. Issue numbers start at 1000 and chunk numbers are well short of it, so a
+bare number of four digits is an issue and anything shorter a chunk, with no prefix needed.
 
-- **It bounds the run itself**, since macOS has no `timeout`: one missing exits 127 before the
-  example starts, and an empty log reads as a clean one.
-- **`CLAUDE.md`'s launch paragraph** names the script, and the known warnings move into it, where a
-  Bevy bump that fixes one shows up as a stale entry.
-- **Verified by:** a clean run of each example, and a run with a deliberate panic in a scratch
-  example reported as failed.
-- **Not done:** driving the example, which is the remote driver's job, or catching a wrong answer
-  that neither panics nor logs.
+- **`--toc issues`** lists the entries, as `--toc X` does for deferred work.
+- **Verified by:** `show.py` printing an issue whole, one beside a chunk in the same call, and a
+  retired issue reported as absent rather than as a chunk.
+- **Not done:** issue state (open, routed, blocked), which would make the file a database.
+
+### 186. `xref.py` checks references to issues · E[1]
+
+`xref.py` validates every numbered anchor except an issue's, so a reference to one that has been
+routed or dropped survives until someone greps for it. A four-digit number on a line naming
+`issues.md` is the signature: references read "`docs/issues.md`, 1074", "`docs/issues.md` 1041" and
+"issues.md's 1041".
+
+- **Validate the scan first** against a reference known to be good and one planted as dead, since a
+  clean result from an unvalidated scan says nothing.
+- **Verified by:** that pair, and `scripts/verify.sh` clean on the tree.
+- **Not done:** a bare issue number with no `issues.md` beside it, which cannot be told from a year
+  or a count.
 
 ---
 
