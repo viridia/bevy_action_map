@@ -55,7 +55,6 @@ impl BindingDiagnostic {
             | DiagnosticKind::FollowsUnlisted { .. }
             | DiagnosticKind::DuplicateTunableKey { .. }
             | DiagnosticKind::TunableShapeDisagreement { .. }
-            | DiagnosticKind::BoundAndDelegated
             | DiagnosticKind::DeltaFromAuthority
             | DiagnosticKind::ReservedAuthority
             | DiagnosticKind::CombinedWithoutBindings => Severity::Error,
@@ -159,9 +158,6 @@ pub enum DiagnosticKind {
         /// The builder method that declared it.
         modifier: &'static str,
     },
-    /// An action is bound to a control of the same device family an outside authority supplies it
-    /// for.
-    BoundAndDelegated,
     /// A `Delta2` action is bound to an outside authority, whose value is a level read every tick.
     DeltaFromAuthority,
     /// An authority binding is declared reserved, and has no control to reserve.
@@ -291,13 +287,6 @@ impl core::fmt::Display for BindingDiagnostic {
                     )
                 }
             }
-            DiagnosticKind::BoundAndDelegated => write!(
-                f,
-                "`{}` is bound to an authority for a device family, and also to a control of that \
-                 family. The authority already supplies that family's input, so drop one of the \
-                 two",
-                self.action
-            ),
             DiagnosticKind::DeltaFromAuthority => write!(
                 f,
                 "`{}` is a delta, which an authority cannot drive: an authority's value is a level \
@@ -446,22 +435,15 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
             }
         }
 
-        // R0.4: the authority owns its family's input for this action, so a control of that family
-        // here would read what the authority is already supplying. Other families are the point.
-        if let BindingInput::Authority(family, ..) = binding.input {
+        // A control of the authority's own family beside it is allowed: R0.4 is met at L0, by the
+        // backend filtering that family while it runs (D92).
+        if let BindingInput::Authority(..) = binding.input {
             if binding.intent == ActionIntent::Delta2 {
                 found.push(at(DiagnosticKind::DeltaFromAuthority));
             }
             // R4.8: `reserved` collects controls, and an authority reads none of its own.
             if binding.reserved {
                 found.push(at(DiagnosticKind::ReservedAuthority));
-            }
-            if bindings.iter().any(|other| {
-                other.action == binding.action
-                    && !matches!(other.input, BindingInput::Authority(..))
-                    && other.input.family() == family
-            }) {
-                found.push(at(DiagnosticKind::BoundAndDelegated));
             }
         }
 
@@ -510,10 +492,7 @@ pub(crate) fn diagnose(bindings: &[BindingSpec]) -> Vec<BindingDiagnostic> {
                     if rebindable || claimed_as.is_rebindable() {
                         found.push(at(DiagnosticKind::DuplicateMappingKey { key }));
                     }
-                } else if *claimed_as != declaration.rebind_policy
-                    // A control beside its family's authority is `BoundAndDelegated` already.
-                    && ![*claimed_as, declaration.rebind_policy].contains(&crate::mapping::RebindPolicy::Delegated)
-                {
+                } else if *claimed_as != declaration.rebind_policy {
                     found.push(at(DiagnosticKind::RebindingDisagreement { key }));
                 }
             }

@@ -2429,6 +2429,75 @@ mod tests {
         }
     }
 
+    /// With a control of its family beside it, the authority has no row, so a rebind or a preset
+    /// moves the control and leaves the authority as declared, a follower's copy included.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_rebind_beside_an_authority_moves_only_the_control() {
+        use crate::backend::Authority;
+        use crate::binding::BindingInput;
+        use bevy_input::gamepad::GamepadButton;
+
+        let mut builder = crate::binding::InputContextBuilder::<()>::default();
+        builder.bind::<Jump>(Authority(DeviceFamily::Gamepad));
+        builder.bind::<Jump>(GamepadButton::South).mappable();
+        builder.follow::<Lunge, Jump>(|binding| binding.hold(0.4));
+        let (declared, _) = builder.finish();
+        let rows = crate::mapping::mappings_of(&declared, "override_tests.playing");
+        let pad = rows
+            .iter()
+            .find(|row| row.family == DeviceFamily::Gamepad)
+            .unwrap();
+        let limits = Limits {
+            reserved: &[],
+            max_slots: None,
+        };
+        let authorities = |bindings: &[BindingSpec]| {
+            bindings
+                .iter()
+                .filter(|binding| matches!(binding.input, BindingInput::Authority(..)))
+                .map(|binding| (binding.action, binding.input))
+                .collect::<Vec<_>>()
+        };
+        let east = Control::GamepadButton(GamepadButton::East);
+
+        let mut overrides = Overrides::new();
+        overrides.bind(pad.family, pad.key, [east]);
+        let (rebound, _, _, problems) = rewrite(
+            &declared,
+            &rows,
+            &[],
+            &overrides,
+            None,
+            &limits,
+            "override_tests.playing",
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(authorities(&rebound), authorities(&declared));
+        assert_eq!(authorities(&rebound).len(), 2);
+        // Both the leader's control and the follower's copy of it moved.
+        assert_eq!(
+            rebound
+                .iter()
+                .filter(|binding| binding.input == BindingInput::GamepadButton(GamepadButton::East))
+                .count(),
+            2
+        );
+
+        // A preset moves a row the same way, through the same path.
+        let (preset_bound, _, _, problems) = rewrite(
+            &declared,
+            &rows,
+            &[],
+            &overrides,
+            Some(&overrides),
+            &limits,
+            "override_tests.playing",
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(authorities(&preset_bound), authorities(&declared));
+    }
+
     /// The point of the whole container: emptying the primary of a two-control row leaves the gap
     /// where it was. Position is what primary and secondary mean, so a secondary that slid up into
     /// the column the player just cleared would be a different binding than the one they asked for.

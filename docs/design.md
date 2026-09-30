@@ -212,7 +212,7 @@ pub enum DiagnosticKind {
     ReservedAndMappable, FollowsNothing { .. }, FollowsUnlisted { .. },
     DuplicateClassBinding { .. }, DuplicateTunableKey { .. },
     TunableShapeDisagreement { .. }, DeadZoneAtFullDeflection { .. },
-    ModifierOnPart { .. }, BoundAndDelegated, DeltaFromAuthority, ReservedAuthority,
+    ModifierOnPart { .. }, DeltaFromAuthority, ReservedAuthority,
     CombinedWithoutBindings,
 }
 ```
@@ -500,9 +500,10 @@ backend's `Prompts` answer for its family. Its mapping row is `Delegated` and ho
 (TD9.1). An inactive or shadowed context does not sample it. Interruption does not reach it either:
 a window losing focus is this crate's device going away, and the authority's has not.
 
-The one contradiction is a control of the authority's own family bound to the same action, which is
-`BoundAndDelegated` and a plan-build error. Controls of other families beside it are what the split
-is for.
+Controls of other families beside it are what the split is for. A control of the authority's own
+family may be bound beside it too, for a game that runs without the authority on some launches.
+Nothing in evaluation tells the two apart: keeping one press from reaching the action through both
+is the backend's, by keeping its family's raw input out of the frame while it runs (R0.4).
 
 ---
 
@@ -1019,9 +1020,15 @@ own binding screen, and opening that screen is the game's job.
 
 Having no slots, a delegated row cannot take part in a conflict. A write that reaches it anyway is
 refused ahead of the preset exemption (TD10.1), which also keeps `rewrite` from addressing a part
-with no control. `mappable` on an authority binding panics, and `private` hides it like any row. A
-control of the authority's family on the same action shares its key, and the mismatch is reported
-once, as `BoundAndDelegated`.
+with no control. `mappable` on an authority binding panics, and `private` hides it like any row.
+
+Where the action also binds a control of the authority's family, `mapped_parts` skips the authority,
+and the control's row is the family's only one. The two would otherwise share a key and merge into a
+delegated row holding a control, which every write would refuse. With no part, the authority binding
+is out of `rewrite`'s reach, so an override or a preset moves the control and leaves the authority
+as declared. `PresetBuilder::bind` skips a family only where the row it finds is delegated. Whether
+a screen shows the row or a way into the backend's screen is the game's decision, since only the
+game knows whether its backend started.
 
 **`MaxSlots`** is the only length limit the crate enforces, and only when applying overrides. A game
 that loads override sets it did not write inserts the resource, and a row naming more controls comes

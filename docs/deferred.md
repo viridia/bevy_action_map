@@ -568,14 +568,14 @@ time-dependent stage", and the closing step honouring it: E[2].
 
 This was chunk 178: a setting keyed by `Identity`, as calibration is, so under gilrs ignoring one
 pad ignores its model, shown on the Disasteroids controls screen and written as an L0 filter (chunk
-112) that records `FocusLost` and unpairs the pad when the list changes. An ignored pad stays listed
-so it can be un-ignored; telling two identical pads apart is out, since Bevy's gamepad backend has
-no identity per unit. Deferred on Discord feedback that a player can unplug a bad pad, which answers
-the measured case, the Switch-protocol clone's phantom presses (the R14 notes). It does not answer a
-device that stays plugged in: a virtual duplicate from DS4Windows, a wheel or stick kept for another
-game, a built-in HID device that reports itself as a joystick. Those reach players only if the
-setting ships without a developer building it, so it waits for a request rather than being written
-into an example.
+112b) that records `FocusLost` and unpairs the pad when the list changes. An ignored pad stays
+listed so it can be un-ignored; telling two identical pads apart is out, since Bevy's gamepad
+backend has no identity per unit. Deferred on Discord feedback that a player can unplug a bad pad,
+which answers the measured case, the Switch-protocol clone's phantom presses (the R14 notes). It
+does not answer a device that stays plugged in: a virtual duplicate from DS4Windows, a wheel or
+stick kept for another game, a built-in HID device that reports itself as a joystick. Those reach
+players only if the setting ships without a developer building it, so it waits for a request rather
+than being written into an example.
 
 ## 7. Tooling, and other projects
 

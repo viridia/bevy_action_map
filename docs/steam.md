@@ -247,11 +247,11 @@ id and product id followed by an instance suffix — `000` `45e` `b13` `3e5f260`
 packing is inferred rather than known; a vendor id needing four significant nibbles would not fit
 the same layout.
 
-**Consequence for S3 and R0.6.** The correlation an emulation-aware suppression needs is not
-missing from Steam, only from its API. Per-device suppression is unavailable rather than
-impossible, which is the case to make upstream. Neither route is usable by a shipped game: reading
-another application's cache file is no more permissible than writing into its bundle (`S4`), so
-chunk 112 still ships per-family suppression.
+**Consequence for S3 and R0.6.** The correlation an emulation-aware suppression needs is not missing
+from Steam, only from its API. Per-device suppression is unavailable rather than impossible, which
+is the case to make upstream. Neither route is usable by a shipped game: reading another
+application's cache file is no more permissible than writing into its bundle (`S4`), so chunk 112b
+still ships per-family suppression.
 
 **And the identity it holds is Steam's, not the OS's.** The record above carried `0x0b13` while the
 pad was wired on `0x0b12`, and kept the same handle across a transport swap (`S8`). The join a

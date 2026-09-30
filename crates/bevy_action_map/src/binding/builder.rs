@@ -1150,17 +1150,6 @@ impl<C> InputContextBuilder<C> {
         reserved
     }
 
-    /// Each action bound to an authority, with the family it stands in for.
-    pub(crate) fn delegated(&self) -> Vec<(ActionId, crate::device::DeviceFamily)> {
-        self.bindings
-            .iter()
-            .filter_map(|binding| match binding.input {
-                BindingInput::Authority(family, ..) => Some((binding.action, family)),
-                _ => None,
-            })
-            .collect()
-    }
-
     /// What [`combined`](Self::combined) declared, which `finish` leaves behind.
     pub(crate) fn take_combined(&mut self) -> Vec<CombinedSpec> {
         core::mem::take(&mut self.combined)
@@ -1481,29 +1470,20 @@ mod tests {
         crate::plan::Plan::from_bindings(bindings, class_bindings);
     }
 
-    /// An authority owns its family, so a control of that family on the same action contradicts it.
-    /// A control of another family is the point of the split: the keyboard beside a pad that Steam
-    /// drives.
+    /// A control of another family is the point of the split, the keyboard beside a pad that Steam
+    /// drives; one of the authority's own family is what a launch without the authority plays on.
     #[cfg(all(feature = "keyboard", feature = "gamepad"))]
     #[test]
-    fn an_authority_refuses_a_control_of_its_own_family_only() {
+    fn an_authority_takes_a_control_of_either_family_beside_it() {
         let mut builder = InputContextBuilder::<()>::default();
         builder.bind::<DummyButton>(KeyCode::Space);
         builder.bind::<DummyButton>(crate::backend::Authority(DeviceFamily::Gamepad));
+        builder.bind::<DummyButton>(GamepadButton::South);
         assert!(
             builder.diagnostics().is_empty(),
             "{:?}",
             builder.diagnostics()
         );
-
-        builder.bind::<DummyButton>(GamepadButton::South);
-        let found = builder.diagnostics();
-        assert_eq!(found.len(), 1, "{found:?}");
-        assert_eq!(
-            found[0].kind,
-            crate::plan::DiagnosticKind::BoundAndDelegated
-        );
-        assert_eq!(found[0].severity(), crate::plan::Severity::Error);
     }
 
     /// Takes the action's shape rather than one of its own, so the intent check passes for every

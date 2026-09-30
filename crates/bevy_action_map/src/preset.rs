@@ -19,9 +19,9 @@
 
 use bevy_ecs::world::World;
 
-use crate::action::{ActionId, InputAction};
+use crate::action::InputAction;
 use crate::device::DeviceFamily;
-use crate::mapping::{BoundSlot, TunableValue, mappings};
+use crate::mapping::{BoundSlot, RebindPolicy, TunableValue, mappings};
 use crate::overrides::Overrides;
 
 /// A named set of mapping assignments a player selects as a unit.
@@ -68,10 +68,11 @@ impl PresetBuilder<'_> {
     /// Puts `slots` in whatever mapping `A` has in `family`: bare controls, or [`BoundSlot`]s for
     /// any that are held with something, bound exactly as [`Overrides::bind`] binds them.
     ///
-    /// Does nothing where `A` is bound to an [`Authority`](crate::backend::Authority) for `family`,
-    /// whose controls the player sets in the authority's own layout instead. A game that ships both
-    /// with and without one, such as a Steam build beside a plain one, can then write its presets
-    /// once.
+    /// Does nothing where `A`'s mapping in `family` is delegated to an
+    /// [`Authority`](crate::backend::Authority), whose controls the player sets in the authority's
+    /// own layout instead. A game that ships both with and without one, such as a Steam build
+    /// beside a plain one, can then write its presets once. An action bound to a control of that
+    /// family as well as the authority has the control's mapping, and the preset lands there.
     ///
     /// # Panics
     ///
@@ -84,9 +85,6 @@ impl PresetBuilder<'_> {
         family: DeviceFamily,
         slots: impl IntoIterator<Item = impl Into<BoundSlot>>,
     ) -> &mut Self {
-        if delegated(self.world, A::id(), family) {
-            return self;
-        }
         let mut found = mappings(self.world)
             .into_iter()
             .filter(|mapping| mapping.action == A::id() && mapping.family == family);
@@ -102,6 +100,9 @@ impl PresetBuilder<'_> {
              part a composite action's row belongs to instead",
             A::PATH
         );
+        if mapping.rebind_policy == RebindPolicy::Delegated {
+            return self;
+        }
         self.rows.bind(
             family,
             mapping.key,
@@ -126,18 +127,6 @@ impl PresetBuilder<'_> {
         self.rows.tune(family, key, value);
         self
     }
-}
-
-/// Whether any context binds `action` to an authority standing in for `family`.
-fn delegated(world: &World, action: ActionId, family: DeviceFamily) -> bool {
-    world
-        .get_resource::<crate::inspect::DeclaredContexts>()
-        .is_some_and(|declared| {
-            declared
-                .0
-                .iter()
-                .any(|context| context.delegated.contains(&(action, family)))
-        })
 }
 
 #[cfg(all(test, feature = "keyboard"))]
@@ -218,5 +207,33 @@ mod tests {
 
         let families: Vec<_> = preset.rows.iter().map(|(family, ..)| family).collect();
         assert_eq!(families, [DeviceFamily::KeyboardMouse]);
+    }
+
+    /// With a control of the family bound beside the authority, the preset has that control's row
+    /// to land on.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_preset_lands_on_a_control_beside_an_authority() {
+        use crate::backend::Authority;
+        use crate::binding::Control;
+        use alloc::vec::Vec;
+        use bevy_input::gamepad::GamepadButton;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|controls| {
+            controls.bind::<Jump>(Authority(DeviceFamily::Gamepad));
+            controls.bind::<Jump>(GamepadButton::South).mappable();
+        });
+
+        let preset = Preset::build(app.world(), "preset_tests.beside", |preset| {
+            preset.bind::<Jump>(
+                DeviceFamily::Gamepad,
+                [Control::GamepadButton(GamepadButton::East)],
+            );
+        });
+
+        let families: Vec<_> = preset.rows.iter().map(|(family, ..)| family).collect();
+        assert_eq!(families, [DeviceFamily::Gamepad]);
     }
 }

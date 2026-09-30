@@ -1532,8 +1532,7 @@ a tick: origins, glyphs, whether an action is bound, and delegating a rebind to 
 **Decided.** An authority backend supplies an input, not an action. The game declares it as a
 binding in the context, naming the device family it stands in for, and its value enters the fold
 beside the context's own bindings for other families. Conditions and modifiers chained onto that
-binding run on it as on any other. Binding the authority's own family as well is the contradiction
-that remains an error.
+binding run on it as on any other.
 
 **Rules out.** An action owned whole by one source, which `delegate` expressed; and skipping the
 game's conditions for an authority's value.
@@ -1568,6 +1567,14 @@ have a network peer send an already-held value that the follower's hold then run
 to the backend (R19.8), so a controls screen shows the keyboard rebindable here and the pad
 delegated, from the declarations alone. Prompts for that family come from the backend's `Prompts`
 (R18.8).
+
+**Revised by chunk 112a**, which withdrew the error for a control of the authority's own family on
+the same action. One binary serving a Steam launch and a direct one needs `Thrust` on both the
+authority and `RightTrigger2`, and the error made it undeclarable. R0.4 is met at L0 instead: the
+backend filters its family while it runs (R0.6), which also covers the actions it does not supply.
+The control's row stands for the family and the authority adds none, so an override or a preset
+lands on the control; a screen shows the pad delegated only where the game says its backend runs.
+Reversing it puts such a game back to shipping two builds.
 
 ### D52 — Pairing is a runtime handle, filtered at the frame
 

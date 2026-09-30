@@ -227,6 +227,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 183  | Bevy 0.20.0-rc.2, and the driver's gamepad message registration gone  |
 | 184  | Inline prompts from the block art                                     |
 | 159  | `docs/decisions.md` compressed, the longest entries first             |
+| 112a | An authority beside its own family's controls                         |
 
 ---
 
@@ -551,10 +552,14 @@ numbered zero so that it moves no other section's anchor.
 - **After 181**, whose TD5 rewrite introduces most of the first entries.
 - **Verified by** `python3 scripts/xref.py`, and `scripts/show.py` printing the new section.
 
-### 112. Filtering raw input at L0 · E[2]
+### 112b. Filtering raw input at L0 · E[2]
 
 R0.6, in the shape D93 settles: filters are removal-only systems, and the first customer is the
-Steam Disasteroids serving a Steam launch and a direct one from one binary.
+Steam Disasteroids serving a Steam launch and a direct one from one binary. 112a made its bindings
+declarable.
+
+- **Link the filter where 112a could not**: the `Authority` doc's paragraph on binding the family's
+  controls beside it, and TD5.8's matching paragraph, both name a filter that does not exist yet.
 
 - **Measure first**, on the bench, before any code: whether gilrs sees the pad on macOS at all
   (`docs/steam.md` "Not measured yet" has a wired Xbox pad invisible to raw IOHID), and whether
@@ -567,8 +572,13 @@ Steam Disasteroids serving a Steam launch and a direct one from one binary.
   timestamp is this sample's frame. `FocusLost` never reaches the predicate.
 - **The Steam Disasteroids takes `bevy_gilrs` back** (`steam_examples/Cargo.toml` drops it today),
   and its Steam plugin adds a filter rejecting `RawEvent::Gamepad`, run-conditioned on Steam Input
-  having started. The acceptance test is the player's: launched through Steam, the pad plays once;
-  launched directly, it plays through gilrs.
+  having started. The Steam plugin runs before the actions are declared, so the game knows which
+  launch it is in.
+- **Every pad action binds the base game's control beside its authority**, about 14 bindings, and
+  `pad_presets.rs` is linked by path. The pad column shows the presets and the dead-zone stepper
+  when Steam Input is not live, and "Change in Steam" when it is.
+- **The acceptance test is the player's:** launched through Steam, the pad plays once, and A on the
+  controls screen presses once; launched directly, it plays through gilrs and Southpaw applies.
 - **Doc comments mark it an advanced feature**, with four guidelines: filter by device, not by game
   state, which is what contexts are for; change a filter only while the devices it newly rejects are
   idle, or record `RawEvent::FocusLost` when it turns on; rejecting a device hides its connects and
@@ -581,6 +591,10 @@ Steam Disasteroids serving a Steam launch and a direct one from one binary.
 - **Not doing: Steam's emulated keyboard and mouse** (S27). Nothing tells their events from the real
   devices', so no filter reaches them.
 - **Not doing: a player-facing ignore list**, deferred as X56.
+- **Not doing: sparing a gilrs device Steam does not take**, such as a racing wheel or a flight
+  stick. The example's filter drops the whole family, since no such device is on the bench to test a
+  narrower one; a game can reject per device, by matching a pad's brand to the controller types
+  Steam reports.
 
 ### 28. Docs that run · E[4]
 

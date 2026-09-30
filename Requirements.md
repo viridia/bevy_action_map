@@ -141,7 +141,9 @@ be delegable to the backend's own UI.
   it drives, it supplies that family's input and our bindings for that family must not also read it.
   The split must be per action and per family, not all-or-nothing — a game reading its pads through
   Steam Input still binds the keyboard to the same actions, and still maps its own debug and editor
-  bindings.
+  bindings. An action may bind controls of the authority's family beside it, for a launch without
+  the authority; while the authority runs, its backend keeps that family's input out of the frame
+  (R0.6).
 - **R0.5 (MUST)** Consumers of action state (gameplay code, prompts) must not need to know which
   backend produced it. Backend identity is queryable but never required at the call site.
 - **R0.6 (MUST)** _(D93)_ Raw input must be filterable at **L0**, after sampling and before anything
@@ -1284,7 +1286,9 @@ and response curves ([IGA file][steam-iga]).
   a normal outcome — and R19.3's conflict detection does not apply to those bindings, since we do
   not own the rules. Delegation can be unavailable: the backend may be absent, or hold no device to
   open its screen for. A screen offering delegation must show that, and must not accept a press that
-  does nothing.
+  does nothing. Where an action binds a control of the authority's family beside it, the control's
+  row stands for the family and is rebindable here; delegation is the game's to offer while the
+  backend runs.
 
 ### The presentation model
 

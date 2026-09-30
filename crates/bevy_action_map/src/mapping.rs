@@ -164,6 +164,10 @@ pub enum RebindPolicy {
     /// Every [`Authority`](crate::backend::Authority) binding's row carries this, and it holds no
     /// slots: the authority decides which control drives the action, and does not say. A screen
     /// draws the row as a way into the authority's own screen, which is the game's to open.
+    ///
+    /// An action that also binds a control of the authority's family has that control's row
+    /// instead, and no delegated row. While the authority runs, the game decides whether to show
+    /// that row or a way into the authority's own screen.
     Delegated,
 }
 
@@ -498,6 +502,13 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
         };
         let prefix = declaration.prefix.unwrap_or(binding.path);
         let (part, control) = match binding.input {
+            // The control's row stands for the family instead, so an override lands on it and
+            // `rewrite` never reaches the authority (D92).
+            BindingInput::Authority(family, ..)
+                if binds_control_in_family(bindings, binding.action, family) =>
+            {
+                continue;
+            }
             BindingInput::Authority(..) => (BindingPart::Whole, None),
             input => {
                 let (part, control) = input.part();
@@ -513,6 +524,19 @@ pub(crate) fn mapped_parts(bindings: &[BindingSpec]) -> Vec<MappedPart> {
         });
     }
     parts
+}
+
+/// Whether `action` is bound to a control of `family`, beside any authority standing in for it.
+pub(crate) fn binds_control_in_family(
+    bindings: &[BindingSpec],
+    action: ActionId,
+    family: DeviceFamily,
+) -> bool {
+    bindings.iter().any(|binding| {
+        binding.action == action
+            && !matches!(binding.input, BindingInput::Authority(..))
+            && binding.input.family() == family
+    })
 }
 
 /// A binding's chord, in the terms a screen draws it in.
@@ -1402,6 +1426,34 @@ mod tests {
         // The follower rides the authority as it rides the key, so both rows carry it.
         assert_eq!(pad.followers.len(), 1);
         assert!(mappings.iter().all(|mapping| mapping.followers.len() == 1));
+    }
+
+    /// A control of the authority's own family stands for the family, whichever was declared first,
+    /// and the authority adds no row of its own.
+    #[cfg(feature = "gamepad")]
+    #[test]
+    fn a_control_beside_its_familys_authority_takes_the_row() {
+        #[derive(InputContext)]
+        #[context(path = "mapping_tests.both", tick = Fixed)]
+        struct Both;
+
+        let mut app = App::new();
+        app.add_plugins((bevy_input::InputPlugin, ActionMapPlugin));
+        app.add_context::<Both>(|controls| {
+            controls.bind::<Jump>(crate::backend::Authority(DeviceFamily::Gamepad));
+            controls
+                .bind::<Jump>(bevy_input::gamepad::GamepadButton::South)
+                .mappable();
+            controls.follow::<Lunge, Jump>(|binding| binding.hold(0.4));
+        });
+
+        let mappings = mappings(app.world());
+        assert_eq!(mappings.len(), 1, "{mappings:?}");
+        let pad = &mappings[0];
+        assert_eq!(pad.family, DeviceFamily::Gamepad);
+        assert_eq!(pad.rebind_policy, RebindPolicy::Here);
+        assert_eq!(pad.slots.len(), 1);
+        assert_eq!(pad.followers.len(), 1);
     }
 
     #[test]

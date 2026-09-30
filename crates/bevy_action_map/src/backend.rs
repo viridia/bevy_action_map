@@ -38,10 +38,14 @@ use crate::device::DeviceFamily;
 /// same value, so the authority writes it once: an afterburner riding `Thrust` needs nothing
 /// written for itself.
 ///
-/// The values arrive through [`AuthorityValues`] on the context's entity. Binding a control of the
-/// same family to the same action is refused, since the authority owns that family. A network peer
-/// or a scripted player works the same way, standing in for whichever family a human would have
-/// used.
+/// The values arrive through [`AuthorityValues`] on the context's entity. A network peer or a
+/// scripted player works the same way, standing in for whichever family a human would have used.
+///
+/// A game that runs with the authority on some launches and without it on others, such as one
+/// binary for Steam and elsewhere, can bind the family's controls beside it. The controls then play
+/// when the authority is absent. While it runs, the backend must keep that family's raw input out
+/// of the input frame with a filter, or the same press would reach the action twice. The controls
+/// screen lists the controls' row for the family, since only the game knows which launch it is in.
 ///
 /// An authority reports a level rather than a stream of presses, so a press and release between two
 /// of its writes never reach the action; under Steam Input, that is a tap shorter than a frame.
