@@ -560,8 +560,12 @@ what keeps the shape uniform across every built-in condition and stateful modifi
 restore can therefore compare against readings from before it, and skip recording one superseded
 reading.
 
-The struct holds no ECS references, so a test or replay harness can drive one directly. Activation
-flips a flag: no spawn, despawn, insert or remove.
+Activation flips a flag: no spawn, despawn, insert or remove.
+
+A context can go on any entity (R23.6): a player, one entity per local player, or the entity a
+resource lives on. Spawning `(GlobalInput, OnFoot)` gives a game without a protagonist one global
+place for input. Bevy keeps one `GlobalInput` and strips it from a second spawn, which leaves that
+entity's contexts behind as an extra instance.
 
 ---
 

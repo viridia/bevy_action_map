@@ -11,6 +11,9 @@ struct Jump;
 #[context(path = "gameplay.on_foot", tick = Render)]
 struct OnFoot;
 
+#[derive(Resource)]
+struct GlobalInput;
+
 fn main() {
     App::new()
         .add_plugins((
@@ -22,7 +25,7 @@ fn main() {
             context.bind::<Jump>(KeyCode::Space);
         })
         .add_systems(Startup, |mut commands: Commands| {
-            commands.spawn(OnFoot);
+            commands.spawn((GlobalInput, OnFoot));
         })
         .add_systems(Update, print_jump)
         .run();

@@ -230,6 +230,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 112a | An authority beside its own family's controls                         |
 | 112b | Filtering raw input at L0, with no example using it                   |
 | 177  | An example, launched and checked                                      |
+| 187  | A context on a resource's entity                                      |
 
 ---
 

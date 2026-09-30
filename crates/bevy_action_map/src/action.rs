@@ -522,6 +522,28 @@ pub trait ActionOutput: Copy + Send + Sync + 'static {
 /// be spawned from a scene like any other component. `Default`, `Clone` and `Copy` come with it,
 /// all trivial on a unit struct.
 ///
+/// A game with no single protagonist, such as a puzzle game, may prefer to handle input globally. A
+/// resource is stored on an entity of its own, so spawning the resource together with its contexts
+/// gives one place that gathers all input, readable as `Res<GlobalInput>` for any data you keep
+/// there:
+///
+/// ```rust
+/// # use bevy_action_map::prelude::*;
+/// # use bevy_ecs::prelude::*;
+/// # #[derive(InputContext)]
+/// # #[context(path = "gameplay.falling", tick = Render)]
+/// # struct Falling;
+/// #[derive(Resource)]
+/// struct GlobalInput;
+///
+/// fn setup(mut commands: Commands) {
+///     commands.spawn((GlobalInput, Falling));
+/// }
+/// ```
+///
+/// Spawn it once. Bevy keeps a single `GlobalInput` and strips it from a second entity, but the
+/// contexts spawned alongside stay behind as a second, separate instance.
+///
 /// To configure the component differently, write both impls by hand: `InputContext` is four
 /// associated constants, three of them required. A hand-written `Component` loses the warning that
 /// catches a context you never declared.

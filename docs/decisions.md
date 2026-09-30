@@ -230,6 +230,18 @@ granularity, which the bitset gives, is not something a single component's chang
 to, work on any layout: a generic entity event carries the action in its type parameter and targets
 the context entity (D17).
 
+### D103 — A context is driven only inside a `World`
+
+**Decided.** An `InputContextState` is created and advanced by the crate's own systems. A global
+context is a context on a resource's entity, which Bevy 0.20 stores like any other; tests use a
+headless `App`.
+
+**Rules out.** Constructing and ticking one by hand, as R23.6 once asked of test and replay
+harnesses.
+
+**Reversal.** `InputContextState::new` and `apply_frame` become public API, freezing the plan, the
+frame cursor and the held-device state into signatures a user calls.
+
 ### D9 — A context declares one tick domain and is evaluated once
 
 **Decided.** `TickDomain::Render` or `TickDomain::Fixed`, declared on the context. A render context

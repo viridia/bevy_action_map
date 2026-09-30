@@ -1629,9 +1629,9 @@ properties that decided the state layout, as **D8**.
 - **R23.5 (MUST)** Action state must be snapshot-able and restorable cheaply enough to run per
   rollback tick (R10.3), and reachable from an `ActionId` in O(1) without a hash lookup on the hot
   path. _How_ — see **D8**.
-- **R23.6 (SHOULD)** A context instance may live as a component on an entity or standalone; the
-  storage model must be identical in both cases, so per-player, global, and test-harness contexts
-  share one code path (R0.3).
+- **R23.6 (SHOULD)** _(D103)_ A context instance may live on any entity, including a resource's
+  entity, and must behave identically on each, so per-player and global contexts share one code path
+  (R0.3).
 - **R23.7 (MUST)** The same action may be present in two simultaneously-active layers (R7.3) and
   must be able to hold **independent in-flight state in each** — a half-completed hold in the base
   context must not be clobbered by the overriding layer's copy. Any storage keyed globally by

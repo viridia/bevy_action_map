@@ -264,7 +264,7 @@ instructions for writing a plan, and says why a run cannot be split across two c
 rebinds writes the developer's real settings file: a clean pass puts it back, a failure halfway
 leaves it dirty.
 
-**Known, not regressions:** 42 of the 51 doctests are `ignore` fences — fragments written to be read
+**Known, not regressions:** 42 of the 52 doctests are `ignore` fences — fragments written to be read
 mid-prose rather than to stand alone — so they are neither compiled nor run, and chunk 28 owns
 making them execute. That workaround is macOS-only; elsewhere the doctest step skips rather than
 pretending to have run. The unit tests under `crates/bevy_action_map/src/` assume a keyboard is

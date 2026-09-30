@@ -20,9 +20,6 @@ use crate::plan::Plan;
 
 /// The live state of one context on one entity: what every action it binds is currently doing.
 ///
-/// It holds no references into the ECS, so a test or a replay harness can drive one directly
-/// without a `World`.
-///
 /// # Change detection
 ///
 /// This component is marked changed on a tick where one of its actions actually moved, and not on
@@ -1325,6 +1322,32 @@ mod tests {
 
         let count = app.world().resource::<Jumping>();
         assert_eq!((count.0, count.1), (2, 2));
+    }
+
+    /// A resource is a component on an entity of its own, so a game with no protagonist can put its
+    /// contexts there (R23.6). A Bevy that hid resource entities from queries would fail this.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_context_on_a_resource_entity_is_evaluated() {
+        #[derive(Resource)]
+        struct GlobalInput;
+
+        let mut app = App::new();
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<OnFoot>(|context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        app.init_resource::<FireCount>();
+        app.add_systems(FixedUpdate, count_jump_fires);
+        let global = app.world_mut().spawn((GlobalInput, OnFoot)).id();
+        assert_eq!(app.world().resource_entity::<GlobalInput>(), Some(global));
+
+        app.world_mut()
+            .write_message(press(KeyCode::Space, Key::Space, ButtonState::Pressed));
+        app.update();
+        run_fixed_tick(&mut app);
+
+        assert_eq!(app.world().resource::<FireCount>().0, 1);
     }
 
     /// Another runtime failure rather than a developer mistake: an action read where it was never

@@ -128,15 +128,6 @@ modeled inside the crate's own closed set rather than through an escape hatch fo
 written. What's missing is a variant and an identity for "not a real piece of hardware," not a
 mechanism for hardware this crate has never seen.
 
-### 1025 A context instance cannot be driven from outside the crate
-
-R23.6 · `InputContextState::new` and `apply_frame` are both `pub(crate)`
-
-TD6 says "a test or replay harness can drive one directly." From outside, the only way to get an
-instance is to spawn an entity and the only way to advance one is `App::update`. The struct's
-freedom from ECS references is real and unreachable, and R23.6's standalone half has no citation
-anywhere. X35, netcode injection, is where this plausibly already belongs.
-
 ### 1027 Two documentation requirements with no document
 
 - R16.4 (SHOULD) — the web caveats: pointer lock and gamepad access needing a user gesture, gamepad
