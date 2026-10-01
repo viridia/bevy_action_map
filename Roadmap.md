@@ -231,6 +231,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 112b | Filtering raw input at L0, with no example using it                   |
 | 177  | An example, launched and checked                                      |
 | 187  | A context on a resource's entity                                      |
+| 188a | Steam's prompts answered per action set                               |
 
 ---
 
@@ -436,26 +437,6 @@ providers, and neither is special.
 - **On landing:** that the presentation layer ships no art, and takes it from sibling providers, is
   an entry in `docs/decisions.md`.
 
-### 188a. Steam's prompts answer per action set · E[2]
-
-`SteamOrigins` is keyed by action alone, and `SteamOrigins::read` merges an action fed from two sets
-into one list, so `ToggleSettings`, which both `disasteroids.gameplay` and `disasteroids.menu`
-declare, answers with both sets' controls. `SteamPrompts::prompts` returns no pad prompts at all for
-a lookup that names a context, because it has no way to get from a context to a set.
-
-- **What it is:** `SteamOrigins` keyed by set and action, and a table in
-  `steam_examples/disasteroids/actions.rs` from context path to set: `Flying` and `Shell` to
-  gameplay, `Menu` to menu. A lookup that names a context answers from that context's set; one that
-  does not keeps today's merged answer until 188b removes that form.
-- **Depends on nothing; 188b depends on it.** Without it, 188b blanks every pad prompt in the Steam
-  build.
-- **Not the crate**, and not the base Disasteroids.
-- **Not Split Friction on Steam**, which is 151e and has one set.
-- **Verified by:** a test of `SteamPrompts` against a hand-built `SteamOrigins` (no client needed),
-  answering `ToggleSettings` differently per context once the two sets bind it differently;
-  `scripts/verify.sh --full`; the author running the Steam build with the HUD's and settings
-  screen's captions unchanged.
-
 ### 188b. A prompt lookup names its context · E[3]
 
 A lookup that does not name its context returns every carried context's bindings, ranked, and the
@@ -489,8 +470,10 @@ context's answer reads `inspect::dump`'s context list and asks per path, orderin
 - **What it touches:** `present.rs` (signature, impl, about 12 test calls), `overrides.rs` (4 test
   calls), `examples/common/prompt_ui.rs` and its `PromptSource`, 16 spans across 6 example files,
   about 20 spawns in `crates/bevy_action_map/tests/prompt_ui.rs`, and `SteamPrompts`, whose unscoped
-  path goes.
-- **Depends on 188a.**
+  path goes, with the merged answer's dedup. `CONTEXT_SETS` in
+  `steam_examples/disasteroids/actions.rs` and `ContextSet` in `steam.rs` key by `ContextId` in
+  place of the path, and the Steam tests' unscoped case goes.
+- **Depends on 188a**, landed.
 - **Changes R18.1**: "optionally a context … in every context something carries … ranked order"
   becomes the named context's bindings. D35's sentence on indexing the answer across contexts goes.
 - **Not a liveness filter**: a named context still answers whether or not it is active (D84).

@@ -140,7 +140,9 @@ if [[ ${full} -eq 1 ]]; then
     # linked by path: a change there breaks this crate without touching a file in it. A check needs
     # neither Steam nor its library, since `steamworks-sys` vendors the SDK.
     run_step "cargo clippy (steam_examples)" \
-        cargo clippy --manifest-path steam_examples/Cargo.toml
+        cargo clippy --manifest-path steam_examples/Cargo.toml --all-targets
+    run_step "cargo test (steam_examples)" \
+        cargo test --manifest-path steam_examples/Cargo.toml
 fi
 
 summarize

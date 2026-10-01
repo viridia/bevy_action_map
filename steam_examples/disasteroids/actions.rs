@@ -15,7 +15,7 @@ use crate::common::widget_focus::{
 };
 use crate::pause::{self, Game};
 use crate::ship::{BOMB_CHARGE, RELOAD};
-use crate::steam::{self, SteamActions};
+use crate::steam::{self, ContextSet, SteamActions};
 
 #[derive(InputAction)]
 #[action(path = "disasteroids.thrust", output = f32, intent = Analog1, category = "disasteroids.flight")]
@@ -96,10 +96,41 @@ const MENU_DEAD_ZONE: f32 = 0.6;
 /// names nothing and the settings screen's stepper has no range to offer.
 pub const TURN_DEAD_ZONE_KEY: &str = "disasteroids.turn.stick_deadzone";
 
-/// The two action sets in `game_actions_480.vdf`. `Flying` and `Shell` are live together and so
-/// share a set; `Menu` is exclusive, so it can have its own (`docs/steam.md`'s appendix).
+/// The two action sets in `game_actions_480.vdf`, laid out as `docs/steam.md`'s appendix explains.
 const GAMEPLAY: &str = "disasteroids.gameplay";
 const MENU: &str = "disasteroids.menu";
+
+/// Which action set feeds each context's pad bindings.
+///
+/// Steam and the mapper group actions differently. A Steam action set is a whole layout for the
+/// pad, and only one is active at a time, so the game switches sets as screens open and close. A
+/// context is a group of bindings, and several are live at once: `Flying` and `Shell` during play,
+/// with `Menu` over them while a screen is up. One set can therefore feed several contexts, and an
+/// action needed in two sets is declared in each. The player can bind each copy to a different
+/// control, so `ToggleSettings` may be one button in play and another on the menu.
+///
+/// Steam says what an action is bound to per set, and a prompt is asked for per context, so this
+/// table says which set to ask. A context with a pad binding that is missing here shows only its
+/// keyboard controls.
+pub const CONTEXT_SETS: &[ContextSet] = &[
+    ContextSet {
+        context: Flying::PATH,
+        set: GAMEPLAY,
+    },
+    ContextSet {
+        context: Shell::PATH,
+        set: GAMEPLAY,
+    },
+    ContextSet {
+        context: Menu::PATH,
+        set: MENU,
+    },
+    // Live only while a screen is up, so its `Activate` is in the menu set.
+    ContextSet {
+        context: ButtonFocused::PATH,
+        set: MENU,
+    },
+];
 
 pub fn plugin(app: &mut App) {
     const PAD: Authority = Authority(DeviceFamily::Gamepad);
@@ -238,6 +269,7 @@ pub fn plugin(app: &mut App) {
                 ],
             ),
         ],
+        CONTEXT_SETS,
     ));
     app.add_systems(Update, choose_set);
 

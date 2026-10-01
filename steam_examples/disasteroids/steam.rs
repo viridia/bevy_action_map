@@ -50,6 +50,9 @@ pub struct SteamActions {
     /// it when a screen takes the controls away from the game underneath.
     pub set: &'static str,
     actions: Vec<SteamAction>,
+    // A prompt asked for in a context is answered from the set feeding it, since the same action
+    // can be bound differently in two.
+    contexts: &'static [ContextSet],
     // Every set's handle, not only the live one's: an action's controls are asked for in the set
     // that declares it.
     set_handles: Vec<(&'static str, u64)>,
@@ -61,8 +64,13 @@ pub struct SteamActions {
 }
 
 impl SteamActions {
-    /// Every set in the manifest with the actions it declares, starting in `set`.
-    pub fn new(set: &'static str, sets: Vec<(&'static str, Vec<SteamAction>)>) -> Self {
+    /// Every set in the manifest with the actions it declares, starting in `set`, and which set
+    /// feeds each context.
+    pub fn new(
+        set: &'static str,
+        sets: Vec<(&'static str, Vec<SteamAction>)>,
+        contexts: &'static [ContextSet],
+    ) -> Self {
         let actions = sets
             .into_iter()
             .flat_map(|(name, actions)| {
@@ -75,12 +83,29 @@ impl SteamActions {
         Self {
             set,
             actions,
+            contexts,
             set_handles: Vec::new(),
             activated: 0,
             resolved: None,
             pads: None,
         }
     }
+
+    /// The set feeding the context with this path, if any does.
+    fn set_for(&self, context: &str) -> Option<&'static str> {
+        self.contexts
+            .iter()
+            .find(|entry| entry.context == context)
+            .map(|entry| entry.set)
+    }
+}
+
+/// The action set whose actions a context's authority bindings are fed from.
+pub struct ContextSet {
+    /// The context's path.
+    pub context: &'static str,
+    /// The set's name in the manifest.
+    pub set: &'static str,
 }
 
 /// One action in the manifest, and how to read it into the crate's action of the same meaning.
@@ -499,12 +524,17 @@ fn trigger_vibration(_: &Steam, pad: u64, level: GamepadRumbleIntensity) {
 ///
 /// Rebuilt only when the layout changes, so drawing a prompt never calls into Steam.
 #[derive(Resource, Default)]
-pub struct SteamOrigins(Vec<(ActionId, ControlOrigin)>);
+pub struct SteamOrigins(Vec<SteamOrigin>);
+
+/// One control an action is bound to, in one set.
+struct SteamOrigin {
+    set: &'static str,
+    action: ActionId,
+    control: ControlOrigin,
+}
 
 impl SteamOrigins {
     /// Asks Steam for the name and art of every control the table's actions are bound to.
-    ///
-    /// A control reached twice, by one action fed from two sets, is named once.
     fn read(input: &Input, actions: &[SteamAction]) -> Self {
         let mut origins = Vec::new();
         for action in actions {
@@ -522,10 +552,11 @@ impl SteamOrigins {
                     class: action.class,
                     glyph: (!glyph.is_empty()).then_some(glyph),
                 };
-                let entry = (action.action, control);
-                if !origins.contains(&entry) {
-                    origins.push(entry);
-                }
+                origins.push(SteamOrigin {
+                    set: action.set,
+                    action: action.action,
+                    control,
+                });
             }
         }
         Self(origins)
@@ -541,36 +572,129 @@ pub struct SteamPrompts<'w>(pub &'w World);
 impl Prompts for SteamPrompts<'_> {
     fn prompts(&self, action: ActionId, scope: PromptScope) -> Vec<Prompt> {
         let mut prompts = BindingTable::new(self.0).prompts(action, scope);
-        // Steam's layout is per action set rather than per context, so a lookup narrowed to one
-        // context has no answer from it.
-        if scope.context.is_some()
-            || scope
-                .family
-                .is_some_and(|family| family != DeviceFamily::Gamepad)
+        if scope
+            .family
+            .is_some_and(|family| family != DeviceFamily::Gamepad)
         {
             return prompts;
         }
-        let Some(origins) = self.0.get_resource::<SteamOrigins>() else {
+        let (Some(table), Some(origins)) = (
+            self.0.get_resource::<SteamActions>(),
+            self.0.get_resource::<SteamOrigins>(),
+        ) else {
             return prompts;
         };
-        prompts.extend(
-            origins
-                .0
-                .iter()
-                .filter(|(bound, _)| *bound == action)
-                .filter(|(_, origin)| {
-                    scope
-                        .class
-                        .is_none_or(|class| origin.class() == Some(class))
-                })
-                .map(|(_, origin)| Prompt {
-                    origin: origin.clone(),
-                    with: Vec::new(),
-                    part: BindingPart::Whole,
-                    condition: ConditionDescriptor::None,
-                    context: None,
-                }),
-        );
+        // Steam's layout is per action set, so a lookup in one context answers from the set that
+        // feeds it, and one in a context no set feeds has no pad controls. An unscoped lookup
+        // answers from every set.
+        let set = match scope.context {
+            Some(context) => match table.set_for(context) {
+                Some(set) => Some(set),
+                None => return prompts,
+            },
+            None => None,
+        };
+        for origin in &origins.0 {
+            if origin.action != action
+                || set.is_some_and(|set| set != origin.set)
+                || scope
+                    .class
+                    .is_some_and(|class| origin.control.class() != Some(class))
+                // A control reached from two sets is named once.
+                || prompts.iter().any(|prompt| prompt.origin == origin.control)
+            {
+                continue;
+            }
+            prompts.push(Prompt {
+                origin: origin.control.clone(),
+                with: Vec::new(),
+                part: BindingPart::Whole,
+                condition: ConditionDescriptor::None,
+                context: scope.context,
+            });
+        }
         prompts
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::actions::{CONTEXT_SETS, Flying, Menu, Shell, ToggleSettings};
+    use crate::common::widget_focus::StepperFocused;
+
+    fn origin(name: &str) -> ControlOrigin {
+        ControlOrigin::Foreign {
+            name: format!("steam/{name}"),
+            label: name.into(),
+            family: Some(DeviceFamily::Gamepad),
+            class: Some(ControlClass::AnyButton),
+            glyph: None,
+        }
+    }
+
+    /// `ToggleSettings` on Start in the gameplay set and Select in the menu set, with B in both.
+    fn world() -> World {
+        let mut world = World::new();
+        world.insert_resource(SteamActions::new(
+            "disasteroids.gameplay",
+            Vec::new(),
+            CONTEXT_SETS,
+        ));
+        let bound = |set, name| SteamOrigin {
+            set,
+            action: ToggleSettings::id(),
+            control: origin(name),
+        };
+        world.insert_resource(SteamOrigins(vec![
+            bound("disasteroids.gameplay", "Start"),
+            bound("disasteroids.gameplay", "B"),
+            bound("disasteroids.menu", "Select"),
+            bound("disasteroids.menu", "B"),
+        ]));
+        world
+    }
+
+    fn names(world: &World, scope: PromptScope) -> Vec<String> {
+        SteamPrompts(world)
+            .prompts(ToggleSettings::id(), scope)
+            .into_iter()
+            .map(|prompt| match prompt.origin {
+                ControlOrigin::Foreign { label, .. } => label,
+                other => panic!("expected Steam's control, got {other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_context_answers_from_its_set() {
+        let world = world();
+        let gameplay = ["Start", "B"];
+        assert_eq!(
+            names(&world, PromptScope::ANY.in_context(Flying::PATH)),
+            gameplay
+        );
+        assert_eq!(
+            names(&world, PromptScope::ANY.in_context(Shell::PATH)),
+            gameplay
+        );
+        assert_eq!(
+            names(&world, PromptScope::ANY.in_context(Menu::PATH)),
+            ["Select", "B"]
+        );
+    }
+
+    #[test]
+    fn an_unscoped_lookup_merges_the_sets() {
+        assert_eq!(names(&world(), PromptScope::ANY), ["Start", "B", "Select"]);
+    }
+
+    #[test]
+    fn steam_has_no_answer_off_the_pad_or_outside_its_sets() {
+        let world = world();
+        let scope = PromptScope::ANY.in_context(StepperFocused::PATH);
+        assert!(names(&world, scope).is_empty());
+        let keyboard = PromptScope::ANY.on(DeviceFamily::KeyboardMouse);
+        assert!(names(&world, keyboard).is_empty());
     }
 }
