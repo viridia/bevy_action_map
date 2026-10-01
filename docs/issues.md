@@ -239,22 +239,6 @@ cheap and the first is the one that would make the example teach more.
 
 ## 5. Cost and surface
 
-### 1034 One prompt lookup walks every declared context
-
-`present.rs`, `BindingTable::prompts`, calling each declared context's own `bindings` fn fresh per
-context per call — the scan cited this as `read_bindings::<C>`, which the call now reaches
-indirectly through `DeclaredContexts`
-
-`prompts` rebuilds every declared context's binding list on every call — two fresh vectors per
-context, every binding and every part — then does an O(n²) scan for earlier claims and an O(n²)
-dedup. The cost does not depend on which action was asked for, so it is paid in full per call:
-`examples/common/prompt_ui.rs` calls it once per span, so twenty spans over six contexts rebuild a
-hundred and twenty context binding lists.
-
-`PromptGeneration` bounds how _often_ this runs and nothing bounds what one pass costs.
-`BindingTable` holds the world for exactly the lifetime an amortization would want. Not on the
-per-tick path, so R23.2 does not apply.
-
 ### 1035 R23.2 is unenforced, and reading is the only thing enforcing it
 
 No allocation and no synchronization on the per-tick path is a rule with no tooling behind it. Four
