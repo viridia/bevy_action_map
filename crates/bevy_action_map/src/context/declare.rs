@@ -609,13 +609,17 @@ fn apply_to_entity<C: InputContext + Component>(
     problems
 }
 
-/// Reads one context's bindings back out for a reverse lookup, once its type is no longer known.
+/// Answers a prompt lookup in one context, once its type is no longer known.
 ///
 /// Registered beside `read_mappings`, and answering a different question: this one reads the
 /// compiled plan rather than the presentation rows, so a `private` binding is in it, and it asks
 /// whether anything is carrying the context at all.
-fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::ContextBindings {
-    use crate::present::{BoundControl, ContextBindings};
+fn read_prompts<C: InputContext + Component>(
+    world: &World,
+    action: crate::action::ActionId,
+    scope: crate::present::PromptScope,
+) -> alloc::vec::Vec<crate::present::Prompt> {
+    use crate::present::{ControlOrigin, Prompt};
 
     // What is bound now rather than what was declared: a prompt names the control that would fire
     // the action, and after a rebind that is the control the player chose.
@@ -623,8 +627,23 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
         Some(applied) => &applied.plan,
         None => match world.get_resource::<InputContextPlan<C>>() {
             Some(declared) => &declared.plan,
-            None => return ContextBindings::default(),
+            None => return alloc::vec::Vec::new(),
         },
+    };
+    // Every action has a slot in each context that binds it, rebound or not, so a miss is a
+    // context and action that were never paired.
+    let Some(slot) = plan.slot_for_action(action) else {
+        if action != crate::action::ActionId::PLACEHOLDER {
+            bevy_utils::once!(log::warn!(
+                "a prompt asked context `{}` what fires `{}`, which it does not bind, so the \
+                 answer is always empty. Name the context the action is bound in.",
+                C::PATH,
+                action
+                    .info()
+                    .map_or("an unregistered action", |info| info.path),
+            ));
+        }
+        return alloc::vec::Vec::new();
     };
 
     // Carried rather than active (D84). Read-only, which is what keeps a lookup callable from an
@@ -632,34 +651,38 @@ fn read_bindings<C: InputContext + Component>(world: &World) -> crate::present::
     let carried = world
         .try_query::<&InputContextState<C>>()
         .is_some_and(|mut instances| instances.iter(world).next().is_some());
+    if !carried {
+        return alloc::vec::Vec::new();
+    }
 
     let mut prompts = alloc::vec::Vec::new();
-    for binding in plan.bindings() {
+    for binding in &plan.bindings()[plan.bindings_of(slot)] {
         // The authority's own prompts answer for the family it owns.
         if matches!(binding.input, crate::binding::BindingInput::Authority(..)) {
             continue;
         }
-        let action = plan.action_for_slot(binding.slot);
-        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-        let chord: alloc::vec::Vec<crate::present::ControlOrigin> =
-            binding.chord.iter().copied().map(Into::into).collect();
-        #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
-        let chord: alloc::vec::Vec<crate::present::ControlOrigin> = alloc::vec::Vec::new();
-        let condition = crate::condition::describe(&binding.conditions);
-
         // By part rather than by control, so that a stick answers once rather than twice — the same
         // view the presentation model takes.
         let (part, control) = binding.input.part();
-        prompts.push(BoundControl {
-            action,
+        if scope
+            .family
+            .is_some_and(|family| family != control.family())
+            || scope.class.is_some_and(|class| !class.contains(control))
+        {
+            continue;
+        }
+        #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
+        let with = binding.chord.iter().copied().map(Into::into).collect();
+        #[cfg(not(any(feature = "keyboard", feature = "mouse", feature = "gamepad")))]
+        let with = alloc::vec::Vec::new();
+        prompts.push(Prompt {
+            origin: ControlOrigin::Ours(control),
+            with,
             part,
-            control,
-            chord,
-            condition,
+            condition: crate::condition::describe(&binding.conditions),
         });
     }
-
-    ContextBindings { carried, prompts }
+    prompts
 }
 
 fn read_instances<C: InputContext + Component>(
@@ -837,7 +860,7 @@ fn declare_context<C: InputContext + Component>(
             read: read_instances::<C>,
             mappings: read_mappings::<C>,
             tunables: read_tunables::<C>,
-            bindings: read_bindings::<C>,
+            prompts: read_prompts::<C>,
             apply: apply_to_context::<C>,
             apply_for_entity: apply_to_entity::<C>,
         });

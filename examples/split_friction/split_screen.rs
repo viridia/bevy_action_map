@@ -37,7 +37,7 @@ use bevy_action_map::player::Paired;
 
 use crate::common::prompt_ui::{PromptFamily, PromptSpan};
 use crate::popup::{self, ActivePreset, Popup};
-use crate::protagonist::{Join, Protagonist};
+use crate::protagonist::{Inviting, Join, Protagonist};
 
 /// One of the two panes in the split-screen layout, and the camera it drives.
 #[derive(Component, Clone, Copy, Default, PartialEq, Eq)]
@@ -253,7 +253,7 @@ fn pane_ui(index: u8) -> impl Scene {
                     padding: {UiRect::axes(Val::Px(12.0), Val::Px(8.0))},
                 }
                 Children [
-                    PromptSpan(Join)
+                    PromptSpan(Inviting, Join)
                     ~{PromptFamily(DeviceFamily::Gamepad)}
                     TextFont { font_size: 18.0_f32 }
                     TextColor(Color::WHITE)
@@ -262,7 +262,7 @@ fn pane_ui(index: u8) -> impl Scene {
                     TextFont { font_size: 18.0_f32 }
                     TextColor(Color::WHITE)
                     --
-                    PromptSpan(Join)
+                    PromptSpan(Inviting, Join)
                     ~{PromptFamily(DeviceFamily::KeyboardMouse)}
                     TextFont { font_size: 18.0_f32 }
                     TextColor(Color::WHITE)

@@ -232,6 +232,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 177  | An example, launched and checked                                      |
 | 187  | A context on a resource's entity                                      |
 | 188a | Steam's prompts answered per action set                               |
+| 188b | A prompt lookup names its context                                     |
 
 ---
 
@@ -436,54 +437,6 @@ providers, and neither is special.
   glyphs beside Kenney's keys.
 - **On landing:** that the presentation layer ships no art, and takes it from sibling providers, is
   an entry in `docs/decisions.md`.
-
-### 188b. A prompt lookup names its context · E[3]
-
-A lookup that does not name its context returns every carried context's bindings, ranked, and the
-ranking is a guess about which one the caller meant. `ToggleSettings` is bound in Disasteroids' game
-context (`F2`, reserved) and in `Menu` (`F2`, mappable). The HUD's span at
-`examples/disasteroids/main.rs` and the settings screen's span both ask unscoped, so after the
-player rebinds `Menu`'s copy, the HUD should caption the menu's key over a game key that is still
-`F2`. That has been read, not run; confirming it is this chunk's first step. A tool that wants every
-context's answer reads `inspect::dump`'s context list and asks per path, ordering however it likes.
-
-- **What it is:** the context becomes required in `Prompts::prompts`. Whether it is a parameter of
-  its own or a non-optional field of `PromptScope` is proposed before it is built.
-- **A context is named by a `ContextId`**, a new public newtype over the path with
-  `From<C: InputContext>`, shaped like `ActionId`. `PromptScope` takes one in place of the path
-  string, and the three spans become `PromptSpan(ContextId, ActionId)`, written
-  `PromptSpan(Menu, ToggleSettings)` in `bsn!`. First check that `bsn!` applies `.into()` to each
-  field of a two-field tuple; only the one-field case is tested. A generic `PromptSpan<C, A>`
-  resolved through a bundle effect or a `bsn!` template was weighed and rejected: no stronger check,
-  and an idiom nothing else uses.
-- **A lookup in a context that does not declare the action warns once.** Types cannot check that
-  pairing, since bindings are declared at runtime.
-- **One pass, filtered at the source.** The type-erased `bindings` fn behind `read_bindings` takes
-  the action, family and class, and skips a binding before building its entry, so the only
-  allocations are the prompts returned. It has no other caller. Returning the *n*th prompt directly,
-  with no `Vec`, is not done: a rebinding row wants the list, and `SteamPrompts` appends to it.
-- **What goes:** the cross-context sort in `BindingTable::prompts`, its "What strongest first means"
-  doc section (within one context, declaration order still makes the first the primary), the
-  cross-context dedup, and with them the cost of rebuilding every context's bindings on every call
-  (issue 1034, retired here): one call reads one context. The `BindingTable` struct is up for review
-  here too, since its trait then has a consumer of its own shape.
-- **What it touches:** `present.rs` (signature, impl, about 12 test calls), `overrides.rs` (4 test
-  calls), `examples/common/prompt_ui.rs` and its `PromptSource`, 16 spans across 6 example files,
-  about 20 spawns in `crates/bevy_action_map/tests/prompt_ui.rs`, and `SteamPrompts`, whose unscoped
-  path goes, with the merged answer's dedup. `CONTEXT_SETS` in
-  `steam_examples/disasteroids/actions.rs` and `ContextSet` in `steam.rs` key by `ContextId` in
-  place of the path, and the Steam tests' unscoped case goes.
-- **Depends on 188a**, landed.
-- **Changes R18.1**: "optionally a context … in every context something carries … ranked order"
-  becomes the named context's bindings. D35's sentence on indexing the answer across contexts goes.
-- **Not a liveness filter**: a named context still answers whether or not it is active (D84).
-- **Not `architecture.md`**, which draws `BindingTable` ranking contexts and waits for X44's batch.
-- **Verified by:** a test that the HUD's and menu's `ToggleSettings` answer differently after a
-  rebind of `Menu`'s copy; `crates/bevy_action_map/tests/prompt_ui.rs`;
-  `scripts/verify.sh --full --doc`; `scripts/smoke.sh` on every example with a span;
-  `disasteroids/rebind.py`; the author running the Steam build.
-- **On landing:** that a prompt lookup names its context, and a whole-world view is `inspect`'s job,
-  is an entry in `docs/decisions.md`.
 
 ### 172a. `bevy_action_map_ui`, starting with prompts · E[3]
 

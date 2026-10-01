@@ -16,8 +16,8 @@
 //! - `P` steps through the presets, and every row answers again under the bindings it moved to.
 //!
 //! Map is bound in a context the gallery itself shadows, and is named anyway: a prompt says what a
-//! control does, not whether it does it this frame. Emote is bound to nothing at all, and its row
-//! is empty on purpose.
+//! control does, not whether it does it this frame. Emote is bound only on the pad, so its keyboard
+//! row is empty on purpose.
 
 #![allow(missing_docs)]
 
@@ -193,6 +193,7 @@ fn main() {
             .with(GamepadButton::LeftTrigger);
         controls.bind::<Reload>(GamepadButton::West).hold(0.5);
         controls.bind::<Dodge>(KeyCode::Space).multi_tap(2, 0.3);
+        controls.bind::<Emote>(GamepadButton::DPadUp);
     });
 
     app.add_context::<Browse>(|controls| {
@@ -231,22 +232,23 @@ fn underneath() -> impl Scene {
 fn gallery() -> impl Scene {
     use DeviceFamily::{Gamepad, KeyboardMouse};
 
+    let sheet = ContextId::of::<Sheet>();
     let rows = vec![
-        row("Key", Interact::id(), KeyboardMouse, 1),
-        row("Mouse button", Fire::id(), KeyboardMouse, 1),
-        row("Face button", Jump::id(), Gamepad, 1),
-        row("Bumper", NextWeapon::id(), Gamepad, 1),
-        row("Trigger", Throttle::id(), Gamepad, 1),
-        row("Stick", Look::id(), Gamepad, 1),
+        row("Key", sheet, Interact::id(), KeyboardMouse, 1),
+        row("Mouse button", sheet, Fire::id(), KeyboardMouse, 1),
+        row("Face button", sheet, Jump::id(), Gamepad, 1),
+        row("Bumper", sheet, NextWeapon::id(), Gamepad, 1),
+        row("Trigger", sheet, Throttle::id(), Gamepad, 1),
+        row("Stick", sheet, Look::id(), Gamepad, 1),
         // One prompt per direction, so four spans rather than one.
-        row("Composite", Walk::id(), KeyboardMouse, 4),
-        row("Keyboard chord", QuickSave::id(), KeyboardMouse, 1),
-        row("Pad chord", Ultimate::id(), Gamepad, 1),
-        row("Hold", Reload::id(), Gamepad, 1),
-        row("Double-tap", Dodge::id(), KeyboardMouse, 1),
+        row("Composite", sheet, Walk::id(), KeyboardMouse, 4),
+        row("Keyboard chord", sheet, QuickSave::id(), KeyboardMouse, 1),
+        row("Pad chord", sheet, Ultimate::id(), Gamepad, 1),
+        row("Hold", sheet, Reload::id(), Gamepad, 1),
+        row("Double-tap", sheet, Dodge::id(), KeyboardMouse, 1),
         // Shadowed by `Browse`, and named all the same, as a hint over a paused game would be.
-        row("Shadowed", Map::id(), KeyboardMouse, 1),
-        row("Unbound", Emote::id(), KeyboardMouse, 1),
+        row("Shadowed", Underneath.into(), Map::id(), KeyboardMouse, 1),
+        row("Unbound", sheet, Emote::id(), KeyboardMouse, 1),
     ];
 
     bsn! {
@@ -295,10 +297,22 @@ fn gallery() -> impl Scene {
 ///
 /// `parts` is how many prompts the action answers with at once, which is one for everything but a
 /// composite.
-fn row(label: &'static str, action: ActionId, family: DeviceFamily, parts: u8) -> impl Scene {
-    let words: Vec<_> = (0..parts).map(|n| word(action, family, n)).collect();
-    let icons: Vec<_> = (0..parts).map(|n| icon(action, family, n)).collect();
-    let blocks: Vec<_> = (0..parts).map(|n| block(action, family, n)).collect();
+fn row(
+    label: &'static str,
+    context: ContextId,
+    action: ActionId,
+    family: DeviceFamily,
+    parts: u8,
+) -> impl Scene {
+    let words: Vec<_> = (0..parts)
+        .map(|n| word(context, action, family, n))
+        .collect();
+    let icons: Vec<_> = (0..parts)
+        .map(|n| icon(context, action, family, n))
+        .collect();
+    let blocks: Vec<_> = (0..parts)
+        .map(|n| block(context, action, family, n))
+        .collect();
     bsn! {
         Node { align_items: AlignItems::Center }
         Children [
@@ -319,11 +333,11 @@ fn row(label: &'static str, action: ActionId, family: DeviceFamily, parts: u8) -
     }
 }
 
-fn word(action: ActionId, family: DeviceFamily, n: u8) -> impl Scene {
+fn word(context: ContextId, action: ActionId, family: DeviceFamily, n: u8) -> impl Scene {
     bsn! {
         Text
         Children [
-            PromptSpan({action})
+            PromptSpan({context}, {action})
             ~{PromptFamily(family)}
             ~{PromptPick::Nth(n)}
             TextFont { font_size: {FONT_SIZE} }
@@ -332,11 +346,11 @@ fn word(action: ActionId, family: DeviceFamily, n: u8) -> impl Scene {
     }
 }
 
-fn icon(action: ActionId, family: DeviceFamily, n: u8) -> impl Scene {
+fn icon(context: ContextId, action: ActionId, family: DeviceFamily, n: u8) -> impl Scene {
     bsn! {
         Text
         Children [
-            IconPromptSpan({action})
+            IconPromptSpan({context}, {action})
             ~{PromptFamily(family)}
             ~{PromptPick::Nth(n)}
             TextFont { font_size: {FONT_SIZE} }
@@ -345,9 +359,9 @@ fn icon(action: ActionId, family: DeviceFamily, n: u8) -> impl Scene {
     }
 }
 
-fn block(action: ActionId, family: DeviceFamily, n: u8) -> impl Scene {
+fn block(context: ContextId, action: ActionId, family: DeviceFamily, n: u8) -> impl Scene {
     bsn! {
-        IconPrompt({action})
+        IconPrompt({context}, {action})
         ~{PromptFamily(family)}
         ~{PromptPick::Nth(n)}
         TextFont { font_size: {FONT_SIZE} }

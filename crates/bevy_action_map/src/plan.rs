@@ -1057,10 +1057,6 @@ impl Plan {
         self.slots[slot].dispatch
     }
 
-    pub(crate) fn action_for_slot(&self, slot: usize) -> ActionId {
-        self.slots[slot].action
-    }
-
     pub(crate) fn slot_for_action(&self, action: ActionId) -> Option<usize> {
         // An id interned after this plan compiled indexes past the end, which means what the
         // sentinel means: not bound here. So the miss needs no separate case.

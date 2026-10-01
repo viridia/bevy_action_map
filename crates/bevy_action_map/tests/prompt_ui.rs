@@ -70,7 +70,10 @@ fn a_span_says_what_fires_the_action() {
     });
     app.world_mut().spawn(Flying);
 
-    let span = app.world_mut().spawn(PromptSpan(Jump::id())).id();
+    let span = app
+        .world_mut()
+        .spawn(PromptSpan(Flying.into(), Jump::id()))
+        .id();
     assert_eq!(caption(&mut app, span), "Space");
 }
 
@@ -86,10 +89,16 @@ fn a_scheme_beside_the_span_overrides_the_games_device() {
     });
     app.world_mut().spawn(Flying);
 
-    let keyboard = app.world_mut().spawn(PromptSpan(Jump::id())).id();
+    let keyboard = app
+        .world_mut()
+        .spawn(PromptSpan(Flying.into(), Jump::id()))
+        .id();
     let pad = app
         .world_mut()
-        .spawn((PromptSpan(Jump::id()), PromptFamily(DeviceFamily::Gamepad)))
+        .spawn((
+            PromptSpan(Flying.into(), Jump::id()),
+            PromptFamily(DeviceFamily::Gamepad),
+        ))
         .id();
 
     assert_eq!(caption(&mut app, keyboard), "Space");
@@ -123,7 +132,10 @@ fn a_gamepad_button_is_named_in_its_pads_own_words() {
             app.world_mut().spawn(Brand(brand));
         }
 
-        let span = app.world_mut().spawn(PromptSpan(Jump::id())).id();
+        let span = app
+            .world_mut()
+            .spawn(PromptSpan(Flying.into(), Jump::id()))
+            .id();
         assert_eq!(caption(&mut app, span), expected, "brand {connected:?}");
     }
 }
@@ -141,7 +153,10 @@ fn a_class_beside_the_span_narrows_to_one_kind_of_control() {
 
     let button = app
         .world_mut()
-        .spawn((PromptSpan(Turn::id()), PromptClass(ControlClass::AnyButton)))
+        .spawn((
+            PromptSpan(Flying.into(), Turn::id()),
+            PromptClass(ControlClass::AnyButton),
+        ))
         .id();
     assert_eq!(caption(&mut app, button), "A");
 }
@@ -159,7 +174,7 @@ fn a_pick_takes_the_one_after_the_first() {
 
     let second = app
         .world_mut()
-        .spawn((PromptSpan(Turn::id()), PromptPick::Nth(1)))
+        .spawn((PromptSpan(Flying.into(), Turn::id()), PromptPick::Nth(1)))
         .id();
     assert_eq!(caption(&mut app, second), "D");
 }
@@ -170,10 +185,16 @@ fn an_action_nothing_fires_renders_a_placeholder() {
     let mut app = app();
     app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
 
-    let bare = app.world_mut().spawn(PromptSpan(Jump::id())).id();
+    let bare = app
+        .world_mut()
+        .spawn(PromptSpan(Flying.into(), Jump::id()))
+        .id();
     let told = app
         .world_mut()
-        .spawn((PromptSpan(Jump::id()), PromptUnbound("unbound".to_string())))
+        .spawn((
+            PromptSpan(Flying.into(), Jump::id()),
+            PromptUnbound("unbound".to_string()),
+        ))
         .id();
 
     assert_eq!(caption(&mut app, bare), "—");
@@ -191,7 +212,10 @@ fn a_held_binding_is_named_by_its_control_alone() {
     });
     app.world_mut().spawn(Flying);
 
-    let span = app.world_mut().spawn(PromptSpan(Jump::id())).id();
+    let span = app
+        .world_mut()
+        .spawn(PromptSpan(Flying.into(), Jump::id()))
+        .id();
     assert_eq!(caption(&mut app, span), "Space");
 }
 
@@ -205,7 +229,10 @@ fn a_span_catches_up_when_the_answer_moves() {
         controls.bind::<Jump>(KeyCode::Space);
     });
 
-    let span = app.world_mut().spawn(PromptSpan(Jump::id())).id();
+    let span = app
+        .world_mut()
+        .spawn(PromptSpan(Flying.into(), Jump::id()))
+        .id();
     // Nothing carries the context yet, so there is nothing to name and the span says so.
     assert_eq!(caption(&mut app, span), "—");
 
@@ -223,7 +250,10 @@ fn an_icon_prompt_falls_back_to_bracketed_text_when_nothing_fires_the_action() {
     let mut app = app();
     app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
 
-    let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
+    let span = app
+        .world_mut()
+        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .id();
     assert_eq!(caption(&mut app, span), "[—]");
 }
 
@@ -294,7 +324,10 @@ fn an_icon_prompt_draws_every_control_in_a_chord() {
     });
     app.world_mut().spawn(Flying);
 
-    let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
+    let span = app
+        .world_mut()
+        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .id();
     let chord = [
         "input_prompts/keyboard_mouse/mod/ctrl.png",
         "+",
@@ -323,7 +356,7 @@ fn an_inline_icon_is_sized_from_its_font() {
     let span = app
         .world_mut()
         .spawn((
-            IconPromptSpan(Jump::id()),
+            IconPromptSpan(Flying.into(), Jump::id()),
             TextFont {
                 font_size: 24.0.into(),
                 ..default()
@@ -356,7 +389,10 @@ fn an_icon_prompt_draws_a_pad_chord_in_the_pads_art() {
     });
     app.world_mut().spawn(Flying);
 
-    let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
+    let span = app
+        .world_mut()
+        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .id();
     assert_eq!(
         icons(&mut app, span),
         [
@@ -380,7 +416,10 @@ fn an_icon_prompt_falls_back_whole_when_one_control_has_no_art() {
     });
     app.world_mut().spawn(Flying);
 
-    let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
+    let span = app
+        .world_mut()
+        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .id();
     assert_eq!(icons(&mut app, span), Vec::<String>::new());
     assert_eq!(caption(&mut app, span), "[Ctrl+Numpad *]");
 }
@@ -395,7 +434,10 @@ fn an_icon_prompt_draws_a_macs_own_modifier_keys_on_a_mac() {
     });
     app.world_mut().spawn(Flying);
 
-    let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
+    let span = app
+        .world_mut()
+        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .id();
     let alt = if cfg!(target_os = "macos") {
         "input_prompts/macos/mod/alt.png"
     } else {
@@ -425,7 +467,10 @@ fn an_icon_prompt_keeps_its_old_chord_until_the_new_art_loads() {
     });
     app.world_mut().spawn(Flying);
 
-    let span = app.world_mut().spawn(IconPromptSpan(Jump::id())).id();
+    let span = app
+        .world_mut()
+        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .id();
     let xbox = [
         "input_prompts/xbox/pad/LeftTrigger.png",
         "+",
@@ -471,7 +516,10 @@ fn a_block_icon_prompt_draws_a_chord_from_the_full_size_art() {
     });
     app.world_mut().spawn(Flying);
 
-    let prompt = app.world_mut().spawn(IconPrompt(Jump::id())).id();
+    let prompt = app
+        .world_mut()
+        .spawn(IconPrompt(Flying.into(), Jump::id()))
+        .id();
     assert_eq!(
         icons(&mut app, prompt),
         [
@@ -488,30 +536,35 @@ fn a_block_icon_prompt_falls_back_to_a_text_node() {
     let mut app = app();
     app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
 
-    let prompt = app.world_mut().spawn(IconPrompt(Jump::id())).id();
+    let prompt = app
+        .world_mut()
+        .spawn(IconPrompt(Flying.into(), Jump::id()))
+        .id();
     assert_eq!(icons(&mut app, prompt), ["[—]"]);
     assert!(app.world().get::<TextSpan>(prompt).is_none());
 }
 
-/// A scene names the action itself, and each span ends up with that action's id. Two actions,
-/// because a conversion that silently left the default would still match whichever one was interned
-/// first.
+/// A scene names the context and the action themselves, and each span ends up with their ids. Two
+/// actions, because a conversion that silently left the default would still match whichever one was
+/// interned first.
 #[test]
-fn a_scene_names_a_prompt_by_its_action() {
+fn a_scene_names_a_prompt_by_its_context_and_action() {
     let mut app = app();
     app.add_plugins(bevy::scene::ScenePlugin);
 
     let jump = app
         .world_mut()
-        .spawn_scene(bsn! { PromptSpan(Jump) })
+        .spawn_scene(bsn! { PromptSpan(Flying, Jump) })
         .unwrap()
         .id();
     let turn = app
         .world_mut()
-        .spawn_scene(bsn! { IconPrompt(Turn) })
+        .spawn_scene(bsn! { IconPrompt(Flying, Turn) })
         .unwrap()
         .id();
 
-    assert_eq!(app.world().get::<PromptSpan>(jump).unwrap().0, Jump::id());
-    assert_eq!(app.world().get::<IconPrompt>(turn).unwrap().0, Turn::id());
+    let jump = app.world().get::<PromptSpan>(jump).unwrap();
+    assert_eq!((jump.0, jump.1), (Flying.into(), Jump::id()));
+    let turn = app.world().get::<IconPrompt>(turn).unwrap();
+    assert_eq!((turn.0, turn.1), (Flying.into(), Turn::id()));
 }

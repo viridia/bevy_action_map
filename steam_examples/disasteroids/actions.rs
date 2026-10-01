@@ -114,20 +114,20 @@ const MENU: &str = "disasteroids.menu";
 /// keyboard controls.
 pub const CONTEXT_SETS: &[ContextSet] = &[
     ContextSet {
-        context: Flying::PATH,
+        context: ContextId::of::<Flying>(),
         set: GAMEPLAY,
     },
     ContextSet {
-        context: Shell::PATH,
+        context: ContextId::of::<Shell>(),
         set: GAMEPLAY,
     },
     ContextSet {
-        context: Menu::PATH,
+        context: ContextId::of::<Menu>(),
         set: MENU,
     },
     // Live only while a screen is up, so its `Activate` is in the menu set.
     ContextSet {
-        context: ButtonFocused::PATH,
+        context: ContextId::of::<ButtonFocused>(),
         set: MENU,
     },
 ];

@@ -1165,10 +1165,10 @@ the prompt show". The flow is [`GetDigitalActionOrigins`][steam-isteaminput] →
 the game. Unity `ToDisplayString` + `InputBinding.MaskByGroup`. Unreal's
 `PlayerMappableKeySettings`.
 
-- **R18.1 (MUST)** _(D84)_ Reverse lookup: given an action (and optionally a context and device
-  class), return the controls it is bound to in every context something carries, whether or not that
-  context is active and whether or not a stronger context consumes the control, in a stable, ranked
-  order.
+- **R18.1 (MUST)** _(D84, D104)_ Reverse lookup: given a context and an action (and optionally a
+  device class), return the controls the action is bound to in that context, in declaration order,
+  whether or not the context is active and whether or not a stronger context consumes the control. A
+  context nothing carries returns none.
 - **R18.2 (WITHDRAWN)** ~~The result must reflect active contexts and consumption (R8) — showing a
   prompt for an action that a higher-priority context is currently consuming is wrong.~~ _Superseded
   by D84: a prompt is always shown inside a sentence or a table row, and only the app knows when to

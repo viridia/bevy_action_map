@@ -575,6 +575,46 @@ pub trait InputContext: Send + Sync + 'static {
     const PATH: &'static str;
 }
 
+/// Names a context without carrying its type.
+///
+/// One action can be bound differently in two contexts, so a question about what it is bound to has
+/// to say which context it means. This is how it says so. Like an action, a context stands for its
+/// own id, so a component holding a `ContextId` can be written `Hint(Menu, Jump)` in a `bsn!`
+/// block.
+#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ContextId(&'static str);
+
+impl ContextId {
+    /// The id that stands for no context.
+    ///
+    /// What a component holding a `ContextId` defaults to when spawned from a scene. No context
+    /// declares it, so a lookup in it finds nothing bound.
+    pub const PLACEHOLDER: Self = Self("");
+
+    /// The id of `C`, for a context type that has no value to hand over.
+    pub const fn of<C: InputContext>() -> Self {
+        Self(C::PATH)
+    }
+
+    /// The path the context declared.
+    pub const fn path(self) -> &'static str {
+        self.0
+    }
+}
+
+impl Default for ContextId {
+    fn default() -> Self {
+        Self::PLACEHOLDER
+    }
+}
+
+impl<C: InputContext> From<C> for ContextId {
+    fn from(_: C) -> Self {
+        Self::of::<C>()
+    }
+}
+
 impl ActionOutput for bool {
     const INTENTS: &'static [ActionIntent] = &[ActionIntent::Button];
     const REST: Self = false;

@@ -106,7 +106,11 @@ pub(crate) struct DeclaredContext {
     // The same bindings as `mappings` the other way round, for a prompt asking what fires an
     // action. Separate because it answers about bindings rather than about rows a player edits:
     // a `private` binding is missing from one and present in the other.
-    pub(crate) bindings: fn(&World) -> crate::present::ContextBindings,
+    pub(crate) prompts: fn(
+        &World,
+        crate::action::ActionId,
+        crate::present::PromptScope,
+    ) -> Vec<crate::present::Prompt>,
     // Rewrites this context's bindings for an override set and swaps the result into every
     // instance. Exclusive because it writes both a resource and the components. The `Option`
     // carries a preset's rows, exempted from the rebindable-only refusal that would otherwise

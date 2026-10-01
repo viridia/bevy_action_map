@@ -1064,11 +1064,12 @@ lets a UI draw a slider or a checkbox without knowing what it drives. `tunables`
 
 ### 9.2 Prompts
 
-The lookup that runs the other way: given an action, which controls it is bound to.
+The lookup that runs the other way: given a context and an action, which controls the action is
+bound to there.
 
 ```rust
 pub trait Prompts {
-    fn prompts(&self, action: ActionId, scope: PromptScope) -> Vec<Prompt>;
+    fn prompts(&self, context: ContextId, action: ActionId, scope: PromptScope) -> Vec<Prompt>;
 }
 
 pub struct Prompt {
@@ -1076,7 +1077,6 @@ pub struct Prompt {
     pub with: Vec<ControlOrigin>,       // what else is held — `Ctrl+S` reads as "S" without it
     pub part: BindingPart,
     pub condition: ConditionDescriptor, // None | Hold { duration } | MultiTap { count }
-    pub context: Option<&'static str>,
 }
 
 pub enum ControlOrigin {
@@ -1118,11 +1118,17 @@ filtering the mapping list.
 exclusive one, and a control a stronger context consumes is still named. Whether a hint belongs on
 screen is the app's to decide (D84).
 
-**Ranking.** Contexts come back in the order they get to claim a control — render tick before fixed
-tick, then by priority, then declaration order — and within a context, in declaration order.
-Nothing ranks one device above another; the device is a scope the caller supplies through
-`PromptScope`, which narrows by context path, family and control class. `PromptDevice` is the
-game-wide setting for which device a bare prompt speaks for, and the crate never defaults it.
+**One context per call.** `ContextId` names a context by its path, and converts from the context
+type the way `ActionId` converts from an action. The answer is that context's bindings in
+declaration order, so the first is the primary; nothing ranks one context against another, and a
+caller wanting every context's answer reads the context list `inspect::dump` returns and asks per
+path. A context that has no slot for the action answers empty and warns once, since the pairing is
+made at runtime where types cannot check it. The type-erased door behind `BindingTable` takes the
+action and scope and reads only that action's bindings, so the only allocation is the answer.
+
+Nothing ranks one device above another either; the device is a scope the caller supplies through
+`PromptScope`, which narrows by family and control class. `PromptDevice` is the game-wide setting
+for which device a bare prompt speaks for, and the crate never defaults it.
 
 **Staleness** is signalled by `PromptGeneration`, a counter bumped when bindings are applied and
 when an instance of a context arrives or goes away. Activation does not bump it, since it does not

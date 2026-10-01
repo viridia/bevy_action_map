@@ -520,7 +520,7 @@ impl ControlsScreen {
                 TextFont { font_size: 13.0_f32 }
                 TextColor(FIXED)
                 Children [
-                    PromptSpan(Clear)
+                    PromptSpan(Menu, Clear)
                     TextFont { font_size: 13.0_f32 }
                     TextColor(TITLE)
                     --
@@ -528,7 +528,7 @@ impl ControlsScreen {
                     TextFont { font_size: 13.0_f32 }
                     TextColor(FIXED)
                     --
-                    PromptSpan(ToggleSettings)
+                    PromptSpan(Menu, ToggleSettings)
                     TextFont { font_size: 13.0_f32 }
                     TextColor(TITLE)
                     --
@@ -576,7 +576,7 @@ fn cancel_button() -> impl Scene {
             TextFont { font_size: 15.0_f32 }
             TextColor(TITLE)
             --
-            IconPrompt(Back)
+            IconPrompt(Menu, Back)
             ~{PromptFamily(DeviceFamily::Gamepad)}
             TextFont { font_size: 15.0_f32 }
             TextColor(TITLE)
@@ -605,7 +605,7 @@ fn confirm_button() -> impl Scene {
             TextFont { font_size: 15.0_f32 }
             TextColor(TITLE)
             --
-            IconPrompt(Confirm)
+            IconPrompt(Menu, Confirm)
             ~{PromptFamily(DeviceFamily::Gamepad)}
             TextFont { font_size: 15.0_f32 }
             TextColor(TITLE)

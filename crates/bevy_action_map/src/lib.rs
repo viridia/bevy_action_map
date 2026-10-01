@@ -423,7 +423,7 @@ impl bevy_app::Plugin for ActionMapPlugin {
 pub mod prelude {
     pub use crate::action::{
         ActionId, ActionIntent, ActionOutput, ActionPhase, ActionState, ActionValue, ChannelShape,
-        InputAction, InputContext, TickDomain,
+        ContextId, InputAction, InputContext, TickDomain,
     };
     pub use crate::{ActionMapPlugin, ActionMapSystems};
     // `InputContextBuilder` is deliberately absent: `add_context` hands one to a closure, so its

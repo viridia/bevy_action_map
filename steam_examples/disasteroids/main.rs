@@ -111,7 +111,7 @@ fn controls_screen() -> impl Scene {
 }
 
 fn hint() -> impl Scene {
-    use actions::{NewGame, ToggleOverlay, ToggleSettings};
+    use actions::{NewGame, Shell, ToggleOverlay, ToggleSettings};
 
     const LABEL: Color = Color::srgb(0.35, 0.4, 0.42);
     const KEY: Color = Color::srgb(0.62, 0.7, 0.72);
@@ -124,7 +124,7 @@ fn hint() -> impl Scene {
             left: Val::Px(8.0),
         }
         Children [
-            IconPromptSpan(ToggleOverlay)
+            IconPromptSpan(Shell, ToggleOverlay)
             TextFont { font_size: 13.0_f32 }
             TextColor(KEY)
             --
@@ -132,7 +132,7 @@ fn hint() -> impl Scene {
             TextFont { font_size: 13.0_f32 }
             TextColor(LABEL)
             --
-            IconPromptSpan(ToggleSettings)
+            IconPromptSpan(Shell, ToggleSettings)
             TextFont { font_size: 13.0_f32 }
             TextColor(KEY)
             --
@@ -140,7 +140,7 @@ fn hint() -> impl Scene {
             TextFont { font_size: 13.0_f32 }
             TextColor(LABEL)
             --
-            PromptSpan(NewGame)
+            PromptSpan(Shell, NewGame)
             ~{PromptFamily(DeviceFamily::KeyboardMouse)}
             TextFont { font_size: 13.0_f32 }
             TextColor(KEY)

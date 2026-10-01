@@ -15,11 +15,11 @@
 //!
 //! # What is here
 //!
-//! [`PromptSpan`] names an action and fills in its own string. The companions beside it narrow the
-//! answer — which device, which kind of control, which of several — and each is a separate
-//! component rather than a field, so that a template says which question it is asking and so that a
-//! new narrowing is additive. A span with no companions renders the strongest control bound to the
-//! action on the device the game speaks for.
+//! [`PromptSpan`] names a context and an action, and fills in its own string. The companions beside
+//! it narrow the answer — which device, which kind of control, which of several — and each is a
+//! separate component rather than a field, so that a template says which question it is asking and
+//! so that a new narrowing is additive. A span with no companions renders the strongest control
+//! bound to the action on the device the game speaks for.
 //!
 //! # Why one control
 //!
@@ -39,15 +39,18 @@ use bevy::ui::{ComputedUiRenderTargetInfo, UiSystems};
 use bevy_action_map::device::{Brand, GamepadBrand};
 use bevy_action_map::prelude::*;
 
-/// Renders the control an action is bound to.
+/// Renders the control an action is bound to in one context, written `PromptSpan(Menu, Close)`.
+///
+/// The context is the one the player is in when they read the prompt, since the same action can be
+/// bound differently in two of them.
 ///
 /// The string is filled in for you, and rewritten when it stops being true — when a binding
-/// changes, or when a context holding one starts or stops being carried. A context that is switched
-/// off, or shadowed by a menu over it, still answers, so hiding a hint while it does not apply is
-/// the game's call.
+/// changes, or when the context starts or stops being carried. A context that is switched off, or
+/// shadowed by a menu over it, still answers, so hiding a hint while it does not apply is the
+/// game's call.
 #[derive(Component, Clone, Copy, Default)]
 #[require(TextSpan)]
-pub struct PromptSpan(pub ActionId);
+pub struct PromptSpan(pub ContextId, pub ActionId);
 
 /// Renders the control an action is bound to as an icon, inline in a line of text.
 ///
@@ -69,13 +72,13 @@ pub struct PromptSpan(pub ActionId);
 /// and does not need them, so a caller wraps neither in its own punctuation.
 #[derive(Component, Clone, Copy, Default)]
 #[require(TextSpan)]
-pub struct IconPromptSpan(pub ActionId);
+pub struct IconPromptSpan(pub ContextId, pub ActionId);
 
 /// Renders the control an action is bound to as an icon, in a UI node of its own.
 ///
 /// What a button's caption or a row of hints wants, where [`IconPromptSpan`] is for a prompt in the
-/// middle of a sentence. It lays out like any other node: in a row with `align_items:
-/// AlignItems::Center`, it lines up with the label beside it.
+/// middle of a sentence. It lays out like any other node: in a row with
+/// `align_items: AlignItems::Center`, it lines up with the label beside it.
 ///
 /// The icons fill the node's height, so size them by giving its `Node` one. The art is scaled down
 /// from a large original, which keeps it sharp on a high-density display. Without a height, the art
@@ -87,7 +90,7 @@ pub struct IconPromptSpan(pub ActionId);
 /// text where there is no art.
 #[derive(Component, Clone, Copy, Default)]
 #[require(Node, TextFont, TextColor)]
-pub struct IconPrompt(pub ActionId);
+pub struct IconPrompt(pub ContextId, pub ActionId);
 
 /// Which device family one span speaks for, overriding [`PromptDevice`].
 ///
@@ -103,9 +106,9 @@ pub struct PromptClass(pub ControlClass);
 /// Which one, where several controls fire the action.
 ///
 /// **Not the settings screen's primary and secondary.** This indexes the prompt lookup's answer,
-/// which runs across every context something carries and answers a composite once per direction, so
-/// the second entry here is as likely to be "the key that turns the other way" as it is to be a
-/// second binding. The declared columns are [`mappings`]' business.
+/// which answers a composite once per direction, so the second entry here is as likely to be "the
+/// key that turns the other way" as it is to be a second binding. The declared columns are
+/// [`mappings`]' business.
 #[derive(Component, Clone, Copy, Default)]
 pub enum PromptPick {
     /// The strongest control that fires it, which is what a hint wants.
@@ -134,11 +137,13 @@ pub struct PromptBrand(pub GamepadBrand);
 /// Who every prompt asks: the mapper's own tables unless a backend that owns some of the bindings
 /// says otherwise.
 #[derive(Resource, Clone, Copy)]
-pub struct PromptSource(pub fn(&World, ActionId, PromptScope) -> Vec<Prompt>);
+pub struct PromptSource(pub fn(&World, ContextId, ActionId, PromptScope) -> Vec<Prompt>);
 
 impl Default for PromptSource {
     fn default() -> Self {
-        Self(|world, action, scope| BindingTable::new(world).prompts(action, scope))
+        Self(|world, context, action, scope| {
+            BindingTable::new(world).prompts(context, action, scope)
+        })
     }
 }
 
@@ -278,7 +283,7 @@ fn refresh_prompts(world: &mut World) {
         .iter(world)
         .map(|(entity, span, scheme, class, pick, unbound)| {
             let (scope, index) = scope_and_index(device, scheme, class, pick);
-            let text = source(world, span.0, scope).get(index).map_or_else(
+            let text = source(world, span.0, span.1, scope).get(index).map_or_else(
                 || unbound.map_or_else(|| "—".to_string(), |text| text.0.clone()),
                 |prompt| caption(prompt, brand),
             );
@@ -434,13 +439,13 @@ fn refresh_icon_prompts(world: &mut World) {
     let resolved: Vec<(Entity, bool, Resolved)> = spans
         .iter(world)
         .map(|(entity, kind, scheme, class, pick, unbound)| {
-            let (action, block) = match kind {
-                (_, Some(block)) => (block.0, true),
-                (Some(span), None) => (span.0, false),
+            let (context, action, block) = match kind {
+                (_, Some(block)) => (block.0, block.1, true),
+                (Some(span), None) => (span.0, span.1, false),
                 (None, None) => unreachable!("`AnyOf` matched neither"),
             };
             let (scope, index) = scope_and_index(device, scheme, class, pick);
-            let prompts = source(world, action, scope);
+            let prompts = source(world, context, action, scope);
             let resolved = match prompts.get(index) {
                 None => {
                     Resolved::Text(unbound.map_or_else(|| "—".to_string(), |text| text.0.clone()))

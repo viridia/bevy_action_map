@@ -41,10 +41,13 @@
 //! # Which control
 //!
 //! ```ignore
-//! for prompt in BindingTable::new(world).prompts(Jump::id(), PromptScope::ANY) {
+//! for prompt in BindingTable::new(world).prompts(OnFoot.into(), Jump::id(), PromptScope::ANY) {
 //!     println!("{}", prompt.origin.fallback_label());
 //! }
 //! ```
+//!
+//! The lookup names a context because an action can be bound differently in two of them, and only
+//! the caller knows which one the player is in.
 //!
 //! The answer is what the action is bound to, not whether pressing the control would fire it this
 //! frame. "Ctrl+N: new game" stays true while a dialog has the keyboard, and players read it that
@@ -62,7 +65,7 @@ use alloc::vec::Vec;
 
 use bevy_ecs::world::World;
 
-use crate::action::ActionId;
+use crate::action::{ActionId, ContextId};
 use crate::binding::{BindingPart, Control};
 use crate::capture::ControlClass;
 use crate::condition::ConditionDescriptor;
@@ -865,20 +868,15 @@ pub struct Prompt {
     /// [`with`](Self::with) being empty: most bindings fire on a bare press and have nothing here to
     /// say.
     pub condition: ConditionDescriptor,
-    /// The path of the context the binding lives in, where it came from a context at all.
-    pub context: Option<&'static str>,
 }
 
-/// How much of the binding set a lookup is asking about.
+/// How much of one context's bindings a lookup is asking about.
 ///
 /// [`ANY`](PromptScope::ANY) is everything. The narrowings are the ones a screen actually wants:
 /// one device's worth, because a prompt shows the control the player is holding rather than all of
-/// them; one context's, because the same action may be bound differently in two of them; and one
-/// kind of signal, for a caller with room to draw a button and none to draw a stick.
+/// them; and one kind of signal, for a caller with room to draw a button and none to draw a stick.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PromptScope {
-    /// Only bindings declared in the context with this path.
-    pub context: Option<&'static str>,
     /// Only controls belonging to this set of devices.
     pub family: Option<DeviceFamily>,
     /// Only controls reporting this kind of signal.
@@ -890,18 +888,11 @@ pub struct PromptScope {
 }
 
 impl PromptScope {
-    /// Everything bound, on any device, in any context something is carrying.
+    /// Everything bound, on any device.
     pub const ANY: Self = Self {
-        context: None,
         family: None,
         class: None,
     };
-
-    /// Narrows to one context, named by the path it declared.
-    pub const fn in_context(mut self, path: &'static str) -> Self {
-        self.context = Some(path);
-        self
-    }
 
     /// Narrows to one set of devices.
     pub const fn on(mut self, family: DeviceFamily) -> Self {
@@ -923,26 +914,21 @@ impl PromptScope {
 /// backend's own controls back, and renders them through the same [`ControlOrigin`]. The trait is about
 /// *who is asked*; [`BindingTable`] is the answer when the asking stops here.
 pub trait Prompts {
-    /// The controls `action` is bound to, strongest first.
+    /// The controls `action` is bound to in `context`, in the order they were declared, so the
+    /// first is the primary.
     ///
-    /// Including those in a context that is switched off, or shadowed by a menu above it: the
-    /// answer is what the control does, not whether it does it this frame. Empty is a real answer,
-    /// and the common way to get one is an action whose context nothing is carrying.
-    fn prompts(&self, action: ActionId, scope: PromptScope) -> Vec<Prompt>;
+    /// The answer holds while the context is switched off, or shadowed by a menu above it: it is
+    /// what the control does, not whether it does it this frame. Empty is a real answer, and the
+    /// common way to get one is a context nothing is carrying.
+    fn prompts(&self, context: ContextId, action: ActionId, scope: PromptScope) -> Vec<Prompt>;
 }
 
 /// This crate's own binding tables, as a source of prompts.
 ///
-/// # What "strongest first" means, and what it does not
-///
-/// Contexts come back in the order they get to claim a control: render-tick contexts before
-/// fixed-tick ones, then by priority, then in the order they were declared. Within one context the
-/// order is the order the bindings were written, which is what makes the first one the primary.
-///
 /// **Nothing here ranks one device above another.** A player on a pad should be shown the pad
 /// control first, and this cannot know which device they are holding. So a caller that knows passes
-/// a [`PromptScope`], and a caller that does not is given every device's answer in a stable order
-/// rather than a guess presented as a ranking.
+/// a [`PromptScope`], and a caller that does not is given every device's answer in declaration
+/// order rather than a guess presented as a ranking.
 pub struct BindingTable<'w>(&'w World);
 
 impl<'w> BindingTable<'w> {
@@ -953,72 +939,20 @@ impl<'w> BindingTable<'w> {
 }
 
 impl Prompts for BindingTable<'_> {
-    fn prompts(&self, action: ActionId, scope: PromptScope) -> Vec<Prompt> {
-        let Some(declared) = self.0.get_resource::<crate::inspect::DeclaredContexts>() else {
-            return Vec::new();
-        };
-
-        // Carried rather than active, and nothing another context consumes is removed: a prompt
-        // names what the control does, not whether it does it this frame (D84).
-        let mut carried: Vec<_> = declared
+    fn prompts(&self, context: ContextId, action: ActionId, scope: PromptScope) -> Vec<Prompt> {
+        let declared = self
             .0
-            .iter()
-            .filter(|context| scope.context.is_none_or(|path| path == context.path))
-            .map(|context| (context, (context.bindings)(self.0)))
-            .filter(|(_, bound)| bound.carried)
-            .collect();
-        // The order contexts claim a control in: schedule first, then priority within a schedule.
-        // The sort is stable, which leaves declaration order as the last tiebreak.
-        carried.sort_by_key(|(context, _)| {
-            (
-                match context.tick {
-                    crate::action::TickDomain::Render => 0,
-                    crate::action::TickDomain::Fixed => 1,
-                },
-                core::cmp::Reverse(context.priority),
-            )
-        });
-
-        let mut prompts: Vec<Prompt> = Vec::new();
-        for (context, bound) in &carried {
-            for entry in &bound.prompts {
-                if entry.action != action {
-                    continue;
-                }
-                if scope
-                    .family
-                    .is_some_and(|family| family != entry.control.family())
-                {
-                    continue;
-                }
-                if scope
-                    .class
-                    .is_some_and(|class| !class.contains(entry.control))
-                {
-                    continue;
-                }
-                let prompt = Prompt {
-                    origin: ControlOrigin::Ours(entry.control),
-                    with: entry.chord.clone(),
-                    part: entry.part,
-                    condition: entry.condition,
-                    context: Some(context.path),
-                };
-                // The same control reached twice — one action bound in two contexts, most often —
-                // is one prompt. A caption naming a key twice is noise rather than information,
-                // and which context it came from is not what the player is being told.
-                if prompts.iter().any(|seen| {
-                    seen.origin == prompt.origin
-                        && seen.part == prompt.part
-                        && seen.with == prompt.with
-                        && seen.condition == prompt.condition
-                }) {
-                    continue;
-                }
-                prompts.push(prompt);
-            }
+            .get_resource::<crate::inspect::DeclaredContexts>()
+            .and_then(|declared| {
+                declared
+                    .0
+                    .iter()
+                    .find(|declared| declared.path == context.path())
+            });
+        match declared {
+            Some(declared) => (declared.prompts)(self.0, action, scope),
+            None => Vec::new(),
         }
-        prompts
     }
 }
 
@@ -1084,26 +1018,6 @@ impl PromptGeneration {
             .wrapping_add(1);
         world.insert_resource(Self(next));
     }
-}
-
-/// One context's bindings, flattened once its type is no longer known.
-#[derive(Default)]
-pub(crate) struct ContextBindings {
-    /// Whether anything is carrying this context.
-    pub(crate) carried: bool,
-    /// One entry per control per binding, in declaration order.
-    pub(crate) prompts: Vec<BoundControl>,
-}
-
-/// One control of one binding, with what the binding requires alongside it.
-pub(crate) struct BoundControl {
-    pub(crate) action: ActionId,
-    pub(crate) part: BindingPart,
-    pub(crate) control: Control,
-    /// Already in prompt terms, because a modifier stands for two controls and `Control` cannot say
-    /// so. Converted where the plan is read rather than here.
-    pub(crate) chord: Vec<ControlOrigin>,
-    pub(crate) condition: ConditionDescriptor,
 }
 
 #[cfg(test)]
@@ -1555,10 +1469,10 @@ mod prompt_tests {
         });
         app.world_mut().spawn(Shell);
 
-        let prompts = BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY);
+        let prompts =
+            BindingTable::new(app.world()).prompts(Shell.into(), Jump::id(), PromptScope::ANY);
         assert_eq!(labels(&prompts), ["Space", "South Button"]);
         assert_eq!(prompts[0].part, crate::binding::BindingPart::Whole);
-        assert_eq!(prompts[0].context, Some("prompt_tests.shell"));
         assert!(prompts[0].with.is_empty());
         // An origin carries the stored name as well as the readable one, so a game with a
         // catalogue looks up the first and falls back to the second.
@@ -1580,7 +1494,7 @@ mod prompt_tests {
 
         assert!(
             BindingTable::new(app.world())
-                .prompts(Jump::id(), PromptScope::ANY)
+                .prompts(Shell.into(), Jump::id(), PromptScope::ANY)
                 .is_empty()
         );
     }
@@ -1600,7 +1514,11 @@ mod prompt_tests {
             .unwrap()
             .deactivate();
         assert_eq!(
-            labels(&BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY)),
+            labels(&BindingTable::new(app.world()).prompts(
+                Shell.into(),
+                Jump::id(),
+                PromptScope::ANY
+            )),
             ["Space"]
         );
     }
@@ -1632,18 +1550,42 @@ mod prompt_tests {
             "the menu is not shadowing the shell, so this test shows nothing"
         );
         assert_eq!(
-            labels(&BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY)),
+            labels(&BindingTable::new(app.world()).prompts(
+                Shell.into(),
+                Jump::id(),
+                PromptScope::ANY
+            )),
             ["Space"]
         );
     }
 
-    /// The two narrowings a screen wants: one device's worth, and one context's.
+    /// The narrowing a screen wants most: one device's worth.
     #[test]
-    fn a_scope_narrows_to_one_device_and_one_context() {
+    fn a_scope_narrows_to_one_device() {
         let mut app = app();
         app.add_context::<Shell>(|controls| {
             controls.bind::<Jump>(KeyCode::Space);
             controls.bind::<Jump>(GamepadButton::South);
+        });
+        app.world_mut().spawn(Shell);
+
+        assert_eq!(
+            labels(&BindingTable::new(app.world()).prompts(
+                Shell.into(),
+                Jump::id(),
+                PromptScope::ANY.on(crate::device::DeviceFamily::Gamepad)
+            )),
+            ["South Button"]
+        );
+    }
+
+    /// One action bound in two contexts answers for each separately, so a prompt over a menu and
+    /// one over the game can name different controls for it.
+    #[test]
+    fn each_context_answers_for_its_own_bindings() {
+        let mut app = app();
+        app.add_context::<Shell>(|controls| {
+            controls.bind::<Jump>(KeyCode::Space);
         });
         app.add_context::<Flying>(|controls| {
             controls.bind::<Jump>(KeyCode::KeyJ);
@@ -1652,38 +1594,33 @@ mod prompt_tests {
 
         let table = BindingTable::new(app.world());
         assert_eq!(
-            labels(&table.prompts(
-                Jump::id(),
-                PromptScope::ANY.on(crate::device::DeviceFamily::Gamepad)
-            )),
-            ["South Button"]
+            labels(&table.prompts(Shell.into(), Jump::id(), PromptScope::ANY)),
+            ["Space"]
         );
         assert_eq!(
-            labels(&table.prompts(
-                Jump::id(),
-                PromptScope::ANY.in_context("prompt_tests.flying")
-            )),
+            labels(&table.prompts(Flying.into(), Jump::id(), PromptScope::ANY)),
             ["J"]
         );
     }
 
-    /// Ranking, such as it is: a render-tick context answers before a fixed-tick one because that
-    /// is the order they get to claim a control in, and declaration order decides the rest.
+    /// A context that does not bind the action is asked the wrong question, and answers nothing
+    /// rather than borrowing another context's answer.
     #[test]
-    fn a_render_tick_context_answers_before_a_fixed_tick_one() {
+    fn a_context_that_does_not_bind_the_action_answers_nothing() {
         let mut app = app();
-        // Declared the other way round, so the order below is the schedule's rather than this
-        // file's.
-        app.add_context::<Flying>(|controls| {
-            controls.bind::<Jump>(KeyCode::KeyJ);
-        });
         app.add_context::<Shell>(|controls| {
             controls.bind::<Jump>(KeyCode::Space);
         });
+        app.add_context::<Flying>(|controls| {
+            controls.bind::<Turn>(AxisButtons::ad());
+        });
         app.world_mut().spawn((Shell, Flying));
 
-        let prompts = BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY);
-        assert_eq!(labels(&prompts), ["Space", "J"]);
+        assert!(
+            BindingTable::new(app.world())
+                .prompts(Flying.into(), Jump::id(), PromptScope::ANY)
+                .is_empty()
+        );
     }
 
     /// A composite binds a control per direction, so it answers once per direction — the same view
@@ -1698,7 +1635,8 @@ mod prompt_tests {
         });
         app.world_mut().spawn(Flying);
 
-        let prompts = BindingTable::new(app.world()).prompts(Turn::id(), PromptScope::ANY);
+        let prompts =
+            BindingTable::new(app.world()).prompts(Flying.into(), Turn::id(), PromptScope::ANY);
         assert_eq!(labels(&prompts), ["A", "D"]);
         assert_eq!(prompts[0].part, BindingPart::Negative);
         assert_eq!(prompts[1].part, BindingPart::Positive);
@@ -1716,7 +1654,8 @@ mod prompt_tests {
         });
         app.world_mut().spawn(Shell);
 
-        let prompts = BindingTable::new(app.world()).prompts(Save::id(), PromptScope::ANY);
+        let prompts =
+            BindingTable::new(app.world()).prompts(Shell.into(), Save::id(), PromptScope::ANY);
         assert_eq!(labels(&prompts), ["S"]);
         assert_eq!(
             prompts[0].with,
@@ -1738,7 +1677,8 @@ mod prompt_tests {
         });
         app.world_mut().spawn(Shell);
 
-        let prompts = BindingTable::new(app.world()).prompts(Save::id(), PromptScope::ANY);
+        let prompts =
+            BindingTable::new(app.world()).prompts(Shell.into(), Save::id(), PromptScope::ANY);
         assert_eq!(
             prompts[0].with,
             vec![ControlOrigin::Modifier(ModifierKey::Ctrl)]
@@ -1765,10 +1705,10 @@ mod prompt_tests {
 
         let table = BindingTable::new(app.world());
         assert_eq!(
-            table.prompts(Turn::id(), PromptScope::ANY)[0].condition,
+            table.prompts(Shell.into(), Turn::id(), PromptScope::ANY)[0].condition,
             ConditionDescriptor::None
         );
-        let held = table.prompts(Save::id(), PromptScope::ANY);
+        let held = table.prompts(Shell.into(), Save::id(), PromptScope::ANY);
         assert_eq!(
             held[0].condition,
             ConditionDescriptor::Hold { duration: 0.75 }
@@ -1796,7 +1736,8 @@ mod prompt_tests {
         });
         app.world_mut().spawn((Shell, Flying));
 
-        let prompts = BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY);
+        let prompts =
+            BindingTable::new(app.world()).prompts(Flying.into(), Jump::id(), PromptScope::ANY);
         assert_eq!(labels(&prompts), ["Space", "J"]);
     }
 
@@ -1813,26 +1754,11 @@ mod prompt_tests {
 
         assert!(crate::mapping::mappings(app.world()).is_empty());
         assert_eq!(
-            labels(&BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY)),
-            ["Space"]
-        );
-    }
-
-    /// One control reached twice is one prompt: what the player is told is which key to press, not
-    /// how many places in the game are listening for it.
-    #[test]
-    fn one_control_bound_in_two_contexts_is_one_prompt() {
-        let mut app = app();
-        app.add_context::<Shell>(|controls| {
-            controls.bind::<Jump>(KeyCode::Space);
-        });
-        app.add_context::<Flying>(|controls| {
-            controls.bind::<Jump>(KeyCode::Space);
-        });
-        app.world_mut().spawn((Shell, Flying));
-
-        assert_eq!(
-            labels(&BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY)),
+            labels(&BindingTable::new(app.world()).prompts(
+                Shell.into(),
+                Jump::id(),
+                PromptScope::ANY
+            )),
             ["Space"]
         );
     }
@@ -1881,7 +1807,7 @@ mod prompt_tests {
         let app = app();
         assert!(
             BindingTable::new(app.world())
-                .prompts(Jump::id(), PromptScope::ANY)
+                .prompts(Shell.into(), Jump::id(), PromptScope::ANY)
                 .is_empty()
         );
     }
@@ -1901,11 +1827,19 @@ mod prompt_tests {
 
         let table = BindingTable::new(app.world());
         assert_eq!(
-            labels(&table.prompts(Turn::id(), PromptScope::ANY.of(ControlClass::AnyButton))),
+            labels(&table.prompts(
+                Flying.into(),
+                Turn::id(),
+                PromptScope::ANY.of(ControlClass::AnyButton)
+            )),
             ["A", "D"]
         );
 
-        let axes = table.prompts(Turn::id(), PromptScope::ANY.of(ControlClass::AnyAxis));
+        let axes = table.prompts(
+            Flying.into(),
+            Turn::id(),
+            PromptScope::ANY.of(ControlClass::AnyAxis),
+        );
         assert_eq!(axes.len(), 1);
         assert_eq!(axes[0].origin.class(), Some(ControlClass::AnyAxis));
     }

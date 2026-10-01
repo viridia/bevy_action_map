@@ -1678,7 +1678,7 @@ mod tests {
         // ...and it is the new control it reads, which is the half that is a gameplay bug when it
         // is missing.
         let fires = BindingTable::new(app.world());
-        let prompts = fires.prompts(Lunge::id(), PromptScope::ANY);
+        let prompts = fires.prompts(Playing.into(), Lunge::id(), PromptScope::ANY);
         assert_eq!(prompts.len(), 1);
         assert_eq!(
             prompts[0].origin.control(),
@@ -1803,6 +1803,39 @@ mod tests {
         );
     }
 
+    /// An action reserved in play and rebindable on a menu: rebinding the menu's copy moves the
+    /// menu's prompt and leaves the game's where it was.
+    #[test]
+    fn a_rebind_in_one_context_moves_only_that_context_s_prompt() {
+        #[derive(InputContext)]
+        #[context(path = "override_tests.menu", tick = Render, priority = 10)]
+        struct Menu;
+
+        let mut app = app();
+        app.add_context::<Menu>(|controls| {
+            controls
+                .bind::<OpenSettings>(KeyCode::F1)
+                .mappable_as("override_tests.menu.settings");
+        });
+        app.world_mut().spawn((Playing, Menu));
+        let overrides = bind(
+            &app,
+            "override_tests.menu.settings",
+            &[Control::PhysicalKey(KeyCode::Escape)],
+        );
+        apply_overrides(app.world_mut(), &overrides);
+
+        let table = BindingTable::new(app.world());
+        let label = |context: crate::action::ContextId| {
+            table.prompts(context, OpenSettings::id(), PromptScope::ANY)[0]
+                .origin
+                .fallback_label()
+                .to_string()
+        };
+        assert_eq!(label(Playing.into()), "F1");
+        assert_eq!(label(Menu.into()), "Esc");
+    }
+
     /// Clearing leaves the row on screen and the action still bound, which is what distinguishes it
     /// from an action nothing binds at all.
     #[test]
@@ -1862,7 +1895,8 @@ mod tests {
         // The follower rides both, and is still one sub-row rather than two.
         let jump = row(&app, "override_tests.jump");
         assert_eq!(jump.followers.len(), 1);
-        let prompts = BindingTable::new(app.world()).prompts(Lunge::id(), PromptScope::ANY);
+        let prompts =
+            BindingTable::new(app.world()).prompts(Playing.into(), Lunge::id(), PromptScope::ANY);
         assert_eq!(
             prompts
                 .iter()
@@ -1905,7 +1939,8 @@ mod tests {
             slots(&app, "override_tests.jump"),
             filled([Control::PhysicalKey(KeyCode::KeyK)])
         );
-        let prompts = BindingTable::new(app.world()).prompts(Lunge::id(), PromptScope::ANY);
+        let prompts =
+            BindingTable::new(app.world()).prompts(Playing.into(), Lunge::id(), PromptScope::ANY);
         assert_eq!(
             prompts
                 .iter()
@@ -1974,7 +2009,8 @@ mod tests {
         app.world_mut().spawn(Playing);
         app.update();
 
-        let prompts = BindingTable::new(app.world()).prompts(Jump::id(), PromptScope::ANY);
+        let prompts =
+            BindingTable::new(app.world()).prompts(Playing.into(), Jump::id(), PromptScope::ANY);
         assert_eq!(prompts.len(), 1);
         assert_eq!(
             prompts[0].origin.control(),
@@ -2231,7 +2267,8 @@ mod tests {
         overrides.bind(jump.family, jump.key, [ctrl_k.clone()]);
         assert!(apply_overrides(app.world_mut(), &overrides).is_empty());
 
-        let prompts = BindingTable::new(app.world()).prompts(Lunge::id(), PromptScope::ANY);
+        let prompts =
+            BindingTable::new(app.world()).prompts(Playing.into(), Lunge::id(), PromptScope::ANY);
         assert_eq!(prompts.len(), 1);
         assert_eq!(prompts[0].origin, ControlOrigin::Ours(ctrl_k.control));
         assert_eq!(prompts[0].with, ctrl_k.with);

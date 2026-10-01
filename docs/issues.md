@@ -343,14 +343,13 @@ honoured at both panics.
 round-trip and the bare word cannot collide with a control name. R17.8 holds by construction.
 R17.2's tolerance holds on both axes. R19.4's four resets exist. R19.16 holds in both directions.
 R19.9 holds at declaration — it is only the rewrite that lowers it, and that finding has landed. The
-tunable pass runs after the control rewrite and matches family as well as key. R18.1's context sort
-is stable, so declaration order survives as the last tiebreak. R18.5's invalidation covers every
-clause but the layout one its own aside withdraws. R18.8 and R18.9's origin half hold. The four
-control tables round-trip exhaustively, unnamed variants included. R22.6's migration path exists in
-`docs/comparison.md`. R21.1–R21.3 are met by the test suite's shape. Capture's arming skips the
-press that opened the session, and a refused press is claimed so it does not also play the game.
-`admissible` asks family before reserved before shape. R15.1's many-to-many holds — neither `Paired`
-nor `is_claimed` enforces exclusivity, which is what lets two players share one keyboard.
+tunable pass runs after the control rewrite and matches family as well as key. R18.5's invalidation
+covers every clause but the layout one its own aside withdraws. R18.8 and R18.9's origin half hold.
+The four control tables round-trip exhaustively, unnamed variants included. R22.6's migration path
+exists in `docs/comparison.md`. R21.1–R21.3 are met by the test suite's shape. Capture's arming
+skips the press that opened the session, and a refused press is claimed so it does not also play the
+game. `admissible` asks family before reserved before shape. R15.1's many-to-many holds — neither
+`Paired` nor `is_claimed` enforces exclusivity, which is what lets two players share one keyboard.
 
 **Excluded rather than missed**, both already recorded: `apply_overrides_for` discards the rewritten
 rows, which is X49; and `Override::NotOurs` leaves the crate's binding live rather than silencing

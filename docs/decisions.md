@@ -1048,8 +1048,8 @@ game revisit each correct `Fixed` declaration.
 
 ### D34 — The reverse lookup is a trait, and the answer is not a `Control`
 
-**Decided.** `Prompts::prompts(action, scope)` is a trait, and it returns `ControlOrigin` — either
-one of ours or a name-and-label pair from somewhere else. Both answer `name()` and
+**Decided.** `Prompts::prompts(context, action, scope)` is a trait, and it returns `ControlOrigin` —
+either one of ours or a name-and-label pair from somewhere else. Both answer `name()` and
 `fallback_label()`.
 
 **Rules out.** A free function over our own tables, and `Vec<Control>`.
@@ -1072,15 +1072,14 @@ and inclusive of a `private` binding.
 **Reversal.** The lookup reads the compiled plan for exactly this reason. `private` is a statement
 about the list, not about whether the control works, so a filtered mapping list would drop a binding
 that really does fire. The same distinction returns in the span components: picking the *n*th answer
-indexes the lookup's answer across contexts and after a composite has expanded, which is
-emphatically not the settings screen's primary and secondary column.
+indexes the lookup's answer after a composite has expanded, which is emphatically not the settings
+screen's primary and secondary column.
 
 ### D36 — The device is a scope the caller supplies; ranking devices is refused
 
-**Decided.** Contexts come back in the order they get to claim a control — render tick before fixed
-tick, then priority, then declaration order — and within a context, in declaration order. Nothing
-ranks one device above another. A caller that knows which device it means passes a `PromptScope`; a
-caller that does not gets every device's answer in a stable order.
+**Decided.** A context's bindings come back in declaration order. Nothing ranks one device above
+another. A caller that knows which device it means passes a `PromptScope`; a caller that does not
+gets every device's answer in a stable order.
 
 **Rules out.** Ordering keyboard before gamepad, and tracking the device the player used last.
 
@@ -1184,10 +1183,10 @@ given; that is the accepted price.
 
 ### D84 — A prompt names what an action is bound to, not what would fire it now
 
-**Decided.** `prompts` answers from every context something carries, whether or not it is active,
-shadowed by an exclusive context, or has a control consumed by a stronger one. A context nobody
-carries is left out. A context arriving or leaving raises `PromptGeneration`; activation does not.
-R18.2, which asked otherwise, is withdrawn.
+**Decided.** A context something carries answers `prompts` whether or not it is active, shadowed by
+an exclusive context, or has a control consumed by a stronger one. A context nobody carries answers
+empty. A context arriving or leaving raises `PromptGeneration`; activation does not. R18.2, which
+asked otherwise, is withdrawn.
 
 **Rules out.** A present-tense lookup in any form: a scope flag either way round, a second trait
 method, and a liveness field on `Prompt`.
@@ -1204,6 +1203,26 @@ method, and a liveness field on `Prompt`.
 
 **Reversal.** Prompts go blank inside prose that stays on screen. A liveness predicate a hint can
 follow is deferred as X9, gated on reactive UI, rather than a filter on this lookup.
+
+### D104 — A prompt lookup names its context
+
+**Decided.** `Prompts::prompts` takes a `ContextId` beside the `ActionId` and answers from that
+context alone. What a lookup must say is a parameter; `PromptScope` keeps only the narrowings, so
+its `ANY` still means something. A whole-world view is `inspect`'s: a caller wanting every context's
+answer reads `dump`'s context list and asks per path, ordering however it likes.
+
+**Rules out.** An optional context with a ranked merge across carried contexts, and the context as a
+required field of `PromptScope`.
+
+- **Cost.** An unscoped lookup rebuilt every declared context's binding list on every call, so a
+  refresh cost spans × contexts × bindings. A named lookup reads one context, and only the action's
+  own bindings in it.
+- **The ranking was a guess.** An action bound differently in two contexts has no right merged
+  answer. The Steam build's controls screen captioned its close key with the gameplay set's button,
+  where the menu set's is the one that closes it.
+
+**Reversal.** The cross-context sort and dedup come back with their per-call cost, and a prompt over
+a menu again shows whichever context ranks first rather than the one the player is in.
 
 ### D85 — An inline icon prompt and a block one are two components
 
