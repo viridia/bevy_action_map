@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 60.**
+**Next: 61.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -680,6 +680,14 @@ it (`mmdc` through `npx`), since GitHub shows a broken one as its source text wi
 It is on Bevy 0.16.1 with `bevy_enhanced_input` 0.12, four versions back, so moving it to this crate
 is a port plus a rewrite. Porting first keeps the two apart: doing both at once would confuse
 "action_map is wrong" with "0.20 moved this".
+
+### X60 — A letter prefix for issue numbers
+
+**Gate:** a chunk number reaching 900.
+
+Issues are numbered from 1000 so that `show.py` can tell a bare four-digit number from a chunk with
+no prefix (chunk 185), and `xref.py` relies on the same split (chunk 186). Once chunk numbers come
+near that range, issues take a letter prefix like every other anchor, and both scripts follow.
 
 ---
 

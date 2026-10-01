@@ -242,8 +242,6 @@ its identity rather than its position.
 
 ## Next
 
-* 188a: Steam's prompts answer per action set
-* 188b: A prompt lookup names its context
 * 115: A timing declared as a tunable
 * 121: A camera that takes the mouse, and gives it back
 * 122: The wheel as a binding source
@@ -716,12 +714,13 @@ bare number of four digits is an issue and anything shorter a chunk, with no pre
 ### 186. `xref.py` checks references to issues · E[1]
 
 `xref.py` validates every numbered anchor except an issue's, so a reference to one that has been
-routed or dropped survives until someone greps for it. A four-digit number on a line naming
-`issues.md` is the signature: references read "`docs/issues.md`, 1074", "`docs/issues.md` 1041" and
-"issues.md's 1041".
+routed or dropped survives until someone greps for it. The signature is a four-digit number on a
+line naming `issues.md`, or one directly after "issue" or "issues". References read
+"`docs/issues.md`, 1074", "`docs/issues.md` 1041" and "issues.md's 1041", and a chunk section's own
+"(issue 1034, retired here)", the form five commits have added.
 
-- **Validate the scan first** against a reference known to be good and one planted as dead, since a
-  clean result from an unvalidated scan says nothing.
+- **Validate the scan first** against a reference known to be good and one planted as dead in each
+  form, since a clean result from an unvalidated scan says nothing.
 - **Verified by:** that pair, and `scripts/verify.sh` clean on the tree.
 - **Not done:** a bare issue number with no `issues.md` beside it, which cannot be told from a year
   or a count.
