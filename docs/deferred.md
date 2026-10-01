@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 59.**
+**Next: 60.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -151,7 +151,10 @@ build on:
   query; `ISteamUtils`' battery calls report the host. Vibration, LED, haptics and trigger effects
   are silent on hardware without them. The product family from `GetInputTypeForHandle` is the only
   per-device fact.
-- **Under Steam, gilrs sees the emulated Xbox 360 pad** (S1), so its answers describe the emulation.
+- **Under Steam, what gilrs sees depends on how the game reads Steam Input.** S1 found an emulated
+  Xbox 360 pad beside the real one, and gilrs's answers about it describe the emulation. A game
+  reading Steam Input natively got no emulated pad in S33, and gilrs saw the real pad. Which of
+  Steam's settings create the emulated pad is unmeasured.
 
 Motion, touchpad and LED can only come from a table keyed on vendor and product id, or on Steam's
 family. That table is the chunk when this returns, and whether capabilities are one component or
@@ -601,6 +604,24 @@ R14 notes). It does not answer a device that stays plugged in: a virtual duplica
 a wheel or stick kept for another game, a built-in HID device that reports itself as a joystick.
 Those reach players only if the setting ships without a developer building it, so it waits for a
 request rather than being written into an example.
+
+### X59 — An alternative to a chord (R20.3, R20.6)
+
+**Gate:** a game asks for a way to perform a chord without pressing its controls together.
+
+R20.3 was a SHOULD inherited from the accessibility guidelines R20 cites, not from shipped games,
+which mostly leave simultaneity to platform aids: adaptive controllers, Xbox Copilot, the OS's
+sticky keys. It is a MAY now. What a player needs is narrower than a sequence: that a chord can be
+replaced by a single control. Capture rebinds only a chord's base key, so remapping does not do that
+today.
+
+- **Keyboard:** the planned interactive editing of modifier keys covers it if *no modifier* is one
+  of the choices.
+- **Gamepad:** a single-press alternative the game ships, as a second binding or a preset, may be
+  enough with no new mechanism. Whether a preset can replace a chord with one control is unchecked.
+- **Sequence or sticky modifier** (R20.6): only for a chord the game reserves. The general sequence
+  condition was withdrawn with R6.4; the sticky modifier (press the modifier, release it, press the
+  key) is the narrower of the two.
 
 ## 7. Tooling, and other projects
 

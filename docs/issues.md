@@ -1,10 +1,10 @@
 # Findings awaiting triage
 
-The triage queue: things known to be wrong, missing, or out of proportion that the author has not
-yet decided what to do about. An entry leaves when that decision is made — given a chunk, an entry
-in `docs/deferred.md`, a decision in `docs/decisions.md`, or dropped — and whatever it knew goes
-with it to that destination. Nothing here describes what the crate does, which is `docs/design.md`'s
-job.
+The triage queue: things known to be wrong, missing, or out of proportion, and proposals to widen
+the crate's scope, that the author has not yet decided what to do about. An entry leaves when that
+decision is made — given a chunk, an entry in `docs/deferred.md`, a decision in `docs/decisions.md`,
+or dropped — and whatever it knew goes with it to that destination. Nothing here describes what the
+crate does, which is `docs/design.md`'s job.
 
 **How to read an entry.** Each says where the problem is, what someone would actually observe, and
 whether it was confirmed by running something or only by reading. Many were found by a model asked
@@ -19,7 +19,7 @@ part that stays good. Re-verify before acting on one.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 tier, and never reused. A gap in the sequence is a retired entry.
 
-**Next: 1078.**
+**Next: 1079.**
 
 **What the tiers mean.**
 
@@ -30,6 +30,7 @@ tier, and never reused. A gap in the sequence is a retired entry.
 | **3. Absent**           | Not wrong, missing, where a requirement or an example's own job says it should exist            |
 | **4. Prose**            | A comment or document contradicts the code. No behaviour at stake                                |
 | **5. Cost and surface** | Public items nothing asks for, and machinery out of proportion                                   |
+| **6. Proposed**         | No requirement asks for it, and someone argues it should: an expansion of the requirements       |
 
 ---
 
@@ -100,33 +101,18 @@ polish; not routed to a chunk, since nothing here is missing from the crate.
 
 Ordered by what a real game would miss first.
 
-### 1021 A chord has no sequential alternative
-
-R20.3 (SHOULD) · uncited anywhere in tree
-
-R20.3 wants every chord re-expressible as a sequence. Its destination was the sequence condition,
-and R6.4 withdrew that, so nothing is built and nothing is planned. What a player would need is
-narrower than R6.4's matching models: press the modifier, release it, then press the key. That is
-R20.6's sticky modifier (MAY), which is **reviewed and left alone** for want of a case behind it —
-so the two requirements stand or fall together, and neither is decided.
-
-The rest of R20 is accounted for: R20.2 and R20.5 are built, R20.1 holds by construction, R20.4 is
-withdrawn, and R20.7 is chunk 115.
-
-### 1048 Virtual devices have no first-class support
+### 1048 An on-screen control is drawn as the pad it imitates
 
 R11.8 (SHOULD) · no citation anywhere in `crates/bevy_action_map/src/`
 
-"On-screen touch sticks, AI/bot drivers, and test fixtures must be first-class devices, not special
-cases" — nothing in `DeviceHandle` or the frame models a device that isn't a real keyboard, mouse or
-gamepad. A test fixture or bot driver today has to fake `RawEvent`s attributed to
-`DeviceHandle::KeyboardMouse` or a real gamepad `Entity`, which is exactly the special case R11.8
-asks not to need.
+An on-screen stick can be a virtual gamepad today, as the remote driver's is (DD5.3): an entity
+announced by Bevy's own messages, which pairing and routing treat like any pad. What it lacks is an
+identity. It reports no vendor or product id, so glyph resolution draws generic pad art where a game
+wants the on-screen control drawn as itself.
 
-Unlike R11.2 (withdrawn, D65), this doesn't need third-party extensibility — a virtual device can be
-modeled inside the crate's own closed set rather than through an escape hatch for hardware nobody's
-written. What's missing is a variant and an identity for "not a real piece of hardware," not a
-mechanism for hardware this crate has never seen.
+Unlike R11.2 (withdrawn, D65), this needs no third-party extensibility: a marker or a brand the
+crate already resolves against would do. It waits in practice on touch, whose feature is a stub, and
+1069 covers what landing that breaks.
 
 ### 1027 Two documentation requirements with no document
 
@@ -306,6 +292,33 @@ and by comment — `PopupMenu` at 10 "matching Disasteroids' `Menu`", `ButtonFoc
 focused button outranks both. Named bands would be cheap, but two examples agreeing is not yet
 evidence of a convention worth fixing in the crate, and a game with a different layering would want
 different numbers.
+
+---
+
+## 6. Proposed — something no requirement asks for
+
+Not a gap: an argument for expanding the requirements. An entry states the case and a rough cost,
+and leaves the way any other does, though "dropped" here means the scope stays as it is.
+
+### 1078 A developer cannot retune a modifier or condition in a running game
+
+`plan.rs` (the plan is compiled once from the `add_context` closure); tunables in `overrides.rs`
+
+BEI's modifiers and conditions are components, so an inspector edits them live, and its author
+treats hot reloading as central to development. Here, a running game can change only the values a
+binding declares as tunables; any other parameter change is a rebuild. Hot-patching does not help,
+because the `add_context` closure runs once at app build.
+
+The case is feel tuning: a dead zone's radius, a curve's exponent, a hold's threshold, a tap's
+window. These are judged by playing, not by reading, and a rebuild per attempt is the cost. Changing
+a binding's *structure* (which modifiers and conditions it has) is out of scope; it usually comes
+with a code change anyway, and making structure data means a serialized format for modifiers and
+conditions, which `Custom(Arc<dyn …>)` cannot have.
+
+The likely shape is to widen what tunables already do rather than add a mechanism: every modifier
+and condition parameter tunable in a development build, with a way to reach them from an inspector
+or overlay. The plan is already recompiled at runtime when overrides are applied. Not sketched;
+whether tunables' machinery stretches that far is unchecked.
 
 ---
 

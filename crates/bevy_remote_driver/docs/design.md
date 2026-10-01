@@ -286,8 +286,8 @@ else. A test of an ordinary bound action sends a key.
 What this answers of `docs/issues.md`'s two candidates:
 
 - **1048, virtual devices.** Resembles only. A test's key arrives as the real keyboard, which leaves
-  a test fixture no special case to need, but on-screen sticks and bots are still the requirement's
-  subject and still unserved.
+  a test fixture no special case to need, and is now R11.10. What 1048 still holds is an on-screen
+  control's identity in a prompt.
 - **1025, driving a context from outside.** Unrelated. That is an in-process harness with no world,
   and a remote driver always has one.
 

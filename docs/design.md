@@ -479,8 +479,8 @@ binding's release into a cancel.
 
 `controls.bind::<A>(Authority(family))` binds an action to the value an outside authority supplies
 in place of one device family's controls. Whatever owns the authority — a platform input service, a
-network peer — writes into an `AuthorityValues` component on the context entity from a system
-ordered before evaluation.
+network peer, a bot (R11.8, `examples/pong_robot`) — writes into an `AuthorityValues` component on
+the context entity from a system ordered before evaluation.
 
 The binding holds no control. Its input is `BindingInput::Authority(family, shape, source)`, where
 `source` is the action whose value it reads and the shape is that action's own. `Authority` is

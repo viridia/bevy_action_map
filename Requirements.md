@@ -1,9 +1,11 @@
 # Requirements: `bevy_action_map`
 
-> Status: draft for review. `MUST` / `SHOULD` / `MAY` per RFC 2119. Requirements are numbered
-> `R<section>.<n>` so they can be referenced from design docs and PRs. Tags like **(D22)** mark
-> requirements that follow from a settled decision, numbered as in
-> [docs/decisions.md](./docs/decisions.md).
+> Status: draft for review. `MUST` / `SHOULD` / `MAY` per RFC 2119. `WITHDRAWN` marks a requirement
+> that no longer should hold, and `BLOCKED` one that should but cannot be met with the backends >
+available, naming the deferred entry that waits on them. Requirements are numbered >
+`R<section>.<n>` so they can be referenced from design docs and PRs. Tags like **(D22)** mark >
+requirements that follow from a settled decision, numbered as in >
+[docs/decisions.md](./docs/decisions.md).
 
 A greenfield input-mapping system for Bevy, incorporating lessons from leafwing-input-manager
 (LWIM), bevy_enhanced_input (BEI), Unreal Enhanced Input, Unity's Input System, Steam Input, and
@@ -758,8 +760,10 @@ is unmodeled.
   without guessing (D65). R11.9's opaque id already covers "at least bindable" for a control this
   crate doesn't know, proven on the presentation side by `ControlOrigin::Foreign`. Reopening this
   needs a real device in hand, not a second guess.
-- **R11.3 (MUST)** Capability queries: available controls, analog vs digital, rumble, motion/gyro,
-  touchpad, battery, LED — used by prompts (R18) and by "can this player play at all" checks.
+- **R11.3 (BLOCKED)** Capability queries: available controls, analog vs digital, rumble,
+  motion/gyro, touchpad, battery, LED — used by prompts (R18) and by "can this player play at all"
+  checks. _Blocked: neither gilrs nor Steam Input reports enough to answer it on every platform
+  (X50)._
 - **R11.4 (MUST)** Hot-plug: connect/disconnect events, and a documented policy for the state of
   actions held on a device that disappears (must release, must cancel — never stick).
 - **R11.5 (MUST)** Stable persistent device identity where the platform allows
@@ -773,10 +777,15 @@ is unmodeled.
   separately from bindings and keyed by the device's runtime handle, from which its persistent
   identity (R11.5) is reachable. Note this _supersedes_ rather than interoperates with Bevy's
   `GamepadSettings` deadzone, per R14.9 — the two must not both be active.
-- **R11.8 (SHOULD)** Virtual devices: on-screen touch sticks, AI/bot drivers, and test fixtures must
-  be first-class devices, not special cases.
+- **R11.8 (SHOULD)** An on-screen control, such as a touch stick, must be a first-class device:
+  paired and routed like any other, and drawn in a prompt as itself rather than as the pad it
+  imitates. A test fixture is R11.10; a bot supplies actions rather than controls, through an
+  authority binding.
 - **R11.9 (MAY)** Surface unhandled/unknown controls as opaque IDs rather than dropping them, so
   exotic hardware is at least bindable.
+- **R11.10 (SHOULD)** A gamepad is any entity Bevy's input messages announce. The crate must not
+  require hardware behind one, so a test fixture or a remote driver can supply a pad as an ordinary
+  device.
 
 ---
 
@@ -1414,8 +1423,8 @@ Video Accessibility Act, which reaches game communication features).
   not make any binding permanently hardcoded.
 - **R20.2 (SHOULD)** Hold-vs-toggle must be expressible as a binding-level option, not reimplemented
   per action by the game.
-- **R20.3 (SHOULD)** No action should _require_ simultaneous inputs that cannot be re-expressed as a
-  sequence; chord conditions must therefore have a sequential alternative.
+- **R20.3 (MAY)** No action should _require_ simultaneous inputs that cannot be re-expressed as a
+  sequence; chord conditions may therefore have a sequential alternative.
 - **R20.4 (WITHDRAWN)** ~~All timing thresholds (hold duration, double-tap window, repeat rate) must
   be globally scalable by a user preference.~~ _Withdrawn: the thresholds do not share a sign, so no
   one factor moves them all toward forgiveness. `Hold` and `HoldAndRelease` take a floor the player

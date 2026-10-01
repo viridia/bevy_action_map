@@ -28,7 +28,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-R_DEF = re.compile(r"^\s*- \*\*(R\d+\.\d+[a-z]?) \((?:MUST|SHOULD|MAY|WITHDRAWN)\)\*\*")
+R_DEF = re.compile(r"^\s*- \*\*(R\d+\.\d+[a-z]?) \((?:MUST|SHOULD|MAY|WITHDRAWN|BLOCKED)\)\*\*")
 R_CITE = re.compile(r"\bR\d+\.\d+[a-z]?\b")
 R_STAR = re.compile(r"\*\*R\d+\.\d+[a-z]?")
 D_DEF = re.compile(r"^### (D\d+)\b")

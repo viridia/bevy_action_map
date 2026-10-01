@@ -8,15 +8,14 @@ code rather than against an impression.
 
 ## Status, before anything else
 
-**This crate is not a competitor you should pick today unless you are looking for one.** It is
-unpublished, unreleased, has one author, targets a Bevy release candidate rather than a release, and
-has never shipped a game. BEI and LWIM are published, maintained, versioned against a Bevy release,
-and in real games. If you are starting a project this week, that difference outweighs every
-technical one below, and the honest recommendation is BEI.
+**This crate is not ready to be chosen today.** It is unpublished and has one author. It targets a
+Bevy release candidate rather than a release, and it has never shipped a game. BEI and LWIM are
+published and maintained, they track Bevy releases, and real games use them. If you are starting a
+project this week, that difference outweighs every technical one below, and the recommendation is
+BEI.
 
-What follows is therefore not "why you should switch". It is a map of where the three crates differ,
-which is useful whichever way you decide, and which is also the argument for why this crate exists
-at all.
+So what follows is not a case for switching. It is a map of where the three crates differ, which is
+useful whichever you choose. It is also the reason this crate exists.
 
 ## What was examined
 
@@ -26,30 +25,29 @@ at all.
 | `leafwing-input-manager` | 0.21.0 | 0.19 | crates.io source |
 | `bevy_action_map` | unpublished, commit `c271ba4` | 0.20.0-rc.1 | this repository |
 
-Two of the three target Bevy 0.19 and one targets 0.20; a handful of differences below are partly
-differences between those two Bevy versions rather than between the crates, and are marked where
-that is so. BEI's `main` is cited only where it has changed something since 0.26.0, and is marked.
-Read on 2026-08-31; BEI's `main` and this crate re-read on 2026-09-23.
+Two of the three target Bevy 0.19 and one targets 0.20. A few differences below come partly from the
+Bevy versions rather than the crates, and are marked where they do. BEI's `main` is cited only where
+it has changed something since 0.26.0, and is marked as such. All three were read on 2026-08-31, and
+BEI's `main` and this crate were read again on 2026-09-23.
 
 ## The short answer
 
 - **Most games: BEI.** It is the most complete of the three, it is maintained, its model (actions,
   bindings, contexts, modifiers, conditions) is the one this crate also uses, and it is the one Bevy
   is looking at for a future first-party input abstraction.
-- **A small game, or one that wants the smallest possible model: LWIM.** One enum, one component,
+- **A small game, or one that wants the smallest possible model: LWIM.** One enum, one input map,
   `just_pressed`. It is much less machinery, and for a jam game or a prototype that is the right
   amount.
-- **This crate**, if and when it is real, is for games where the *player-facing* half of input is a
-  requirement rather than a nice-to-have: a rebinding screen with conflict detection, on-screen
-  prompts that stay correct, per-player device pairing, and a persistence format that survives a
-  patch changing the defaults. That is what it is built around, and it is where the differences
-  below concentrate.
+- **This crate**, once it is released, is for games where the *player-facing* half of input is a
+  requirement rather than a nice-to-have. That means a rebinding screen that detects conflicts,
+  on-screen prompts that stay correct, devices paired to players, and saved settings that survive a
+  patch changing the defaults. The crate is built around those, and most of the differences below
+  are about them.
 
 ## One vocabulary, three shapes
 
-All three crates share the same core idea — the game reads `Jump`, not `KeyCode::Space` — and BEI
-and this crate share Unreal's vocabulary on top of it. Where they differ is what kind of *thing*
-each concept is:
+All three crates share the same core idea: the game reads `Jump`, not `KeyCode::Space`. BEI and this
+crate also share Unreal's vocabulary. Where they differ is what kind of *thing* each concept is:
 
 | | LWIM | BEI | `bevy_action_map` |
 | --- | --- | --- | --- |
@@ -59,17 +57,22 @@ each concept is:
 | State lives | in an `ActionState<A>` component | in components on each action entity | in dense per-instance tables on the context entity |
 | Bindings are declared | by building an `InputMap` value | by spawning entities (`actions!` / `bindings!` macros) | in a closure passed to `add_context` |
 
-The middle column is the one that most shapes BEI's feel: because actions and bindings are entities,
-a scene file can carry a whole input map, a third-party crate can add an action to a context it does
-not own, change detection works per-action for free, and an inspector shows a binding's modifiers
-and conditions as ordinary components. A compiled plan is not visible that way. The right column is
-the one that most shapes this crate's: because bindings are compiled once into an immutable plan, a
-context is checked as a whole before it runs, the declared bindings survive a rebind as a separate
-baseline, evaluation is an array walk with no allocation, and the whole state of a context is a
-couple of `Copy` slices.
+In BEI, actions and bindings are entities, and most of what it is good at follows from that. A scene
+file can carry a whole input map. A third-party crate can add an action to a context it does not
+own. Change detection works per action for free. An inspector shows a binding's modifiers and
+conditions as ordinary components, so a developer can retune a dead zone or a hold time in a running
+game and feel the result at once.
 
-Neither of those is straightforwardly better. They buy different things, and sections 8, 9 and 10
-below are where the difference stops being aesthetic.
+In this crate, a context's bindings are compiled once into an immutable plan, and most of what it is
+good at follows from that instead. The plan is complete when it is built, so it can be checked as a
+whole before the game runs. The declared bindings stay as they were when a player rebinds, as a
+baseline the rebind is applied over. Evaluating a context is a walk over arrays with no allocation.
+What a plan cannot do is show up in an inspector the way an entity does. A running game can change
+only the values a binding declares as tunables (section 8); any other change to a modifier or
+condition means a rebuild.
+
+Neither model is simply better. They buy different things, and sections 8, 9 and 10 below are where
+the difference stops being a matter of taste.
 
 One row is missing from that table on purpose, because it is the one nobody thinks about until a
 refactor: **what identifies an action in a player's saved settings**. LWIM's answer is the enum
@@ -230,26 +233,32 @@ fn jump(input: ContextActions<OnFoot>) {
 
 What each asks of you, read off the snippets:
 
-- **LWIM** is the least to write: one derive per enum, and bindings are a value built wherever is
-  convenient. It has no notion of a context being off, so pausing is the reading system's run
-  condition: South still sets both `Jump` and `Confirm`, and `jump` simply does not run. Each enum
-  is its own plugin.
-- **BEI** puts the bindings on the entity, as components in its spawn. Two players can therefore
-  hold different bindings with nothing extra, and a scene can carry them; the price is the
-  `actions!`/`bindings!` nesting, and a `Move` whose keys and stick need a preset or per-key
-  `SwizzleAxis` and `Negate`. The editor helps less, too: a binding's modifiers and conditions are
-  components in a tuple, which accepts any bundle, so completion cannot offer the ones that mean
-  something there, and the bracketed `Player[...]` syntax inside `actions!` is macro input rather
-  than an expression the editor can complete into. Each context type and state pair is registered
-  for syncing, and gameplay is kept off South by its own `ActiveInStates`, not by the menu.
-- **This crate** declares bindings once per context type at app build, and an entity gets them by
-  carrying the component. Every action names a `path`, an `output` and an `intent`, and every
-  context a `path` and a `tick`, which is more to write up front than either of the others; the path
-  is what a settings file stores. Those attribute arguments do not complete in an editor either,
-  though everything after `bind` is a method on a builder, so the modifiers and conditions a binding
-  can take are what completion lists. The menu is `exclusive`, so gameplay is shadowed while it is
-  up whatever either context binds, and gameplay needs no state of its own. Bindings that differ per
-  player are an override applied to one entity (`apply_overrides_for`), not a second declaration.
+**LWIM** is the least to write. Each enum is a derive and a plugin, and the bindings are a value you
+build wherever is convenient. LWIM has no notion of a context being switched off, so pausing is done
+with a run condition on the reading system. South still sets both `Jump` and `Confirm`; `jump` just
+does not run.
+
+**BEI** puts the bindings on the entity, as components in its spawn. That means two players can hold
+different bindings with nothing extra, and a scene can carry them. The price is the nesting of
+`actions!` and `bindings!`. Binding `Move` to keys and a stick also takes a preset such as
+`Cardinal::wasd_keys()`; written out by hand, each key needs its own `SwizzleAxis` and `Negate`.
+
+Code completion in your IDE helps less with BEI. A binding's modifiers and conditions are components
+in a tuple, and a tuple accepts any bundle, so completion cannot narrow the list to the ones that
+make sense there. The bracketed `Player[...]` syntax inside `actions!` is macro input, which an IDE
+cannot complete inside at all. For pausing, each pair of context type and state is registered for
+syncing, and gameplay stops hearing South because of its own `ActiveInStates`, not because the menu
+took it.
+
+**This crate** declares bindings once per context type, when the app is built, and an entity gets
+them by carrying the context component. There is more to write up front than in either of the
+others: every action names a `path`, an `output` and an `intent`, and every context a `path` and a
+`tick`. The path is what a settings file stores. Those attribute arguments do not complete in an IDE
+either, but everything after `bind` is a method on a builder, so completion lists exactly the
+modifiers and conditions a binding can take. The menu is `exclusive`, which silences gameplay while
+the menu is up whatever either context binds, so gameplay needs no state of its own. Bindings that
+differ per player are an override applied to one entity with `apply_overrides_for`, not a second
+declaration.
 
 ---
 
@@ -280,22 +289,24 @@ app.update();
 assert_eq!(heard, ["fired", "completed"]);   // two observer calls, in order
 ```
 
-**How much this matters is a real question, not a rhetorical one.** At 60 Hz a frame is under 16 ms,
-and most games never notice what happens inside one. A fighting game, where the order and count of
-presses within a frame are the input, does. It matters more the further the read is from the render
-frame; see the next section. And polling recovers only part of it even here: `phase::<A>()` returns
-one `ActionPhase` per read, so a sub-tick tap polls as `Completed`. The two transitions are
-recoverable through the observer path (`On<Fired<A>>` / `On<Completed<A>>`) or the transition log,
-not by polling.
+**Whether this matters depends on the game.** At 60 Hz a frame is under 16 ms, and most games never
+notice what happens inside one. A fighting game does, because the order and count of presses within
+a frame are its input. It also matters more when input is read on a fixed tick rather than the
+render frame, which the next section covers.
 
-Steam Input, on the largest store, does not report edges at all: it is polled once a frame, and an
-action bound to it here gets the frame's resolution and no finer. That does not make the queue moot.
-It still buys fixed-tick correctness at any frame rate, keyboard and mouse never pass through Steam
-Input, and the queue is the frame that replay and device routing are built on.
+Even here, polling recovers only part of it. `phase::<A>()` returns one `ActionPhase` per read, so a
+tap shorter than a tick polls as `Completed`. Both transitions are seen by an observer
+(`On<Fired<A>>` and `On<Completed<A>>`) or in the transition log, but not by polling.
 
-Reading edges is also what makes sections 6 (dead zones), 7 (device routing) and 10 (replay)
-possible in the shape they take here; it is one decision paying for three features, which is why it
-is worth its cost.
+This crate reads Steam Input by polling it once a frame, so an action bound to it gets the frame's
+resolution and no finer. Steam's API also has action event callbacks, which may report each change
+between polls, but the `steamworks` Rust crate does not wrap them, and whether they carry every edge
+is unmeasured. Even without edges from Steam, the queue is still worth having: it keeps fixed ticks
+correct at any frame rate, keyboard and mouse never pass through Steam Input, and replay and device
+routing are built on it.
+
+Reading edges is also what gives sections 6 (dead zones), 7 (device routing) and 10 (replay) the
+shape they take here.
 
 ## 2. Fixed timestep
 
@@ -316,14 +327,14 @@ independently and for the same reason; [decisions.md](./decisions.md) D12 credit
 **LWIM** keeps *two* `ActionState`s per entity and swaps between them: `swap_to_fixed_update` runs
 in `RunFixedMainLoop::BeforeFixedMainLoop`, the fixed state is updated once per frame there, and
 `swap_to_update` restores the render one afterwards (`src/plugin.rs`, `src/action_state/mod.rs`). A
-`just_pressed` read from `FixedUpdate` therefore stays true for every fixed tick of that frame
-rather than only the first — which is usually what a fixed-tick reader wants.
+`just_pressed` read from `FixedUpdate` therefore stays true for every fixed tick of that frame, not
+only the first, which is usually what a fixed-tick reader wants.
 
 **This crate** makes the tick domain a property of the context type (`#[context(tick = Fixed)]`),
-evaluates each context exactly once in its domain, and each instance reads the timestamped event
-queue from its own cursor, so a fixed tick sees every event sampled since the last one ran.
+and evaluates each context in that domain alone. Each instance reads the timestamped event queue
+from its own cursor, so a fixed tick sees every event sampled since the last one ran.
 
-The remaining difference is not "has a story" but **what happens to the input in the gaps**:
+Where they differ is **what happens to input in the gaps**:
 
 | | A tap shorter than one render frame | Zero fixed ticks in a frame | Several fixed ticks in a frame |
 | --- | --- | --- | --- |
@@ -349,12 +360,11 @@ places.
 - **BEI** orders actions within a context by the maximum modifier-key count of their bindings, so
   `Ctrl+S` is evaluated before `S` (`src/context.rs`). But ordering only decides *who goes first*;
   suppression requires `ActionSettings { consume_input: true }`, which is **off by default**. With
-  defaults, pressing Ctrl+S fires both. It also only understands `ModKeys` (Ctrl, Shift, Alt,
-  Super), not a general chord — a general chord is the separate `Chord` condition, which references
-  another action.
-- **This crate** finds, when a context's bindings are compiled, the longer chords on each binding's
-  controls; while one of them is held, the shorter binding reads as rest. Automatic, no consumption
-  involved, and general over any chord (`src/plan.rs`, `src/eval/`).
+  defaults, pressing Ctrl+S fires both. The ordering also only understands `ModKeys` (Ctrl, Shift,
+  Alt, Super). A general chord is the separate `Chord` condition, which references another action.
+- **This crate** does it automatically, for any chord. When a context's bindings are compiled, each
+  binding learns which longer chords share its controls, and while one of those is held, the shorter
+  binding reads as rest. Consumption is not involved (`src/plan.rs`, `src/eval/`).
 
 **One context taking a control from another.** A pause menu should stop the ship hearing Escape.
 
@@ -362,21 +372,21 @@ places.
   conditions.
 - **BEI** has `ContextPriority<C>` (a `usize`, default 0; ties broken by reverse spawn order), and
   `consume_input` per action. Consumption is global across contexts within a schedule.
-- **This crate** has `PRIORITY` as a const on the context type, resolved into priority-keyed system
-  sets once at app build rather than sorted per frame; `CONSUMES` defaults per action and can be
-  overridden per binding. It also has an `EXCLUSIVE` context, which treats every lower-priority
-  context as inactive while it is up — so a modal screen does not have to enumerate the actions it
-  is taking.
+- **This crate** has `PRIORITY` as a const on the context type, turned into ordered system sets when
+  the app is built rather than sorted every frame. `CONSUMES` is set per action and can be
+  overridden per binding. A context can also be `EXCLUSIVE`, which makes every lower-priority
+  context inactive while it is up, so a modal screen does not have to list the actions it takes
+  over.
 
-BEI's arrangement is more flexible at runtime (priority is a component you can change); this crate's
-is fixed at build and cannot be changed per entity, which is a real limitation if you wanted two
-players' contexts at different priorities.
+BEI's arrangement is more flexible at runtime, since priority is a component you can change. This
+crate's is fixed when the app is built and is the same for every entity, which is a real limitation
+if you want two players' contexts at different priorities.
 
-**A difference that only shows in local multiplayer:** BEI records consumption in a table with
-nothing in it saying whose claim it was, so one player's menu consuming a button takes it from every
-player. It scopes its gamepad reads per context but not its consumption. This crate scopes both — a
-claim and an exclusion each carry the devices of the instance that made them, and reach only a
-context sharing one.
+**A difference that only shows in local multiplayer.** BEI's consumption table does not record whose
+claim it was, so when one player's menu consumes a button, it takes it from every player. BEI scopes
+its gamepad reads to a context, but not its consumption. This crate scopes both. Consumption and
+exclusivity each carry the devices of the instance responsible, and affect only contexts that share
+one of those devices.
 
 ## 4. Combining several bindings into one action
 
@@ -386,20 +396,20 @@ when two contribute at once?
 - **LWIM** resolves per input kind; buttonlike actions are pressed if any input is pressed.
 - **BEI** takes the contributions with the most significant `TriggerState` and combines them by
   `ActionSettings::accumulation`: `Cumulative` (sum, the default) or `MaxAbs`.
-- **This crate** keys the rule off the action's declared **intent** — a property BEI and LWIM do not
-  have. `Button` takes the strongest contribution; `Analog1` and `Directional2` take the strongest
-  in each direction per axis, so opposite directions cancel; `Delta2` sums.
+- **This crate** chooses the rule from the action's declared **intent**, which BEI and LWIM do not
+  have. A `Button` takes the strongest contribution. An `Analog1` or `Directional2` takes the
+  strongest in each direction on each axis, so opposite directions cancel. A `Delta2` sums.
 
-The reason for the third of those is that shape does not distinguish a stick from a mouse — both are
-`Vec2` — but summing is right for one and wrong for the other. A mouse delta is a displacement that
-already happened, so two devices moving at once should both move you; two half-deflected sticks are
-not a full deflection. `ActionIntent` also lets the crate *refuse* a binding whose source channel
-cannot serve the action (a stick bound to a `Delta2` look action), which is caught when the context
-is declared rather than felt as camera drift later.
+Intent exists because a stick and a mouse have the same shape, `Vec2`, but summing is right for one
+and wrong for the other. A mouse delta is a movement that has already happened, so two devices
+moving at once should both move you. Two half-deflected sticks are not a full deflection. Intent
+also lets the crate *refuse* a binding whose control cannot serve the action, such as a stick bound
+to a `Delta2` look action. The mistake is caught when the context is declared, rather than felt
+later as camera drift.
 
-The cost: intent is a fourth thing to declare, and it makes one case harder rather than easier — a
-single action driven by *both* a mouse and a stick needs an explicit rate-to-delta conversion
-(`.per_second()`) rather than just working.
+The cost is one more thing to declare per action, and one case gets harder rather than easier. A
+single action driven by *both* a mouse and a stick needs the stick's rate converted to a movement
+explicitly, with `.per_second()`.
 
 ## 5. Conditions and modifiers
 
@@ -428,60 +438,61 @@ BEI has more conditions than this crate, `Flick` and `Cooldown` in particular.
 
 ## 6. Dead zones
 
-This is where reading raw events pays off, and it is also the place the difference is easiest to
-overstate, so precisely:
+This is where reading raw events pays off. It is also where the difference is easiest to overstate,
+so precisely:
 
 Bevy applies a per-axis `GamepadSettings` filter to gamepad values before they reach the `Gamepad`
 component. BEI and LWIM both read the `Gamepad` component, so they consume whatever that filter
 produced and apply their own `DeadZone` / `AxisDeadZone` on top of it. This crate reads
 `RawGamepadEvent`, which is emitted before that filter, and owns the whole chain.
 
-*(The exact behaviour of Bevy's filter has changed between versions — on `main` the `Gamepad`
-component stores the unscaled raw value and the deadzone is applied to the change-detection
-threshold and the emitted event's scaled value. So "BEI consumes an already-deadzoned value" is
-version-dependent and was more true in older Bevy. What is not version-dependent is that BEI and
-LWIM read a value someone else has already decided the filtering policy for, and this crate reads
-one nobody has.)*
+The filter itself has changed between Bevy versions. On Bevy's `main`, the `Gamepad` component
+stores the raw value unscaled, and the dead zone is applied only to the change-detection threshold
+and to the scaled value in the emitted event. So whether BEI reads an already dead-zoned value
+depends on the Bevy version; it was more true of older ones. What holds in every version is that BEI
+and LWIM read a value whose filtering policy Bevy has already chosen, and this crate reads the value
+before any policy is applied.
 
-What the crate does with that is three stages, because three parties have a claim on the number and
-they are answering different questions (TD8.4):
+The crate splits dead-zone handling into three stages, because three parties have a say in the
+number and each is answering a different question ([design.md](./design.md) TD8.4):
 
-1. **Calibration** — this physical unit's true centre and rest envelope, set by the game and applied
-   as the event is recorded. Per device unit, because drift is a wear characteristic of one pad.
-2. **Design** — the shape and curve the mechanic wants. This is the stage that rescales, so full
+1. **Calibration.** Where this particular pad's stick actually rests, and how far it wanders there.
+   The game sets it, and it is applied as the event is recorded. It is per device, because drift is
+   wear on one pad.
+2. **Design.** The shape and curve the mechanic wants. This is the stage that rescales, so full
    deflection still reads 1.0.
-3. **Preference** — the player's own adjustment, modulating stage 2.
+3. **Preference.** The player's own adjustment to stage 2.
 
-Only one stage may rescale, and that is enforced when the plan is compiled. Neither BEI nor LWIM
-distinguishes these; both have "a dead zone", which is stage 2.
+Only one stage may rescale, and that is checked when the plan is compiled. Neither BEI nor LWIM
+separates these. Both have "a dead zone", which is stage 2.
 
-Whether you need stages 1 and 3 depends entirely on whether you ship a settings screen with a dead
-zone slider, and whether your players have worn sticks. Many games do not, and for those this is
-machinery for nothing.
+You need stages 1 and 3 only if you ship a settings screen with a dead-zone slider, or your players
+have worn sticks. Many games do neither, and for them this is machinery for nothing.
 
 ## 7. Local multiplayer and device routing
 
 - **LWIM**: `InputMap::with_gamepad(entity)` associates one map with one gamepad. Keyboard and mouse
   are global.
-- **BEI**: a `GamepadDevice` component on the context entity — `Any`, `Single(entity)`, or `None`.
-  Keyboard and mouse are global.
-- **This crate**: a `Paired(DeviceHandleSet)` component naming the devices one occupant owns.
-  `DeviceHandle` is `KeyboardMouse` or `Gamepad(Entity)`, so keyboard-and-mouse can be routed to one
-  player and a pad to another; filtering happens when the frame is applied, before anything else
-  reads it. It also ships a **join gesture** — a context bound to a control *class* rather than a
-  specific control, so "press anything to join" claims the device that pressed, with a check that
-  two waiting slots cannot race for it (`examples/split_friction/`).
+- **BEI**: a `GamepadDevice` component on the context entity, which is `Any`, `Single(entity)` or
+  `None`. Keyboard and mouse are global.
+- **This crate**: a `Paired(DeviceHandleSet)` component naming the devices one player owns. A
+  `DeviceHandle` is `KeyboardMouse` or `Gamepad(Entity)`, so keyboard and mouse can go to one player
+  and a pad to another. Input from devices a player does not own is filtered out before anything
+  reads it.
 
-The keyboard-and-mouse routing is the substantive difference; the join gesture is the thing that is
-tedious to write yourself. Note that this crate treats keyboard and mouse as one indivisible device,
-so it cannot split two keyboards — but neither can Bevy, which does not distinguish them.
+  It also has a **join gesture**: a context bound to a *class* of control rather than a specific
+  one, so "press anything to join" claims whichever device pressed. Two waiting slots cannot both
+  claim the same device (`examples/split_friction/`).
+
+Routing keyboard and mouse is the real difference. The join gesture is the part that is tedious to
+write yourself. This crate treats keyboard and mouse as one device, so it cannot tell two keyboards
+apart, but neither can Bevy.
 
 ## 8. Rebinding, and what a settings screen needs
 
-This is the axis the crate was actually built for, so it is where the gap is widest, and therefore
-where it is easiest to overstate what the other two lack. What they have goes first. BEI treats this
-half as the game's job rather than the input crate's, which is a coherent scope; what follows is
-what that leaves a game to write.
+This crate was built for this, so the gap is widest here, and it is easiest to overstate what the
+other two lack. What they have comes first. BEI treats the settings screen as the game's job rather
+than the input crate's, and what follows is what that leaves a game to write.
 
 **What BEI has today.** Bindings are entities with a `Binding` component, so a settings screen can
 query them, and rebinding is despawning one and spawning another. `Binding` implements `Display`
@@ -495,36 +506,39 @@ and loadable as an asset. Same story: a workable basis, rendering left to you.
 
 **What neither has**, and what this crate treats as first-class:
 
-- A **presentation model distinct from the binding model**. Dead zones and response curves are
-  developer concerns; a player rebinding "Thrust" should not see them. Marking a binding
-  `.mappable()` puts it in a separate, smaller model — a named *mapping* with an ordered list of
-  slots ("Primary", "Secondary"), which is what a primary/secondary table is. Everything is *listed*
-  for the player to read; only what was declared is rebindable.
-- **Interactive capture** with reserved and excluded controls, and **conflict detection** that can
-  be run against an uncommitted working copy — so a screen with unconfirmed choices can tell whether
-  two of them clash before either is applied, and a clash can steal the control from whatever held
-  it.
-- **Overrides as a diff, not a replacement.** The declared bindings stay intact; a rebind is a patch
-  applied over them by recompiling a variant plan. That is what lets a patch ship revised defaults
-  that still reach a player who never touched that row. In BEI and LWIM the live bindings *are* the
-  source of truth, so unless the game keeps its own record of the defaults, a saved input map is a
-  full replacement and revised defaults reach nobody who has ever saved.
-- **Prompts that stay true.** A reverse lookup from an action to the controls it is bound to,
-  exposed as a text span a template can write, which is told when the answer moves. A pad's buttons
-  are named the way that pad names them, resolved from the device connected: "Cross" on a DualSense,
-  "A" on an Xbox pad.
-- **Shared controls declared as shared** — tap to dodge, hold to sprint, on one control: rebinding
-  moves both, and the second is drawn as a subordinate line rather than a row of its own.
-- **Tunables** — a named, typed, player-adjustable value that overwrites one field of one modifier,
-  enumerated and persisted the same way a mapping is.
-- **Presets** — a named override set the game ships, applied through the same path a rebind uses,
-  and allowed to move rows a capture screen would refuse.
+- A **presentation model separate from the binding model**. Dead zones and response curves are the
+  developer's concern, and a player rebinding "Thrust" should not see them. Marking a binding
+  `.mappable()` puts it in a smaller model of its own: a named *mapping* with an ordered list of
+  slots, such as "Primary" and "Secondary", which is what a primary/secondary table shows. Every
+  binding is *listed* for the player to read, but only the ones declared mappable can be changed.
+- **Interactive capture**, which listens for the next control the player presses, with controls that
+  are reserved or excluded from it.
+- **Conflict detection** that runs on a working copy before it is applied, so a screen with
+  unconfirmed choices can tell whether two of them clash. A new choice can take its control away
+  from whatever held it.
+- **Overrides as a diff, not a replacement.** The declared bindings stay intact, and a rebind is
+  applied over them as a patch. So when a game update revises a default, the new default still
+  reaches a player who never changed that row. In BEI and LWIM the live bindings *are* the record.
+  Unless the game keeps its own copy of the defaults, a saved input map replaces them wholesale, and
+  a revised default reaches nobody who has ever saved.
+- **Prompts that stay true.** A lookup from an action to the controls it is bound to, available as a
+  text span in a template and updated when a rebind changes the answer. A pad's buttons are named
+  the way that pad names them: "Cross" on a DualSense, "A" on an Xbox pad.
+- **Shared controls declared as shared.** Tap to dodge and hold to sprint can share one control.
+  Rebinding one moves both, and the second is drawn as a line under the first rather than as a row
+  of its own.
+- **Tunables.** A named, typed value the player can adjust, which replaces one setting of one
+  modifier. It is listed and saved the same way a mapping is.
+- **Presets.** A named set of overrides the game ships, applied the same way a rebind is. A preset
+  may move rows that a capture screen would refuse to.
 
-None of this is exotic; it is what a shipped game's controls screen needs, and it is normally
-written by hand per game. Whether it is worth a different crate depends entirely on whether you were
-going to write it.
+None of this is exotic. It is what a shipped game's controls screen needs, and it is normally
+written by hand for each game. Whether that makes a different crate worth it depends on whether you
+were going to write it.
 
-**Not built here either:** glyphs (button images). All three crates render text.
+**Glyphs**, the button images in a prompt, are partly here. This crate works out which image a
+prompt should draw, trying a pad brand's own art before generic art, and passes along an image Steam
+supplies (`resolve_glyph`). It ships no art: the game provides its own. BEI and LWIM stop at text.
 
 ## 9. Persistence
 
@@ -533,10 +547,11 @@ going to write it.
 - **BEI**: `Binding` and `ActionSettings` are `Serialize`/`Deserialize` under the `serialize`
   feature; conditions and modifiers are components, so reflection-based scene serialization is the
   route.
-- **This crate**: `Overrides` — the diff, not the map — serializes through `serde`, hand-written so
-  a single-control row writes as a bare scalar, pinned by a golden TOML document. Loading resolves a
-  saved mapping name against what the game currently declares and *reports* an unresolved name or an
-  unrecognized control rather than dropping it silently.
+- **This crate**: `Overrides`, the diff rather than the map, serializes through `serde`. The format
+  is written by hand so that a row with one control saves as a single value, and a golden TOML
+  document in the tests holds it steady. Loading matches each saved mapping name against what the
+  game declares now, and *reports* a name or a control it does not recognize rather than dropping it
+  silently.
 
 Two structural differences sit underneath those, and both are invisible until the game changes.
 
@@ -553,18 +568,15 @@ belongs to, and the three crates name it differently:
 | this crate | the action's declared `PATH`, a string separate from the type | harmless | harmless |
 
 `#[action(path = "gameplay.jump")]` exists for exactly this. The path is a name that lives outside
-your code, so `Move` can become `MoveOnFoot` and relocate to another module without a player losing
-what they bound to it. The convention is `<namespace>.<name>`, and the discipline is that the path
-does **not** follow the type — changing a path is a save-data migration, not a refactor. It does a
-second job as the localization key a controls screen renders the row's label from, which is why it
-is a required declaration rather than an optional one.
+your code, so `Move` can become `MoveOnFoot` and move to another module without a player losing what
+they bound to it. The convention is `<namespace>.<name>`. The discipline is that the path does
+**not** follow the type: changing a path is a save-data migration, not a refactor. The path is also
+the localization key for the row's label on a controls screen, which is why every action must
+declare one. If a path does change, loading reports the saved one it cannot match, as above.
 
-Loading also *reports* a path it cannot resolve rather than dropping it, so a rename that did happen
-is visible instead of silent.
-
-The cost is a third thing to declare per action, and a convention to hold to — nothing stops you
-renaming the path alongside the type and getting exactly LWIM's behaviour. What it buys is that the
-default is right: a refactor is free, and breaking a player's settings takes a deliberate act.
+The cost is one more thing to declare per action, and a convention to keep. You can still rename the
+path along with the type and get exactly LWIM's behaviour. What it buys is a safe default: a
+refactor costs the player nothing, and breaking their settings takes a deliberate act.
 
 **All three leave writing the bytes to a file to the app.** None of them is a settings-file crate.
 
@@ -578,19 +590,21 @@ default is right: a refactor is free, and breaking a player's settings takes a d
   data yourself), and `CustomInput`/`CustomInputs` (a resource of `ActionValue`s that bindings can
   read, for inputs Bevy does not model). Between them these cover testing, cutscenes, AI, and
   network-replicated input, and games ship rollback netcode on them.
-- **This crate** splits the two jobs. Local replay and CI determinism use the input frame (L1): a
-  distinct, constructible, serializable object, with the whole mapping layer a pure function of it,
-  so a replay re-derives through conditions, chords, consumption and contexts rather than bypassing
-  them — something an action-level mock cannot exercise. A network peer instead targets the
-  authority backend (D22, D51), the same door Steam Input uses: an already-resolved `ActionValue`
-  rather than a raw frame, so two peers never need to share a `Plan`. That is the same job LWIM's
-  `ActionDiff` and BEI's `ActionMock` do, not a lower-level alternative to them.
+- **This crate** splits the two jobs. Local replay and determinism tests use the *input frame*: an
+  object holding one frame's raw input, which can be built by hand and serialized. Everything the
+  crate computes is a function of the frames it is given, so a replayed frame passes through
+  conditions, chords, consumption and contexts again, which a mock at the action level skips.
 
-The input frame is built, and is what this crate's own tests drive; a recorder and replay backend on
-top of it are not. The network half is **designed and not proven**: there is no testbed in tree that
-sends anything over a wire, and deferred.md's X35 says so, gated on a networked target. The
-injection point it would use is built: an `Authority` binding and `AuthorityValues`, through which
-`examples/pong_robot` drives a paddle.
+  A network peer uses the *authority* binding instead, the same entry point Steam Input uses
+  ([decisions.md](./decisions.md) D22, D51). It supplies an action's finished value rather than raw
+  input, so two peers never need the same bindings. That is the job LWIM's `ActionDiff` and BEI's
+  `ActionMock` do, not a lower-level alternative to them.
+
+The input frame is built, and this crate's own tests drive it, but a recorder and a replay backend
+on top of it are not. The network half is **designed and not proven**. No testbed here sends
+anything over a wire, and [deferred.md](./deferred.md) X35 records that, waiting on a networked game
+to try it. The entry point it would use is built: an `Authority` binding and `AuthorityValues`,
+through which `examples/pong_robot` drives a paddle.
 
 Mocking at the action level (BEI, LWIM) and replaying at the frame level (this crate, for local
 determinism) are not the same test. The first tests your game logic; the second also tests your
@@ -602,27 +616,30 @@ each peer has its own bindings.
 Steam Input is the motivating case: the binding UI, the conflict rules and the glyphs all live
 outside the game, and the platform answers "is Jump pressed" for you.
 
-**BEI** can be driven by Steam today. `ActionMock` skips input reading, conditions and modifiers and
-reports a value and state you supply, and the transition events still fire, so observers cannot tell
-where the value came from. A context fed by Steam can set `GamepadDevice::None` so it does not also
-read the gamepad Steam emulates. What it leaves to the game is the rest of the integration: names
-for the actions in Steam's manifest, prompts built from Steam's origins, and controls-screen rows
-that Steam rather than the game rebinds.
+**BEI** can be driven by Steam today. `ActionMock` skips input reading, conditions and modifiers,
+and reports a value and state you supply. The transition events still fire, so observers cannot tell
+where the value came from. A context fed by Steam can set `GamepadDevice::None` so that it does not
+also read the pad through Bevy. The rest of the integration is left to the game: names for the
+actions in Steam's manifest, prompts built from Steam's description of the controls, and
+controls-screen rows that Steam rebinds rather than the game.
 
-**This crate** has the same value path, an `Authority` binding and `AuthorityValues`: the backend
-writes a value and the crate's own lifecycle turns it into events. It differs in scope. The
-authority stands in for one device family rather than owning the action, so the keyboard stays bound
-beside a pad Steam drives, and the game's own conditions, such as a rate of fire, run on Steam's
-value as on any other. It also answers the questions BEI leaves to the game. An action's declared
-path is the manifest name, and a dotted path was measured to be a valid Steam action name; the
-prompt lookup returns a `ControlOrigin`, which can be one of Steam's rather than one of ours. Not
-built: suppressing a device family at the frame, which is how this crate would keep Steam's emulated
-pad from being read twice, and a Steam backend run end to end. What a running Steam client actually
+**This crate** has the same kind of value path, an `Authority` binding and `AuthorityValues`. The
+backend writes a value, and the crate's own lifecycle turns it into events. The difference is scope.
+The authority stands in for one device family rather than owning the whole action, so the keyboard
+stays bound beside a pad that Steam drives. The game's own conditions, such as a rate of fire, run
+on Steam's value as on any other.
+
+It also covers what BEI leaves to the game. An action's declared path is its name in Steam's
+manifest, and a dotted path has been checked to be a valid Steam action name. The prompt lookup
+returns a `ControlOrigin`, which can describe one of Steam's controls as well as one of this
+crate's. A game that also reads the pad through Bevy disables `GilrsPlugin` when Steam Input starts,
+so the pad is not read twice. A Steam build of the `disasteroids` example runs on all of this,
+though outside the workspace and outside any automated test. What a running Steam client actually
 does is recorded in [steam.md](./steam.md).
 
 So both can be driven by Steam, this crate also covers naming and prompts, and neither has shipped a
-Steam game. Do not choose on this axis unless you are actually shipping on Steam Input, in which
-case check the current state of both.
+Steam game. Do not choose on this axis unless you are shipping on Steam Input, and if you are, check
+the current state of both.
 
 ## 12. The rest
 
@@ -631,23 +648,23 @@ you can switch whole input sources off while the UI is being used, with a worked
 `Interaction`. LWIM reserves an `InputManagerSystem::Filter` system-set slot for a filter you write.
 
 This crate does not depend on `bevy_input_focus` either. Instead it has a working *focus
-orchestrator* for `bevy_ui_widgets`: the layer that works out which widget an action was meant for
-and drives that widget. The mapper underneath knows nothing about focus, and the widgets above know
-nothing about devices, so the orchestrator is where the two meet. `examples/common/widget_focus.rs`
-tags each widget with a *kind* (as a required component, so no spawn site has to remember),
-activates a context while that kind holds focus, and answers from the keyboard **and the gamepad**
-through the same priority and consumption the rest of the game uses. The `disasteroids` example disables
-`InputDispatchPlugin` outright and lets the orchestrator answer for both, rather than leaving two
-mechanisms answering the same keys. It is built from public crate API alone (`add_context`,
-`active_if`, `bind`, `.consume()`), so it needed nothing added for it.
+orchestrator* for `bevy_ui_widgets`, which works out which widget an action was meant for and drives
+that widget. The mapper underneath knows nothing about focus, and the widgets above know nothing
+about devices, so the orchestrator is where the two meet.
 
-The orchestrator lives beside the examples rather than in the crate for a layering reason, not a
-readiness one: an input crate that depends on `bevy_ui` cannot be depended on *by* `bevy_ui`, so the
-integration belongs in a crate of its own, and giving it one means splitting this repository into
-sub-crates. Until that happens it is a `#[path]` import shared by the examples, and exercised by
-Disasteroids end to end rather than by a test of its own. The `bevy_ui_widgets` side may not stay
-this crate's problem at all — [bevy#25592](https://github.com/bevyengine/bevy/issues/25592) asks for
-a widget-kind id upstream, which is the half that would move.
+`examples/common/widget_focus.rs` tags each widget with a *kind*, as a required component so that no
+spawn site has to remember it. While a widget of that kind has focus, a context for the kind is
+active, and it answers the keyboard **and the gamepad** through the same priority and consumption as
+the rest of the game. The `disasteroids` example turns off Bevy's `InputDispatchPlugin` and lets the
+orchestrator answer for both, so two mechanisms are not answering the same keys. The orchestrator
+uses only the crate's public API (`add_context`, `active_if`, `bind`, `.consume()`).
+
+It lives beside the examples rather than in the crate because of layering, not readiness. If an
+input crate depends on `bevy_ui`, `bevy_ui` cannot depend on it, so the integration belongs in a
+crate of its own. Until it has one, the examples share it as a `#[path]` import, and Disasteroids
+exercises it end to end in place of a test of its own. Part of it may move upstream:
+[bevy#25592](https://github.com/bevyengine/bevy/issues/25592) asks Bevy for an id for a widget's
+kind.
 
 What *is* still open here is narrower: making **unmodified** widgets respect consumption
 generically, without declaring a context per widget kind. That is deferred, and the documented
@@ -660,20 +677,24 @@ the first, so `WASD` keeps its shape on an AZERTY board, and a shortcut wants th
 
 **Diagnostics.** Two kinds, at two times.
 
-*Before the game runs*, this crate checks each context whole when it is declared. `add_context`
-refuses one that cannot work: an action bound to a control that cannot drive it (a stick on a mouse
-look), two stages that both rescale a value, an action bound both to a backend and to a control of
-the family the backend owns, two rebindable rows under one key. It warns about one that is only
-suspicious: the same control bound twice, a dead zone that swallows full deflection. The same pass
-runs on bindings the game has no intention of installing, which is how a controls screen checks
-unconfirmed choices for conflicts. BEI's bindings are entities that can be spawned at any time, so
-there is no whole context to check; a dimension mismatch is converted rather than refused, and a
-mistake shows up in play.
+*Before the game runs*, this crate checks each context whole, at the moment it is declared. A
+declaration is finished: `add_context` receives every binding the context will have, so a check can
+compare bindings with each other as well as inspect each one. A context that cannot work as written,
+such as one binding a stick to a mouse look, is refused. One that will work but probably not as
+meant, such as one reading the same control twice, draws a warning. The same pass runs on bindings
+the game has no intention of installing, which is how a controls screen checks a player's
+unconfirmed choices for conflicts.
 
-*While it runs*, this crate has `why_not::<A>()`, which answers "why didn't this fire?" with a named
-obstacle: inactive context, a higher-priority consumer, a longer chord winning, an unmet condition,
-a device that is not this player's. BEI's answer is `RUST_LOG=bevy_enhanced_input=debug`, which is
-less structured but costs nothing to add and covers a lot. LWIM has no equivalent of either.
+BEI cannot check this way, and the reason is its model rather than an omission. Its bindings are
+entities, and any system may spawn another one under an action on any frame, so a BEI context is
+never finished: there is no moment at which its bindings are known to be complete, and a check that
+compares them has no set to compare. Where a value has the wrong dimension, BEI converts it rather
+than refusing it, so a mistake shows up in play.
+
+*While it runs*, this crate has `why_not::<A>()`, which answers "why didn't this fire?" by naming
+what stopped it. The answer might be that the context is inactive, or that a longer chord took the
+control. BEI's answer is `RUST_LOG=bevy_enhanced_input=debug`, which is less structured but costs
+nothing to turn on and covers a lot. LWIM has no equivalent of either.
 
 **Build surface.**
 
@@ -683,13 +704,13 @@ less structured but costs nothing to add and covers a lot. LWIM has no equivalen
 | BEI | **yes** | `bevy` umbrella, `default-features = false` | reflect, state, serialize |
 | this crate | **yes** (`alloc` only) | Bevy *subcrates* individually | std, libm, keyboard, mouse, gamepad, touch, bevy_reflect, serialize, state |
 
-`no_std` is not a differentiator between BEI and this crate — both are. The dependency shape is:
-this crate depends on `bevy_ecs`, `bevy_input`, `bevy_math` and so on individually rather than on
-the `bevy` umbrella, which matters mainly if you care about the minimal graph or about eventual
-upstream inclusion.
+BEI and this crate both support `no_std`, so that does not separate them. What does is the
+dependency shape. This crate depends on `bevy_ecs`, `bevy_input`, `bevy_math` and the others
+individually rather than on the `bevy` umbrella. That matters mainly if you want the smallest
+dependency graph, or care about the crate moving into Bevy one day.
 
-**Touch.** None of the three has touch bindings. This crate has a `touch` feature flag that is
-currently a stub.
+**Touch.** None of the three has touch bindings. This crate's `touch` feature exists but does
+nothing yet.
 
 **Mouse wheel.** BEI and LWIM have it. This crate does not yet (chunk 122 in Roadmap.md).
 
@@ -697,20 +718,19 @@ currently a stub.
 
 ## What each crate is best at
 
-**BEI** — completeness and maintenance. The largest condition and modifier set, presets that make
-common bindings one line, an ECS model that makes input authorable from a scene and extensible by a
-third-party crate, and an active maintainer. It is the default answer.
+**BEI: completeness and maintenance.** It has the largest set of conditions and modifiers, presets
+that make common bindings one line, and an active maintainer. Its ECS model lets a scene author
+input and a third-party crate extend it. It is the default answer.
 
-**LWIM** — smallness and netcode. One enum, two components, `just_pressed`, and the most mature
-action-diff/rollback story of the three. If you do not need contexts, conditions or a rebinding
-screen, the other two are machinery you are paying for and not using.
+**LWIM: smallness and netcode.** One enum, one input map, `just_pressed`, and the most mature
+rollback support of the three. If you do not need contexts, conditions or a rebinding screen, the
+other two are machinery you pay for and do not use.
 
-**This crate** — the player-facing half. The presentation and rebinding model, overrides as a diff
-against declared defaults, prompts that name a pad's own buttons, per-player device routing
-including keyboard-and-mouse, keys bound by character as well as position, three-stage dead zones,
-sub-frame input edges, and a pure-function mapping layer with an injectable input frame. All of
-which is worth exactly nothing if you never build a controls screen — and none of which is shipped
-or published yet.
+**This crate: the player-facing half.** Its strengths are the rebinding model and the controls
+screen built on it, overrides kept apart from the declared defaults, and prompts that name a pad's
+own buttons. It also routes keyboard and mouse to a player as well as pads, binds keys by character
+as well as position, and sees input edges inside a frame. Most of that is worth nothing if you never
+build a controls screen, and none of it is released yet.
 
 ## If you are migrating
 
@@ -728,16 +748,19 @@ Concept-for-concept, BEI → this crate is close to mechanical:
 | `ActionSettings { consume_input: true }` | `CONSUMES` on the action, or per binding |
 | `ContextActivity<C>`, `ActiveInStates` | `active_if` / `active_in_state`, or `activate()`/`deactivate()` |
 
-The three places it is not mechanical: an action must declare an **intent**, a context is evaluated
-in **one** tick domain so an action needed at both rates is declared twice, and bindings are
-declared at app build rather than spawned — so anything that manipulated binding entities at runtime
-becomes an override instead.
+It is not mechanical in three places:
 
-One thing worth doing deliberately rather than mechanically: **choose the paths, do not derive
-them.** The obvious move when porting is `path = "jump"` for `struct Jump`, which reproduces BEI's
-identity exactly and throws away the reason the field exists (section 9). Pick the namespace and the
-name you would want in a settings file five years from now, because that is what they are, and they
-are cheapest to get right before anyone has saved one.
+- An action must declare an **intent**.
+- A context is evaluated in **one** tick domain, so an action needed at both rates is declared
+  twice.
+- Bindings are declared when the app is built rather than spawned, so code that changed binding
+  entities at runtime becomes an override instead.
+
+One thing to do deliberately rather than mechanically: **choose the paths, do not derive them.** The
+obvious move when porting is `path = "jump"` for `struct Jump`. That makes the saved name a copy of
+the type name, which throws away the reason the path exists (section 9). Pick the namespace and name
+you would want in a settings file five years from now, because that is what they are. They are
+cheapest to get right before anyone has saved one.
 
 LWIM → either is a rewrite, because an enum of actions becomes one type per action.
 
@@ -745,8 +768,8 @@ LWIM → either is a rewrite, because an enum of actions becomes one type per ac
 
 If you maintain BEI or LWIM and something here is wrong, it is a bug in this document and I would
 rather fix it than defend it. An earlier version of this comparison claimed neither crate addressed
-fixed-timestep timing, which was false of both — section 2 is the correction. Open an issue or mail
-the author.
+fixed-timestep timing, which was false of both, and section 2 corrects it. Open an issue or mail the
+author.
 
 Deeper reasoning for this crate's side of each difference is in
 [Requirements.md](../Requirements.md) (what must be true), [design.md](./design.md) (how it works)
