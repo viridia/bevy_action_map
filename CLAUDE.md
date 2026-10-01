@@ -17,11 +17,12 @@ Everything below is on demand.
 ## The documents, and when to open one
 
 Every section is numbered, so a known target is one command away: `scripts/show.py <anchor>...`
-prints it, given a chunk number, a `TD`, `D`, `X`, `G`, `S` or `R` anchor, or a driver `DR` or `DD`
-one, and takes several at once. `--outline` prints only the headings and requirements inside, with
-line numbers, for a section too long to read whole; `--toc TD` (or `R`, `D`, `X`, `G`, `S`, `DR`,
-`DD`, `chunks`) lists every heading of one document, to find a section before its anchor is known.
-Use that for lookups; see "Context" below for when not to.
+prints it, given a chunk number, an issue's four-digit number, a `TD`, `D`, `X`, `G`, `S` or `R`
+anchor, or a driver `DR` or `DD` one, and takes several at once. `--outline` prints only the
+headings and requirements inside, with line numbers, for a section too long to read whole;
+`--toc TD` (or `R`, `D`, `X`, `G`, `S`, `DR`, `DD`, `chunks`, `issues`) lists every heading of one
+document, to find a section before its anchor is known. Use that for lookups; see "Context" below
+for when not to.
 
 | File | Holds | Reach for it when |
 | --- | --- | --- |

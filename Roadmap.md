@@ -233,6 +233,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 187  | A context on a resource's entity                                      |
 | 188a | Steam's prompts answered per action set                               |
 | 188b | A prompt lookup names its context                                     |
+| 185  | `show.py` takes an issue number                                       |
 
 ---
 
@@ -699,17 +700,6 @@ boundaries with `pulldown-cmark`, and keeps devfmt's rewrap and `--diff` scoping
   item, and a string literal starting with `///`.
 - **Not done:** retiring devfmt, or rendering Markdown through the parser, which would restyle every
   document.
-
-### 185. `show.py` takes an issue number · E[1]
-
-An issue is looked up with a hand-written `awk` range today, since `show.py` takes every other
-anchor but not this one. Issue numbers start at 1000 and chunk numbers are well short of it, so a
-bare number of four digits is an issue and anything shorter a chunk, with no prefix needed.
-
-- **`--toc issues`** lists the entries, as `--toc X` does for deferred work.
-- **Verified by:** `show.py` printing an issue whole, one beside a chunk in the same call, and a
-  retired issue reported as absent rather than as a chunk.
-- **Not done:** issue state (open, routed, blocked), which would make the file a database.
 
 ### 186. `xref.py` checks references to issues · E[1]
 

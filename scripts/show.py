@@ -5,16 +5,18 @@
     scripts/show.py TD8.4     a section of docs/design.md
     scripts/show.py R19.14    a requirement, with its sub-bullets
     scripts/show.py R19       a section of Requirements.md
+    scripts/show.py 1046      an entry of docs/issues.md: four digits is an issue, fewer a chunk
     scripts/show.py R2.2 D6   several at once
     scripts/show.py --outline TD8
                               only the headings and requirements inside, with line numbers
-    scripts/show.py --toc TD  every heading of one document: R, TD, D, X, G, S, DR, DD or chunks
+    scripts/show.py --toc TD  every heading of one document: R, TD, D, X, G, S, DR, DD, chunks or
+                              issues
 
 Decisions (`D12`), deferred entries (`X3`), guidelines (`G3`), Steam findings (`S7`) and the remote
 driver's `DR` and `DD` anchors work the same way. A section runs to the next heading of the same or
 a higher level; a requirement runs to the next requirement or heading. A landed chunk has no
-section, and says so; a lettered part without a section of its own prints its parent's. Any unknown
-anchor exits 1, after the others are printed.
+section, and says so; a lettered part without a section of its own prints its parent's; a retired
+issue is reported as absent. Any unknown anchor exits 1, after the others are printed.
 """
 
 import re
@@ -34,7 +36,9 @@ from xref import (
 
 CHUNK_DEF = re.compile(r"^### (\d+[a-z]?)\.")
 S_DEF = re.compile(r"^### (S\d+)\b")
-LETTERED = re.compile(r"(\d+)[a-z]")
+ISSUE_DEF = re.compile(r"^### (\d{4}) ")
+ISSUE = re.compile(r"\d{4}")
+LETTERED = re.compile(r"(\d{1,3})[a-z]")
 LANDED_ROW = re.compile(r"^\| (\d+[a-z]?) +\|")
 HEADING = re.compile(r"^(#+) ")
 OUTLINE_WIDTH = 100
@@ -54,6 +58,8 @@ KINDS = [
     (re.compile(r"X\d+"), ROOT / "docs/deferred.md", [X_DEF], ""),
     (re.compile(r"G\d+"), ROOT / "docs/guidelines.md", [G_DEF], ""),
     (re.compile(r"S\d+"), ROOT / "docs/steam.md", [S_DEF], ""),
+    # Issues are numbered from 1000, so four digits is never a chunk (X60).
+    (ISSUE, ROOT / "docs/issues.md", [ISSUE_DEF], ""),
     (re.compile(r"\d+[a-z]?"), ROOT / "Roadmap.md", [CHUNK_DEF], ""),
 ]
 
@@ -67,6 +73,7 @@ TOC = {
     "G": ROOT / "docs/guidelines.md",
     "S": ROOT / "docs/steam.md",
     "chunks": ROOT / "Roadmap.md",
+    "issues": ROOT / "docs/issues.md",
 }
 
 
@@ -164,6 +171,10 @@ def main():
         part = LETTERED.fullmatch(anchor)
         if found is None and part and (found := find(part.group(1))):
             print(f"{anchor}: part of {part.group(1)}", file=sys.stderr)
+        if found is None and ISSUE.fullmatch(anchor):
+            print(f"{anchor}: no such issue; a gap in the numbering is a retired one", file=sys.stderr)
+            status = 1
+            continue
         if found is None:
             print(f"{anchor}: no such section", file=sys.stderr)
             status = 1
