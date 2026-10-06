@@ -146,9 +146,10 @@ boundary or sits inside another struct is the value it wraps: `Option<&DeviceHan
 
 ### G13 — Inline and block variants stay separate
 
-A span-like component and a block one are two types, even when one could render as the other. Their
-layout options differ, and a block has to align with the blocks beside it: `IconPrompt` and
-`IconPromptSpan`.
+A span-like element and a block one are written as two types, and produce two shapes of output, even
+when one could render as the other. Their layout options differ, and a block has to align with the
+blocks beside it: `IconPrompt` and `IconPromptSpan`. The machinery between the authored type and its
+output need not be separate: a lookup both forms share stays one lookup.
 
 ### G14 — Know an asset path is valid before loading it
 
