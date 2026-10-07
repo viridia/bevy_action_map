@@ -1239,12 +1239,14 @@ a slot consulted for `Glyph::External` alone.
 asset set or a path into a directory it does not own. A backend's art could again only stand in
 where the base set had none, so Steam's pad glyphs could not take precedence over Kenney's.
 
-### D85 — An inline icon prompt and a block one are two components
+### D85 — An inline icon prompt and a block one are two templates over one component
 
-**Decided.** `IconPromptSpan` is a span in a line of text, drawing `InlineImage`s sized from that
-line's font. `IconPrompt` is a node of its own, drawing image nodes scaled from the full-size art to
-whatever height its `Node` is given. Each falls back to text in its own layout kind. They share
-resolution, the wait for art, and the art providers. Chunk 110 built the block one.
+**Decided.** `IconPromptSpan` builds a span in a line of text, drawing `InlineImage`s sized from
+that line's font. `IconPrompt` builds a node of its own, drawing image nodes scaled from the
+full-size art to whatever height its `Node` is given. Each falls back to text in its own layout
+kind. Both are templates whose output is one component, `ActionPrompt`, with the form a field the
+author names; they share resolution, the wait for art, and the art providers. Chunk 110 built the
+block one, and chunk 189 merged the components under the templates.
 
 **Rules out.** One component that is a span or a node depending on where it is spawned.
 

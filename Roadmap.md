@@ -235,6 +235,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 188b | A prompt lookup names its context                                     |
 | 185  | `show.py` takes an issue number                                       |
 | 170  | Prompt art from an ordered list of providers                          |
+| 189  | One prompt component, written through templates                       |
 
 ---
 
@@ -244,8 +245,6 @@ its identity rather than its position.
 
 ## Next
 
-* 170: Prompt art from an ordered list of providers
-* 189: One prompt component, written through templates
 * 190: An inline icon prompt's size, as a `Val`
 * 172a: `bevy_action_map_ui`, starting with prompts
 * 115: A timing declared as a tunable
@@ -410,39 +409,6 @@ going through a catalogue. The crate's half of R19.14 is done, but the claim tha
   that is a reading of the spec rather than a dependency.
 - **Review surface:** whether the key is the one an author would actually want to type.
 
-### 189. One prompt component, written through templates · E[3]
-
-`prompt_ui.rs` draws a prompt three ways, `PromptSpan`, `IconPromptSpan` and `IconPrompt`, and all
-three ask the same lookup through the same companions. `refresh_icon_prompts` already treats the two
-icon forms as one, with `AnyOf` and a `block` flag, and `refresh_prompts` repeats the lookup for
-text. They become one component, `ActionPrompt { context, action, form }`, and the three names
-become `bsn!` templates that build it.
-
-- **What it is:** `PromptForm` is `Text`, `InlineIcon` or `BlockIcon`. One refresh system and one
-  run condition replace two, and `swap_in_icons` reads the form rather than `Has<IconPrompt>`. A
-  `Text` prompt resolves as an icon prompt with no art would, without the brackets.
-- **The templates** are `PromptSpan<C, A>`, `IconPromptSpan<C, A>` and `IconPrompt<C, A>`, each a
-  `Template` whose `Output` is `ActionPrompt`, written `~IconPrompt::<Menu, Close>`. The context and
-  action are type parameters, so `bsn!` can no longer read `actions::Jump` as a patch and leave the
-  placeholder id.
-- **Code holding only ids**, such as a controls screen walking `registered_actions()`, inserts
-  `ActionPrompt` directly. The templates are the authoring path, not the only one.
-- **No `#[require]`.** What a prompt entity holds follows from the answer: a span is text or a run
-  of icon children, a block a fallback text child or a row of images. The refresh system inserts its
-  form's base component, `TextSpan` or `Node`, when it first writes a prompt, with `insert_if_new`
-  so a `Node` or `TextFont` the scene set survives.
-- **Within G13**, which separates what the author writes and the shape it produces, not the
-  machinery between. D85's "Rules out" already holds, since the author names the form and it never
-  changes underneath them; its title and "Decided" are restated to say the two forms are two
-  templates over one component.
-- **Every caller changes:** 47 lines across Disasteroids, Split Friction, `prompt_gallery`, the
-  Steam build and `tests/prompt_ui.rs`. That is the chunk's purpose, not an abstraction leaking.
-- **Not the companions:** `PromptFamily`, `PromptClass`, `PromptPick` and `PromptUnbound` stay
-  components beside it.
-- **Verified by:** `tests/prompt_ui.rs`, with a test per template that it builds its form, one
-  written with a nested path; `prompt_gallery`, Disasteroids and Split Friction drawing the prompts
-  they drew before; `scripts/verify.sh --full` for the Steam build.
-
 ### 190. An inline icon prompt's size, as a `Val` · E[1]
 
 An inline icon stands `5/3` of its span's font size, a constant in `prompt_ui.rs`. A game whose font
@@ -455,9 +421,8 @@ default is `Val::Em(5.0 / 3.0)`, which is today's behaviour.
   the span's evaluated font size as both the em size and the base. `Percent` is therefore relative
   to the font, and `Auto` leaves the height unset, drawing the art at its own size as a block prompt
   with no height does.
-- **After 189**, which merges the refresh systems and reshapes the query this reads in; the doc
-  comment then names the inline form of `ActionPrompt` rather than `IconPromptSpan`. 172a moves the
-  file either side of it.
+- **The doc comment** names the inline form of `ActionPrompt`, `PromptForm::InlineIcon`. 172a moves
+  the file either side of it.
 - **Not a block prompt's size,** which its `Node` height already sets; the component is ignored
   there, and its doc comment says so.
 - **Not a change after the icons go in.** The size is resolved when an answer's icons are placed, as

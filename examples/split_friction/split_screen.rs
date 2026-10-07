@@ -253,7 +253,7 @@ fn pane_ui(index: u8) -> impl Scene {
                     padding: {UiRect::axes(Val::Px(12.0), Val::Px(8.0))},
                 }
                 Children [
-                    PromptSpan(Inviting, Join)
+                    ~PromptSpan::<Inviting, Join>
                     ~{PromptFamily(DeviceFamily::Gamepad)}
                     TextFont { font_size: 18.0_f32 }
                     TextColor(Color::WHITE)
@@ -262,7 +262,7 @@ fn pane_ui(index: u8) -> impl Scene {
                     TextFont { font_size: 18.0_f32 }
                     TextColor(Color::WHITE)
                     --
-                    PromptSpan(Inviting, Join)
+                    ~PromptSpan::<Inviting, Join>
                     ~{PromptFamily(DeviceFamily::KeyboardMouse)}
                     TextFont { font_size: 18.0_f32 }
                     TextColor(Color::WHITE)

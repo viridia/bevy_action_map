@@ -322,7 +322,7 @@ fn bomb_meter() -> impl Scene {
             // chord.
             Text
             Children [
-                IconPromptSpan(Flying, SmartBomb)
+                ~IconPromptSpan::<Flying, SmartBomb>
                 ~{PromptFamily(DeviceFamily::Gamepad)}
                 TextFont { font_size: 15.0_f32 }
                 TextColor(Color::srgb(0.5, 0.6, 0.6))

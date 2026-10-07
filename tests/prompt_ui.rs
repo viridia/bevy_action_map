@@ -13,7 +13,8 @@ mod prompt_ui;
 mod kenney;
 
 use prompt_ui::{
-    IconPrompt, IconPromptSpan, PromptClass, PromptFamily, PromptPick, PromptSpan, PromptUnbound,
+    ActionPrompt, IconPrompt, IconPromptSpan, PromptClass, PromptFamily, PromptForm, PromptPick,
+    PromptSpan, PromptUnbound,
 };
 
 #[derive(InputAction)]
@@ -24,9 +25,27 @@ struct Jump;
 #[action(path = "prompt_ui_tests.turn", output = f32, intent = Analog1)]
 struct Turn;
 
+/// An action a scene names by a path, which `bsn!` would read as a patch were it a value.
+mod actions {
+    use bevy_action_map::prelude::*;
+
+    #[derive(InputAction)]
+    #[action(path = "prompt_ui_tests.fire", output = bool, intent = Button)]
+    pub struct Fire;
+}
+
 #[derive(InputContext)]
 #[context(path = "prompt_ui_tests.flying", tick = Render)]
 struct Flying;
+
+/// A prompt for `action` in `Flying`.
+fn prompt(action: ActionId, form: PromptForm) -> ActionPrompt {
+    ActionPrompt {
+        context: Flying.into(),
+        action,
+        form,
+    }
+}
 
 /// Headless: nothing here draws, and a `TextSpan` is a component whether or not anything renders
 /// it. What is being tested is the string, which is the whole of what this layer decides.
@@ -71,7 +90,7 @@ fn a_span_says_what_fires_the_action() {
 
     let span = app
         .world_mut()
-        .spawn(PromptSpan(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::Text))
         .id();
     assert_eq!(caption(&mut app, span), "Space");
 }
@@ -90,12 +109,12 @@ fn a_scheme_beside_the_span_overrides_the_games_device() {
 
     let keyboard = app
         .world_mut()
-        .spawn(PromptSpan(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::Text))
         .id();
     let pad = app
         .world_mut()
         .spawn((
-            PromptSpan(Flying.into(), Jump::id()),
+            prompt(Jump::id(), PromptForm::Text),
             PromptFamily(DeviceFamily::Gamepad),
         ))
         .id();
@@ -133,7 +152,7 @@ fn a_gamepad_button_is_named_in_its_pads_own_words() {
 
         let span = app
             .world_mut()
-            .spawn(PromptSpan(Flying.into(), Jump::id()))
+            .spawn(prompt(Jump::id(), PromptForm::Text))
             .id();
         assert_eq!(caption(&mut app, span), expected, "brand {connected:?}");
     }
@@ -153,7 +172,7 @@ fn a_class_beside_the_span_narrows_to_one_kind_of_control() {
     let button = app
         .world_mut()
         .spawn((
-            PromptSpan(Flying.into(), Turn::id()),
+            prompt(Turn::id(), PromptForm::Text),
             PromptClass(ControlClass::AnyButton),
         ))
         .id();
@@ -173,7 +192,7 @@ fn a_pick_takes_the_one_after_the_first() {
 
     let second = app
         .world_mut()
-        .spawn((PromptSpan(Flying.into(), Turn::id()), PromptPick::Nth(1)))
+        .spawn((prompt(Turn::id(), PromptForm::Text), PromptPick::Nth(1)))
         .id();
     assert_eq!(caption(&mut app, second), "D");
 }
@@ -186,12 +205,12 @@ fn an_action_nothing_fires_renders_a_placeholder() {
 
     let bare = app
         .world_mut()
-        .spawn(PromptSpan(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::Text))
         .id();
     let told = app
         .world_mut()
         .spawn((
-            PromptSpan(Flying.into(), Jump::id()),
+            prompt(Jump::id(), PromptForm::Text),
             PromptUnbound("unbound".to_string()),
         ))
         .id();
@@ -213,7 +232,7 @@ fn a_held_binding_is_named_by_its_control_alone() {
 
     let span = app
         .world_mut()
-        .spawn(PromptSpan(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::Text))
         .id();
     assert_eq!(caption(&mut app, span), "Space");
 }
@@ -230,7 +249,7 @@ fn a_span_catches_up_when_the_answer_moves() {
 
     let span = app
         .world_mut()
-        .spawn(PromptSpan(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::Text))
         .id();
     // Nothing carries the context yet, so there is nothing to name and the span says so.
     assert_eq!(caption(&mut app, span), "—");
@@ -242,8 +261,8 @@ fn a_span_catches_up_when_the_answer_moves() {
     assert_eq!(caption(&mut app, span), "—");
 }
 
-/// No art beats a blank caption: `IconPromptSpan` falls back to the same text `PromptSpan` would
-/// show, bracketed.
+/// No art beats a blank caption: an inline icon prompt falls back to the same text a text prompt
+/// would show, bracketed.
 #[test]
 fn an_icon_prompt_falls_back_to_bracketed_text_when_nothing_fires_the_action() {
     let mut app = app();
@@ -251,7 +270,7 @@ fn an_icon_prompt_falls_back_to_bracketed_text_when_nothing_fires_the_action() {
 
     let span = app
         .world_mut()
-        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::InlineIcon))
         .id();
     assert_eq!(caption(&mut app, span), "[—]");
 }
@@ -325,7 +344,7 @@ fn an_icon_prompt_draws_every_control_in_a_chord() {
 
     let span = app
         .world_mut()
-        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::InlineIcon))
         .id();
     let chord = [
         "input_prompts/keyboard_mouse/mod/ctrl.png",
@@ -355,7 +374,7 @@ fn an_inline_icon_is_sized_from_its_font() {
     let span = app
         .world_mut()
         .spawn((
-            IconPromptSpan(Flying.into(), Jump::id()),
+            prompt(Jump::id(), PromptForm::InlineIcon),
             TextFont {
                 font_size: 24.0.into(),
                 ..default()
@@ -390,7 +409,7 @@ fn an_icon_prompt_draws_a_pad_chord_in_the_pads_art() {
 
     let span = app
         .world_mut()
-        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::InlineIcon))
         .id();
     assert_eq!(
         icons(&mut app, span),
@@ -417,7 +436,7 @@ fn an_icon_prompt_falls_back_whole_when_one_control_has_no_art() {
 
     let span = app
         .world_mut()
-        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::InlineIcon))
         .id();
     assert_eq!(icons(&mut app, span), Vec::<String>::new());
     assert_eq!(caption(&mut app, span), "[Ctrl+Numpad *]");
@@ -436,7 +455,7 @@ fn an_icon_prompt_without_art_providers_is_text() {
 
     let span = app
         .world_mut()
-        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::InlineIcon))
         .id();
     assert_eq!(icons(&mut app, span), Vec::<String>::new());
     assert_eq!(caption(&mut app, span), "[Space]");
@@ -454,7 +473,7 @@ fn an_icon_prompt_draws_a_macs_own_modifier_keys_on_a_mac() {
 
     let span = app
         .world_mut()
-        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::InlineIcon))
         .id();
     let alt = if cfg!(target_os = "macos") {
         "input_prompts/macos/mod/alt.png"
@@ -487,7 +506,7 @@ fn an_icon_prompt_keeps_its_old_chord_until_the_new_art_loads() {
 
     let span = app
         .world_mut()
-        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::InlineIcon))
         .id();
     let xbox = [
         "input_prompts/xbox/pad/LeftTrigger.png",
@@ -536,7 +555,7 @@ fn a_block_icon_prompt_draws_a_chord_from_the_full_size_art() {
 
     let prompt = app
         .world_mut()
-        .spawn(IconPrompt(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::BlockIcon))
         .id();
     assert_eq!(
         icons(&mut app, prompt),
@@ -556,33 +575,69 @@ fn a_block_icon_prompt_falls_back_to_a_text_node() {
 
     let prompt = app
         .world_mut()
-        .spawn(IconPrompt(Flying.into(), Jump::id()))
+        .spawn(prompt(Jump::id(), PromptForm::BlockIcon))
         .id();
     assert_eq!(icons(&mut app, prompt), ["[—]"]);
     assert!(app.world().get::<TextSpan>(prompt).is_none());
 }
 
-/// A scene names the context and the action themselves, and each span ends up with their ids. Two
-/// actions, because a conversion that silently left the default would still match whichever one was
-/// interned first.
+/// What a scene spawned as a prompt: its context, action and form.
+fn spawned(app: &mut App, scene: impl Scene) -> (ContextId, ActionId, PromptForm) {
+    let entity = app.world_mut().spawn_scene(scene).unwrap().id();
+    let prompt = app.world().get::<ActionPrompt>(entity).unwrap();
+    (prompt.context, prompt.action, prompt.form)
+}
+
+/// Each template builds its own form, from the context and action it names. Three actions, because
+/// an id silently left at its default would still match whichever one was interned first.
 #[test]
-fn a_scene_names_a_prompt_by_its_context_and_action() {
+fn a_template_builds_a_prompt_of_its_own_form() {
     let mut app = app();
     app.add_plugins(bevy::scene::ScenePlugin);
 
-    let jump = app
-        .world_mut()
-        .spawn_scene(bsn! { PromptSpan(Flying, Jump) })
-        .unwrap()
-        .id();
-    let turn = app
-        .world_mut()
-        .spawn_scene(bsn! { IconPrompt(Flying, Turn) })
-        .unwrap()
-        .id();
+    assert_eq!(
+        spawned(&mut app, bsn! { ~PromptSpan::<Flying, Jump> }),
+        (Flying.into(), Jump::id(), PromptForm::Text)
+    );
+    assert_eq!(
+        spawned(&mut app, bsn! { ~IconPromptSpan::<Flying, Turn> }),
+        (Flying.into(), Turn::id(), PromptForm::InlineIcon)
+    );
+    assert_eq!(
+        spawned(&mut app, bsn! { ~IconPrompt::<Flying, actions::Fire> }),
+        (Flying.into(), actions::Fire::id(), PromptForm::BlockIcon)
+    );
+}
 
-    let jump = app.world().get::<PromptSpan>(jump).unwrap();
-    assert_eq!((jump.0, jump.1), (Flying.into(), Jump::id()));
-    let turn = app.world().get::<IconPrompt>(turn).unwrap();
-    assert_eq!((turn.0, turn.1), (Flying.into(), Turn::id()));
+/// A scene holding ids rather than types writes the component itself.
+#[test]
+fn a_scene_writes_a_prompt_from_ids() {
+    let mut app = app();
+    app.add_plugins(bevy::scene::ScenePlugin);
+
+    let (context, action) = (ContextId::from(Flying), Turn::id());
+    assert_eq!(
+        spawned(
+            &mut app,
+            bsn! { ActionPrompt { context: {context}, action: {action}, form: PromptForm::BlockIcon } }
+        ),
+        (Flying.into(), Turn::id(), PromptForm::BlockIcon)
+    );
+}
+
+/// A block prompt keeps the node its scene gave it, which is what sizes its icons.
+#[test]
+fn a_block_icon_prompt_keeps_its_scenes_node() {
+    let mut app = app();
+    app.add_plugins(bevy::scene::ScenePlugin);
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
+
+    let entity = app
+        .world_mut()
+        .spawn_scene(bsn! { ~IconPrompt::<Flying, Jump> Node { height: Val::Px(30.0) } })
+        .unwrap()
+        .id();
+    app.update();
+    let node = app.world().get::<Node>(entity).unwrap();
+    assert_eq!(node.height, Val::Px(30.0));
 }

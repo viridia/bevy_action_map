@@ -32,9 +32,7 @@ use bevy_action_map::preset::Preset;
 #[path = "common/mod.rs"]
 mod common;
 
-use common::prompt_ui::{
-    self, IconPrompt, IconPromptSpan, PromptBrand, PromptFamily, PromptPick, PromptSpan,
-};
+use common::prompt_ui::{self, ActionPrompt, PromptBrand, PromptFamily, PromptForm, PromptPick};
 
 const TITLE: Color = Color::srgb(0.85, 0.9, 0.92);
 const LABEL: Color = Color::srgb(0.45, 0.5, 0.52);
@@ -338,7 +336,7 @@ fn word(context: ContextId, action: ActionId, family: DeviceFamily, n: u8) -> im
     bsn! {
         Text
         Children [
-            PromptSpan({context}, {action})
+            ActionPrompt { context: {context}, action: {action}, form: PromptForm::Text }
             ~{PromptFamily(family)}
             ~{PromptPick::Nth(n)}
             TextFont { font_size: {FONT_SIZE} }
@@ -351,7 +349,7 @@ fn icon(context: ContextId, action: ActionId, family: DeviceFamily, n: u8) -> im
     bsn! {
         Text
         Children [
-            IconPromptSpan({context}, {action})
+            ActionPrompt { context: {context}, action: {action}, form: PromptForm::InlineIcon }
             ~{PromptFamily(family)}
             ~{PromptPick::Nth(n)}
             TextFont { font_size: {FONT_SIZE} }
@@ -362,7 +360,7 @@ fn icon(context: ContextId, action: ActionId, family: DeviceFamily, n: u8) -> im
 
 fn block(context: ContextId, action: ActionId, family: DeviceFamily, n: u8) -> impl Scene {
     bsn! {
-        IconPrompt({context}, {action})
+        ActionPrompt { context: {context}, action: {action}, form: PromptForm::BlockIcon }
         ~{PromptFamily(family)}
         ~{PromptPick::Nth(n)}
         TextFont { font_size: {FONT_SIZE} }

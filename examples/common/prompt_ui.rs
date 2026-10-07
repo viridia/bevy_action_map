@@ -15,10 +15,10 @@
 //!
 //! # What is here
 //!
-//! [`PromptSpan`] names a context and an action, and fills in its own string. The companions beside
-//! it narrow the answer — which device, which kind of control, which of several — and each is a
-//! separate component rather than a field, so that a template says which question it is asking and
-//! so that a new narrowing is additive. A span with no companions renders the strongest control
+//! [`ActionPrompt`] names a context and an action, and draws whatever fires it. The companions
+//! beside it narrow the answer — which device, which kind of control, which of several — and each
+//! is a separate component rather than a field, so that a template says which question it is asking
+//! and so that a new narrowing is additive. A span with no companions renders the strongest control
 //! bound to the action on the device the game speaks for.
 //!
 //! # Why one control
@@ -30,9 +30,11 @@
 //! thrust" is a worse one even where both are true.
 
 use std::borrow::Cow;
+use std::marker::PhantomData;
 
 use bevy::asset::AssetPath;
 use bevy::ecs::schedule::SystemCondition;
+use bevy::ecs::template::{Template, TemplateContext};
 use bevy::prelude::*;
 use bevy::text::RemSize;
 use bevy::ui::{ComputedUiRenderTargetInfo, UiSystems};
@@ -40,58 +42,121 @@ use bevy_action_map::device::{Brand, GamepadBrand};
 use bevy_action_map::prelude::*;
 use bevy_action_map_ui::{IconLayout, PromptArt};
 
-/// Renders the control an action is bound to in one context, written `PromptSpan(Menu, Close)`.
+/// Renders the control an action is bound to in one context.
 ///
 /// The context is the one the player is in when they read the prompt, since the same action can be
 /// bound differently in two of them.
 ///
-/// The string is filled in for you, and rewritten when it stops being true — when a binding
+/// What is drawn is filled in for you, and redrawn when it stops being true — when a binding
 /// changes, or when the context starts or stops being carried. A context that is switched off, or
 /// shadowed by a menu over it, still answers, so hiding a hint while it does not apply is the
 /// game's call.
+///
+/// A scene writes one with a template that names the context and action as types:
+/// `~PromptSpan::<Menu, Close>`, `~IconPromptSpan::<Menu, Close>` or `~IconPrompt::<Menu, Close>`.
+/// Code that has only the ids, such as a screen listing every registered action, spawns this
+/// directly. Either way the entity is given the text or UI components its form draws with when the
+/// prompt is first written, keeping any the scene set.
 #[derive(Component, Clone, Copy, Default)]
-#[require(TextSpan)]
-pub struct PromptSpan(pub ContextId, pub ActionId);
+pub struct ActionPrompt {
+    /// The context the action is looked up in.
+    pub context: ContextId,
+    /// The action whose control is shown.
+    pub action: ActionId,
+    /// How the control is drawn.
+    pub form: PromptForm,
+}
 
-/// Renders the control an action is bound to as an icon, inline in a line of text.
-///
-/// A chord draws every control in it as children of this span, joined by `+`, so the whole chord
-/// stays one run that moves with its sentence. The `+` takes the span's own `TextFont` and
-/// `TextColor`.
-///
-/// The icons are sized from the span's font, so a larger `TextFont` draws larger icons. A font size
-/// relative to the window is read when the icons go in, and a resize leaves them at that size until
-/// the prompt's answer next changes.
-///
-/// A new answer waits for its art: the span goes on drawing the old one until every icon in the new
-/// one has loaded, so the line never reflows around an icon that is still loading.
-///
-/// Falls back to the same text [`PromptSpan`] would show, bracketed, wherever nothing has art for
-/// the control, such as an unrecognized pad brand or a control the art simply does not cover, so
-/// a caption never goes blank for want of an icon. A chord falls back whole if any control in it
-/// has no art. The brackets are only there for that fallback: an icon reads as a control on its own
-/// and does not need them, so a caller wraps neither in its own punctuation.
-#[derive(Component, Clone, Copy, Default)]
-#[require(TextSpan)]
-pub struct IconPromptSpan(pub ContextId, pub ActionId);
+/// How an [`ActionPrompt`] draws its control.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub enum PromptForm {
+    /// The control's name, as a text span in a line of text.
+    #[default]
+    Text,
+    /// An icon inline in a line of text, as a text span.
+    ///
+    /// A chord draws every control in it as children of this span, joined by `+`, so the whole
+    /// chord stays one run that moves with its sentence. The `+` takes the span's own `TextFont`
+    /// and `TextColor`.
+    ///
+    /// The icons are sized from the span's font, so a larger `TextFont` draws larger icons. A font
+    /// size relative to the window is read when the icons go in, and a resize leaves them at that
+    /// size until the prompt's answer next changes.
+    ///
+    /// A new answer waits for its art: the span goes on drawing the old one until every icon in the
+    /// new one has loaded, so the line never reflows around an icon that is still loading.
+    ///
+    /// Falls back to the same text [`PromptForm::Text`] would show, bracketed, wherever nothing has
+    /// art for the control, such as an unrecognized pad brand or a control the art simply does not
+    /// cover, so a caption never goes blank for want of an icon. A chord falls back whole if any
+    /// control in it has no art. The brackets are only there for that fallback: an icon reads as a
+    /// control on its own and does not need them, so a caller wraps neither in its own punctuation.
+    InlineIcon,
+    /// An icon in a UI node of its own.
+    ///
+    /// What a button's caption or a row of hints wants, where [`PromptForm::InlineIcon`] is for a
+    /// prompt in the middle of a sentence. It lays out like any other node: in a row with
+    /// `align_items: AlignItems::Center`, it lines up with the label beside it.
+    ///
+    /// The icons fill the node's height, so size them by giving its `Node` one. The art is scaled
+    /// down from a large original, which keeps it sharp on a high-density display. Without a
+    /// height, the art is drawn at its own size.
+    ///
+    /// A chord is a row of icons joined by `+`, and the `+` takes this node's `TextFont` and
+    /// `TextColor`, as does the text it falls back to. Otherwise it behaves as an inline icon does:
+    /// it keeps drawing the old answer until the new one's art has loaded, and falls back to
+    /// bracketed text where there is no art.
+    BlockIcon,
+}
 
-/// Renders the control an action is bound to as an icon, in a UI node of its own.
-///
-/// What a button's caption or a row of hints wants, where [`IconPromptSpan`] is for a prompt in the
-/// middle of a sentence. It lays out like any other node: in a row with
-/// `align_items: AlignItems::Center`, it lines up with the label beside it.
-///
-/// The icons fill the node's height, so size them by giving its `Node` one. The art is scaled down
-/// from a large original, which keeps it sharp on a high-density display. Without a height, the art
-/// is drawn at its own size.
-///
-/// A chord is a row of icons joined by `+`, and the `+` takes this node's `TextFont` and
-/// `TextColor`, as does the text it falls back to. Otherwise it behaves as [`IconPromptSpan`] does:
-/// it keeps drawing the old answer until the new one's art has loaded, and falls back to bracketed
-/// text where there is no art.
-#[derive(Component, Clone, Copy, Default)]
-#[require(Node, TextFont, TextColor)]
-pub struct IconPrompt(pub ContextId, pub ActionId);
+/// Defines a template that builds an [`ActionPrompt`] of one form, from a context and an action
+/// named as types.
+macro_rules! prompt_template {
+    ($(#[$doc:meta])* $name:ident, $form:expr) => {
+        $(#[$doc])*
+        pub struct $name<C, A>(PhantomData<fn() -> (C, A)>);
+
+        impl<C, A> Default for $name<C, A> {
+            fn default() -> Self {
+                Self(PhantomData)
+            }
+        }
+
+        impl<C: InputContext, A: InputAction> Template for $name<C, A> {
+            type Output = ActionPrompt;
+
+            fn build_template(&self, _: &mut TemplateContext) -> Result<ActionPrompt> {
+                Ok(ActionPrompt {
+                    context: ContextId::of::<C>(),
+                    action: A::id(),
+                    form: $form,
+                })
+            }
+
+            fn clone_template(&self) -> Self {
+                Self::default()
+            }
+        }
+    };
+}
+
+prompt_template! {
+    /// A prompt that names its control in text, written `~PromptSpan::<Menu, Close>` as a child of
+    /// a `Text`.
+    PromptSpan, PromptForm::Text
+}
+
+prompt_template! {
+    /// A prompt that draws its control as an icon in a line of text, written
+    /// `~IconPromptSpan::<Menu, Close>` as a child of a `Text`. See [`PromptForm::InlineIcon`].
+    IconPromptSpan, PromptForm::InlineIcon
+}
+
+prompt_template! {
+    /// A prompt that draws its control as an icon in a node of its own, written
+    /// `~IconPrompt::<Menu, Close>`. See [`PromptForm::BlockIcon`].
+    IconPrompt, PromptForm::BlockIcon
+}
 
 /// Which device family one span speaks for, overriding [`PromptDevice`].
 ///
@@ -159,14 +224,11 @@ pub fn plugin(app: &mut App) {
         PostUpdate,
         (
             refresh_prompts.run_if(
-                resource_changed::<PromptGeneration>.or_else(any_match_filter::<Added<PromptSpan>>),
-            ),
-            refresh_icon_prompts.run_if(
                 resource_changed::<PromptGeneration>
-                    .or_else(any_match_filter::<Or<(Added<IconPromptSpan>, Added<IconPrompt>)>>),
+                    .or_else(any_match_filter::<Added<ActionPrompt>>),
             ),
             swap_in_icons
-                .after(refresh_icon_prompts)
+                .after(refresh_prompts)
                 .run_if(any_with_component::<PendingIcons>),
         )
             .before(UiSystems::Prepare),
@@ -174,9 +236,6 @@ pub fn plugin(app: &mut App) {
 }
 
 /// [`PromptDevice`]'s family, warning once if a game never set one.
-///
-/// Shared by [`refresh_prompts`] and [`refresh_icon_prompts`] so the warning fires from one call
-/// site rather than two.
 fn active_family(world: &World) -> Option<DeviceFamily> {
     world.get_resource::<PromptDevice>().map_or_else(
         || {
@@ -217,7 +276,7 @@ fn connected_brand(world: &mut World) -> GamepadBrand {
 ///
 /// A presentation choice, and deliberately this side of the crate: `Generic` genuinely means "no
 /// brand-specific name", which is a fact. What to *show* when there is none is a game's call.
-/// [`refresh_icon_prompts`] does not do this — art that says Xbox on an unrecognized pad would be
+/// Icon art does not do this — art that says Xbox on an unrecognized pad would be
 /// claiming something, where a word is only labelling one.
 fn labelling_brand(world: &mut World) -> GamepadBrand {
     match connected_brand(world) {
@@ -227,7 +286,7 @@ fn labelling_brand(world: &mut World) -> GamepadBrand {
 }
 
 /// The scope a prompt's own companions narrow it to, and which of possibly several answers it asks
-/// for — shared by [`refresh_prompts`] and [`refresh_icon_prompts`].
+/// for.
 fn scope_and_index(
     device: Option<DeviceFamily>,
     scheme: Option<&PromptFamily>,
@@ -248,15 +307,22 @@ fn scope_and_index(
     (scope, index)
 }
 
-/// Everything one span needs in order to ask its question.
+/// Everything one prompt needs in order to ask its question.
 type PromptQuery = (
     Entity,
-    &'static PromptSpan,
+    &'static ActionPrompt,
     Option<&'static PromptFamily>,
     Option<&'static PromptClass>,
     Option<&'static PromptPick>,
     Option<&'static PromptUnbound>,
 );
+
+/// What one prompt resolved to: an image to load per control in the chord, in the order they are
+/// drawn, or text.
+enum Resolved {
+    Icons(Vec<AssetPath<'static>>),
+    Text(String),
+}
 
 /// Rewrites every prompt on screen.
 ///
@@ -267,26 +333,101 @@ type PromptQuery = (
 ///
 /// Exclusive because the lookup reads the whole world. It walks every declared context, and the
 /// types of those are long gone by the time anything wants a prompt.
+///
+/// Which gamepad's brand a control's icon draws in is read the way [`split_screen`]'s device label
+/// already does: the first connected pad's `Brand`, since nothing here plays more than one at once,
+/// unless [`PromptBrand`] overrides it.
+///
+/// [`split_screen`]: ../split_friction/split_screen/index.html
 fn refresh_prompts(world: &mut World) {
-    let device = active_family(world);
-    let brand = labelling_brand(world);
-    let source = world.resource::<PromptSource>().0;
+    let mut prompts = world.query::<PromptQuery>();
+    if prompts.iter(world).next().is_none() {
+        return;
+    }
 
-    let mut spans = world.query::<PromptQuery>();
-    let captions: Vec<(Entity, String)> = spans
+    let device = active_family(world);
+    // Two brands, deliberately: art is resolved from what the pad actually is, text from what the
+    // button is called — see `labelling_brand`.
+    let brand = connected_brand(world);
+    let labelled = labelling_brand(world);
+    let art = world.resource::<PromptArt>();
+    let source = world.resource::<PromptSource>().0;
+    let resolved: Vec<(Entity, PromptForm, Resolved)> = prompts
         .iter(world)
-        .map(|(entity, span, scheme, class, pick, unbound)| {
+        .map(|(entity, prompt, scheme, class, pick, unbound)| {
             let (scope, index) = scope_and_index(device, scheme, class, pick);
-            let text = source(world, span.0, span.1, scope).get(index).map_or_else(
-                || unbound.map_or_else(|| "—".to_string(), |text| text.0.clone()),
-                |prompt| caption(prompt, brand),
-            );
-            (entity, text)
+            let answers = source(world, prompt.context, prompt.action, scope);
+            let Some(answer) = answers.get(index) else {
+                let text = unbound.map_or_else(|| "—".to_string(), |text| text.0.clone());
+                return (entity, prompt.form, Resolved::Text(text));
+            };
+            let layout = match prompt.form {
+                PromptForm::Text => {
+                    return (
+                        entity,
+                        prompt.form,
+                        Resolved::Text(caption(answer, labelled)),
+                    );
+                }
+                PromptForm::InlineIcon => IconLayout::Inline,
+                PromptForm::BlockIcon => IconLayout::Block,
+            };
+            let has_art = |tier, origin: &ControlOrigin| art.has_art(tier, origin, layout);
+            // All or none: a chord drawn half as art and half as bracketed words reads as two
+            // separate answers.
+            let resolved = answer
+                .with
+                .iter()
+                .chain([&answer.origin])
+                .map(|origin| {
+                    resolve_glyph(origin, brand, has_art).and_then(|glyph| art.path(&glyph, layout))
+                })
+                .collect::<Option<Vec<_>>>()
+                .map_or_else(
+                    || Resolved::Text(caption(answer, labelled)),
+                    Resolved::Icons,
+                );
+            (entity, prompt.form, resolved)
         })
         .collect();
 
-    for (entity, text) in captions {
-        world.entity_mut(entity).insert(TextSpan::new(text));
+    for (entity, form, resolved) in resolved {
+        let mut entity = world.entity_mut(entity);
+        // Whatever the scene set wins: a block's `Node` carries its height.
+        match form {
+            PromptForm::Text | PromptForm::InlineIcon => {
+                entity.insert_if_new(TextSpan::default());
+            }
+            PromptForm::BlockIcon => {
+                entity.insert_if_new((Node::default(), TextFont::default(), TextColor::default()));
+            }
+        }
+        match resolved {
+            Resolved::Icons(paths) => {
+                let asset_server = entity.resource::<AssetServer>();
+                let icons = paths.into_iter().map(|path| asset_server.load(path));
+                let icons = PendingIcons(icons.collect());
+                entity.insert(icons);
+            }
+            Resolved::Text(text) if form == PromptForm::Text => {
+                entity.insert(TextSpan::new(text));
+            }
+            Resolved::Text(text) => {
+                // A chord still waiting on its art is no longer the answer.
+                entity.remove::<PendingIcons>();
+                entity.despawn_children();
+                // The brackets belong to the fallback, not to a prompt — see
+                // `PromptForm::InlineIcon`.
+                let text = format!("[{text}]");
+                if form == PromptForm::BlockIcon {
+                    let font = entity.get::<TextFont>().cloned().unwrap_or_default();
+                    let color = entity.get::<TextColor>().copied().unwrap_or_default();
+                    entity.with_child(block_text(text, font, color));
+                } else {
+                    entity.insert(TextSpan::new(text));
+                }
+            }
+        }
     }
 }
 
@@ -321,114 +462,7 @@ fn branded(origin: &ControlOrigin, brand: GamepadBrand) -> Cow<'_, str> {
 /// letters beside it.
 const INLINE_ICON_SCALE: f32 = 5.0 / 3.0;
 
-/// Everything one icon prompt needs in order to ask its question — mirrors [`PromptQuery`].
-type IconPromptQuery = (
-    Entity,
-    AnyOf<(&'static IconPromptSpan, &'static IconPrompt)>,
-    Option<&'static PromptFamily>,
-    Option<&'static PromptClass>,
-    Option<&'static PromptPick>,
-    Option<&'static PromptUnbound>,
-);
-
-/// What one icon prompt resolved to: an image to load per control in the chord, in the order they
-/// are drawn, or text to fall back to.
-enum Resolved {
-    Icons(Vec<AssetPath<'static>>),
-    Text(String),
-}
-
-/// Rewrites every icon prompt on screen — the same staleness contract as [`refresh_prompts`],
-/// answering the same lookup, but choosing between an icon and text rather than only ever text.
-///
-/// Which gamepad's brand a control's icon draws in is read the way [`split_screen`]'s device label
-/// already does: the first connected pad's `Brand`, since nothing here plays more than one at once,
-/// unless [`PromptBrand`] overrides it.
-///
-/// [`split_screen`]: ../split_friction/split_screen/index.html
-fn refresh_icon_prompts(world: &mut World) {
-    let mut spans = world.query::<IconPromptQuery>();
-    // Nothing to draw, so nothing to ask `AssetServer` or `Brand` for either — a game that never
-    // spawns an icon prompt should not have to carry either just because this system shares
-    // `PromptSpan`'s own staleness signal.
-    if spans.iter(world).next().is_none() {
-        return;
-    }
-
-    let device = active_family(world);
-    // Two brands, deliberately: art is resolved from what the pad actually is, the text it falls
-    // back to from what `refresh_prompts` would call the button — see `labelling_brand`.
-    let brand = connected_brand(world);
-    let labelled = labelling_brand(world);
-    let art = world.resource::<PromptArt>();
-    let source = world.resource::<PromptSource>().0;
-    let resolved: Vec<(Entity, bool, Resolved)> = spans
-        .iter(world)
-        .map(|(entity, kind, scheme, class, pick, unbound)| {
-            let (context, action, block) = match kind {
-                (_, Some(block)) => (block.0, block.1, true),
-                (Some(span), None) => (span.0, span.1, false),
-                (None, None) => unreachable!("`AnyOf` matched neither"),
-            };
-            let layout = if block {
-                IconLayout::Block
-            } else {
-                IconLayout::Inline
-            };
-            let has_art = |tier, origin: &ControlOrigin| art.has_art(tier, origin, layout);
-            let (scope, index) = scope_and_index(device, scheme, class, pick);
-            let prompts = source(world, context, action, scope);
-            let resolved = match prompts.get(index) {
-                None => {
-                    Resolved::Text(unbound.map_or_else(|| "—".to_string(), |text| text.0.clone()))
-                }
-                // All or none: a chord drawn half as art and half as bracketed words reads as two
-                // separate answers.
-                Some(prompt) => prompt
-                    .with
-                    .iter()
-                    .chain([&prompt.origin])
-                    .map(|origin| {
-                        resolve_glyph(origin, brand, has_art)
-                            .and_then(|glyph| art.path(&glyph, layout))
-                    })
-                    .collect::<Option<Vec<_>>>()
-                    .map_or_else(
-                        || Resolved::Text(caption(prompt, labelled)),
-                        Resolved::Icons,
-                    ),
-            };
-            (entity, block, resolved)
-        })
-        .collect();
-
-    let asset_server = world.resource::<AssetServer>().clone();
-    for (entity, block, resolved) in resolved {
-        let mut entity = world.entity_mut(entity);
-        match resolved {
-            Resolved::Icons(paths) => {
-                let icons = paths.into_iter().map(|path| asset_server.load(path));
-                entity.insert(PendingIcons(icons.collect()));
-            }
-            Resolved::Text(text) => {
-                // A chord still waiting on its art is no longer the answer.
-                entity.remove::<PendingIcons>();
-                entity.despawn_children();
-                // The brackets belong to the fallback, not to a prompt — see `IconPromptSpan`.
-                let text = format!("[{text}]");
-                if block {
-                    let font = entity.get::<TextFont>().cloned().unwrap_or_default();
-                    let color = entity.get::<TextColor>().copied().unwrap_or_default();
-                    entity.with_child(block_text(text, font, color));
-                } else {
-                    entity.insert(TextSpan::new(text));
-                }
-            }
-        }
-    }
-}
-
-/// Text inside an [`IconPrompt`]: the `+` in a chord, or the whole of a fallback.
+/// Text inside a block icon prompt: the `+` in a chord, or the whole of a fallback.
 ///
 /// Centred on its own, since the prompt's node leaves its children stretched to its height and a
 /// stretched text node draws at the top.
@@ -456,27 +490,22 @@ struct PendingIcons(Vec<Handle<Image>>);
 ///
 /// Before UI layout, so each icon's box is sized from an image already in memory in the frame it
 /// first appears. A chord whose art is already loaded, such as one a rebind left unchanged, swaps
-/// in the same frame [`refresh_icon_prompts`] resolved it.
+/// in the same frame [`refresh_prompts`] resolved it.
 ///
 /// An icon that fails to load leaves its chord pending, with the previous one still drawn: the
-/// art's provider has already said the file exists, so a failure is a broken install, and
-/// Bevy logs it.
+/// art's provider has already said the file exists, so a failure is a broken install, and Bevy logs
+/// it.
 fn swap_in_icons(
     mut commands: Commands,
-    spans: Query<(
-        Entity,
-        &PendingIcons,
-        &TextFont,
-        &TextColor,
-        Has<IconPrompt>,
-    )>,
+    spans: Query<(Entity, &PendingIcons, &TextFont, &TextColor, &ActionPrompt)>,
     parents: Query<&ChildOf>,
     targets: Query<&ComputedUiRenderTargetInfo>,
     rem: Option<Res<RemSize>>,
     images: Res<Assets<Image>>,
 ) {
     let rem = rem.map_or_else(RemSize::default, |rem| *rem);
-    for (entity, pending, font, color, block) in &spans {
+    for (entity, pending, font, color, prompt) in &spans {
+        let block = prompt.form == PromptForm::BlockIcon;
         if !pending.0.iter().all(|icon| images.contains(icon)) {
             continue;
         }

@@ -126,7 +126,7 @@ fn hint() -> impl Scene {
             left: Val::Px(8.0),
         }
         Children [
-            IconPromptSpan(Shell, ToggleOverlay)
+            ~IconPromptSpan::<Shell, ToggleOverlay>
             TextFont { font_size: 13.0_f32 }
             TextColor(KEY)
             --
@@ -134,7 +134,7 @@ fn hint() -> impl Scene {
             TextFont { font_size: 13.0_f32 }
             TextColor(LABEL)
             --
-            IconPromptSpan(Shell, ToggleSettings)
+            ~IconPromptSpan::<Shell, ToggleSettings>
             TextFont { font_size: 13.0_f32 }
             TextColor(KEY)
             --
@@ -142,7 +142,7 @@ fn hint() -> impl Scene {
             TextFont { font_size: 13.0_f32 }
             TextColor(LABEL)
             --
-            PromptSpan(Shell, NewGame)
+            ~PromptSpan::<Shell, NewGame>
             ~{PromptFamily(DeviceFamily::KeyboardMouse)}
             TextFont { font_size: 13.0_f32 }
             TextColor(KEY)
