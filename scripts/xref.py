@@ -67,6 +67,7 @@ def sources():
         for d in (
             "crates/bevy_action_map/src",
             "crates/bevy_action_map/tests",
+            "crates/bevy_action_map_ui/src",
             "examples",
             "crates/bevy_remote_driver/src",
         )

@@ -1,0 +1,19 @@
+[package]
+name = "bevy_action_map_ui"
+description = "UI for bevy_action_map: drawing input prompts"
+keywords = ["bevy", "input", "ui", "prompts"]
+categories = ["game-development"]
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["-Zunstable-options", "--generate-link-to-definition", "--cfg", "docsrs"]
