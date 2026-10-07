@@ -18,7 +18,8 @@
 //! [`ActionPrompt`] names a context and an action, and draws whatever fires it. The companions
 //! beside it narrow the answer — which device, which kind of control, which of several — and each
 //! is a separate component rather than a field, so that a template says which question it is asking
-//! and so that a new narrowing is additive. A span with no companions renders the strongest control
+//! and so that a new narrowing is additive. [`InlineIconSize`] is a companion of the same kind that
+//! says how large an inline icon is drawn. A span with no companions renders the strongest control
 //! bound to the action on the device the game speaks for.
 //!
 //! # Why one control
@@ -36,7 +37,7 @@ use bevy::asset::AssetPath;
 use bevy::ecs::schedule::SystemCondition;
 use bevy::ecs::template::{Template, TemplateContext};
 use bevy::prelude::*;
-use bevy::text::RemSize;
+use bevy::text::{EmSize, RemSize};
 use bevy::ui::{ComputedUiRenderTargetInfo, UiSystems};
 use bevy_action_map::device::{Brand, GamepadBrand};
 use bevy_action_map::prelude::*;
@@ -79,9 +80,10 @@ pub enum PromptForm {
     /// chord stays one run that moves with its sentence. The `+` takes the span's own `TextFont`
     /// and `TextColor`.
     ///
-    /// The icons are sized from the span's font, so a larger `TextFont` draws larger icons. A font
-    /// size relative to the window is read when the icons go in, and a resize leaves them at that
-    /// size until the prompt's answer next changes.
+    /// The icons are sized from the span's font, so a larger `TextFont` draws larger icons, and an
+    /// [`InlineIconSize`] beside the span sets how much larger. A font size or an icon size
+    /// relative to the window is read when the icons go in, and a resize leaves them at that size
+    /// until the prompt's answer next changes.
     ///
     /// A new answer waits for its art: the span goes on drawing the old one until every icon in the
     /// new one has loaded, so the line never reflows around an icon that is still loading.
@@ -190,6 +192,25 @@ pub enum PromptPick {
 /// than as an unbound control, which is what it is.
 #[derive(Component, Clone)]
 pub struct PromptUnbound(pub String);
+
+/// How tall an inline icon prompt, one of [`PromptForm::InlineIcon`], draws its icons.
+///
+/// Measured against the span's font: `Val::Em(2.0)` and `Val::Percent(200.0)` both stand an icon
+/// twice the font size. `Val::Px` is a fixed height whatever the font, and `Val::Auto` draws the
+/// art at its own size. Without one, an icon stands at `Val::Em(5.0 / 3.0)`, which suits art that
+/// leaves a margin around each glyph.
+///
+/// A block icon prompt ignores it: its `Node`'s height sizes the icons.
+#[derive(Component, Clone, Copy)]
+pub struct InlineIconSize(pub Val);
+
+impl Default for InlineIconSize {
+    // Kenney's art draws each glyph in the middle three quarters of its square, so this puts the
+    // glyph itself a little taller than the letters beside it.
+    fn default() -> Self {
+        Self(Val::Em(5.0 / 3.0))
+    }
+}
 
 /// Which brand pad prompts speak in, whatever pad is connected.
 ///
@@ -457,11 +478,6 @@ fn branded(origin: &ControlOrigin, brand: GamepadBrand) -> Cow<'_, str> {
     }
 }
 
-/// How tall an inline icon stands against its span's font size. Kenney's art draws each glyph in
-/// the middle three quarters of its square, so this puts the glyph itself a little taller than the
-/// letters beside it.
-const INLINE_ICON_SCALE: f32 = 5.0 / 3.0;
-
 /// Text inside a block icon prompt: the `+` in a chord, or the whole of a fallback.
 ///
 /// Centred on its own, since the prompt's node leaves its children stretched to its height and a
@@ -495,16 +511,27 @@ struct PendingIcons(Vec<Handle<Image>>);
 /// An icon that fails to load leaves its chord pending, with the previous one still drawn: the
 /// art's provider has already said the file exists, so a failure is a broken install, and Bevy logs
 /// it.
+#[expect(
+    clippy::type_complexity,
+    reason = "one query of everything a span is drawn from"
+)]
 fn swap_in_icons(
     mut commands: Commands,
-    spans: Query<(Entity, &PendingIcons, &TextFont, &TextColor, &ActionPrompt)>,
+    spans: Query<(
+        Entity,
+        &PendingIcons,
+        &TextFont,
+        &TextColor,
+        &ActionPrompt,
+        Option<&InlineIconSize>,
+    )>,
     parents: Query<&ChildOf>,
     targets: Query<&ComputedUiRenderTargetInfo>,
     rem: Option<Res<RemSize>>,
     images: Res<Assets<Image>>,
 ) {
     let rem = rem.map_or_else(RemSize::default, |rem| *rem);
-    for (entity, pending, font, color, prompt) in &spans {
+    for (entity, pending, font, color, prompt, size) in &spans {
         let block = prompt.form == PromptForm::BlockIcon;
         if !pending.0.iter().all(|icon| images.contains(icon)) {
             continue;
@@ -514,7 +541,13 @@ fn swap_in_icons(
             .iter_ancestors(entity)
             .find_map(|ancestor| targets.get(ancestor).ok())
             .map_or(Vec2::ZERO, ComputedUiRenderTargetInfo::logical_size);
-        let height = INLINE_ICON_SCALE * font.font_size.eval(viewport, rem);
+        // In logical pixels, which `InlineImage` takes, so at a scale factor of 1; the font is
+        // what a percentage is of. `Auto` cannot resolve, and leaves the height unset.
+        let font_size = font.font_size.eval(viewport, rem);
+        let size = size.copied().unwrap_or_default().0;
+        let height = size
+            .resolve(1.0, font_size, viewport, EmSize(font_size), rem)
+            .ok();
         let mut span = commands.entity(entity);
         span.remove::<PendingIcons>().despawn_related::<Children>();
         if !block {
@@ -541,7 +574,7 @@ fn swap_in_icons(
                     }
                     chord.spawn(InlineImage {
                         image: icon,
-                        height: Some(height),
+                        height,
                         ..default()
                     });
                 }

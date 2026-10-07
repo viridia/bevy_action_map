@@ -236,6 +236,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 185  | `show.py` takes an issue number                                       |
 | 170  | Prompt art from an ordered list of providers                          |
 | 189  | One prompt component, written through templates                       |
+| 190  | An inline icon prompt's size, as a `Val`                              |
 
 ---
 
@@ -245,7 +246,6 @@ its identity rather than its position.
 
 ## Next
 
-* 190: An inline icon prompt's size, as a `Val`
 * 172a: `bevy_action_map_ui`, starting with prompts
 * 115: A timing declared as a tunable
 * 121: A camera that takes the mouse, and gives it back
@@ -408,30 +408,6 @@ going through a catalogue. The crate's half of R19.14 is done, but the claim tha
   thing it would genuinely test is whether our key syntax collides with its identifier grammar, and
   that is a reading of the spec rather than a dependency.
 - **Review surface:** whether the key is the one an author would actually want to type.
-
-### 190. An inline icon prompt's size, as a `Val` · E[1]
-
-An inline icon stands `5/3` of its span's font size, a constant in `prompt_ui.rs`. A game whose font
-or art wants another ratio, or a fixed height, has no way to say so. A companion component,
-`InlineIconSize(Val)`, beside `PromptFamily` and the rest, sets it per prompt; without one the
-default is `Val::Em(5.0 / 3.0)`, which is today's behaviour.
-
-- **Resolved by hand.** `InlineImage::height` is an `f32` in logical pixels, so `swap_in_icons`
-  resolves the `Val` with `Val::resolve`, at a scale factor of 1 against the logical viewport, with
-  the span's evaluated font size as both the em size and the base. `Percent` is therefore relative
-  to the font, and `Auto` leaves the height unset, drawing the art at its own size as a block prompt
-  with no height does.
-- **The doc comment** names the inline form of `ActionPrompt`, `PromptForm::InlineIcon`. 172a moves
-  the file either side of it.
-- **Not a block prompt's size,** which its `Node` height already sets; the component is ignored
-  there, and its doc comment says so.
-- **Not a change after the icons go in.** The size is resolved when an answer's icons are placed, as
-  a window-relative font size already is, and the doc comment's caveat widens to cover a
-  window-relative `InlineIconSize`. X61 removes the caveat.
-- **Not an app-wide default.** A resource could sit under the component when a game wants one; none
-  does.
-- **Verified by:** `tests/prompt_ui.rs`, at a 24-pixel font: no component draws the height it does
-  now, `Em(2.0)` draws 48, `Px` ignores the font, `Auto` leaves the height unset.
 
 ### 172a. `bevy_action_map_ui`, starting with prompts · E[3]
 

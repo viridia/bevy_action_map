@@ -13,8 +13,8 @@ mod prompt_ui;
 mod kenney;
 
 use prompt_ui::{
-    ActionPrompt, IconPrompt, IconPromptSpan, PromptClass, PromptFamily, PromptForm, PromptPick,
-    PromptSpan, PromptUnbound,
+    ActionPrompt, IconPrompt, IconPromptSpan, InlineIconSize, PromptClass, PromptFamily,
+    PromptForm, PromptPick, PromptSpan, PromptUnbound,
 };
 
 #[derive(InputAction)]
@@ -361,9 +361,8 @@ fn an_icon_prompt_draws_every_control_in_a_chord() {
     assert_eq!(icons(&mut app, span), chord);
 }
 
-/// An inline icon stands as tall as its line's font calls for, whatever size the art was drawn at.
-#[test]
-fn an_inline_icon_is_sized_from_its_font() {
+/// The height an inline icon prompt draws its icon at, on a 24-pixel font.
+fn inline_icon_height(size: Option<InlineIconSize>) -> Option<f32> {
     let mut app = app();
     app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
     app.add_context::<Flying>(|controls| {
@@ -371,24 +370,41 @@ fn an_inline_icon_is_sized_from_its_font() {
     });
     app.world_mut().spawn(Flying);
 
-    let span = app
-        .world_mut()
-        .spawn((
-            prompt(Jump::id(), PromptForm::InlineIcon),
-            TextFont {
-                font_size: 24.0.into(),
-                ..default()
-            },
-        ))
-        .id();
+    let mut span = app.world_mut().spawn((
+        prompt(Jump::id(), PromptForm::InlineIcon),
+        TextFont {
+            font_size: 24.0.into(),
+            ..default()
+        },
+    ));
+    if let Some(size) = size {
+        span.insert(size);
+    }
+    let span = span.id();
     icons(&mut app, span);
     let world = app.world();
-    let height = world
+    world
         .get::<Children>(span)
         .and_then(|children| world.get::<InlineImage>(children[0]))
-        .and_then(|icon| icon.height)
-        .expect("an inline icon has a height");
+        .expect("an inline icon prompt draws its icon")
+        .height
+}
+
+/// An inline icon stands as tall as its line's font calls for, whatever size the art was drawn at.
+#[test]
+fn an_inline_icon_is_sized_from_its_font() {
+    let height = inline_icon_height(None).expect("an inline icon has a height");
     assert!((height - 40.0).abs() < 1e-3, "{height}");
+}
+
+/// A size beside the span is measured against its font, unless it names a height of its own.
+#[test]
+fn an_inline_icon_size_overrides_the_default() {
+    let height = |val| inline_icon_height(Some(InlineIconSize(val)));
+    assert_eq!(height(Val::Em(2.0)), Some(48.0));
+    assert_eq!(height(Val::Percent(50.0)), Some(12.0));
+    assert_eq!(height(Val::Px(30.0)), Some(30.0));
+    assert_eq!(height(Val::Auto), None);
 }
 
 /// A chord is not a keyboard thing, and a pad chord draws in the pad's own art.
