@@ -38,6 +38,7 @@ use bevy::text::RemSize;
 use bevy::ui::{ComputedUiRenderTargetInfo, UiSystems};
 use bevy_action_map::device::{Brand, GamepadBrand};
 use bevy_action_map::prelude::*;
+use bevy_action_map_ui::{IconLayout, PromptArt};
 
 /// Renders the control an action is bound to in one context, written `PromptSpan(Menu, Close)`.
 ///
@@ -66,7 +67,7 @@ pub struct PromptSpan(pub ContextId, pub ActionId);
 /// one has loaded, so the line never reflows around an icon that is still loading.
 ///
 /// Falls back to the same text [`PromptSpan`] would show, bracketed, wherever nothing has art for
-/// the control, such as an unrecognized pad brand or a control the atlas simply does not cover, so
+/// the control, such as an unrecognized pad brand or a control the art simply does not cover, so
 /// a caption never goes blank for want of an icon. A chord falls back whole if any control in it
 /// has no art. The brackets are only there for that fallback: an icon reads as a control on its own
 /// and does not need them, so a caller wraps neither in its own punctuation.
@@ -147,17 +148,10 @@ impl Default for PromptSource {
     }
 }
 
-/// Where to load a backend's own art from: [`Glyph::External`]'s path, and whether the prompt is a
-/// block one, to an asset path.
-///
-/// The backend knows its own files and this module knows its sizes, so the backend installs this.
-/// Without it, a control with only external art falls back to text.
-#[derive(Resource, Clone, Copy)]
-pub struct ExternalArt(pub fn(&str, bool) -> Option<AssetPath<'static>>);
-
-/// Draws prompts, and keeps them true.
+/// Draws prompts, and keeps them true. The art an icon prompt draws comes from [`PromptArt`]'s
+/// providers, added by plugins of their own.
 pub fn plugin(app: &mut App) {
-    app.init_resource::<IconManifest>();
+    app.init_resource::<PromptArt>();
     app.init_resource::<PromptSource>();
     // Ahead of every UI system, so a caption that changed this frame is laid out at the width it
     // will be drawn at rather than at the width it used to be.
@@ -322,72 +316,10 @@ fn branded(origin: &ControlOrigin, brand: GamepadBrand) -> Cow<'_, str> {
     }
 }
 
-/// Which (tier, control) pairs have art under `assets/input_prompts/`.
-///
-/// Parsed once from the manifest `scripts/import_input_prompts.py` writes, so resolution never
-/// opens a file to discover one is missing.
-#[derive(Resource)]
-struct IconManifest(std::collections::HashSet<String>);
-
-impl Default for IconManifest {
-    fn default() -> Self {
-        const MANIFEST: &str = include_str!("../../assets/input_prompts/manifest.txt");
-        Self(
-            MANIFEST
-                .lines()
-                .filter(|line| !line.is_empty() && !line.starts_with('#'))
-                .map(str::to_string)
-                .collect(),
-        )
-    }
-}
-
-/// The path segment a tier's art is filed under.
-fn tier_str(tier: GlyphTier) -> &'static str {
-    match tier {
-        GlyphTier::KeyboardMouse => "keyboard_mouse",
-        GlyphTier::Gamepad(GamepadBrand::Xbox) => "xbox",
-        GlyphTier::Gamepad(GamepadBrand::PlayStation) => "playstation",
-        GlyphTier::Gamepad(GamepadBrand::Nintendo) => "nintendo",
-        GlyphTier::Gamepad(GamepadBrand::Generic) => "generic",
-    }
-}
-
 /// How tall an inline icon stands against its span's font size. Kenney's art draws each glyph in
 /// the middle three quarters of its square, so this puts the glyph itself a little taller than the
 /// letters beside it.
 const INLINE_ICON_SCALE: f32 = 5.0 / 3.0;
-
-/// Where a resolved glyph's art lives, for `AssetServer::load`. Block and inline prompts draw the
-/// same art, each scaling it to its own height; only a backend's art may differ between the two.
-///
-/// A Mac takes `macos/` first where it has an entry, for the keys it labels differently: Option
-/// for Alt, and Command for Super.
-///
-/// `None` for a backend's art where the backend has not said how to load it.
-fn icon_path(
-    glyph: &Glyph,
-    manifest: &IconManifest,
-    external: Option<&ExternalArt>,
-    block: bool,
-) -> Option<AssetPath<'static>> {
-    let (tier, origin) = match glyph {
-        Glyph::Own(tier, origin) => (tier, origin),
-        Glyph::External(path) => return external.and_then(|art| (art.0)(path, block)),
-        _ => return None,
-    };
-    let name = origin.name();
-    let mac = format!("macos/{name}");
-    let key = if cfg!(target_os = "macos")
-        && *tier == GlyphTier::KeyboardMouse
-        && manifest.0.contains(&mac)
-    {
-        mac
-    } else {
-        format!("{}/{name}", tier_str(*tier))
-    };
-    Some(format!("input_prompts/{key}.png").into())
-}
 
 /// Everything one icon prompt needs in order to ask its question — mirrors [`PromptQuery`].
 type IconPromptQuery = (
@@ -428,14 +360,8 @@ fn refresh_icon_prompts(world: &mut World) {
     // back to from what `refresh_prompts` would call the button — see `labelling_brand`.
     let brand = connected_brand(world);
     let labelled = labelling_brand(world);
-    let manifest = world.resource::<IconManifest>();
-    let external = world.get_resource::<ExternalArt>();
+    let art = world.resource::<PromptArt>();
     let source = world.resource::<PromptSource>().0;
-    let has_art = |tier, origin: &ControlOrigin| {
-        manifest
-            .0
-            .contains(&format!("{}/{}", tier_str(tier), origin.name()))
-    };
     let resolved: Vec<(Entity, bool, Resolved)> = spans
         .iter(world)
         .map(|(entity, kind, scheme, class, pick, unbound)| {
@@ -444,6 +370,12 @@ fn refresh_icon_prompts(world: &mut World) {
                 (Some(span), None) => (span.0, span.1, false),
                 (None, None) => unreachable!("`AnyOf` matched neither"),
             };
+            let layout = if block {
+                IconLayout::Block
+            } else {
+                IconLayout::Inline
+            };
+            let has_art = |tier, origin: &ControlOrigin| art.has_art(tier, origin, layout);
             let (scope, index) = scope_and_index(device, scheme, class, pick);
             let prompts = source(world, context, action, scope);
             let resolved = match prompts.get(index) {
@@ -458,7 +390,7 @@ fn refresh_icon_prompts(world: &mut World) {
                     .chain([&prompt.origin])
                     .map(|origin| {
                         resolve_glyph(origin, brand, has_art)
-                            .and_then(|glyph| icon_path(&glyph, manifest, external, block))
+                            .and_then(|glyph| art.path(&glyph, layout))
                     })
                     .collect::<Option<Vec<_>>>()
                     .map_or_else(
@@ -527,7 +459,7 @@ struct PendingIcons(Vec<Handle<Image>>);
 /// in the same frame [`refresh_icon_prompts`] resolved it.
 ///
 /// An icon that fails to load leaves its chord pending, with the previous one still drawn: the
-/// manifest or the backend has already said the file exists, so a failure is a broken install, and
+/// art's provider has already said the file exists, so a failure is a broken install, and
 /// Bevy logs it.
 fn swap_in_icons(
     mut commands: Commands,

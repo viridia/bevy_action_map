@@ -81,6 +81,7 @@ fn main() {
             // after `actions::plugin`, whose contexts it resolves a saved row against.
             saved_controls::plugin,
             prompt_ui::plugin,
+            common::kenney::plugin,
             widget_focus::plugin,
         ))
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))

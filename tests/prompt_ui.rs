@@ -6,8 +6,11 @@
 use bevy::prelude::*;
 use bevy_action_map::prelude::*;
 
-#[path = "../../../examples/common/prompt_ui.rs"]
+#[path = "../examples/common/prompt_ui.rs"]
 mod prompt_ui;
+
+#[path = "../examples/common/kenney.rs"]
+mod kenney;
 
 use prompt_ui::{
     IconPrompt, IconPromptSpan, PromptClass, PromptFamily, PromptPick, PromptSpan, PromptUnbound,
@@ -36,16 +39,12 @@ fn app() -> App {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
-        // The art is the examples', at the repository root; a path here is relative to this
-        // crate's manifest.
-        bevy::asset::AssetPlugin {
-            file_path: "../../assets".into(),
-            ..default()
-        },
+        bevy::asset::AssetPlugin::default(),
         bevy::image::ImagePlugin::default(),
         bevy::input::InputPlugin,
         ActionMapPlugin,
         prompt_ui::plugin,
+        kenney::plugin,
     ))
     .register_asset_loader(ImageLoader::new(CompressedImageFormats::empty()));
     app
@@ -118,8 +117,8 @@ fn a_gamepad_button_is_named_in_its_pads_own_words() {
         (Some(GamepadBrand::Generic), "A"),
         (Some(GamepadBrand::Xbox), "A"),
         (Some(GamepadBrand::PlayStation), "Cross"),
-        // Nintendo's face buttons sit mirrored, so physical South is B there — the prompt names
-        // the button the player is looking at rather than the one in the same place on a Xbox pad.
+        // Nintendo's face buttons sit mirrored, so physical South is B there — the prompt names the
+        // button the player is looking at rather than the one in the same place on a Xbox pad.
         (Some(GamepadBrand::Nintendo), "B"),
     ] {
         let mut app = app();
@@ -422,6 +421,25 @@ fn an_icon_prompt_falls_back_whole_when_one_control_has_no_art() {
         .id();
     assert_eq!(icons(&mut app, span), Vec::<String>::new());
     assert_eq!(caption(&mut app, span), "[Ctrl+Numpad *]");
+}
+
+/// Art comes only from providers, so a game that adds none draws every prompt as text.
+#[test]
+fn an_icon_prompt_without_art_providers_is_text() {
+    let mut app = app();
+    app.insert_resource(bevy_action_map_ui::PromptArt::default());
+    app.insert_resource(PromptDevice(Some(DeviceFamily::KeyboardMouse)));
+    app.add_context::<Flying>(|controls| {
+        controls.bind::<Jump>(KeyCode::Space);
+    });
+    app.world_mut().spawn(Flying);
+
+    let span = app
+        .world_mut()
+        .spawn(IconPromptSpan(Flying.into(), Jump::id()))
+        .id();
+    assert_eq!(icons(&mut app, span), Vec::<String>::new());
+    assert_eq!(caption(&mut app, span), "[Space]");
 }
 
 /// A Mac labels Alt as Option and Super as Command, so its art does too.

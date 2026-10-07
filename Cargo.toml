@@ -21,6 +21,7 @@ workspace = true
 
 [dependencies]
 bevy_action_map = { path = "crates/bevy_action_map" }
+bevy_action_map_ui = { path = "crates/bevy_action_map_ui" }
 # `bevy_settings` is not in the umbrella's default profiles. Split Friction is the only example
 # that stores anything, and where a game puts its bytes is the app's decision (D53), so the crate
 # itself knows nothing about it.
@@ -69,6 +70,7 @@ missing_docs = "warn"
 [workspace.dependencies]
 bevy = "0.20.0-rc.2"
 bevy_app = { version = "0.20.0-rc.2", default-features = false }
+bevy_asset = { version = "0.20.0-rc.2", default-features = false }
 bevy_camera = { version = "0.20.0-rc.2", default-features = false }
 bevy_diagnostic = { version = "0.20.0-rc.2", default-features = false }
 bevy_ecs = { version = "0.20.0-rc.2", default-features = false }

@@ -74,6 +74,8 @@ fn main() {
             settings::plugin,
             saved_controls::plugin,
             prompt_ui::plugin,
+            // After `glyphs::plugin`, so Steam's art for the pad is asked for first.
+            common::kenney::plugin,
             widget_focus::prepare_widgets,
         ))
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.05)))

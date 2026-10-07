@@ -1224,12 +1224,27 @@ required field of `PromptScope`.
 **Reversal.** The cross-context sort and dedup come back with their per-call cost, and a prompt over
 a menu again shows whichever context ranks first rather than the one the player is in.
 
+### D105 — The prompt layer ships no art, and asks an ordered list of providers
+
+**Decided.** `bevy_action_map_ui` knows no file layout. `PromptArt` is a list of providers, each a
+function from a `Glyph` and an `IconLayout` to an asset path; the first to answer wins, and the
+order the plugins are added in is the priority. Coverage is the same question, so `resolve_glyph`'s
+brand-to-generic fallback follows the art installed. Kenney's art is a provider in
+`examples/common/`, and Steam's in `steam_examples/`.
+
+**Rules out.** A built-in art set with a backend's art as an override that only fills its gaps, and
+a slot consulted for `Glyph::External` alone.
+
+**Reversal.** The ui crate ships art, or a manifest of someone's, so it either carries a licensed
+asset set or a path into a directory it does not own. A backend's art could again only stand in
+where the base set had none, so Steam's pad glyphs could not take precedence over Kenney's.
+
 ### D85 — An inline icon prompt and a block one are two components
 
 **Decided.** `IconPromptSpan` is a span in a line of text, drawing `InlineImage`s sized from that
 line's font. `IconPrompt` is a node of its own, drawing image nodes scaled from the full-size art to
 whatever height its `Node` is given. Each falls back to text in its own layout kind. They share
-resolution, the wait for art, and the manifest. Chunk 110 built the block one.
+resolution, the wait for art, and the art providers. Chunk 110 built the block one.
 
 **Rules out.** One component that is a span or a node depending on where it is spawned.
 

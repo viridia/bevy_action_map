@@ -11,8 +11,8 @@ use bevy::asset::io::{
     AssetReader, AssetReaderError, AssetSourceBuilder, AssetSourceId, PathStream, Reader, VecReader,
 };
 use bevy::prelude::*;
-
-use crate::common::prompt_ui::ExternalArt;
+use bevy_action_map::prelude::Glyph;
+use bevy_action_map_ui::{IconLayout, PromptArt};
 
 const SOURCE: &str = "steam";
 
@@ -34,8 +34,9 @@ fn glyph_dir() -> Option<PathBuf> {
     })
 }
 
-/// Registers the `steam://` source and tells the prompts how to reach it. Ahead of `AssetPlugin`,
-/// which builds its sources once.
+/// Registers the `steam://` source and adds Steam's art to the prompts. Ahead of `AssetPlugin`,
+/// which builds its sources once, and of every other art provider, so Steam's art is the one asked
+/// for first.
 ///
 /// Without a Steam install to read, neither happens, and the pad's prompts fall back to Steam's own
 /// words for its controls.
@@ -48,7 +49,12 @@ pub fn plugin(app: &mut App) {
         AssetSourceId::from(SOURCE),
         AssetSourceBuilder::new(move || Box::new(Confined(root.clone()))),
     );
-    app.insert_resource(ExternalArt(art));
+    app.world_mut()
+        .get_resource_or_init::<PromptArt>()
+        .push(|glyph, layout| match glyph {
+            Glyph::External(path) => art(path, layout),
+            _ => None,
+        });
 }
 
 /// The asset path for one of Steam's glyphs, in the theme chosen above and at the size the prompt
@@ -58,12 +64,15 @@ pub fn plugin(app: &mut App) {
 /// 32-pixel `_sm` beside it, which is nearer the height of a line and scales down to it more
 /// cleanly. Only the file's name is kept, relative to the source's root: the asset server refuses
 /// an absolute path from any source. A path in any other shape is not loaded.
-fn art(path: &str, block: bool) -> Option<AssetPath<'static>> {
+fn art(path: &str, layout: IconLayout) -> Option<AssetPath<'static>> {
     let stem = Path::new(path)
         .file_name()
         .and_then(|name| name.to_str())
         .and_then(|name| name.strip_suffix("_md.png"))?;
-    let size = if block { "md" } else { "sm" };
+    let size = match layout {
+        IconLayout::Block => "md",
+        IconLayout::Inline => "sm",
+    };
     let path = Path::new(THEME).join(format!("{stem}_{size}.png"));
     Some(AssetPath::from_path_buf(path).with_source(SOURCE))
 }

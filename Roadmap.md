@@ -234,6 +234,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 188a | Steam's prompts answered per action set                               |
 | 188b | A prompt lookup names its context                                     |
 | 185  | `show.py` takes an issue number                                       |
+| 170  | Prompt art from an ordered list of providers                          |
 
 ---
 
@@ -243,10 +244,10 @@ its identity rather than its position.
 
 ## Next
 
-* 172a: `bevy_action_map_ui`, starting with prompts
 * 170: Prompt art from an ordered list of providers
 * 189: One prompt component, written through templates
 * 190: An inline icon prompt's size, as a `Val`
+* 172a: `bevy_action_map_ui`, starting with prompts
 * 115: A timing declared as a tunable
 * 121: A camera that takes the mouse, and gives it back
 * 122: The wheel as a binding source
@@ -409,37 +410,6 @@ going through a catalogue. The crate's half of R19.14 is done, but the claim tha
   that is a reading of the spec rather than a dependency.
 - **Review surface:** whether the key is the one an author would actually want to type.
 
-### 170. Prompt art from an ordered list of providers · E[2]
-
-`prompt_ui.rs` has Kenney's file layout built in (`IconManifest`, `tier_str`, `icon_path`), and a
-backend's art reaches it only through `ExternalArt`: one slot, consulted for `Glyph::External`
-alone. Kenney is the base and Steam an override that can only fill Kenney's gaps. Both become
-providers, and neither is special.
-
-- **What it is:** a resource in `prompt_ui.rs` holding an ordered list of providers, each a function
-  from a `Glyph` and whether the prompt is a block one to `Option<AssetPath>`. The first answer
-  wins, and the order the plugins are added in is the priority. `ExternalArt` goes.
-- **Coverage is the same question.** The `has_art` closure given to `resolve_glyph` becomes "does
-  any provider answer for this `Glyph::Own`", so the brand-to-generic fallback follows the art that
-  is installed rather than Kenney's manifest.
-- **The Kenney provider** is a module of its own in `examples/common/`, taking the manifest, the
-  tier directories and the `macos/` preference with it. `prompt_ui.rs` ends with no path into
-  `assets/`.
-- **The Steam provider** is `steam_examples/disasteroids/glyphs.rs`, registered ahead of Kenney:
-  Steam's art for the pad, Kenney's for the keys.
-- **With no provider**, every prompt is text, as a control without art is today.
-- **Not the crate.** `crates/bevy_action_map/src/` is untouched: `resolve_glyph` already takes
-  coverage as a closure.
-- **Not `PromptSource`**, which decides which controls a prompt names. This decides how they are
-  drawn.
-- **Not the packaging**, which is chunk 172a.
-- **Verified by:** `crates/bevy_action_map/tests/prompt_ui.rs`, plus a test that the first provider
-  to answer wins; `prompt_gallery` and Disasteroids drawing the art they drew before;
-  `scripts/verify.sh --full` for the Steam build, and the author running it to see Steam's pad
-  glyphs beside Kenney's keys.
-- **On landing:** that the presentation layer ships no art, and takes it from sibling providers, is
-  an entry in `docs/decisions.md`.
-
 ### 189. One prompt component, written through templates · E[3]
 
 `prompt_ui.rs` draws a prompt three ways, `PromptSpan`, `IconPromptSpan` and `IconPrompt`, and all
@@ -466,14 +436,12 @@ become `bsn!` templates that build it.
   changes underneath them; its title and "Decided" are restated to say the two forms are two
   templates over one component.
 - **Every caller changes:** 47 lines across Disasteroids, Split Friction, `prompt_gallery`, the
-  Steam build and `crates/bevy_action_map/tests/prompt_ui.rs`. That is the chunk's purpose, not an
-  abstraction leaking.
-- **After 170**, which rewrites `refresh_icon_prompts`' art lookup in the same file.
+  Steam build and `tests/prompt_ui.rs`. That is the chunk's purpose, not an abstraction leaking.
 - **Not the companions:** `PromptFamily`, `PromptClass`, `PromptPick` and `PromptUnbound` stay
   components beside it.
-- **Verified by:** `crates/bevy_action_map/tests/prompt_ui.rs`, with a test per template that it
-  builds its form, one written with a nested path; `prompt_gallery`, Disasteroids and Split Friction
-  drawing the prompts they drew before; `scripts/verify.sh --full` for the Steam build.
+- **Verified by:** `tests/prompt_ui.rs`, with a test per template that it builds its form, one
+  written with a nested path; `prompt_gallery`, Disasteroids and Split Friction drawing the prompts
+  they drew before; `scripts/verify.sh --full` for the Steam build.
 
 ### 190. An inline icon prompt's size, as a `Val` · E[1]
 
@@ -497,9 +465,8 @@ default is `Val::Em(5.0 / 3.0)`, which is today's behaviour.
   window-relative `InlineIconSize`. X61 removes the caveat.
 - **Not an app-wide default.** A resource could sit under the component when a game wants one; none
   does.
-- **Verified by:** `crates/bevy_action_map/tests/prompt_ui.rs`, at a 24-pixel font: no component
-  draws the height it does now, `Em(2.0)` draws 48, `Px` ignores the font, `Auto` leaves the height
-  unset.
+- **Verified by:** `tests/prompt_ui.rs`, at a 24-pixel font: no component draws the height it does
+  now, `Em(2.0)` draws 48, `Px` ignores the font, `Auto` leaves the height unset.
 
 ### 172a. `bevy_action_map_ui`, starting with prompts · E[3]
 
@@ -509,19 +476,17 @@ their users by `#[path]`, the Steam build included. They become `crates/bevy_act
 published beside the base crate, a layer at a time. Prompts come first: neither file uses the other,
 and prompts are the half with tests.
 
-- **Depends on chunks 170, 171 and 189**: 170 leaves `prompt_ui.rs` with no path into `assets/`, 171
-  leaves a workspace for the crate to join, and 189 leaves one prompt component to publish.
-- **The crate is created here**, with prompts as its first module. Its public shape is proposed
-  before it is built: what is `pub`, which plugins there are, and which of the prompt components and
-  resources keep their names.
+- **Depends on chunks 170, 171 and 189**: 170 leaves `prompt_ui.rs` with no path into `assets/` and
+  the provider list already in the crate, 171 leaves a workspace for the crate to join, and 189
+  leaves one prompt component to publish.
+- **The crate exists**, as scaffolding landed ahead of 170: a manifest, a README, and the license
+  files linked from the workspace root into both published crates. Prompts join the provider list
+  there. Their public shape is proposed before it is built: what is `pub`, which plugins there are,
+  and which of the prompt components and resources keep their names.
 - **Ships no art.** The Kenney provider stays in `examples/common/` beside `assets/`, and the Steam
   provider in `steam_examples/`.
-- **`crates/bevy_action_map/tests/prompt_ui.rs` moves into the ui crate**, and its `#[path]` goes.
-  Until it does, the base crate's package ships a test that cannot build from the package, since the
-  file it includes is outside it.
-- **Both published crates carry the license files.** The base stopped shipping `LICENSE-MIT` and
-  `LICENSE-APACHE` when it moved under `crates/`, and the ui crate starts without them; whether each
-  crate gets copies or links is settled here.
+- **`tests/prompt_ui.rs` moves into the ui crate** with the file it tests, from the examples'
+  package where 170 leaves it, and its `#[path]` goes.
 - **Not the focus bridge**, which is 172b: the layer is half moved until then.
 - **Not upstreaming it**, which is X48.
 - **Verified by:** `scripts/verify.sh --full --doc`, `prompt_gallery`, Disasteroids and Split

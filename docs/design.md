@@ -1106,8 +1106,19 @@ included, has the one `KeyboardMouse` tier; a foreign control answers `Glyph::Ex
 path its reporter supplied, or `None`, and the atlas is not asked (R18.9). The crate carries the
 path as reported, a `String`, since it has no asset types; making it loadable is the app's. `Glyph`
 stays `#[non_exhaustive]` for a backend that hands art over in another shape. A chord resolves an
-entry at a time. Everything that draws — the atlas, inline and block layout, the art a Mac labels
-differently — is `examples/common/prompt_ui.rs`, outside the crate.
+entry at a time. Everything that draws — inline and block layout, and where the art comes from — is
+outside the crate.
+
+**Art providers.** `bevy_action_map_ui`'s `PromptArt` resource is an ordered list of providers, each
+a function from a `Glyph` and an `IconLayout` (`Inline` or `Block`) to an `Option<AssetPath>`. The
+first to answer wins, and a plugin pushes its provider through `get_resource_or_init`, so the order
+the plugins are added in is the priority. `PromptArt::has_art` asks the same list for a
+`Glyph::Own`, and is the `has_art` an icon prompt hands `resolve_glyph`, so the brand-to-generic
+fallback follows the art installed. The crate ships no art. The examples' providers are
+`examples/common/kenney.rs` (its manifest, one directory per tier, and `macos/` first for the keys a
+Mac labels differently) and Steam's `glyphs.rs`, added ahead of Kenney's, which answers
+`Glyph::External` with the `_sm` or `_md` file by layout. The rest of the prompt layer is
+`examples/common/prompt_ui.rs`.
 
 **A prompt is not a row of the settings screen.** `mappings` is what the game declared and is
 static; a prompt answers from the contexts something carries, so it is empty for a context nobody is
