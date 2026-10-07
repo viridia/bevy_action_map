@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 61.**
+**Next: 62.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -102,6 +102,16 @@ root only with `--exclude-lockfile`.
 
 Once everything else is done, the release is the publish, then an announcement on the Bevy Discord.
 X54's question goes to the users that announcement reaches.
+
+### X61 — Handing an inline icon's `Val` to layout
+
+**Gate:** a Bevy whose `InlineImage` takes its width and height as `Val`. No PR is known; rc.2's are
+`Option<f32>` in logical pixels.
+
+Chunk 190 resolves `InlineIconSize` itself when the icons go in, so a size relative to the window or
+to `RemSize` goes stale until the prompt's answer next changes. With a `Val` field, the component
+passes through unresolved, layout keeps it current, and the caveat leaves the inline prompt's doc
+comment.
 
 ## 2. An upstream decision still open
 
