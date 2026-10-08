@@ -450,6 +450,35 @@ going through a catalogue. The crate's half of R19.14 is done, but the claim tha
   that is a reading of the spec rather than a dependency.
 - **Review surface:** whether the key is the one an author would actually want to type.
 
+### 193. Prompts name their context and action without generics · E[2]
+
+A scene names a prompt's context and action through three generic templates (`PromptSpan<C, A>`,
+`IconPromptSpan<C, A>`, `IconPrompt<C, A>`). A BSN asset, due in Bevy 0.21, can use a generic type
+only once each specialization is registered for reflection: one registration per context, action and
+form. `bsn!` already converts a bare type name in a field with `.into()`, and both ids convert from
+their types, so the component can be written directly:
+`ActionPrompt { context: Menu, action: Close, form: PromptForm::BlockIcon }`. This is the spelling
+an asset will use, through X62.
+
+- **The three generic templates and their macro go.** The 21 typed uses become `ActionPrompt`
+  literals: in `prompt_ui.rs`'s doc comments, Disasteroids (`main.rs`, `settings.rs`, `ship.rs`),
+  Split Friction (`split_screen.rs`), `steam_examples/disasteroids/main.rs` and
+  `tests/prompt_ui.rs`.
+- **To confirm first:** a bare name compiles in a `bsn!` field, which is read from
+  `bevy_scene_macros`' codegen and not yet compiled. A qualified name such as `actions::Fire` may
+  need braces.
+- **G13 and D85 name the removed templates** as the inline and block types. Once those are gone, the
+  inline/block split is a `PromptForm` value on one component. Whether that still satisfies G13 is a
+  review question, and the chunk rewrites both entries either way.
+- **`ActionPrompt`'s doc comment** shows the new spelling, in place of the templates.
+- **Bevy 0.20 is due to release.** This is scoped against rc.2's `bsn!`. Re-check the bare-name
+  conversion before building if the bump lands first.
+- **Not loading prompts from an asset**, which is X62. **Not naming a context by path**, which is
+  X63.
+- **Verified by:** `tests/prompt_ui.rs` spawning a prompt from type names;
+  `scripts/verify.sh --full --doc`; `scripts/smoke.sh` on `prompt_gallery`, Disasteroids and Split
+  Friction; the author running the Steam build.
+
 ### 172a. `bevy_action_map_ui`, starting with prompts · E[3]
 
 `prompt_ui.rs` and `widget_focus.rs` are a layer an input crate cannot own: drawing prompts, and a
@@ -458,9 +487,10 @@ their users by `#[path]`, the Steam build included. They become `crates/bevy_act
 published beside the base crate, a layer at a time. Prompts come first: neither file uses the other,
 and prompts are the half with tests.
 
-- **Depends on chunks 170, 171 and 189**: 170 leaves `prompt_ui.rs` with no path into `assets/` and
-  the provider list already in the crate, 171 leaves a workspace for the crate to join, and 189
-  leaves one prompt component to publish.
+- **Depends on chunks 170, 171, 189 and 193**: 170 leaves `prompt_ui.rs` with no path into `assets/`
+  and the provider list already in the crate, 171 leaves a workspace for the crate to join, 189
+  leaves one prompt component to publish, and 193 leaves it without generic templates, so the shape
+  published is the one assets will use.
 - **The crate exists**, as scaffolding landed ahead of 170: a manifest, a README, and the license
   files linked from the workspace root into both published crates. Prompts join the provider list
   there. Their public shape is proposed before it is built: what is `pub`, which plugins there are,

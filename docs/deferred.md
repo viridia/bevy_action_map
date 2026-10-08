@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 62.**
+**Next: 64.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -112,6 +112,19 @@ Chunk 190 resolves `InlineIconSize` itself when the icons go in, so a size relat
 to `RemSize` goes stale until the prompt's answer next changes. With a `Val` field, the component
 passes through unresolved, layout keeps it current, and the caveat leaves the inline prompt's doc
 comment.
+
+### X62 — A prompt loaded from a BSN asset
+
+**Gate:** a Bevy that loads BSN assets, targeted for 0.21.
+
+An asset names a prompt's context and action by type, as `bsn!` does after chunk 193:
+`ActionPrompt { context: Menu, action: Close, form: PromptForm::BlockIcon }`. Cart's suggestion, and
+agreed with him for both fields, is that reflection resolves each name: `#[derive(InputAction)]` and
+`#[derive(InputContext)]` register type data that turns the type into its id. That is one
+registration per action or context type, possibly none if automatic registration covers it. The
+generic templates chunk 193 removed would have needed one per context, action and form. How an asset
+converts a bare type name into a field of a different type is the part 0.21 decides. The acceptance
+test is a prompt in `prompt_gallery` loaded from an asset.
 
 ## 2. An upstream decision still open
 
@@ -219,6 +232,18 @@ a player has personally rebound. A landed query supersedes it outright, for ever
 rather than only captured ones, so the workaround is not worth building ahead of it.
 
 ## 3. A game or screen in tree that needs it
+
+### X63 — Finding a context by path
+
+**Gate:** a caller that holds a context's path as text and needs its `ContextId`, such as X62 if
+assets cannot resolve a type name.
+
+`ActionId::from_path` finds an action by the path it declared. `ContextId` wraps a `&'static str`,
+and the only route to one is the context's type. The shape agreed: a resource filled by
+`add_context`, mapping each declared path to its id, and a lookup answering `None` for a path this
+`App` never declared. A resource rather than a global list like the actions', because actions are
+global only so their ids can be assigned without a `World`, and contexts are declared per `App`.
+Written as chunk 192, and withdrawn when chunk 193 dropped paths for type names.
 
 ### X13 — Resolving a stored device identity to the connected devices that match it
 

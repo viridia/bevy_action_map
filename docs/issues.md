@@ -19,7 +19,7 @@ part that stays good. Re-verify before acting on one.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 tier, and never reused. A gap in the sequence is a retired entry.
 
-**Next: 1079.**
+**Next: 1080.**
 
 **What the tiers mean.**
 
@@ -55,6 +55,23 @@ first is one line and leaves the arming sites alone.
 ---
 
 ## 2. Latent — the code is wrong and nothing in tree takes the path
+
+### 1079 Two action or context types declaring one path share an id
+
+`intern_action` and `ContextId::of` (`action.rs`) · read, **not probed**
+
+The action registry finds an action by its path, so a second type declaring a path already
+registered gets the first one's `ActionId`, without an error, and the two share every binding,
+override and prompt from then on. What happens where their `Output` types differ is unexamined. A
+`ContextId` is its path, so two context types sharing one compare equal in every prompt lookup;
+`add_context` panics on one type declared twice, not on two types with one path. Paths are typed by
+hand in `#[action(path = …)]` and `#[context(path = …)]`, so a copy-pasted declaration hits this. No
+two in tree share a path.
+
+_Fix, sketched (E[1]):_ keep the declaring type's `TypeId` beside each action registry entry, and
+panic in `intern_action` when a path comes back with a different one. For contexts, `add_context`
+checks the paths already declared in the `App`. The set it keeps is X63's resource without the
+lookup, so landing either one first gives the other its storage.
 
 ### 1046 A class binding on an analog source has no dead zone
 
