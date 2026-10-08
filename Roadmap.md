@@ -246,7 +246,9 @@ its identity rather than its position.
 
 ## Next
 
+* 191: `bevy_action_map_ui`, starting with prompts
 * 172a: `bevy_action_map_ui`, starting with prompts
+* 172b: The focus bridge joins `bevy_action_map_ui`
 * 115: A timing declared as a tunable
 * 121: A camera that takes the mouse, and gives it back
 * 122: The wheel as a binding source
@@ -385,6 +387,45 @@ to the player as a named tunable, the way `tunable_dead_zone` already offers a d
 - **Verified by:** Disasteroids' settings screen offering one timing beside the dead-zone slider it
   already has, and the changed value still applied after a quit and relaunch.
 
+### 191. Accept and back, by the pad's maker · E[3]
+
+A binding names a gamepad button by position, and confirm is not in one position: a Nintendo pad
+confirms with A, on `East`, where every other brand confirms on `South`. A menu bound to `South` is
+backwards in a Nintendo player's hands, and every game with a menu meets this before any widget
+crate does. This chunk lets a binding name the role instead, as `LogicalKey` names a character
+rather than a key.
+
+- **Its shape is proposed before it is built**: a `Control` variant naming a role, two roles to
+  start, accept and back. A role that means nothing across games, such as "the X button", is not
+  one.
+- **Resolved per event, from the pad's own `Brand`**, not per binding: a context with no `Paired`
+  reads every pad, and two brands can share one game. Resolution is recorded at sampling beside the
+  event, as `HeldControlState` records a key's character, so a release finds its press.
+- **The answer is fixed in code, with no table a game overrides.** Nintendo resolves accept to
+  `East` and back to `South`; every other brand, `Generic` included, the reverse.
+- **The Nintendo answer is untested on hardware, and the doc comment says so**, asking the first
+  developer who meets a Nintendo pad to report what it does; the author supplies where. It is read
+  from SDL_GameControllerDB, as X21 records. Two devices were tried through gilrs on macOS and
+  neither delivers input: a clone Switch Pro pad streams its report timer as button presses, and a
+  genuine Joy-Con pair connects, resolves as Nintendo and reports nothing.
+- **X21 closes**, and its hardware check moves to a new X-entry gated on that first report, or on a
+  Linux machine reading a Nintendo pad.
+- **What a new control reaches**, counted from `LogicalKey`, which appears in eight files under
+  `src/`: binding reading and held state, consumption (claiming the button the role resolved to, so
+  a lower context bound to `South` sees a Nintendo player's back as taken), prompts (accept draws
+  "A" on either brand), and override serialization, as a name of its own beside `char/`.
+- **A preset can name a role; a capture never produces one.** Capture records the physical button,
+  for the reason it records a physical key. A preset replaces rows rather than transforming them, so
+  a game wanting confirm on `East` for every brand writes `East` into the row, and one with
+  positional defaults ships a preset writing the role. A role reaches the player's own file only
+  through a preset merged into their working copy.
+- **Not single Joy-Cons.** A Joy-Con held sideways rotates its face buttons, and a brand does not
+  say how a pad is held. Deferred as an X-entry when this lands.
+- **Not the Steam path.** An authority backend hands over actions already mapped.
+- **Verified by:** a headless `App` test pressing `South` and `East` on a pad carrying
+  `Brand(Nintendo)` and on one carrying `Brand(Xbox)`, `prompt_gallery` drawing accept per brand,
+  and `scripts/verify.sh --full`.
+
 ---
 
 ## Presentation and prompts
@@ -440,7 +481,8 @@ and prompts are the half with tests.
 `widget_focus.rs`, the `bevy_ui_widgets` bridge a controls screen is built on, becomes the ui
 crate's second module, completing the layer 172a started.
 
-- **Depends on chunk 172a**, for the crate and the shape its public API took.
+- **Depends on chunk 172a**, for the crate and the shape its public API took, and on chunk 191, so
+  the binding recipe it documents names accept rather than `South`.
 - **The public shape is proposed before it is built**, as for prompts: what is `pub`, and which
   plugin a game adds.
 - **`WidgetKind` is published as the crate's own**, a newtype over a string that Bevy's own id
