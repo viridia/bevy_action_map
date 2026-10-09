@@ -231,12 +231,13 @@ def prelude():
 
 
 def unreached(names):
-    """Public names that no example, integration test or Steam example mentions."""
-    text = "\n".join(
-        p.read_text(encoding="utf-8")
-        for d in ("examples", "crates/bevy_action_map/tests", "steam_examples/disasteroids")
-        for p in (ROOT / d).rglob("*.rs")
-    )
+    """Public names that nothing outside the crate's `src/` mentions: examples, tests, benches and
+    the sibling crates."""
+    dirs = ["examples", "tests", "steam_examples/disasteroids"]
+    dirs += [f"crates/bevy_action_map/{d}" for d in ("tests", "benches")]
+    crates = (ROOT / "crates").iterdir()
+    dirs += [f"crates/{c.name}/src" for c in crates if c.name != "bevy_action_map"]
+    text = "\n".join(p.read_text(encoding="utf-8") for d in dirs for p in (ROOT / d).rglob("*.rs"))
     return sorted(n for n in names if not re.search(rf"\b{re.escape(n)}\b", text))
 
 
@@ -299,7 +300,7 @@ def main():
               + f", {len(methods)} inherent methods")
         missing, exported = unreached(items), prelude()
         print(
-            f"\nPublic items no example or integration test names ({len(missing)}; "
+            f"\nPublic items nothing outside the crate names ({len(missing)}; "
             f"{sum(n not in exported for n in missing)} outside the prelude, marked *):"
         )
         for name in sorted(missing, key=lambda n: (n in exported, n)):

@@ -739,17 +739,55 @@ document was written by an earlier model and has not been edited as a whole.
 
 ### 161. Public items nothing outside `crates/bevy_action_map/src/` names · E[1]
 
-`growth.py --api` lists public items that no example or integration test names; the ones outside the
-prelude are the candidates, 48 at the first run.
+`growth.py --api` lists public items that nothing outside the crate's `src/` names; the ones outside
+the prelude are the candidates, 46 once the scan took in benches, the root `tests/` and the sibling
+crates. `ActionIdCache`, which the derive macros emit, left the list then, and still wants
+`#[doc(hidden)]`.
 
 - **Each gets one of three answers:** made `pub(crate)`, where it is public only because its module
-  is (`Scratch`, `run_captures` and `sample_input` look like that); kept, with an example or test
-  made to use it, where it is API nothing has exercised; or left alone, where it is reached without
-  being named, as a builder a closure receives or an extension trait the prelude brings in.
+  is; kept, with an example or test made to use it, where it is API nothing has exercised; or left
+  alone, where it is reached without being named, as a builder a closure receives or an extension
+  trait the prelude brings in.
 - **A unit is one module**, and folds in any tier-5 finding in `docs/issues.md` about the same
   items.
 - **Narrowing visibility breaks the public API**, which costs nothing until the first publish.
 - **Verified by:** `scripts/verify.sh`, since this one changes code, and the examples do not change.
+
+**Triage.** All 46 were narrowed to `pub(crate)` at once in a scratch checkout and the workspace
+checked. *Reached* means an example, test or bench fails to compile without the item, or a public
+signature or pub field carries it (the `private_interfaces` lint does not cover fields, so those
+were found by grep, as were signatures of another candidate, which narrowing both hid from the
+lint); *unreached* means neither. A reached item is left alone unless its owner narrows too.
+`sample_input` is in the prelude, so is not a candidate.
+
+| Unit | Reached | Unreached |
+| --- | --- | --- |
+| `action` | `ActionInfo` (`ActionId::info`); `Scratch` (`Condition::evaluate`, `Modifier::apply`: wants a test with a custom condition) | `registered_actions` (unused in the crate too); `ActionIdCache` to `#[doc(hidden)]` |
+| `capture` | `ReservedControl` | `run_captures`, `DEFLECTION`, `MOUSE_MOTION` |
+| `inspect` | `InputDump` (`dump`), `ContextDump`, `InstanceDump`, `ActionDump` (fields) | |
+| `gamepad` | | `GamepadBrands`, `GamepadModelId`, `mark_gamepad_connected`, `mark_gamepad_disconnected`, `resolve_gamepad_brand` |
+| `device` | `DeviceHandleSet` (`Paired`'s `Deref`), `DeviceIdentity` (bound), `GamepadCalibration`, `AxisCalibration` (its `get`) | `RegisterDeviceIdentity`, `ReflectDeviceIdentity`, `resolve_gamepad_identity` |
+| `binding` | `BindingBuilder`, `ClassBindingBuilder`, `CombinedBuilder` (closures); `IntoBindingInput`, `ButtonControl` (bounds); `DeadZoneShape`; `ChordEntry` (`with`'s bound) | `BindingModifier` |
+| `overrides` | `Override`, `OverrideProblem`, `ResolvedOverrides`, `SavedRow`, `SavedTunableValue`, `Unresolved`, `UnresolvedKind` (field), `UnsupportedVersion` | `MaxSlots` (a setting: wants a test), `apply_overrides_for` (unused in the crate too) |
+| the rest | `ActionReading`, `BindingDiagnostic`, `ConsumedControls`, `PresetBuilder` | `BindingCondition` |
+
+**Decided** (by the author, 2026-10-08). Every reached item, and `ReflectDeviceIdentity`, stays
+public. The rest:
+
+- **`pub(crate)`:** `run_captures`, `DEFLECTION`, `MOUSE_MOTION`, `GamepadModelId`,
+  `mark_gamepad_connected`, `mark_gamepad_disconnected`, `resolve_gamepad_brand`,
+  `resolve_gamepad_identity`, `BindingModifier`, `BindingCondition`.
+- **`#[doc(hidden)]`:** `ActionIdCache`.
+- **Kept, with a test:** `registered_actions`, `GamepadBrands`, `RegisterDeviceIdentity` and
+  `Scratch` get a compile-only check in a new `crates/bevy_action_map/tests/public_surface.rs`,
+  whose functions are built and never called; `apply_overrides_for` and `MaxSlots` get a behaviour
+  test, since what they promise is what they do. `RegisterDeviceIdentity`'s check uses a custom
+  identity type, which exercises `DeviceIdentity` too.
+- **`Scratch` becomes `Registers`** in the `action` unit, now that it stays public. The doc comment
+  teaches the metaphor: a condition's or modifier's own small set of registers, kept between calls,
+  meaning whatever the code using them decides, and fixed and small because every binding's set sits
+  in one flat array the evaluator walks each tick without allocating. The internal documents keep
+  D8's terms and change only the name.
 
 ## Tooling
 
