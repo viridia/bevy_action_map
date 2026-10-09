@@ -60,7 +60,7 @@ impl GamepadBrands {
 ///
 /// Leaves an existing `Brand` alone, so inserting one yourself ahead of time overrides this for a
 /// pad you know better than the vendor id table does.
-pub fn resolve_gamepad_brand(
+pub(crate) fn resolve_gamepad_brand(
     connected: On<Add<Gamepad>>,
     mut commands: Commands,
     gamepads: Query<&Gamepad, Without<Brand>>,
@@ -83,15 +83,16 @@ pub fn resolve_gamepad_brand(
 ///
 /// Not every platform reports these. They are absent on wasm and on some Linux setups, and a pad
 /// that reports neither has no identity of this kind at all.
-#[cfg_attr(feature = "bevy_reflect", derive(bevy_reflect::Reflect))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct GamepadModelId {
+#[cfg(feature = "bevy_reflect")]
+#[derive(bevy_reflect::Reflect, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct GamepadModelId {
     /// The USB vendor id.
     pub vendor: u16,
     /// The USB product id.
     pub product: u16,
 }
 
+#[cfg(feature = "bevy_reflect")]
 impl GamepadModelId {
     /// The model id a connected pad reports, or `None` if it reports either half as absent.
     pub fn of(gamepad: &Gamepad) -> Option<Self> {
@@ -104,7 +105,7 @@ impl GamepadModelId {
 
 /// Attaches [`ConnectedGamepad`] to a pad Bevy's own gamepad backend connected, so it enumerates
 /// alongside any other backend's.
-pub fn mark_gamepad_connected(connected: On<Add<Gamepad>>, mut commands: Commands) {
+pub(crate) fn mark_gamepad_connected(connected: On<Add<Gamepad>>, mut commands: Commands) {
     commands.entity(connected.entity).insert(ConnectedGamepad);
 }
 
@@ -113,7 +114,7 @@ pub fn mark_gamepad_connected(connected: On<Add<Gamepad>>, mut commands: Command
 /// Watches the component rather than the entity because that backend keeps the entity alive across
 /// a disconnect — it removes `Gamepad` and re-adds it on reconnect, so the entity outlives any
 /// single connection and despawning is never the signal.
-pub fn mark_gamepad_disconnected(disconnected: On<Remove<Gamepad>>, mut commands: Commands) {
+pub(crate) fn mark_gamepad_disconnected(disconnected: On<Remove<Gamepad>>, mut commands: Commands) {
     // `try_` because a game is free to despawn a pad's entity outright, which removes `Gamepad` on
     // the way out and would leave this addressing something already gone.
     commands

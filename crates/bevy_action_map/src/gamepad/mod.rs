@@ -15,11 +15,11 @@ use core::ops::Deref;
 
 mod gilrs;
 
+pub use gilrs::GamepadBrands;
+#[cfg(feature = "bevy_reflect")]
+pub(crate) use gilrs::GamepadModelId;
 use gilrs::drive_gamepad_rumble;
-pub use gilrs::{
-    GamepadBrands, GamepadModelId, mark_gamepad_connected, mark_gamepad_disconnected,
-    resolve_gamepad_brand,
-};
+pub(crate) use gilrs::{mark_gamepad_connected, mark_gamepad_disconnected, resolve_gamepad_brand};
 
 /// A gamepad that is connected right now.
 ///

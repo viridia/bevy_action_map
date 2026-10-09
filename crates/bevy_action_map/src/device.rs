@@ -6,11 +6,10 @@
 //! are connected, and what brand each one is, are answered by [`gamepad`](crate::gamepad), whose
 //! items are also available here.
 
+#[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
+pub(crate) use crate::gamepad::GamepadModelId;
 #[cfg(feature = "gamepad")]
-pub use crate::gamepad::{
-    Brand, ConnectedGamepad, GamepadBrand, GamepadBrands, GamepadModelId, mark_gamepad_connected,
-    mark_gamepad_disconnected, resolve_gamepad_brand,
-};
+pub use crate::gamepad::{Brand, ConnectedGamepad, GamepadBrand, GamepadBrands};
 
 // Named so the `#[reflect(..)]` attributes on `DeviceId` resolve; not referred to directly.
 #[cfg(feature = "serialize")]
