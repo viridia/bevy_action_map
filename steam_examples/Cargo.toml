@@ -17,13 +17,13 @@ path = "disasteroids/main.rs"
 [dependencies]
 bevy_action_map = { path = "../crates/bevy_action_map", features = ["serialize"] }
 bevy_action_map_ui = { path = "../crates/bevy_action_map_ui" }
-bevy_input = { version = "0.20.0-rc.2", default-features = false }
+bevy_input = { version = "0.20.0", default-features = false }
 # Bevy's `2d` and `ui` profiles spelled out without `bevy_gilrs`, which both pull in through
 # `default_platform`. Steam owns the pad, so no hardware gamepad event may reach the frame
 # (`docs/steam.md` S2).
 # `gamepad` stays: the mapper's gamepad bindings are what `Authority(DeviceFamily::Gamepad)` stands
 # in for.
-bevy = { version = "0.20.0-rc.2", default-features = false, features = [
+bevy = { version = "0.20.0", default-features = false, features = [
   "default_app",
   "std",
   "bevy_winit",

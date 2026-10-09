@@ -67,10 +67,7 @@ one_shot() {
 # `WARN` lines known to be harmless, as `<example>|<pattern>`, the pattern matching the `WARN` line
 # itself. One that does not appear is reported as stale, which is how a Bevy bump that fixes it
 # shows up; it is a notice rather than a failure, since a warning can be intermittent.
-known_warnings=(
-    # Bevy's, bevy#25936: `mesh2d::bindings` unresolved, on the next line. Seen on some runs only.
-    "split_friction|sprite_material.wesl\` has an unresolved import"
-)
+known_warnings=()
 
 log_dir=$(mktemp -d "${TMPDIR:-/tmp}/smoke.XXXXXX")
 failed=0
@@ -112,7 +109,7 @@ for example in "${examples[@]}"; do
 
     # Known warnings for this example, and which of them turned up.
     declare -a patterns=()
-    for entry in "${known_warnings[@]}"; do
+    for entry in "${known_warnings[@]+"${known_warnings[@]}"}"; do
         [[ "${entry%%|*}" == "${example}" ]] && patterns+=("${entry#*|}")
     done
     problems=$(grep -E 'panicked|ERROR|WARN' "${log}" || true)

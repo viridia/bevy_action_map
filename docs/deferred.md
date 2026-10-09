@@ -22,14 +22,14 @@ group at a time: a Bevy version bump is the first group, and nothing else.
 
 ## 1. Bevy or winit moving past the pin
 
-Each of these waits on an upstream change that 0.20.0-rc.2 does not carry. On every bump, check each
-against the new version: a release candidate is cut from the release branch, so a PR merged to main
-before it is in it only if it was picked.
+Each of these waits on an upstream change that 0.20.0 does not carry. On every bump, check each
+against the new version: a release is cut from the release branch, so a PR merged to main before it
+is in it only if it was picked.
 
 ### X51 — Clicking in physical pixels, and deleting `driver.locate`
 
 **Gate:** this crate's Bevy pin moving past [bevy#25890][], merged to main on 23 September 2026 and
-not in rc.2.
+not in 0.20.0.
 
 It moves `CursorMoved`'s enrichment from `bevy_winit` to `bevy_window`, and a client writing
 `WindowEvent::CursorMoved` then supplies a `physical_position`. The driver's click writes a logical
@@ -40,7 +40,7 @@ node itself and `driver.locate` goes (DD3.3).
 ### X52 — Deleting `driver.diagnostics`
 
 **Gate:** this crate's Bevy pin moving past [bevy#25824][], merged to main on 17 September 2026 and
-not in rc.2.
+not in 0.20.0.
 
 It adds `diagnostics.get` to BRP, which reads `frame_count` as `driver.diagnostics` does (DD3.4).
 The client switches to it and the method goes. `FrameTimeDiagnosticsPlugin` is still the driver's to
@@ -49,7 +49,7 @@ add, since it records the count and is not in `DefaultPlugins`.
 ### X2 — Deleting `acquire_focus_directional`
 
 **Gate:** this crate's Bevy pin moving past [bevy#25675][], merged to main on 24 September 2026 and
-not in rc.2.
+not in 0.20.0.
 
 `examples/common/widget_focus.rs` carries a global `AcquireFocus` observer mirroring
 `acquire_focus_tab_index`, with `AutoDirectionalNavigation` standing in for `TabIndex`:
@@ -79,7 +79,7 @@ with it.
 ### X3 — Deleting `examples/common/font.rs`
 
 **Gate:** this crate's Bevy pin moving past [bevy#25847][], which answers [bevy#25842][] and merged
-to main on 22 September 2026 and not in rc.2.
+to main on 22 September 2026 and not in 0.20.0.
 
 Until then the plugin overwrites the `default_font` feature's slot at `AssetId::default()` during
 plugin build, which depends on that slot's location and on text layout registering a font id once.
@@ -87,26 +87,10 @@ The answer is a `DefaultFontSource` resource that `FontSource::Default`, now `Te
 resolves to. Changing it rebuilds the font collection and marks every `TextFont` changed, so it
 reacts to a change and the build-time ordering goes with the file.
 
-### X43 — Publishing to crates.io
-
-**Gate:** Bevy 0.20.0 final. The dependency requirement `^0.20.0-rc.2` already admits it, so the
-move is a `cargo update` and a lockfile commit.
-
-crates.io would accept a publish against a release candidate, so the gate is a judgement, not a
-limit: a crate published against an rc pins its users to a version about to be superseded. What this
-entry holds is the order. A change that breaks the public API is free until the first publish and
-costly after it, so those land first: chunk 161's narrowing of public items is one, and so is any
-reshaping of the extensibility mechanism. The README's "Not on crates.io yet" section changes with
-the publish. The macros crate goes first: until it is on crates.io, `cargo package` resolves the
-root only with `--exclude-lockfile`.
-
-Once everything else is done, the release is the publish, then an announcement on the Bevy Discord.
-X54's question goes to the users that announcement reaches.
-
 ### X61 — Handing an inline icon's `Val` to layout
 
-**Gate:** a Bevy whose `InlineImage` takes its width and height as `Val`. No PR is known; rc.2's are
-`Option<f32>` in logical pixels.
+**Gate:** a Bevy whose `InlineImage` takes its width and height as `Val`. No PR is known; 0.20.0's
+are `Option<f32>` in logical pixels.
 
 Chunk 190 resolves `InlineIconSize` itself when the icons go in, so a size relative to the window or
 to `RemSize` goes stale until the prompt's answer next changes. With a `Val` field, the component
@@ -168,7 +152,7 @@ build on:
 - **gilrs 0.11** reports power state and force-feedback support on Linux and Windows only, and
   `Unknown` and `false` on macOS and wasm. It has no motion, touchpad or LED query anywhere, and no
   power-change event, so battery would be polled.
-- **`bevy_gilrs` 0.20.0-rc.2** forwards neither, and keeps `Gilrs` and its entity-to-`GamepadId` map
+- **`bevy_gilrs` 0.20.0** forwards neither, and keeps `Gilrs` and its entity-to-`GamepadId` map
   `pub(crate)`, so a crate outside it cannot read them at all.
 - **Steam Input, through SDK 1.65** (`SteamInput007`), has no controller battery and no capability
   query; `ISteamUtils`' battery calls report the host. Vibration, LED, haptics and trigger effects
@@ -472,10 +456,10 @@ the right answer while an app offers one, and it exercises two more paths beside
 cover is a plan that fails halfway, which leaves the file dirty for the next run to reset. Deleting
 the file first is the obvious answer and is half of one: it makes a run repeatable without stopping
 it writing the developer's real settings on the way out, which the bookend does handle. Isolation is
-the whole answer. At rc.2 it costs a platform branch — `XDG_CONFIG_HOME` on Linux, `LOCALAPPDATA` on
-Windows, and on macOS `HOME` itself, since `preferences_dir` is `home_dir()/Library/Preferences`
-with no narrower lever. [bevy#25902][], merged to main on 24 September 2026, not in rc.2, and
-milestoned for 0.20, makes `preferences_dir` honour an absolute `BEVY_SETTINGS_DIR` on all three, so
+the whole answer. At 0.20.0 it costs a platform branch — `XDG_CONFIG_HOME` on Linux, `LOCALAPPDATA`
+on Windows, and on macOS `HOME` itself, since `preferences_dir` is `home_dir()/Library/Preferences`
+with no narrower lever. [bevy#25902][], merged to main on 24 September 2026 and milestoned for 0.20
+but not in 0.20.0, makes `preferences_dir` honour an absolute `BEVY_SETTINGS_DIR` on all three, so
 past it isolation is one variable in `environment()` in `run.py`. Whichever is built wants a check
 that the throwaway directory was actually written, because a path or variable that is wrong fails
 silently: nothing is deleted, or the redirect does not take, and the plan passes while reading the
@@ -539,8 +523,8 @@ and the `Filter` docs describe dropping, not re-recording.
 
 ### X54 — Conditions that read other actions
 
-**Gate:** the crate public (X43), and its users asked on the Bevy Discord whether a game wants a
-condition that reads another action rather than a control.
+**Gate:** the crate public (chunk 195), and its users asked on the Bevy Discord whether a game wants
+a condition that reads another action rather than a control.
 
 The evaluator removed the main obstacle (D98): an action's state changes only when it commits, so a
 commit can mark its dependents affected the way a control change does. Left are the condition that
@@ -561,8 +545,9 @@ state, and `pong_countdown` already gates that by disabling `Serve` from a syste
 - **What to ask:** whether a game gates one action on another's state in the mapper, or in a system
   as `pong_countdown` does, and what the case was. An answer naming game state is R6.5's argument
   and argues for withdrawing R6.1's two clauses.
-- **One answer so far** (September 2026, asked before X43): `leafwing-input-manager`'s maintainer
-  prefers gating one action on another at the simulation level, not in the mapper.
+- **One answer so far** (September 2026, asked before the crate was public):
+  `leafwing-input-manager`'s maintainer prefers gating one action on another at the simulation
+  level, not in the mapper.
 
 ### X47 — Measuring a stick's rest envelope
 

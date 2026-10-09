@@ -332,9 +332,7 @@ keep something between runs need `--features serialize` as well, marked below.
 
 ## Installing
 
-Not on crates.io yet, so depend on the git repository directly. It targets Bevy `0.20.0-rc.2`, and
-your own Bevy dependency has to name that pre-release exactly: a plain `0.20` will not match it
-until 0.20.0 is out.
+Not on crates.io yet, so depend on the git repository directly. It targets Bevy 0.20.
 
 ```toml
 [dependencies]

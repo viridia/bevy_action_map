@@ -237,6 +237,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 170  | Prompt art from an ordered list of providers                          |
 | 189  | One prompt component, written through templates                       |
 | 190  | An inline icon prompt's size, as a `Val`                              |
+| 194  | Bevy 0.20.0                                                           |
 
 ---
 
@@ -471,8 +472,8 @@ an asset will use, through X62.
   inline/block split is a `PromptForm` value on one component. Whether that still satisfies G13 is a
   review question, and the chunk rewrites both entries either way.
 - **`ActionPrompt`'s doc comment** shows the new spelling, in place of the templates.
-- **Bevy 0.20 is due to release.** This is scoped against rc.2's `bsn!`. Re-check the bare-name
-  conversion before building if the bump lands first.
+- **Scoped against rc.2's `bsn!`, and true of 0.20.0's**: between the two, `bevy_scene_macros` gains
+  only array arguments to a scene function, and field values convert as before.
 - **Not loading prompts from an asset**, which is X62. **Not naming a context by path**, which is
   X63.
 - **Verified by:** `tests/prompt_ui.rs` spawning a prompt from type names;
@@ -577,6 +578,33 @@ the expensive part.
 
 Work no game asks for and no published crate can do without: the crate's internals kept consistent,
 extension points exercised, and documentation that is true and runs.
+
+### 195. The first publish to crates.io · E[2]
+
+Bevy 0.20.0 is out, and with it the crate can be published against a release rather than a
+candidate. The purpose is users: much of the scope of what is left in this document waits on what
+they say, so the chunk publishes what is fit to publish rather than waiting for the Roadmap to
+empty.
+
+- **First, the list of what lands before it.** A change that breaks the public API is free until the
+  first publish and costly after it, which is the test for a place on the list. Chunk 161's
+  narrowing of public items is one candidate, and any reshaping of the extensibility mechanism is
+  another. The author decides the list; the rest follows a 0.1.
+- **`bevy_action_map_ui` is not ready**, while chunks 172a and 172b are still building it, but its
+  name wants claiming. crates.io's policy removes a placeholder published only to hold a name, so
+  the claim is an early version of what it has, its prompts, with its README saying the API is
+  unsettled.
+- **The first version is the workspace's `0.1.0`**, for every crate published. Versions rise slowly
+  and never outpace Bevy's own. That rule outlives the chunk, so it lands with a home of its own, as
+  a `G` or `D` entry.
+- **The macros crate goes first**: until it is on crates.io, `cargo package` resolves the root only
+  with `--exclude-lockfile`.
+- **The README's "Installing" section** changes from the git dependency to the crates.io one, and
+  `docs/comparison.md`'s status paragraph and version table change with it.
+- **Then an announcement on the Bevy Discord.** X54's question goes to the users it reaches.
+- **Not doing:** any chunk on the list itself, each of which lands on its own first.
+- **Verified by** `cargo publish --dry-run` for each crate, its `cargo package --list` read, and a
+  project outside the workspace building against the published version.
 
 ### 182. A glossary as the preface to `docs/design.md` · E[1]
 
