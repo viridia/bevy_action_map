@@ -35,7 +35,7 @@ log = { version = "0.4", default-features = false }
 # For `once!`, which is the `no_std` half of `bevy_log::warn_once!`. Already in the graph beneath
 # `bevy_ecs`, so it costs a line here and nothing to build.
 bevy_utils.workspace = true
-# For `DeviceHandleSet` (§15): a handful of devices per occupant, heap-spilling rather than
+# For `DeviceHandleSet` (R15): a handful of devices per occupant, heap-spilling rather than
 # hard-capping. Already in the graph beneath `bevy_ecs`.
 smallvec = { version = "1", default-features = false }
 fixedbitset = "0.5"
@@ -44,7 +44,7 @@ fixedbitset = "0.5"
 bevy = { workspace = true, features = ["dynamic_linking"] }
 trybuild = "1.0"
 # Picked as the concrete format for chunk 55's golden persistence test — a format this crate never
-# learns about outside that one test (§10.1).
+# learns about outside that one test (TD10.3).
 toml = "0.8"
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
@@ -93,7 +93,7 @@ bevy_reflect = [
   "bevy_time/bevy_reflect",
 ]
 
-# Persistence of binding overrides and input frames (§17, R10.1). Depends on `bevy_reflect`:
+# Persistence of binding overrides and input frames (R17, R10.1). Depends on `bevy_reflect`:
 # `SavedOverrides` is the portable shape a save file or a Reflect-based settings layer actually
 # stores (D50), and needs `Reflect` to be structurally walkable.
 serialize = [

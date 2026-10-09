@@ -773,16 +773,14 @@ lint); *unreached* means neither. A reached item is left alone unless its owner 
 **Decided** (by the author, 2026-10-08). Every reached item, and `ReflectDeviceIdentity`, stays
 public. The rest:
 
-- **`pub(crate)`:** `resolve_gamepad_identity`, `BindingModifier`, `BindingCondition`.
+- **`pub(crate)`:** `BindingModifier`, `BindingCondition`.
 - **Rustdoc warnings the sweep passes.** A narrowed item linked from public docs is an error under
   `RUSTDOCFLAGS="-D warnings" cargo doc -p bevy_action_map --all-features --no-deps`, which no
   recipe runs, so each unit runs it. Two errors predate the sweep and go with their units: an
   unresolved `ModifierKey` at `binding/builder.rs:284` (`binding`), and a redundant link target at
   `overrides.rs:186` (`overrides`).
-- **Kept, with a test:** `RegisterDeviceIdentity` gets a compile-only check in
-  `crates/bevy_action_map/tests/public_surface.rs`, whose tests pass by compiling; it uses a custom
-  identity type, which exercises `DeviceIdentity` too. `apply_overrides_for` and `MaxSlots` get a
-  behaviour test, since what they promise is what they do.
+- **Kept, with a test:** `apply_overrides_for` and `MaxSlots` get a behaviour test, since what they
+  promise is what they do.
 
 **Done:** `action`. `Scratch` became `Registers`, a single set is named `registers` and the flat
 array of them keeps `scratch`; `registered_actions` and `Registers` started `public_surface.rs`;
@@ -792,7 +790,9 @@ comment teaches it to anyone writing an `InputAction` impl by hand. `capture`: `
 and the module doc states the two thresholds rather than linking them. `inspect`: every item is
 reached, so unchanged. `gamepad`: the three observers and `GamepadModelId` narrowed, the last under
 `bevy_reflect` as well, which every use of it is; `device` still re-exports the public gamepad
-items; `GamepadBrands` has a check in `public_surface.rs`.
+items; `GamepadBrands` has a check in `public_surface.rs`. `device`: `resolve_gamepad_identity`
+narrowed; `public_surface.rs` registers a custom identity type, which covers
+`RegisterDeviceIdentity` and `DeviceIdentity`.
 
 ## Tooling
 

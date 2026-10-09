@@ -768,7 +768,7 @@ impl Deref for Identity {
 /// Leaves an existing `Identity` alone, so a backend that knows a device better than its USB ids do
 /// can insert its own ahead of this and keep it.
 #[cfg(all(feature = "gamepad", feature = "bevy_reflect"))]
-pub fn resolve_gamepad_identity(
+pub(crate) fn resolve_gamepad_identity(
     connected: On<Add<Gamepad>>,
     mut commands: Commands,
     gamepads: Query<&Gamepad, Without<Identity>>,
