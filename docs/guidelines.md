@@ -12,7 +12,7 @@ belongs there, and why a particular choice was made belongs in [`decisions.md`](
 **Numbering.** Each guideline's number is a permanent identity from a single counter, independent of
 its group, and never reused. A gap in the sequence is a retired guideline.
 
-**Next: 23.**
+**Next: 24.**
 
 ---
 
@@ -203,3 +203,15 @@ parameter proves its precondition, as `&Steam` proves the client is alive, so no
 and no `# Safety` section is owed. Each `unsafe` block has a `// SAFETY:` comment above it, one
 bullet per condition when it relies on more than one. `known_folder` in Bevy's
 `bevy_platform/src/dirs/windows.rs` is the shape.
+
+### G23 — An item is public because a developer is better off with it
+
+Three questions decide it: would a developer benefit from reaching this, does it expose a detail
+that may change, and can its doc comment teach it to someone who has not read the source? A system
+the plugin registers fails the first, a tuning threshold the second. `Registers` passes all three
+only once its doc comment explains why the set is fixed. When the answer is unclear, narrow it:
+widening later breaks no one, and narrowing after a publish does.
+
+`growth.py --api` lists public items that nothing outside `src/` names. That list is where to ask
+the questions, not the answer. A kept item that no example uses gets a line in
+`crates/bevy_action_map/tests/public_surface.rs`, so that narrowing it breaks the build.
