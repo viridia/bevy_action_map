@@ -12,7 +12,7 @@ belongs there, and why a particular choice was made belongs in [`decisions.md`](
 **Numbering.** Each guideline's number is a permanent identity from a single counter, independent of
 its group, and never reused. A gap in the sequence is a retired guideline.
 
-**Next: 24.**
+**Next: 25.**
 
 ---
 
@@ -215,3 +215,11 @@ widening later breaks no one, and narrowing after a publish does.
 `growth.py --api` lists public items that nothing outside `src/` names. That list is where to ask
 the questions, not the answer. A kept item that no example uses gets a line in
 `crates/bevy_action_map/tests/public_surface.rs`, so that narrowing it breaks the build.
+
+### G24 — Versions start at 0.1 and never outpace Bevy's
+
+Every published crate takes the workspace's version, which started at `0.1.0` and rises slowly:
+`0.1.x` for a fix or an addition, the next minor only for a breaking change. Never `0.0.x`: cargo
+treats every `0.0` release as incompatible with every other, so a fix would never reach a user
+through `cargo update`. The version never passes Bevy's own: while Bevy is `0.20`, nothing here is
+`0.21` or later.

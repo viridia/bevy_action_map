@@ -19,7 +19,7 @@ part that stays good. Re-verify before acting on one.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 tier, and never reused. A gap in the sequence is a retired entry.
 
-**Next: 1081.**
+**Next: 1082.**
 
 **What the tiers mean.**
 
@@ -196,6 +196,15 @@ person adding one has a rule rather than a coin flip.
 
 No behaviour at stake. All are small, and the reason to do them together is that a reader trusting
 any one of them is misled about a mechanism.
+
+### 1081 R5.6 and R17.5 promise custom modifiers a serialized form D19 gave up
+
+R5.6 says a third-party modifier round-trips through serialization via the type registry, and R17.5
+says serialization goes through `Reflect` so that it can. D19, as D-entries since record it, took
+serializability out of the extensibility question: an override row holds controls, never modifiers,
+and `Modifier` and `Condition` require no `Reflect`. The crate docs' feature table repeated the
+requirements' claim until chunk 195 corrected it; the manifest's `bevy_reflect` comment still does.
+Either requirement is withdrawn or narrowed to what is built, which is the author's call.
 
 ### 1031 Examples and sketches that do not compile
 

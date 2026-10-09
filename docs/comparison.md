@@ -8,11 +8,10 @@ code rather than against an impression.
 
 ## Status, before anything else
 
-**This crate is not ready to be chosen today.** It is unpublished and has one author. It targets a
-Bevy release candidate rather than a release, and it has never shipped a game. BEI and LWIM are
-published and maintained, they track Bevy releases, and real games use them. If you are starting a
-project this week, that difference outweighs every technical one below, and the recommendation is
-BEI.
+**This crate is not ready to be chosen today.** Its first version, `0.1.0`, is new, it has one
+author, and it has never shipped a game. BEI and LWIM have been published and maintained for many
+Bevy releases, and real games use them. If you are starting a project this week, that difference
+outweighs every technical one below, and the recommendation is BEI.
 
 So what follows is not a case for switching. It is a map of where the three crates differ, which is
 useful whichever you choose. It is also the reason this crate exists.
@@ -23,7 +22,7 @@ useful whichever you choose. It is also the reason this crate exists.
 | --- | --- | --- | --- |
 | `bevy_enhanced_input` | 0.26.0, and `main` @ `f42a68a` | 0.19 | crates.io source; GitHub |
 | `leafwing-input-manager` | 0.21.0 | 0.19 | crates.io source |
-| `bevy_action_map` | unpublished, commit `c271ba4` | 0.20.0-rc.1 | this repository |
+| `bevy_action_map` | commit `c271ba4`, before `0.1.0` | 0.20.0-rc.1 | this repository |
 
 Two of the three target Bevy 0.19 and one targets 0.20. A few differences below come partly from the
 Bevy versions rather than the crates, and are marked where they do. BEI's `main` is cited only where

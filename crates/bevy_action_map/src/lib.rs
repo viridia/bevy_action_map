@@ -195,7 +195,7 @@
 //! | `mouse`       |   yes   | Mouse buttons and motion as a binding input.                     |
 //! | `gamepad`     |   yes   | Gamepad buttons and axes as a binding input.                     |
 //! | `touch`       |         | Planned: touch as a binding input. Gates the dependency only.    |
-//! | `bevy_reflect`|   yes   | Runtime reflection, needed to register custom modifiers and conditions. |
+//! | `bevy_reflect`|   yes   | Reflection for the crate's types, which saving overrides and persistent device identities use. |
 //! | `serialize`   |         | `serde` support for saving and loading binding overrides.         |
 //! | `state`       |   yes   | A context's activation can follow a `bevy_state` state.           |
 

@@ -1,6 +1,5 @@
-//! Derive macros for [`bevy_action_map`](https://docs.rs/bevy_action_map).
-//!
-//! Use them like this:
+//! Derive macros for [`bevy_action_map`](https://docs.rs/bevy_action_map), which re-exports them.
+//! Depend on that crate rather than this one:
 //!
 //! ```ignore
 //! use bevy_action_map::prelude::*;
@@ -13,10 +12,9 @@
 //! #[context(path = "gameplay.on_foot", tick = Fixed)]
 //! struct OnFoot;
 //! ```
-//!
-//! Not compiled: what the macros expand to names `bevy_action_map`, and this crate cannot depend on
-//! the one that re-exports it. The same example is checked for real in that crate's own docs and in
-//! `tests/ui/pass`.
+
+// The example is `ignore` because what the macros expand to names `bevy_action_map`, which this
+// crate cannot depend on. The same example is compiled in that crate's docs and in `tests/ui/pass`.
 
 #![forbid(unsafe_code)]
 

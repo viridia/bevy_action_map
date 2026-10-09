@@ -332,11 +332,11 @@ keep something between runs need `--features serialize` as well, marked below.
 
 ## Installing
 
-Not on crates.io yet, so depend on the git repository directly. It targets Bevy 0.20.
+It targets Bevy 0.20.
 
 ```toml
 [dependencies]
-bevy_action_map = { git = "https://github.com/viridia/bevy_action_map" }
+bevy_action_map = "0.1"
 ```
 
 Default features are `std`, `bevy_reflect`, `keyboard`, `mouse`, `gamepad`, and `state`. `serialize`
