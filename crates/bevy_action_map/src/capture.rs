@@ -41,9 +41,9 @@
 //!   stays operable while listening. An excluded control is not being refused — it is busy doing
 //!   its normal job, which is how the key that cancels a capture gets through to cancel it.
 //! - **A reading nobody chose.** A stick at rest is not quite at rest and a hand on the desk moves
-//!   the mouse, so a session listening for a button ignores a deflection past [`DEFLECTION`] or a
-//!   twitch past [`MOUSE_MOTION`]. A session listening for that kind of control takes it, because
-//!   for a stick row the deflection *is* the answer.
+//!   the mouse, so a session listening for a button ignores a stick pushed past half way or a mouse
+//!   moved eight pixels in one event. A session listening for that kind of control takes it,
+//!   because for a stick row the deflection *is* the answer.
 
 use alloc::vec::Vec;
 
@@ -67,20 +67,21 @@ use crate::overrides::{Override, Overrides};
 /// A stick at rest is not quite at rest, and a capture that took the first non-zero reading would
 /// bind whichever axis the hardware happened to be drifting on. Half deflection is well past any
 /// resting jitter and well short of what a player has to strain for.
-pub const DEFLECTION: f32 = 0.5;
+#[cfg(feature = "gamepad")]
+pub(crate) const DEFLECTION: f32 = 0.5;
 
 /// How far the mouse must move in one event before capture treats it as a choice.
 ///
 /// Same reason as [`DEFLECTION`], for a device with no resting position: a hand on the desk moves
 /// the mouse a pixel at a time without anybody choosing anything.
-pub const MOUSE_MOTION: f32 = 8.0;
+pub(crate) const MOUSE_MOTION: f32 = 8.0;
 
 /// A set of controls named by what its members are, rather than by listing them.
 ///
-/// This is the language capture filters in. A class is defined by the channel a control reports
-/// on, never by an enumeration of `KeyCode` and `GamepadButton` variants, which lets a device kind
-/// that does not exist yet join a class the day its backend ships, rather than needing to be added
-/// to a list here.
+/// This is the language capture filters in. A class is defined by the channel a control reports on,
+/// never by an enumeration of `KeyCode` and `GamepadButton` variants, which lets a device kind that
+/// does not exist yet join a class the day its backend ships, rather than needing to be added to a
+/// list here.
 ///
 /// The set of classes is closed: a class earns its place only where writing the members out is not
 /// reasonable. "Any button-shaped control" qualifies because the device set is open. "The arrow
@@ -618,7 +619,7 @@ fn releases(event: &RawEvent, control: Control, threshold: &ButtonThreshold) -> 
 ///
 /// Runs between sampling and evaluation, which is what lets it claim what it saw before any context
 /// gets to act on it.
-pub fn run_captures(
+pub(crate) fn run_captures(
     mut commands: Commands<'_, '_>,
     frame: Res<'_, InputFrame>,
     threshold: Res<'_, ButtonThreshold>,
