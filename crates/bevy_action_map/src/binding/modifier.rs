@@ -125,7 +125,7 @@ pub trait Modifier: Send + Sync + 'static {
 // `Clone` for the reason `BindingSpec` is: applying an override clones the authored bindings and
 // rewrites their inputs.
 #[derive(Clone)]
-pub enum BindingModifier {
+pub(crate) enum BindingModifier {
     /// Suppresses values near centre, per [`DeadZone`].
     DeadZone(DeadZone),
     /// Multiplies the value by a scalar.

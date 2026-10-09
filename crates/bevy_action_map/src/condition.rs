@@ -81,7 +81,7 @@ pub trait Condition: Send + Sync + 'static {
 // `Clone` for the reason `BindingSpec` is: applying an override clones the authored bindings and
 // rewrites their inputs.
 #[derive(Clone)]
-pub enum BindingCondition {
+pub(crate) enum BindingCondition {
     /// Fires on the tick the control leaves rest.
     Press,
     /// Fires on the tick the control returns to rest.

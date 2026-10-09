@@ -773,12 +773,10 @@ lint); *unreached* means neither. A reached item is left alone unless its owner 
 **Decided** (by the author, 2026-10-08). Every reached item, and `ReflectDeviceIdentity`, stays
 public. The rest:
 
-- **`pub(crate)`:** `BindingModifier`, `BindingCondition`.
 - **Rustdoc warnings the sweep passes.** A narrowed item linked from public docs is an error under
   `RUSTDOCFLAGS="-D warnings" cargo doc -p bevy_action_map --all-features --no-deps`, which no
-  recipe runs, so each unit runs it. Two errors predate the sweep and go with their units: an
-  unresolved `ModifierKey` at `binding/builder.rs:284` (`binding`), and a redundant link target at
-  `overrides.rs:186` (`overrides`).
+  recipe runs, so each unit runs it. One error predates the sweep and goes with its unit: a
+  redundant link target at `overrides.rs:186` (`overrides`).
 - **Kept, with a test:** `apply_overrides_for` and `MaxSlots` get a behaviour test, since what they
   promise is what they do.
 
@@ -792,7 +790,8 @@ reached, so unchanged. `gamepad`: the three observers and `GamepadModelId` narro
 `bevy_reflect` as well, which every use of it is; `device` still re-exports the public gamepad
 items; `GamepadBrands` has a check in `public_surface.rs`. `device`: `resolve_gamepad_identity`
 narrowed; `public_surface.rs` registers a custom identity type, which covers
-`RegisterDeviceIdentity` and `DeviceIdentity`.
+`RegisterDeviceIdentity` and `DeviceIdentity`. `binding`, with the rest folded in: `BindingModifier`
+and `BindingCondition` narrowed, and a `ModifierKey` doc link that never resolved given its path.
 
 ## Tooling
 

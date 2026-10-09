@@ -281,7 +281,7 @@ impl<'a, C> BindingBuilder<'a, C> {
     /// context.bind::<SaveAs>(KeyCode::KeyS).with(ModifierKey::Ctrl).with(ModifierKey::Shift);
     /// ```
     ///
-    /// A [`ModifierKey`] is satisfied by either key of its pair, which is almost always what a
+    /// A [`ModifierKey`](crate::binding::ModifierKey) is satisfied by either key of its pair, which is almost always what a
     /// chord wants. Pass a [`KeyCode`](bevy_input::keyboard::KeyCode) instead to require one
     /// particular physical key.
     ///

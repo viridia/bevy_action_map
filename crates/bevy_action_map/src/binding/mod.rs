@@ -12,7 +12,8 @@ pub use builder::{BindingBuilder, ClassBindingBuilder, CombinedBuilder, InputCon
 pub use control::{
     BindingInput, BindingPart, ButtonThreshold, Control, IntoBindingInput, MouseMove,
 };
-pub use modifier::{BindingModifier, CompassPoints, DeadZone, DeadZoneShape, Modifier};
+pub(crate) use modifier::BindingModifier;
+pub use modifier::{CompassPoints, DeadZone, DeadZoneShape, Modifier};
 
 #[cfg(feature = "gamepad")]
 pub use control::Stick;
