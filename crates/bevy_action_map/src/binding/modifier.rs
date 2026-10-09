@@ -3,7 +3,7 @@
 use bevy_math::Vec2;
 use bevy_platform::sync::Arc;
 
-use crate::action::{ActionValue, ChannelShape, Scratch};
+use crate::action::{ActionValue, ChannelShape, Registers};
 
 /// How a deadzone measures the region it removes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,16 +101,15 @@ pub enum CompassPoints {
 pub trait Modifier: Send + Sync + 'static {
     /// Applies the modifier to a runtime value.
     ///
-    /// `scratch` is this modifier's own working memory, untouched by anything else, and persists
-    /// between calls. `delta` is how much time this call accounts for, in the owning context's own
-    /// seconds.
+    /// `registers` are this modifier's own, untouched by anything else, and persist between calls.
+    /// `delta` is how much time this call accounts for, in the owning context's own seconds.
     ///
     /// It is called each time the binding's input changes within a tick, so that a press and a
     /// release inside one tick are both seen, and once more at the end of the tick. Only the call
     /// at the end is handed the tick's length, the fixed timestep for a fixed context or the frame
     /// time for a render one; the others, and the first tick a context evaluates, are handed zero.
     /// A modifier that accumulates over time should therefore add `delta` rather than count calls.
-    fn apply(&self, value: ActionValue, scratch: &mut Scratch, delta: f32) -> ActionValue;
+    fn apply(&self, value: ActionValue, registers: &mut Registers, delta: f32) -> ActionValue;
 
     /// Whether this modifier stretches its input onto a different range.
     ///
@@ -187,7 +186,7 @@ pub enum BindingModifier {
 
 impl BindingModifier {
     /// Applies this modifier to a runtime value.
-    pub fn apply(&self, value: ActionValue, scratch: &mut Scratch, delta: f32) -> ActionValue {
+    pub fn apply(&self, value: ActionValue, registers: &mut Registers, delta: f32) -> ActionValue {
         match self {
             Self::DeadZone(dead_zone) => apply_dead_zone(value, *dead_zone),
             Self::Scale(scale) => apply_scale(value, *scale),
@@ -199,8 +198,8 @@ impl BindingModifier {
             Self::Curve(power) => apply_curve(value, *power),
             Self::PerSecond(scale) => apply_scale(value, scale * delta),
             Self::Compass(points) => apply_compass(value, *points),
-            Self::Toggle { active } => apply_toggle(value, scratch, *active),
-            Self::Custom(modifier) => modifier.apply(value, scratch, delta),
+            Self::Toggle { active } => apply_toggle(value, registers, *active),
+            Self::Custom(modifier) => modifier.apply(value, registers, delta),
         }
     }
 
@@ -339,55 +338,55 @@ fn compass_direction(value: Vec2, points: CompassPoints) -> Vec2 {
     .as_vec2()
 }
 
-/// Bit position within `Scratch::flags` this modifier's latch lives at. Its own `Scratch` slot —
-/// see `apply_modifiers`' per-modifier split in `eval` — so nothing else on the binding can collide
-/// with it.
+/// Bit position within `Registers::flags` this modifier's latch lives at. The modifier has its own
+/// `Registers` (see `apply_modifiers`' per-modifier split in `eval`), so nothing else on the
+/// binding can collide with it.
 const TOGGLE_LATCH: u8 = 1 << 0;
 
 /// Converts a momentary button into a sustained latch, active only while `active` says so.
 ///
-/// `scratch.prev` is tracked whether or not the latch is live, so switching modes mid-press cannot
-/// manufacture a spurious edge the tick after the switch.
+/// `registers.prev` is tracked whether or not the latch is live, so switching modes mid-press
+/// cannot manufacture a spurious edge the tick after the switch.
 ///
 /// Used only for a binding whose tunable is *not* shared with another. A shared one is resolved for
 /// the whole group instead, by the evaluator's `resolve_shared_toggle`, and each member reads
 /// `toggle_latch` rather than calling this at all: running this independently per binding, against
-/// a scratch cell other bindings in the group also write, spuriously re-flips the latch on every
+/// a register set other bindings in the group also write, spuriously re-flips the latch on every
 /// tick a *different* member of the group is held.
-fn apply_toggle(value: ActionValue, scratch: &mut Scratch, active: bool) -> ActionValue {
+fn apply_toggle(value: ActionValue, registers: &mut Registers, active: bool) -> ActionValue {
     let actuated = value.to_bool();
-    let was = scratch.prev.to_bool();
-    scratch.prev = value;
+    let was = registers.prev.to_bool();
+    registers.prev = value;
 
     if !active {
         return value;
     }
     if actuated && !was {
-        scratch.flags ^= TOGGLE_LATCH;
+        registers.flags ^= TOGGLE_LATCH;
     }
-    ActionValue::Bool(scratch.flags & TOGGLE_LATCH != 0)
+    ActionValue::Bool(registers.flags & TOGGLE_LATCH != 0)
 }
 
 /// Whether a shared toggle's latch currently reads on — the bit [`apply_toggle`] uses, read back
 /// out of the plan's shared cell for a binding's group rather than its own private one.
-pub(crate) fn toggle_latch(scratch: &Scratch) -> bool {
-    scratch.flags & TOGGLE_LATCH != 0
+pub(crate) fn toggle_latch(registers: &Registers) -> bool {
+    registers.flags & TOGGLE_LATCH != 0
 }
 
 /// Resolves one tick of a shared toggle's latch, from every sharing binding's raw actuation
 /// combined — never per binding, which is what [`apply_toggle`]'s own doc explains is unsafe here.
-/// `actuated` is the combined reading; `scratch` is the group's one shared cell, carrying the
+/// `actuated` is the combined reading; `registers` is the group's one shared set, carrying the
 /// combined reading from last tick in `prev` the same way a private toggle carries its own.
 ///
 /// `active` mirrors [`apply_toggle`]'s own parameter: the bit only moves while the group's tunable
 /// says toggle mode is on, and `prev` is tracked regardless of it, for the same reason.
 #[cfg(any(feature = "keyboard", feature = "mouse", feature = "gamepad"))]
-pub(crate) fn resolve_shared_toggle(actuated: bool, active: bool, scratch: &mut Scratch) {
-    let was = scratch.prev.to_bool();
+pub(crate) fn resolve_shared_toggle(actuated: bool, active: bool, registers: &mut Registers) {
+    let was = registers.prev.to_bool();
     if active && actuated && !was {
-        scratch.flags ^= TOGGLE_LATCH;
+        registers.flags ^= TOGGLE_LATCH;
     }
-    scratch.prev = ActionValue::Bool(actuated);
+    registers.prev = ActionValue::Bool(actuated);
 }
 
 /// A shared group's current toggle setting, read off any one member — `hold_or_toggle` and override
@@ -523,7 +522,12 @@ mod tests {
     struct DoubleAxis;
 
     impl Modifier for DoubleAxis {
-        fn apply(&self, value: ActionValue, _scratch: &mut Scratch, _delta: f32) -> ActionValue {
+        fn apply(
+            &self,
+            value: ActionValue,
+            _registers: &mut Registers,
+            _delta: f32,
+        ) -> ActionValue {
             match value {
                 ActionValue::Axis2(value) => ActionValue::Axis2(value * 2.0),
                 other => other,
@@ -580,7 +584,7 @@ mod tests {
 
         for (modifier, input, expected) in cases {
             assert_eq!(
-                modifier.apply(input, &mut Scratch::default(), 0.0),
+                modifier.apply(input, &mut Registers::default(), 0.0),
                 expected
             );
         }
@@ -591,25 +595,25 @@ mod tests {
     #[test]
     fn toggle_latches_on_a_press_and_survives_a_release() {
         let modifier = BindingModifier::Toggle { active: true };
-        let mut scratch = Scratch::default();
+        let mut registers = Registers::default();
 
         assert_eq!(
-            modifier.apply(ActionValue::Bool(false), &mut scratch, 0.0),
+            modifier.apply(ActionValue::Bool(false), &mut registers, 0.0),
             ActionValue::Bool(false),
             "nothing pressed yet"
         );
         assert_eq!(
-            modifier.apply(ActionValue::Bool(true), &mut scratch, 0.0),
+            modifier.apply(ActionValue::Bool(true), &mut registers, 0.0),
             ActionValue::Bool(true),
             "a press flips the latch on"
         );
         assert_eq!(
-            modifier.apply(ActionValue::Bool(false), &mut scratch, 0.0),
+            modifier.apply(ActionValue::Bool(false), &mut registers, 0.0),
             ActionValue::Bool(true),
             "letting go does not turn a toggle back off"
         );
         assert_eq!(
-            modifier.apply(ActionValue::Bool(true), &mut scratch, 0.0),
+            modifier.apply(ActionValue::Bool(true), &mut registers, 0.0),
             ActionValue::Bool(false),
             "the second press flips it back off"
         );
@@ -620,27 +624,31 @@ mod tests {
     #[test]
     fn an_inactive_toggle_is_identity() {
         let modifier = BindingModifier::Toggle { active: false };
-        let mut scratch = Scratch::default();
+        let mut registers = Registers::default();
 
         assert_eq!(
-            modifier.apply(ActionValue::Bool(true), &mut scratch, 0.0),
+            modifier.apply(ActionValue::Bool(true), &mut registers, 0.0),
             ActionValue::Bool(true)
         );
         assert_eq!(
-            modifier.apply(ActionValue::Bool(false), &mut scratch, 0.0),
+            modifier.apply(ActionValue::Bool(false), &mut registers, 0.0),
             ActionValue::Bool(false)
         );
     }
 
     #[test]
     fn switching_to_toggle_mode_mid_press_does_not_manufacture_an_edge() {
-        let mut scratch = Scratch::default();
-        BindingModifier::Toggle { active: false }.apply(ActionValue::Bool(true), &mut scratch, 0.0);
+        let mut registers = Registers::default();
+        BindingModifier::Toggle { active: false }.apply(
+            ActionValue::Bool(true),
+            &mut registers,
+            0.0,
+        );
 
         assert_eq!(
             BindingModifier::Toggle { active: true }.apply(
                 ActionValue::Bool(true),
-                &mut scratch,
+                &mut registers,
                 0.0
             ),
             ActionValue::Bool(false),
@@ -655,7 +663,7 @@ mod tests {
         assert_eq!(
             modifier.apply(
                 ActionValue::Axis2(Vec2::new(1.0, -2.0)),
-                &mut Scratch::default(),
+                &mut Registers::default(),
                 0.0
             ),
             ActionValue::Axis2(Vec2::new(2.0, -4.0))
@@ -665,7 +673,7 @@ mod tests {
     fn dead_zoned(dead_zone: DeadZone, value: Vec2) -> Vec2 {
         match BindingModifier::DeadZone(dead_zone).apply(
             ActionValue::Axis2(value),
-            &mut Scratch::default(),
+            &mut Registers::default(),
             0.0,
         ) {
             ActionValue::Axis2(value) => value,
@@ -702,7 +710,7 @@ mod tests {
     fn compassed(points: CompassPoints, value: Vec2) -> Vec2 {
         match BindingModifier::Compass(points).apply(
             ActionValue::Axis2(value),
-            &mut Scratch::default(),
+            &mut Registers::default(),
             0.0,
         ) {
             ActionValue::Axis2(value) => value,
@@ -748,7 +756,7 @@ mod tests {
     fn one_dimension_has_two_compass_points() {
         let signed = |value: f32| match BindingModifier::Compass(CompassPoints::Four).apply(
             ActionValue::Axis1(value),
-            &mut Scratch::default(),
+            &mut Registers::default(),
             0.0,
         ) {
             ActionValue::Axis1(value) => value,
@@ -778,7 +786,7 @@ mod tests {
     fn clamp_magnitude_reins_in_a_diagonal_but_leaves_a_cardinal_alone() {
         let diagonal = BindingModifier::ClampMagnitude.apply(
             ActionValue::Axis2(Vec2::new(1.0, 1.0)),
-            &mut Scratch::default(),
+            &mut Registers::default(),
             0.0,
         );
         let ActionValue::Axis2(diagonal) = diagonal else {
@@ -789,7 +797,7 @@ mod tests {
         assert_eq!(
             BindingModifier::ClampMagnitude.apply(
                 ActionValue::Axis2(Vec2::new(1.0, 0.0)),
-                &mut Scratch::default(),
+                &mut Registers::default(),
                 0.0,
             ),
             ActionValue::Axis2(Vec2::new(1.0, 0.0))
@@ -801,10 +809,10 @@ mod tests {
     #[test]
     fn rescale_maps_its_range_onto_zero_to_one_and_clamps_outside_it() {
         let modifier = BindingModifier::Rescale { min: 0.1, max: 0.9 };
-        let mut scratch = Scratch::default();
+        let mut registers = Registers::default();
         let mut rescaled = |input| {
             modifier
-                .apply(ActionValue::Axis1(input), &mut scratch, 0.0)
+                .apply(ActionValue::Axis1(input), &mut registers, 0.0)
                 .to_axis1()
         };
 
@@ -846,7 +854,7 @@ mod tests {
         assert_eq!(
             BindingModifier::DeadZone(DeadZone::radial(0.5)).apply(
                 value,
-                &mut Scratch::default(),
+                &mut Registers::default(),
                 0.0
             ),
             ActionValue::Axis3(bevy_math::Vec3::ZERO)
@@ -858,7 +866,7 @@ mod tests {
         let diagonal = Vec2::splat(core::f32::consts::FRAC_1_SQRT_2 * 0.5);
         let curved = match BindingModifier::Curve(2.0).apply(
             ActionValue::Axis2(diagonal),
-            &mut Scratch::default(),
+            &mut Registers::default(),
             0.0,
         ) {
             ActionValue::Axis2(value) => value,

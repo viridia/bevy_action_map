@@ -524,10 +524,10 @@ State divides in two, and both halves are dense arrays of `Copy` types indexed b
 | | Holds | Belongs to |
 | --- | --- | --- |
 | `ActionState` | value, phase | the action |
-| `Scratch` | hold timers, tap counts, previous value, flags | the binding's conditions and modifiers, and a `Button` action's derived press |
+| `Registers` | hold timers, tap counts, previous value, flags | the binding's conditions and modifiers, and a `Button` action's derived press |
 
 ```rust
-pub struct Scratch {
+pub struct Registers {
     pub prev: ActionValue,   // previous input, or a filter accumulator
     pub time: f32,           // press time, window start, or last fire
     pub count: u16,          // tap count, or progress through a sequence
@@ -631,7 +631,7 @@ and `why_not`.
 its control has been down, and how far that is toward the duration it needs, clamped to `0.0..=1.0`.
 Both are `0.0` where an action has no such binding, or none of its bindings is currently held; where
 more than one qualifies, the one furthest along wins. Nothing new is tracked to answer this — the
-timer is the same `Scratch` the binding's own condition already keeps between ticks, walked from
+timer is the same `Registers` the binding's own condition already keeps between ticks, walked from
 outside evaluation rather than threaded through it.
 
 `why_not` answers the question a call site cannot:

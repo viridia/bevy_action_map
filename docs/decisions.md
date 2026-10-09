@@ -214,8 +214,8 @@ rebinding UI filters candidate controls on, so the capture path loses its constr
 
 ### D8 — Action state is two dense tables; actions are not entities
 
-**Decided.** Per context instance: one `ActionState` per action and one `Scratch` per condition and
-per stateful modifier, both dense arrays of `Copy` types indexed by plan slot, plus a per-action
+**Decided.** Per context instance: one `ActionState` per action and one `Registers` per condition
+and per stateful modifier, both dense arrays of `Copy` types indexed by plan slot, plus a per-action
 dirty bitset. Parameters — durations, thresholds — live in the immutable plan and never in state.
 
 **Rules out.** Action-as-entity, a packed byte buffer, and a typed tuple per action. The last two

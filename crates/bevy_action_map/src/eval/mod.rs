@@ -1045,18 +1045,18 @@ mod tests {
     /// second would read what the first wrote and the chain would depend on its own length.
     #[cfg(feature = "keyboard")]
     #[test]
-    fn every_modifier_in_a_chain_has_its_own_scratch() {
+    fn every_modifier_in_a_chain_has_its_own_registers() {
         struct Remembering;
 
         impl crate::binding::Modifier for Remembering {
             fn apply(
                 &self,
                 _value: ActionValue,
-                scratch: &mut crate::action::Scratch,
+                registers: &mut crate::action::Registers,
                 _delta: f32,
             ) -> ActionValue {
-                scratch.count += 1;
-                ActionValue::Axis1(f32::from(scratch.count))
+                registers.count += 1;
+                ActionValue::Axis1(f32::from(registers.count))
             }
         }
 

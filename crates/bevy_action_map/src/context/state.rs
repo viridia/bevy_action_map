@@ -11,7 +11,7 @@ use bevy_ecs::system::SystemParam;
 use bevy_platform::sync::Arc;
 
 use crate::action::{
-    ActionId, ActionOutput, ActionPhase, ActionState, InputAction, InputContext, Scratch,
+    ActionId, ActionOutput, ActionPhase, ActionState, InputAction, InputContext, Registers,
 };
 use crate::condition::BindingCondition;
 use crate::eval::{HeldControlState, Transition};
@@ -42,11 +42,11 @@ pub struct InputContextState<C> {
     // two do not fight each other — see `is_active`.
     pub(crate) shadowed: bool,
     // Working memory for every modifier and condition in the plan, indexed as the plan says.
-    pub(crate) scratch: Vec<Scratch>,
+    pub(crate) scratch: Vec<Registers>,
     // One cell per group of bindings sharing a tunable (`Plan::tunable_scratch_count`), rather than
     // each binding's own private slot in `scratch` above — the mechanism `hold_or_toggle` needs so
     // that pressing any control it reaches agrees with every other about the latch.
-    pub(crate) tunable_scratch: Vec<Scratch>,
+    pub(crate) tunable_scratch: Vec<Registers>,
     // Parallel to `actions`: the require-reset latch. This action may not fire until it has been
     // seen at rest once. Set when a context activates, so a control the player was already holding
     // does not read as a fresh press.
@@ -99,8 +99,8 @@ impl<C: InputContext> InputContextState<C> {
             dirty: FixedBitSet::with_capacity(slots),
             active: true,
             shadowed: false,
-            scratch: alloc::vec![Scratch::default(); scratch_slots],
-            tunable_scratch: alloc::vec![Scratch::default(); tunable_scratch_slots],
+            scratch: alloc::vec![Registers::default(); scratch_slots],
+            tunable_scratch: alloc::vec![Registers::default(); tunable_scratch_slots],
             require_reset: FixedBitSet::with_capacity(slots),
             disabled: FixedBitSet::with_capacity(slots),
             transitions: Vec::new(),
@@ -218,7 +218,7 @@ impl<C: InputContext> InputContextState<C> {
 
     // The elapsed time and duration of whichever `hold`-shaped binding is furthest along.
     //
-    // `Scratch::time` already accumulates exactly this while `Hold` or `HoldAndRelease` is
+    // `Registers::time` already accumulates exactly this while `Hold` or `HoldAndRelease` is
     // building or satisfied, so this is a read path over existing working memory rather than new
     // bookkeeping (R3.4, R3.5).
     fn holding<A>(&self) -> Option<(f32, f32)>
@@ -486,10 +486,10 @@ impl<C: InputContext> InputContextState<C> {
 
         self.scratch.clear();
         self.scratch
-            .resize(plan.scratch_count(), Scratch::default());
+            .resize(plan.scratch_count(), Registers::default());
         self.tunable_scratch.clear();
         self.tunable_scratch
-            .resize(plan.tunable_scratch_count(), Scratch::default());
+            .resize(plan.tunable_scratch_count(), Registers::default());
         self.binding_progress.clear();
         self.binding_progress
             .resize(plan.bindings().len(), Default::default());
@@ -3626,7 +3626,7 @@ mod tests {
         // which is the claim that has to hold for a rollback to afford it once per tick.
         fn assert_copy<T: Copy>() {}
         assert_copy::<ActionState>();
-        assert_copy::<Scratch>();
+        assert_copy::<Registers>();
 
         let mut app = App::new();
         app.add_plugins((InputPlugin, ActionMapPlugin));

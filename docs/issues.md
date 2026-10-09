@@ -100,10 +100,10 @@ wiggling the stick rapidly is the same shape of control, and it works on hardwar
 calibrated for exactly this reason.
 
 _Fix, sketched (E[2]):_ not a crate change. `Modifier` (`binding.rs:1256`) is a pure function of a
-value and its own `Scratch` — `scratch.prev` holds last tick's position,
-`scratch.count`/`scratch.time` can track reversals within a window — so a stateful "wiggle" modifier
-that outputs `Bool(false)` until enough movement has accumulated, then passes the real value
-through, is buildable entirely in `examples/` today via `.custom()` (`binding.rs:1885`). Free
+value and its own `Registers` — `registers.prev` holds last tick's position,
+`registers.count`/`registers.time` can track reversals within a window — so a stateful "wiggle"
+modifier that outputs `Bool(false)` until enough movement has accumulated, then passes the real
+value through, is buildable entirely in `examples/` today via `.custom()` (`binding.rs:1885`). Free
 parameters — window length, reversal count, how much movement counts — are a game's own design
 question, which is the reason this stays a worked example rather than a `BindingModifier` variant:
 baking in an intensity or a pattern would be guessing at what any particular game's grapple-escape
@@ -203,13 +203,6 @@ any one of them is misled about a mechanism.
   Copying the sketch into a hand-written impl does not compile.
 - TD5.6's `Fired<A>` sketch names its target field `context`, and the `bsn!` example under it reads
   `ev.context`. The field is `entity` (`event.rs`), so the example does not compile.
-
-### 1032 Internal comments whose stated reason is false
-
-- `action.rs:335`, `Scratch::flags` is documented as "Condition-defined bits" and a modifier defines
-  one too (`TOGGLE_LATCH`, `binding.rs:2311`). Related, and worth carrying with it: `condition.rs`'s
-  own constant does not carry the note `binding.rs`'s does, explaining why two constants in two
-  files can both be `1 << 0` — `plan.rs:691` gives every modifier and every condition its own cell.
 
 ### 1033 Design sentences that are a clause short
 

@@ -333,30 +333,31 @@ pub enum ActionPhase {
     Canceled,
 }
 
-/// Working memory for one condition or one stateful modifier.
+/// A condition's or modifier's own small set of registers, kept from one call to the next.
 ///
-/// A binding that has to remember something between ticks — how long a button has been down, how
-/// many taps have landed, what the last value was — keeps it here. One of these belongs to each
-/// condition and each stateful modifier, so two conditions on one binding cannot tread on each
+/// Like a CPU's registers, they have no fixed meaning: a hold keeps its start time in `time`, a
+/// multi-tap its count in `count`, a smoothing modifier its running value in `prev`. Each condition
+/// and each stateful modifier on a binding gets its own set, so two of them cannot overwrite each
 /// other.
 ///
-/// Configuration does not live here: a hold's duration and a multi-tap's window do not change from
-/// tick to tick, so they belong to the binding rather than to its working memory.
+/// The set is small and fixed so that every binding's registers sit in one flat array, which the
+/// evaluator walks each tick without allocating. Anything that does not change from tick to tick,
+/// such as a hold's duration, belongs on the condition itself.
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Scratch {
+pub struct Registers {
     /// The previous input value, or an accumulator for a filtering modifier.
     pub prev: ActionValue,
     /// When something started, in the context's own seconds.
     pub time: f32,
     /// A tap count, or how far through a sequence this binding has come.
     pub count: u16,
-    /// Condition-defined bits.
+    /// Bits whose meaning the condition or modifier defines for itself.
     pub flags: u8,
 }
 
-impl Default for Scratch {
+impl Default for Registers {
     fn default() -> Self {
         Self {
             prev: ActionValue::Bool(false),

@@ -741,8 +741,7 @@ document was written by an earlier model and has not been edited as a whole.
 
 `growth.py --api` lists public items that nothing outside the crate's `src/` names; the ones outside
 the prelude are the candidates, 46 once the scan took in benches, the root `tests/` and the sibling
-crates. `ActionIdCache`, which the derive macros emit, left the list then, and still wants
-`#[doc(hidden)]`.
+crates. `ActionIdCache`, which the derive macros emit, left the list then.
 
 - **Each gets one of three answers:** made `pub(crate)`, where it is public only because its module
   is; kept, with an example or test made to use it, where it is API nothing has exercised; or left
@@ -777,17 +776,16 @@ public. The rest:
 - **`pub(crate)`:** `run_captures`, `DEFLECTION`, `MOUSE_MOTION`, `GamepadModelId`,
   `mark_gamepad_connected`, `mark_gamepad_disconnected`, `resolve_gamepad_brand`,
   `resolve_gamepad_identity`, `BindingModifier`, `BindingCondition`.
-- **`#[doc(hidden)]`:** `ActionIdCache`.
-- **Kept, with a test:** `registered_actions`, `GamepadBrands`, `RegisterDeviceIdentity` and
-  `Scratch` get a compile-only check in a new `crates/bevy_action_map/tests/public_surface.rs`,
-  whose functions are built and never called; `apply_overrides_for` and `MaxSlots` get a behaviour
-  test, since what they promise is what they do. `RegisterDeviceIdentity`'s check uses a custom
-  identity type, which exercises `DeviceIdentity` too.
-- **`Scratch` becomes `Registers`** in the `action` unit, now that it stays public. The doc comment
-  teaches the metaphor: a condition's or modifier's own small set of registers, kept between calls,
-  meaning whatever the code using them decides, and fixed and small because every binding's set sits
-  in one flat array the evaluator walks each tick without allocating. The internal documents keep
-  D8's terms and change only the name.
+- **Kept, with a test:** `GamepadBrands` and `RegisterDeviceIdentity` get a compile-only check in
+  `crates/bevy_action_map/tests/public_surface.rs`, whose tests pass by compiling;
+  `RegisterDeviceIdentity`'s uses a custom identity type, which exercises `DeviceIdentity` too.
+  `apply_overrides_for` and `MaxSlots` get a behaviour test, since what they promise is what they
+  do.
+
+**Done:** `action`. `Scratch` became `Registers`, a single set is named `registers` and the flat
+array of them keeps `scratch`; `registered_actions` and `Registers` started `public_surface.rs`;
+issue 1032 folded in. `ActionIdCache` stays public and visible, reversing the triage: its doc
+comment teaches it to anyone writing an `InputAction` impl by hand.
 
 ## Tooling
 

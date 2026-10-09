@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 
 use super::binding_reading::BindingReading;
-use crate::action::{ActionIntent, ActionValue, Scratch};
+use crate::action::{ActionIntent, ActionValue, Registers};
 use crate::binding::{BindingModifier, ButtonThreshold, Control};
 use crate::condition::ConditionState;
 use crate::plan::CompiledBinding;
@@ -54,7 +54,7 @@ pub(crate) fn record_reading(
     binding: &CompiledBinding,
     intent: ActionIntent,
     run: PipelineRun,
-    scratch: &mut [Scratch],
+    scratch: &mut [Registers],
     threshold: &ButtonThreshold,
     claims: &mut Vec<Control>,
 ) -> BindingOutput {
@@ -96,9 +96,9 @@ pub(crate) fn record_reading(
     let value = match (intent, value) {
         (ActionIntent::Button, ActionValue::Bool(_)) => value,
         (ActionIntent::Button, _) => {
-            let memory = &mut press_scratch[0];
-            let pressed = threshold.pressed(value.to_axis1().abs(), memory.prev.to_bool());
-            memory.prev = ActionValue::Bool(pressed);
+            let registers = &mut press_scratch[0];
+            let pressed = threshold.pressed(value.to_axis1().abs(), registers.prev.to_bool());
+            registers.prev = ActionValue::Bool(pressed);
             ActionValue::Bool(pressed)
         }
         _ => value,
@@ -134,16 +134,16 @@ pub(crate) fn record_reading(
     }
 }
 
-/// Runs a modifier chain in order, each modifier with its own scratch. Shared by a binding's chain
-/// and an action's `combined` stage.
+/// Runs a modifier chain in order, each modifier with its own registers. Shared by a binding's
+/// chain and an action's `combined` stage.
 pub(super) fn apply_modifiers(
     mut value: ActionValue,
     modifiers: &[BindingModifier],
-    scratch: &mut [Scratch],
+    scratch: &mut [Registers],
     delta: f32,
 ) -> ActionValue {
-    for (modifier, scratch) in modifiers.iter().zip(scratch) {
-        value = modifier.apply(value, scratch, delta);
+    for (modifier, registers) in modifiers.iter().zip(scratch) {
+        value = modifier.apply(value, registers, delta);
     }
     value
 }

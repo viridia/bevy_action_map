@@ -1133,7 +1133,7 @@ mod tests {
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_custom_modifier_still_counts_toward_chained_rescaling() {
-        use crate::action::{ActionValue, Scratch};
+        use crate::action::{ActionValue, Registers};
         use crate::binding::Modifier;
         use bevy_input::keyboard::KeyCode;
 
@@ -1143,7 +1143,7 @@ mod tests {
             fn apply(
                 &self,
                 value: ActionValue,
-                _scratch: &mut Scratch,
+                _registers: &mut Registers,
                 _delta: f32,
             ) -> ActionValue {
                 value
@@ -1509,12 +1509,12 @@ mod tests {
     #[cfg(feature = "keyboard")]
     #[test]
     fn a_stage_rescaling_after_a_binding_that_did_is_refused() {
-        use crate::action::{ActionValue, Scratch};
+        use crate::action::{ActionValue, Registers};
         use crate::binding::{DeadZone, DirectionalButtons, Modifier};
 
         struct Rescales;
         impl Modifier for Rescales {
-            fn apply(&self, value: ActionValue, _: &mut Scratch, _: f32) -> ActionValue {
+            fn apply(&self, value: ActionValue, _: &mut Registers, _: f32) -> ActionValue {
                 value
             }
 

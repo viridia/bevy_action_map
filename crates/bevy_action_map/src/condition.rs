@@ -23,7 +23,7 @@
 
 use bevy_platform::sync::Arc;
 
-use crate::action::{ActionValue, Scratch};
+use crate::action::{ActionValue, Registers};
 
 /// What a condition says about its binding this tick.
 ///
@@ -60,15 +60,16 @@ pub enum ConditionKind {
 pub trait Condition: Send + Sync + 'static {
     /// Decides what this condition makes of the binding's value.
     ///
-    /// `scratch` is this condition's own working memory and persists between calls; `delta` is how
-    /// much time this call accounts for, in the owning context's own seconds.
+    /// `registers` are this condition's own and persist between calls; `delta` is how much time
+    /// this call accounts for, in the owning context's own seconds.
     ///
     /// It is called each time the binding's input changes within a tick, so that a press and a
     /// release inside one tick are both seen, and once more at the end of the tick. Only the call
     /// at the end is handed the tick's length; the others are handed zero. A hold should therefore
     /// charge by adding `delta` rather than by counting calls, and a press inside one long tick
     /// still reads as a tap.
-    fn evaluate(&self, value: ActionValue, scratch: &mut Scratch, delta: f32) -> ConditionState;
+    fn evaluate(&self, value: ActionValue, registers: &mut Registers, delta: f32)
+    -> ConditionState;
 
     /// How this condition combines with the others on its binding.
     fn kind(&self) -> ConditionKind {
@@ -203,7 +204,8 @@ pub(crate) fn describe(conditions: &[BindingCondition]) -> ConditionDescriptor {
         .unwrap_or(ConditionDescriptor::None)
 }
 
-/// Bit positions within [`Scratch::flags`](crate::action::Scratch::flags).
+/// Bit positions within [`Registers::flags`](crate::action::Registers::flags). Every condition and
+/// modifier has its own `Registers`, so these may share positions with a modifier's bits.
 const HELD: u8 = 1 << 0;
 const DONE: u8 = 1 << 1;
 
@@ -212,16 +214,16 @@ impl BindingCondition {
     pub fn evaluate(
         &self,
         value: ActionValue,
-        scratch: &mut Scratch,
+        registers: &mut Registers,
         delta: f32,
     ) -> ConditionState {
         let actuated = value.to_bool();
         // The whole value rather than whether it was off rest, so that a condition comparing one
         // tick against the last has something to compare. Everything below reads `was`, which is
         // the same answer either way, so this costs nothing to the conditions that do not care.
-        let previous = scratch.prev;
+        let previous = registers.prev;
         let was = previous.to_bool();
-        scratch.prev = value;
+        registers.prev = value;
 
         match self {
             Self::Press => condition_state(actuated && !was),
@@ -230,68 +232,68 @@ impl BindingCondition {
 
             Self::Hold { duration, one_shot } => {
                 if !actuated {
-                    scratch.time = 0.0;
-                    scratch.flags &= !DONE;
+                    registers.time = 0.0;
+                    registers.flags &= !DONE;
                     return ConditionState::Idle;
                 }
-                scratch.time += delta;
-                if scratch.time < *duration {
+                registers.time += delta;
+                if registers.time < *duration {
                     return ConditionState::Building;
                 }
                 if *one_shot {
-                    if scratch.flags & DONE != 0 {
+                    if registers.flags & DONE != 0 {
                         return ConditionState::Idle;
                     }
-                    scratch.flags |= DONE;
+                    registers.flags |= DONE;
                 }
                 ConditionState::Satisfied
             }
 
             Self::HoldAndRelease { duration } => {
                 if actuated {
-                    scratch.time += delta;
+                    registers.time += delta;
                     return ConditionState::Building;
                 }
                 // The release is the fire, so the timer has to be read before it is cleared.
-                let long_enough = was && scratch.time >= *duration;
-                scratch.time = 0.0;
+                let long_enough = was && registers.time >= *duration;
+                registers.time = 0.0;
                 condition_state(long_enough)
             }
 
             Self::Tap { max_duration } => {
                 if actuated {
-                    scratch.time += delta;
+                    registers.time += delta;
                     return ConditionState::Building;
                 }
-                let quick_enough = was && scratch.time <= *max_duration;
-                scratch.time = 0.0;
+                let quick_enough = was && registers.time <= *max_duration;
+                registers.time = 0.0;
                 condition_state(quick_enough)
             }
 
             Self::MultiTap { count, max_gap } => {
                 // The gap runs between taps, so it is measured whether or not the control is down.
-                scratch.time += delta;
+                registers.time += delta;
 
-                if scratch.count > 0 && scratch.time > *max_gap {
+                if registers.count > 0 && registers.time > *max_gap {
                     // Too slow: the sequence lapses rather than counting toward the next one.
-                    scratch.count = 0;
-                    scratch.flags &= !HELD;
+                    registers.count = 0;
+                    registers.flags &= !HELD;
                 }
 
                 if actuated && !was {
-                    scratch.flags |= HELD;
-                    scratch.time = 0.0;
-                } else if !actuated && was && scratch.flags & HELD != 0 {
-                    scratch.flags &= !HELD;
-                    scratch.count += 1;
-                    scratch.time = 0.0;
-                    if scratch.count >= *count {
-                        scratch.count = 0;
+                    registers.flags |= HELD;
+                    registers.time = 0.0;
+                } else if !actuated && was && registers.flags & HELD != 0 {
+                    registers.flags &= !HELD;
+                    registers.count += 1;
+                    registers.time = 0.0;
+                    if registers.count >= *count {
+                        registers.count = 0;
                         return ConditionState::Satisfied;
                     }
                 }
 
-                if scratch.count > 0 || actuated {
+                if registers.count > 0 || actuated {
                     ConditionState::Building
                 } else {
                     ConditionState::Idle
@@ -303,27 +305,27 @@ impl BindingCondition {
                 immediate,
             } => {
                 if !actuated {
-                    scratch.time = 0.0;
-                    scratch.flags &= !DONE;
+                    registers.time = 0.0;
+                    registers.flags &= !DONE;
                     return ConditionState::Idle;
                 }
-                if scratch.flags & DONE == 0 {
-                    scratch.flags |= DONE;
+                if registers.flags & DONE == 0 {
+                    registers.flags |= DONE;
                     if *immediate {
                         return ConditionState::Satisfied;
                     }
                 }
-                scratch.time += delta;
-                if scratch.time >= *interval {
-                    scratch.time -= *interval;
+                registers.time += delta;
+                if registers.time >= *interval {
+                    registers.time -= *interval;
                     return ConditionState::Satisfied;
                 }
                 ConditionState::Building
             }
 
             Self::Change => {
-                // Two values that are both at rest are the same input however they are spelled —
-                // a fresh scratch holds `Bool(false)` and the first tick of a stick reports
+                // Two values that are both at rest are the same input however they are spelled — a
+                // fresh register set holds `Bool(false)` and the first tick of a stick reports
                 // `Axis2(ZERO)`, and that is not the player doing anything.
                 if value != previous && (actuated || was) {
                     ConditionState::Satisfied
@@ -338,7 +340,7 @@ impl BindingCondition {
                 }
             }
 
-            Self::Custom(condition) => condition.evaluate(value, scratch, delta),
+            Self::Custom(condition) => condition.evaluate(value, registers, delta),
         }
     }
 
@@ -370,7 +372,7 @@ fn condition_state(satisfied: bool) -> ConditionState {
 pub(crate) fn combine(
     conditions: &[BindingCondition],
     value: ActionValue,
-    scratch: &mut [Scratch],
+    scratch: &mut [Registers],
     delta: f32,
 ) -> ConditionState {
     if conditions.is_empty() {
@@ -384,8 +386,8 @@ pub(crate) fn combine(
     let mut building = false;
     let mut blocked = false;
 
-    for (condition, scratch) in conditions.iter().zip(scratch) {
-        let outcome = condition.evaluate(value, scratch, delta);
+    for (condition, registers) in conditions.iter().zip(scratch) {
+        let outcome = condition.evaluate(value, registers, delta);
         match condition.kind() {
             ConditionKind::Explicit => {
                 has_value_condition = true;
@@ -438,10 +440,10 @@ mod tests {
     /// Drives one condition through a script of "is the control down this tick", and reports what
     /// it said each time. Every duration below is a multiple of `TICK`, so the arithmetic is exact.
     fn run(condition: &BindingCondition, script: &[bool]) -> Vec<ConditionState> {
-        let mut scratch = Scratch::default();
+        let mut registers = Registers::default();
         script
             .iter()
-            .map(|down| condition.evaluate(ActionValue::Bool(*down), &mut scratch, TICK))
+            .map(|down| condition.evaluate(ActionValue::Bool(*down), &mut registers, TICK))
             .collect()
     }
 
@@ -573,7 +575,7 @@ mod tests {
         struct Always(ConditionState, ConditionKind);
 
         impl Condition for Always {
-            fn evaluate(&self, _: ActionValue, _: &mut Scratch, _: f32) -> ConditionState {
+            fn evaluate(&self, _: ActionValue, _: &mut Registers, _: f32) -> ConditionState {
                 self.0
             }
             fn kind(&self) -> ConditionKind {
@@ -582,7 +584,7 @@ mod tests {
         }
 
         fn state_of(conditions: Vec<BindingCondition>) -> ConditionState {
-            let mut scratch = alloc::vec![Scratch::default(); conditions.len()];
+            let mut scratch = alloc::vec![Registers::default(); conditions.len()];
             combine(&conditions, ActionValue::Bool(true), &mut scratch, TICK)
         }
 
@@ -629,7 +631,7 @@ mod tests {
         struct NeverVetoes;
 
         impl Condition for NeverVetoes {
-            fn evaluate(&self, _: ActionValue, _: &mut Scratch, _: f32) -> ConditionState {
+            fn evaluate(&self, _: ActionValue, _: &mut Registers, _: f32) -> ConditionState {
                 ConditionState::Idle
             }
             fn kind(&self) -> ConditionKind {
@@ -639,7 +641,7 @@ mod tests {
 
         fn state_of(value: ActionValue) -> ConditionState {
             let conditions = alloc::vec![BindingCondition::Custom(Arc::new(NeverVetoes))];
-            let mut scratch = alloc::vec![Scratch::default(); conditions.len()];
+            let mut scratch = alloc::vec![Registers::default(); conditions.len()];
             combine(&conditions, value, &mut scratch, TICK)
         }
 
@@ -650,10 +652,10 @@ mod tests {
     // Drives one condition through a script of values, which is what `run` cannot do: a condition
     // that compares one tick against the last needs the value and not only whether it was down.
     fn run_values(condition: &BindingCondition, script: &[ActionValue]) -> Vec<ConditionState> {
-        let mut scratch = Scratch::default();
+        let mut registers = Registers::default();
         script
             .iter()
-            .map(|value| condition.evaluate(*value, &mut scratch, TICK))
+            .map(|value| condition.evaluate(*value, &mut registers, TICK))
             .collect()
     }
 
@@ -673,7 +675,7 @@ mod tests {
         );
     }
 
-    // The trap a `Bool(false)` default sets: a fresh scratch and a stick sitting at centre are the
+    // The trap a `Bool(false)` default sets: a fresh register set and a stick sitting at centre are the
     // same input spelled two ways, and reading them as a change would fire on the first tick of
     // every context with nobody touching anything.
     #[test]
@@ -718,7 +720,7 @@ mod tests {
                 immediate: false,
             },
         ];
-        let mut scratch = alloc::vec![Scratch::default(); conditions.len()];
+        let mut scratch = alloc::vec![Registers::default(); conditions.len()];
         let held = ActionValue::Axis1(1.0);
 
         let states: Vec<_> = (0..6)
