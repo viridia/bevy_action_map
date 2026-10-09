@@ -587,10 +587,10 @@ candidate. The purpose is users: much of the scope of what is left in this docum
 they say, so the chunk publishes what is fit to publish rather than waiting for the Roadmap to
 empty.
 
-- **First, the list of what lands before it.** A change that breaks the public API is free until the
-  first publish and costly after it, which is the test for a place on the list. Chunk 161, which
-  narrowed the public items, has landed; any reshaping of the extensibility mechanism is a
-  candidate. The author decides the list; the rest follows a 0.1.
+- **Nothing else lands before it** (decided by the author, 2026-10-09). Chunk 161 narrowed the
+  public items; the extensibility mechanism stays as it is, since a `0.x` version already tells a
+  user the API may break. Issue 1080 is cheap and protects docs.rs, so it may go first, but nothing
+  requires it.
 - **`bevy_action_map_ui` is not ready**, while chunks 172a and 172b are still building it, but its
   name wants claiming. crates.io's policy removes a placeholder published only to hold a name, so
   the claim is an early version of what it has, its prompts, with its README saying the API is
