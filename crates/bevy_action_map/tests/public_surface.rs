@@ -71,3 +71,21 @@ fn add_a_vendor(mut brands: bevy_ecs::prelude::ResMut<bevy_action_map::gamepad::
 fn a_game_can_add_a_gamepad_vendor() {
     let _: fn(bevy_ecs::prelude::ResMut<bevy_action_map::gamepad::GamepadBrands>) = add_a_vendor;
 }
+
+/// A game that reads settings files it did not write, capping how long a row they can make.
+fn cap_rows_from_untrusted_files(app: &mut bevy::app::App) {
+    app.insert_resource(bevy_action_map::overrides::MaxSlots(8));
+}
+
+#[test]
+fn a_game_can_cap_an_override_row() {
+    let _: fn(&mut bevy::app::App) = cap_rows_from_untrusted_files;
+}
+
+#[test]
+fn one_split_screen_player_can_apply_their_own_overrides() {
+    use bevy::ecs::{entity::Entity, world::World};
+    use bevy_action_map::overrides::{OverrideProblem, Overrides, apply_overrides_for};
+
+    let _: fn(&mut World, Entity, &Overrides) -> Vec<OverrideProblem> = apply_overrides_for;
+}

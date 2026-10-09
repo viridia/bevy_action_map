@@ -19,7 +19,7 @@ part that stays good. Re-verify before acting on one.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 tier, and never reused. A gap in the sequence is a retired entry.
 
-**Next: 1080.**
+**Next: 1081.**
 
 **What the tiers mean.**
 
@@ -130,6 +130,14 @@ wants the on-screen control drawn as itself.
 Unlike R11.2 (withdrawn, D65), this needs no third-party extensibility: a marker or a brand the
 crate already resolves against would do. It waits in practice on touch, whose feature is a stub, and
 1069 covers what landing that breaks.
+
+### 1080 No recipe builds the docs with warnings denied
+
+`scripts/verify.sh` never runs rustdoc, so a broken intra-doc link, or a public doc comment linking
+an item since narrowed to `pub(crate)`, passes the whole recipe. Chunk 161 ran
+`RUSTDOCFLAGS="-D warnings" cargo doc -p bevy_action_map --all-features --no-deps` by hand after
+every unit, and found two links broken before it started. The build is clean now; a step in the
+default run, beside clippy, would keep it that way.
 
 ### 1027 Two documentation requirements with no document
 

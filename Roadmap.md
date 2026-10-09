@@ -238,6 +238,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 189  | One prompt component, written through templates                       |
 | 190  | An inline icon prompt's size, as a `Val`                              |
 | 194  | Bevy 0.20.0                                                           |
+| 161  | Public items nothing outside the crate names, narrowed or tested      |
 
 ---
 
@@ -587,9 +588,9 @@ they say, so the chunk publishes what is fit to publish rather than waiting for 
 empty.
 
 - **First, the list of what lands before it.** A change that breaks the public API is free until the
-  first publish and costly after it, which is the test for a place on the list. Chunk 161's
-  narrowing of public items is one candidate, and any reshaping of the extensibility mechanism is
-  another. The author decides the list; the rest follows a 0.1.
+  first publish and costly after it, which is the test for a place on the list. Chunk 161, which
+  narrowed the public items, has landed; any reshaping of the extensibility mechanism is a
+  candidate. The author decides the list; the rest follows a 0.1.
 - **`bevy_action_map_ui` is not ready**, while chunks 172a and 172b are still building it, but its
   name wants claiming. crates.io's policy removes a placeholder published only to hold a name, so
   the claim is an early version of what it has, its prompts, with its README saying the API is
@@ -736,62 +737,6 @@ document was written by an earlier model and has not been edited as a whole.
 - **Not doing:** changing the mechanism. A claim the source contradicts goes to `docs/issues.md`.
 - **Verified by:** `scripts/xref.py`, and the unit's `growth.py` numbers.
 - **Done:** TD9.1.
-
-### 161. Public items nothing outside `crates/bevy_action_map/src/` names · E[1]
-
-`growth.py --api` lists public items that nothing outside the crate's `src/` names; the ones outside
-the prelude are the candidates, 46 once the scan took in benches, the root `tests/` and the sibling
-crates. `ActionIdCache`, which the derive macros emit, left the list then.
-
-- **Each gets one of three answers:** made `pub(crate)`, where it is public only because its module
-  is; kept, with an example or test made to use it, where it is API nothing has exercised; or left
-  alone, where it is reached without being named, as a builder a closure receives or an extension
-  trait the prelude brings in.
-- **A unit is one module**, and folds in any tier-5 finding in `docs/issues.md` about the same
-  items.
-- **Narrowing visibility breaks the public API**, which costs nothing until the first publish.
-- **Verified by:** `scripts/verify.sh`, since this one changes code, and the examples do not change.
-
-**Triage.** All 46 were narrowed to `pub(crate)` at once in a scratch checkout and the workspace
-checked. *Reached* means an example, test or bench fails to compile without the item, or a public
-signature or pub field carries it (the `private_interfaces` lint does not cover fields, so those
-were found by grep, as were signatures of another candidate, which narrowing both hid from the
-lint); *unreached* means neither. A reached item is left alone unless its owner narrows too.
-`sample_input` is in the prelude, so is not a candidate.
-
-| Unit | Reached | Unreached |
-| --- | --- | --- |
-| `action` | `ActionInfo` (`ActionId::info`); `Scratch` (`Condition::evaluate`, `Modifier::apply`: wants a test with a custom condition) | `registered_actions` (unused in the crate too); `ActionIdCache` to `#[doc(hidden)]` |
-| `capture` | `ReservedControl` | `run_captures`, `DEFLECTION`, `MOUSE_MOTION` |
-| `inspect` | `InputDump` (`dump`), `ContextDump`, `InstanceDump`, `ActionDump` (fields) | |
-| `gamepad` | | `GamepadBrands`, `GamepadModelId`, `mark_gamepad_connected`, `mark_gamepad_disconnected`, `resolve_gamepad_brand` |
-| `device` | `DeviceHandleSet` (`Paired`'s `Deref`), `DeviceIdentity` (bound), `GamepadCalibration`, `AxisCalibration` (its `get`) | `RegisterDeviceIdentity`, `ReflectDeviceIdentity`, `resolve_gamepad_identity` |
-| `binding` | `BindingBuilder`, `ClassBindingBuilder`, `CombinedBuilder` (closures); `IntoBindingInput`, `ButtonControl` (bounds); `DeadZoneShape`; `ChordEntry` (`with`'s bound) | `BindingModifier` |
-| `overrides` | `Override`, `OverrideProblem`, `ResolvedOverrides`, `SavedRow`, `SavedTunableValue`, `Unresolved`, `UnresolvedKind` (field), `UnsupportedVersion` | `MaxSlots` (a setting: wants a test), `apply_overrides_for` (unused in the crate too) |
-| the rest | `ActionReading`, `BindingDiagnostic`, `ConsumedControls`, `PresetBuilder` | `BindingCondition` |
-
-**Decided** (by the author, 2026-10-08). Every reached item, and `ReflectDeviceIdentity`, stays
-public. The rest:
-
-- **Rustdoc warnings the sweep passes.** A narrowed item linked from public docs is an error under
-  `RUSTDOCFLAGS="-D warnings" cargo doc -p bevy_action_map --all-features --no-deps`, which no
-  recipe runs, so each unit runs it. One error predates the sweep and goes with its unit: a
-  redundant link target at `overrides.rs:186` (`overrides`).
-- **Kept, with a test:** `apply_overrides_for` and `MaxSlots` get a behaviour test, since what they
-  promise is what they do.
-
-**Done:** `action`. `Scratch` became `Registers`, a single set is named `registers` and the flat
-array of them keeps `scratch`; `registered_actions` and `Registers` started `public_surface.rs`;
-issue 1032 folded in. `ActionIdCache` stays public and visible, reversing the triage: its doc
-comment teaches it to anyone writing an `InputAction` impl by hand. `capture`: `run_captures`,
-`DEFLECTION` and `MOUSE_MOTION` narrowed, `DEFLECTION` under the `gamepad` feature its every use is,
-and the module doc states the two thresholds rather than linking them. `inspect`: every item is
-reached, so unchanged. `gamepad`: the three observers and `GamepadModelId` narrowed, the last under
-`bevy_reflect` as well, which every use of it is; `device` still re-exports the public gamepad
-items; `GamepadBrands` has a check in `public_surface.rs`. `device`: `resolve_gamepad_identity`
-narrowed; `public_surface.rs` registers a custom identity type, which covers
-`RegisterDeviceIdentity` and `DeviceIdentity`. `binding`, with the rest folded in: `BindingModifier`
-and `BindingCondition` narrowed, and a `ModifierKey` doc link that never resolved given its path.
 
 ## Tooling
 

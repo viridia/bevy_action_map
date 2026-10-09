@@ -183,7 +183,7 @@ impl Overrides {
     ///
     /// The row normalizes on the way in as it does for [`bind`](Self::bind): clearing the last
     /// filled slot shortens the row, and clearing the only one leaves
-    /// [`Override::Cleared`](Override::Cleared).
+    /// [`Override::Cleared`].
     pub fn unbind(&mut self, mapping: &ActionMapping, slot: usize) {
         let mut slots = self.slots_of(mapping);
         if slot >= slots.len() {
