@@ -502,7 +502,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_action_map"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bevy",
  "bevy_action_map_macros",
@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_action_map_examples"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bevy",
  "bevy_action_map",
@@ -538,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_action_map_macros"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -547,7 +547,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_action_map_ui"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bevy_action_map",
  "bevy_asset",
@@ -1632,7 +1632,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_remote_driver"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bevy",
  "bevy_app",

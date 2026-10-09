@@ -11,17 +11,10 @@ Declare what your game reacts to, bind whatever devices should drive it, and let
 
 You define **actions** (`Jump`, `Move`, `Fire`) and **contexts** (`OnFoot`, `InVehicle`, `MainMenu`)
 as ordinary Rust types. You bind a mix of keyboard, mouse and gamepad controls to them, with
-modifiers and conditions that decide how a hardware signal becomes a game-shaped one. Your gameplay code
-then reads `Move` as a `Vec2` and never again mentions `WASD`, a stick, or a dead zone — and when a
-player wants to rebind `Jump` to a different key, the crate already has everything it needs to show
-them what is bound, let them change it, and keep every prompt on screen in sync.
-
-> **Status: early and public for review, not for production.** The core mapping pipeline
-> (keyboard, mouse, gamepad, modifiers, conditions, arbitration, fixed and render ticks) is built
-> and exercised by three example games, and the rebinding UI works end to end in them. Saved
-> overrides have a documented, human-editable format; putting the bytes on disk is still the app's
-> job. This crate isn't published to crates.io, so there's no docs.rs page yet. See
-> [Roadmap.md][roadmap] for what's done and what's left.
+modifiers and conditions that decide how a hardware signal becomes a game-shaped one. Your gameplay
+code then reads `Move` as a `Vec2` and never again mentions `WASD`, a stick, or a dead zone — and
+when a player wants to rebind `Jump` to a different key, the crate already has everything it needs
+to show them what is bound, let them change it, and keep every prompt on screen in sync.
 
 ## Why
 
@@ -365,10 +358,6 @@ One more, for readers who want the comparison rather than the specification:
 | Document | What it is |
 | --- | --- |
 | [docs/comparison.md][comparison] | For choosing an input crate: how this one differs from `bevy_enhanced_input` and `leafwing-input-manager`, claim by claim, checked against both crates' source, and why most projects today should pick `bevy_enhanced_input` |
-
-`archive/` holds the superseded `Design.md` and the work logs. They describe the crate as it was;
-`docs/design.md` and `docs/decisions.md` are what replaced them.
-
 ## License
 
 Dual-licensed under either of
