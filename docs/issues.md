@@ -131,14 +131,6 @@ Unlike R11.2 (withdrawn, D65), this needs no third-party extensibility: a marker
 crate already resolves against would do. It waits in practice on touch, whose feature is a stub, and
 1069 covers what landing that breaks.
 
-### 1080 No recipe builds the docs with warnings denied
-
-`scripts/verify.sh` never runs rustdoc, so a broken intra-doc link, or a public doc comment linking
-an item since narrowed to `pub(crate)`, passes the whole recipe. Chunk 161 ran
-`RUSTDOCFLAGS="-D warnings" cargo doc -p bevy_action_map --all-features --no-deps` by hand after
-every unit, and found two links broken before it started. The build is clean now; a step in the
-default run, beside clippy, would keep it that way.
-
 ### 1027 Two documentation requirements with no document
 
 - R16.4 (SHOULD) — the web caveats: pointer lock and gamepad access needing a user gesture, gamepad

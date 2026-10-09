@@ -28,10 +28,9 @@
 //!
 //! # Plugins the driver adds
 //!
-//! When it is active, the plugin adds [`RemotePlugin`](bevy_remote::RemotePlugin) and
-//! [`RemoteHttpPlugin`](bevy_remote::http::RemoteHttpPlugin) itself, so do not add them as well. It
-//! also adds [`FrameTimeDiagnosticsPlugin`] unless the app already has it, which is how a test
-//! counts frames. If your app adds that plugin too, add it before this one.
+//! When it is active, the plugin adds [`RemotePlugin`] and [`RemoteHttpPlugin`] itself, so do not
+//! add them as well. It also adds [`FrameTimeDiagnosticsPlugin`] unless the app already has it,
+//! which is how a test counts frames. If your app adds that plugin too, add it before this one.
 
 #![forbid(unsafe_code)]
 

@@ -589,8 +589,7 @@ empty.
 
 - **Nothing else lands before it** (decided by the author, 2026-10-09). Chunk 161 narrowed the
   public items; the extensibility mechanism stays as it is, since a `0.x` version already tells a
-  user the API may break. Issue 1080 is cheap and protects docs.rs, so it may go first, but nothing
-  requires it.
+  user the API may break.
 - **`bevy_action_map_ui` is not ready**, while chunks 172a and 172b are still building it, but its
   name wants claiming. crates.io's policy removes a placeholder published only to hold a name, so
   the claim is an early version of what it has, its prompts, with its README saying the API is
@@ -604,8 +603,11 @@ empty.
   `docs/comparison.md`'s status paragraph and version table change with it.
 - **Then an announcement on the Bevy Discord.** X54's question goes to the users it reaches.
 - **Not doing:** any chunk on the list itself, each of which lands on its own first.
-- **Verified by** `cargo publish --dry-run` for each crate, its `cargo package --list` read, and a
-  project outside the workspace building against the published version.
+- **Verified by** `scripts/verify.sh --full --doc`, which pays for the doctests once before the
+  publish rather than on every chunk; `cargo publish --dry-run` for each crate, its
+  `cargo package --list` read; and a project outside the workspace building against the published
+  version. `dynamic_linking` is set only on the `bevy` dev-dependency, which neither the publish nor
+  a user's build sees.
 
 ### 182. A glossary as the preface to `docs/design.md` · E[1]
 

@@ -227,6 +227,7 @@ cargo fmt --check
 cargo test --all-features --lib --tests
 cargo clippy --all-features --all-targets
 cargo clippy -p bevy_action_map --no-default-features --features libm     # the no-devices build
+cargo doc --workspace --all-features --no-deps         # doc links, failed on any warning
 cargo test -p bevy_action_map --no-default-features --features libm --test no_devices
 cargo test -p bevy_action_map --no-default-features --features std,mouse,gamepad --test focus_loss_without_keyboard
 ```

@@ -126,6 +126,11 @@ run_step "cargo check --examples" cargo check --examples
 run_step "cargo clippy --all-features --all-targets" cargo clippy --all-features --all-targets
 run_step "cargo clippy -p bevy_action_map --no-default-features --features libm" \
     cargo clippy -p bevy_action_map --no-default-features --features libm
+# Renders and links nothing, so it costs seconds, and it is the only step that resolves doc links:
+# a public doc naming an item since narrowed to `pub(crate)` passes everything else. `run_step`
+# fails it on rustdoc's warnings, which `RUSTDOCFLAGS` would also turn on for the doctests.
+run_step "cargo doc --workspace --all-features --no-deps" \
+    cargo doc --workspace --all-features --no-deps
 run_step "cargo test --all-features --lib --tests" cargo test --all-features --lib --tests
 [[ ${doc} -eq 1 ]] && run_doc_step
 run_step "cargo test -p bevy_action_map --no-default-features --features libm --test no_devices" \
