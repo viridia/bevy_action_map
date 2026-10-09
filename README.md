@@ -1,5 +1,8 @@
 # bevy_action_map
 
+[![crates.io](https://img.shields.io/crates/v/bevy_action_map.svg)](https://crates.io/crates/bevy_action_map)
+[![docs.rs](https://docs.rs/bevy_action_map/badge.svg)](https://docs.rs/bevy_action_map)
+[![Following released Bevy versions](https://img.shields.io/badge/Bevy%20tracking-released%20version-lightblue)](https://bevy.org/learn/quick-start/plugin-development/#main-branch-tracking)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 A comprehensive input action manager for [Bevy](https://bevyengine.org).
@@ -18,11 +21,11 @@ them what is bound, let them change it, and keep every prompt on screen in sync.
 > and exercised by three example games, and the rebinding UI works end to end in them. Saved
 > overrides have a documented, human-editable format; putting the bytes on disk is still the app's
 > job. This crate isn't published to crates.io, so there's no docs.rs page yet. See
-> [Roadmap.md](./Roadmap.md) for what's done and what's left.
+> [Roadmap.md][roadmap] for what's done and what's left.
 
 ## Why
 
-![settings](images/disasteroids_settings.png)
+![settings][settings-screenshot]
 
 A shipped game needs more from its input layer than a map from `KeyCode` to an enum:
 
@@ -89,7 +92,7 @@ A shipped game needs more from its input layer than a map from `KeyCode` to an e
 - **Diagnostics that answer "why didn't this fire?"** — inactive context, a higher-priority consumer,
   a longer chord winning, an unmet condition, or a device that isn't this player's.
 
-See [Roadmap.md](./Roadmap.md) for what is not built yet.
+See [Roadmap.md][roadmap] for what is not built yet.
 
 ## Quick start
 
@@ -342,7 +345,7 @@ bevy_action_map = "0.1"
 Default features are `std`, `bevy_reflect`, `keyboard`, `mouse`, `gamepad`, and `state`. `serialize`
 adds `serde` support for overrides. `touch` is opt-in and reserved for touch input, which is not
 implemented yet. A `no_std` build needs `--no-default-features --features libm` to give `glam` a
-math backend. See `[features]` in [Cargo.toml](./crates/bevy_action_map/Cargo.toml) for the complete
+math backend. See `[features]` in [Cargo.toml][cargo-toml] for the complete
 list.
 
 ## Project documents
@@ -352,16 +355,16 @@ rather than in an issue tracker. Each document answers one question:
 
 | Document | What it is |
 | --- | --- |
-| [docs/design.md](./docs/design.md) | How the crate works: architecture, the input frame, evaluation, state, the presentation surface, persistence |
-| [docs/decisions.md](./docs/decisions.md) | Why it works that way: the decisions expensive to reverse, each with what it rules out and what reversing it would cost |
-| [Roadmap.md](./Roadmap.md) | What's left and what's broken. **Start here to see current status** |
-| [Requirements.md](./Requirements.md) | The numbered requirements, with prior art surveyed from LWIM, `bevy_enhanced_input`, Unreal, Unity, Steam Input, and Godot |
+| [docs/design.md][design] | How the crate works: architecture, the input frame, evaluation, state, the presentation surface, persistence |
+| [docs/decisions.md][decisions] | Why it works that way: the decisions expensive to reverse, each with what it rules out and what reversing it would cost |
+| [Roadmap.md][roadmap] | What's left and what's broken. **Start here to see current status** |
+| [Requirements.md][requirements] | The numbered requirements, with prior art surveyed from LWIM, `bevy_enhanced_input`, Unreal, Unity, Steam Input, and Godot |
 
 One more, for readers who want the comparison rather than the specification:
 
 | Document | What it is |
 | --- | --- |
-| [docs/comparison.md](./docs/comparison.md) | For choosing an input crate: how this one differs from `bevy_enhanced_input` and `leafwing-input-manager`, claim by claim, checked against both crates' source, and why most projects today should pick `bevy_enhanced_input` |
+| [docs/comparison.md][comparison] | For choosing an input crate: how this one differs from `bevy_enhanced_input` and `leafwing-input-manager`, claim by claim, checked against both crates' source, and why most projects today should pick `bevy_enhanced_input` |
 
 `archive/` holds the superseded `Design.md` and the work logs. They describe the crate as it was;
 `docs/design.md` and `docs/decisions.md` are what replaced them.
@@ -370,9 +373,21 @@ One more, for readers who want the comparison rather than the specification:
 
 Dual-licensed under either of
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](./LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](./LICENSE-MIT))
+- Apache License, Version 2.0 ([LICENSE-APACHE][license-apache])
+- MIT license ([LICENSE-MIT][license-mit])
 
 at your option. Unless you explicitly state otherwise, any contribution intentionally submitted for
 inclusion in this crate by you shall be dual-licensed as above, without any additional terms or
 conditions.
+
+<!-- Absolute, because crates.io resolves a relative link against the crate's own directory. -->
+
+[settings-screenshot]: https://github.com/viridia/bevy_action_map/raw/main/images/disasteroids_settings.png
+[roadmap]: https://github.com/viridia/bevy_action_map/blob/main/Roadmap.md
+[requirements]: https://github.com/viridia/bevy_action_map/blob/main/Requirements.md
+[design]: https://github.com/viridia/bevy_action_map/blob/main/docs/design.md
+[decisions]: https://github.com/viridia/bevy_action_map/blob/main/docs/decisions.md
+[comparison]: https://github.com/viridia/bevy_action_map/blob/main/docs/comparison.md
+[cargo-toml]: https://github.com/viridia/bevy_action_map/blob/main/crates/bevy_action_map/Cargo.toml
+[license-apache]: https://github.com/viridia/bevy_action_map/blob/main/LICENSE-APACHE
+[license-mit]: https://github.com/viridia/bevy_action_map/blob/main/LICENSE-MIT
