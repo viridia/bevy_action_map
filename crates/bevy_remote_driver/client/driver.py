@@ -150,7 +150,7 @@ class Driver:
         # Picking needs to know where the cursor is before the press arrives.
         self._send(
             WINDOW_EVENT,
-            {"CursorMoved": {"window": window, "position": where["logical"], "delta": None}},
+            {"CursorMoved": {"window": window, "physical_position": where["physical"]}},
         )
         for state in ("Pressed", "Released"):
             self._send(

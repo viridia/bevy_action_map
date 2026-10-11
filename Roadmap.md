@@ -239,6 +239,8 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 190  | An inline icon prompt's size, as a `Val`                              |
 | 194  | Bevy 0.20.0                                                           |
 | 161  | Public items nothing outside the crate names, narrowed or tested      |
+| 195  | The first publish to crates.io                                        |
+| 196  | `main` on Bevy main, and a release branch for 0.1                     |
 
 ---
 
@@ -523,15 +525,36 @@ crate's second module, completing the layer 172a started.
 - **Its docs owe a game the warning** `widget_focus.rs` carries today: `InputDispatchPlugin` in
   `DefaultPlugins` activates a focused `Button` on a key a context has consumed, so a game using
   both disables it.
-- **Paths that follow it:** X2 and X5 name `widget_focus.rs`. R22.7 and R22.8's annotations name the
-  file too, and R22.8's calls the focus-kind contexts example-side for want of X8, which this makes
-  crate API of the ui crate.
+- **Paths that follow it:** Chunk 200 and X5 name `widget_focus.rs`. R22.7 and R22.8's annotations
+  name the file too, and R22.8's calls the focus-kind contexts example-side for want of X8, which
+  this makes crate API of the ui crate.
 - **Not upstreaming it**, which is X48.
 - **Verified by:** `scripts/verify.sh --full --doc`, the controls screens and menus of Disasteroids
   and Split Friction navigating as before, `disasteroids/rebind.py` and `disasteroids/pad.py`
   passing, and the author running the Steam build.
 
 ---
+
+### 200. Deleting `acquire_focus_directional` · E[1]
+
+`examples/common/widget_focus.rs` carries a global `AcquireFocus` observer mirroring
+`acquire_focus_tab_index`, with `AutoDirectionalNavigation` standing in for `TabIndex`, because
+`click_to_focus` cleared focus under directional navigation (bevy#25596). Past bevy#25675,
+`InputFocusPlugin` installs an `acquire_focus` observer that stops at the first `Focusable` ancestor
+whatever the scheme, and `AutoDirectionalNavigation` requires `Focusable`, so the observer goes.
+
+- **Verified by** the stepper's chevrons, which blinked on every press before the observer and must
+  not after it goes, and `disasteroids/pad.py` end to end.
+
+### 201. Deleting `examples/common/font.rs` · E[1]
+
+The plugin overwrites the `default_font` feature's slot at `AssetId::default()` during plugin build,
+which depends on that slot's location and on text layout registering a font id once. Past
+bevy#25847, a `DefaultFontSource` resource is what `FontSource::Default`, now `TextFont`'s default,
+resolves to, and changing it rebuilds the font collection, so the file goes.
+
+- **Verified by** `scripts/smoke.sh` on every example, and a screenshot from a driver plan with the
+  examples' font in place.
 
 ## Snapshots
 
@@ -579,35 +602,6 @@ the expensive part.
 
 Work no game asks for and no published crate can do without: the crate's internals kept consistent,
 extension points exercised, and documentation that is true and runs.
-
-### 195. The first publish to crates.io · E[2]
-
-Bevy 0.20.0 is out, and with it the crate can be published against a release rather than a
-candidate. The purpose is users: much of the scope of what is left in this document waits on what
-they say, so the chunk publishes what is fit to publish rather than waiting for the Roadmap to
-empty.
-
-- **Nothing else lands before it** (decided by the author, 2026-10-09). Chunk 161 narrowed the
-  public items; the extensibility mechanism stays as it is, since a `0.x` version already tells a
-  user the API may break.
-- **`bevy_action_map_ui` is not ready**, while chunks 172a and 172b are still building it, but its
-  name wants claiming. crates.io's policy removes a placeholder published only to hold a name, so
-  the claim is an early version of what it has, its prompts, with its README saying the API is
-  unsettled.
-- **The first version is the workspace's `0.1.0`**, for every crate published. Versions rise slowly
-  and never outpace Bevy's own. That rule outlives the chunk, so it lands with a home of its own, as
-  a `G` or `D` entry.
-- **The macros crate goes first**: until it is on crates.io, `cargo package` resolves the root only
-  with `--exclude-lockfile`.
-- **The README's "Installing" section** changes from the git dependency to the crates.io one, and
-  `docs/comparison.md`'s status paragraph and version table change with it.
-- **Then an announcement on the Bevy Discord.** X54's question goes to the users it reaches.
-- **Not doing:** any chunk on the list itself, each of which lands on its own first.
-- **Verified by** `scripts/verify.sh --full --doc`, which pays for the doctests once before the
-  publish rather than on every chunk; `cargo publish --dry-run` for each crate, its
-  `cargo package --list` read; and a project outside the workspace building against the published
-  version. `dynamic_linking` is set only on the `bevy` dev-dependency, which neither the publish nor
-  a user's build sees.
 
 ### 182. A glossary as the preface to `docs/design.md` · E[1]
 
@@ -687,6 +681,63 @@ rebinding is.
 - **Not doing:** a step of the mapper's own, or a Python helper over `call`. Deferred as X32.
 - **Not doing:** raw injection, which R25.4 says needs nothing.
 - **Verified by:** a headless test of each handler, and 148's plan reaching one through `call`.
+
+### 197. A click as a server method · E[3]
+
+bevy#25894 wants a runner in any language that speaks HTTP and JSON, so whatever a runner builds for
+itself, every runner builds again. A click today is the client writing `WindowEvent` over BRP, which
+is a window backend's message rather than a contract for tests: bevy#25890 reshaped it, and every
+click failed at runtime with nothing in `scripts/verify.sh` noticing. Chunk 196 patched the field;
+this chunk moves the gesture behind a method.
+
+- **`driver.click { path }`** resolves the node as `driver.locate` does, and queues `CursorMoved`,
+  the press and the release into a resource the plugin drains one per frame. It returns once queued;
+  the client waits for the frames as it does now. A refusal still comes back from the call.
+- **The events are built from Bevy's types**, so a change to their shape is a compile error.
+- **`driver.locate` stays** for a plan that wants a node's position without clicking it.
+- **DD8's row for clicks moves from the client to the plugin**, and the plan it replaces, deleting
+  `driver.locate` so that each client locates a node itself, is withdrawn.
+  `docs/proposals/remote-driver.md` is the author's to update.
+- **Not doing:** keys and text, which have the same exposure and the same answer, and are chunk 202;
+  gamepads.
+- **Verified by** a headless `App` test that one call yields the three events on three frames, and
+  `disasteroids/rebind.py` and `disasteroids/pad.py` end to end.
+
+### 202. Keys and text as server methods · E[2]
+
+After chunk 197, for the same reason. `driver.py` writes `KeyboardInput` over BRP and derives
+`logical_key` and `text` from the key code itself, for a US layout (DD5.2), so every runner
+re-derives them and breaks when the message changes. `driver.key` and `driver.type` take a key code
+or a string, and the plugin builds the messages from Bevy's types.
+
+- **Not doing:** layouts other than US, which the client does not handle either; gamepads.
+- **Verified by** a headless `App` test of the derived messages, including text, which no plan types
+  yet, and `disasteroids/rebind.py`, which presses keys, end to end.
+
+### 198. Deleting `driver.diagnostics` · E[1]
+
+Past bevy#25824, BRP's own `diagnostics.get` reads `frame_count` as `driver.diagnostics` does
+(DD3.4). The client switches to it and the method goes. `FrameTimeDiagnosticsPlugin` is still the
+driver's to add, since it records the count and is not in `DefaultPlugins`.
+
+- **Verified by** any plan end to end, since every wait reads the frame count.
+
+### 199. A run isolated from what the developer has saved · E[1]
+
+A plan that rebinds writes the developer's real settings file, and one that fails halfway leaves it
+dirty. Isolation was deferred until an app's state was out of a plan's reach, because at 0.20.0 it
+cost a platform branch. Past bevy#25902, `preferences_dir` honours an absolute `BEVY_SETTINGS_DIR`
+on every platform, and bevy#25894 lists the redirect among its goals, so the cost that justified the
+gate is gone. `environment()` in `run.py` sets it to a directory under the run's own output.
+
+- **The run checks the directory was written.** A wrong path or variable fails silently: the
+  redirect does not take, and the plan passes while reading the real file.
+- **The Reset and Confirm bookends stay** (DD9): they are a plan reaching a known state the way a
+  player would, and exercise two more paths.
+- **Not doing:** a per-run `app_name`, which would need the example to read an env var, and a plan
+  drives an example without the example knowing it is under test.
+- **Verified by** `disasteroids/rebind.py` run twice, with the real settings file's modification
+  time unchanged.
 
 ## A Steam demo
 

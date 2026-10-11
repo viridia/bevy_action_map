@@ -12,7 +12,7 @@
     scripts/show.py --toc TD  every heading of one document: R, TD, D, X, G, S, DR, DD, chunks or
                               issues
 
-Decisions (`D12`), deferred entries (`X3`), guidelines (`G3`), Steam findings (`S7`) and the remote
+Decisions (`D12`), deferred entries (`X5`), guidelines (`G3`), Steam findings (`S7`) and the remote
 driver's `DR` and `DD` anchors work the same way. A section runs to the next heading of the same or
 a higher level; a requirement runs to the next requirement or heading. A landed chunk has no
 section, and says so; a lettered part without a section of its own prints its parent's; a retired

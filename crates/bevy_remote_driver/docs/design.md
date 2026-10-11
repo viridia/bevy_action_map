@@ -91,12 +91,12 @@ the right measure there, where the app's own logic is measured in frames.
 
 ### 3.3 Where a node is drawn
 
-`driver.locate { path }` resolves one UI node and returns `{ window, logical }`: the window it is
-drawn in, and its centre in logical pixels, `UiGlobalTransform`'s translation divided by that
-window's scale factor. The window is the one the node's camera renders to, read from
-`ComputedUiTargetCamera`, which Bevy propagates from a root's `UiTargetCamera`; a node with no
-camera falls back to the primary window. A node drawn to an image rather than a window is refused.
-The method only locates. The client writes the click itself, using BRP (DD5.1).
+`driver.locate { path }` resolves one UI node and returns `{ window, physical }`: the window it is
+drawn in, and its centre in physical pixels, `UiGlobalTransform`'s translation as it stands. The
+window is the one the node's camera renders to, read from `ComputedUiTargetCamera`, which Bevy
+propagates from a root's `UiTargetCamera`; a node with no camera falls back to the primary window. A
+node drawn to an image rather than a window is refused. The method only locates. The client writes
+the click itself, using BRP (DD5.1).
 
 ### 3.4 Diagnostics
 
@@ -238,9 +238,10 @@ byte is zero fails the step rather than saving a blank file.
 ### 5.1 Clicks
 
 `driver.locate`, then three `world.write_message` calls of `WindowEvent`, each on its own frame:
-`CursorMoved` to the centre, `MouseButtonInput` pressed, then released. Picking needs the cursor to
-have moved before the press, and a press and a release in the same frame are indistinguishable from
-a tap the app may treat differently.
+`CursorMoved` to the centre, given as a `physical_position` from which `bevy_window` derives the
+logical one, `MouseButtonInput` pressed, then released. Picking needs the cursor to have moved
+before the press, and a press and a release in the same frame are indistinguishable from a tap the
+app may treat differently.
 
 ### 5.2 Keys and text
 
@@ -335,9 +336,9 @@ says it is.
 | Piece | Home | Why |
 | --- | --- | --- |
 | Selection by name path | upstream, a filter on `world.query` | any app's test wants it, and it needs nothing but `Name` and `ChildOf` |
-| Where a UI node is drawn, for a click | the client, past bevy#25890 (X51) | clicks then take physical pixels, which `UiGlobalTransform` holds, and the target-camera steps read reflected components |
+| Where a UI node is drawn, for a click | the client, past bevy#25890; chunk 197 moves it to the plugin | clicks then take physical pixels, which `UiGlobalTransform` holds, and the target-camera steps read reflected components |
 | Readiness as state | upstream, `bevy_scene` | a `Reflect` derive on `Ready` would not fix the race; the scene spawner leaving a component would |
-| Diagnostics over BRP | upstream, done: `diagnostics.get`, past bevy#25824 (X52) | BRP took a method rather than reflecting the store |
+| Diagnostics over BRP | upstream, done: `diagnostics.get`, past bevy#25824 (chunk 198) | BRP took a method rather than reflecting the store |
 | Bringing the window forward before a screenshot | the client | a policy for tests, not a property of screenshots |
 | Keys, text, gamepads, clicks | the client | the messages are already reflected |
 | Plans, the runner, the report | the driver crate | upstream has no reason to want a Python client |

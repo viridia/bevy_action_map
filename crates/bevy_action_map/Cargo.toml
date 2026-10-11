@@ -16,7 +16,7 @@ workspace = true
 # upstream inclusion, and R24.2 asks for a minimal dependency surface. The examples, a package of
 # their own, pull the full `bevy`.
 [dependencies]
-bevy_action_map_macros = { path = "../bevy_action_map_macros", version = "0.1.0" }
+bevy_action_map_macros = { path = "../bevy_action_map_macros", version = "0.2.0-dev" }
 bevy_app.workspace = true
 bevy_ecs.workspace = true
 bevy_input.workspace = true

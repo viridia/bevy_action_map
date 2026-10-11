@@ -8,7 +8,7 @@
 #
 # Usage: scripts/depsrc.sh <crate>[@<version>] [grep arguments]
 #   A crate locked at two versions lists both and exits 2; name one with `@`.
-#   Exits 1 when the crate is not a registry package in the lock, or grep finds nothing.
+#   Exits 1 when the crate is not a registry or git package in the lock, or grep finds nothing.
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -25,37 +25,53 @@ wanted=""
 [[ "$1" == *@* ]] && wanted="${1#*@}"
 shift
 
-# Registry packages only: a path or git dependency has no directory under `registry/src`.
-versions="$(awk -v name="${crate}" '
+# Registry and git packages; a path dependency is already in the tree. Each line is the version and
+# either `registry` or the locked git commit.
+locked="$(awk -v name="${crate}" '
     /^\[\[package\]\]/ { n = ""; v = "" }
     /^name = /    { n = $3; gsub(/"/, "", n) }
     /^version = / { v = $3; gsub(/"/, "", v) }
-    /^source = "registry\+/ && n == name { print v }
+    /^source = "registry\+/ && n == name { print v, "registry" }
+    /^source = "git\+/ && n == name { s = $3; sub(/.*#/, "", s); gsub(/"/, "", s); print v, s }
 ' Cargo.lock | sort -u)"
 
 if [[ -n "${wanted}" ]]; then
-    versions="$(printf '%s\n' "${versions}" | grep -Fx -- "${wanted}")"
+    locked="$(printf '%s\n' "${locked}" | grep -E -- "^${wanted//./\\.} ")"
 fi
-if [[ -z "${versions}" ]]; then
-    echo "${crate}${wanted:+@${wanted}}: not a registry package in Cargo.lock" >&2
+if [[ -z "${locked}" ]]; then
+    echo "${crate}${wanted:+@${wanted}}: not a registry or git package in Cargo.lock" >&2
     exit 1
 fi
-if [[ $(printf '%s\n' "${versions}" | wc -l) -gt 1 ]]; then
+if [[ $(printf '%s\n' "${locked}" | wc -l) -gt 1 ]]; then
     echo "${crate} is locked at more than one version; name one as ${crate}@<version>:" >&2
-    printf '  %s\n' ${versions} >&2
+    printf '%s\n' "${locked}" | awk '{ print "  " $1 }' >&2
     exit 2
 fi
+read -r version origin <<<"${locked}"
 
-registry="${CARGO_HOME:-${HOME}/.cargo}/registry/src"
+cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
 dir=""
-for index in "${registry}"/*/; do
-    if [[ -d "${index}${crate}-${versions}" ]]; then
-        dir="${index}${crate}-${versions}"
-        break
-    fi
-done
+if [[ "${origin}" == registry ]]; then
+    for index in "${cargo_home}/registry/src"/*/; do
+        if [[ -d "${index}${crate}-${version}" ]]; then
+            dir="${index}${crate}-${version}"
+            break
+        fi
+    done
+else
+    # Cargo names a checkout by the commit's first seven characters. A repository holds many
+    # crates, so the one wanted is whichever manifest names it.
+    for checkout in "${cargo_home}/git/checkouts"/*/"${origin:0:7}"/; do
+        [[ -d "${checkout}" ]] || continue
+        manifest="$(grep -rlx --include=Cargo.toml "name = \"${crate}\"" "${checkout}" | head -1)"
+        if [[ -n "${manifest}" ]]; then
+            dir="$(dirname "${manifest}")"
+            break
+        fi
+    done
+fi
 if [[ -z "${dir}" ]]; then
-    echo "${crate} ${versions} is locked but not unpacked under ${registry}; run cargo fetch" >&2
+    echo "${crate} ${version} is locked but not on disk under ${cargo_home}; run cargo fetch" >&2
     exit 1
 fi
 

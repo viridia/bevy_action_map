@@ -45,13 +45,12 @@ pub(crate) fn process_request(
         },
         None => primary,
     };
-    let Some((window, scale)) = window.and_then(|w| Some((w, windows.get(w).ok()?.scale_factor())))
-    else {
+    let Some(window) = window.filter(|&w| windows.contains(w)) else {
         return Err(refused(format!("{shown} has no window to be drawn in")));
     };
-    // The transform is in physical pixels, and `CursorMoved` takes logical ones.
-    let logical = transform.translation / scale;
-    Ok(json!({ "window": window, "logical": [logical.x, logical.y] }))
+    // Physical pixels, as the transform and `WindowEvent::CursorMoved` both are.
+    let physical = transform.translation;
+    Ok(json!({ "window": window, "physical": [physical.x, physical.y] }))
 }
 
 #[cfg(test)]
@@ -68,7 +67,7 @@ mod tests {
     }
 
     #[test]
-    fn the_centre_is_reported_in_logical_pixels() {
+    fn the_centre_is_reported_in_physical_pixels() {
         let mut world = World::new();
         let resolution = WindowResolution::new(1600, 1200).with_scale_factor_override(2.0);
         let window = world
@@ -89,7 +88,7 @@ mod tests {
         let found = locate(&mut world, "Start").unwrap();
 
         assert_eq!(found["window"], json!(window));
-        assert_eq!(found["logical"], json!([200.0, 150.0]));
+        assert_eq!(found["physical"], json!([400.0, 300.0]));
     }
 
     #[test]

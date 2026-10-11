@@ -1,6 +1,25 @@
 # Working on `bevy_action_map`
 
-A Bevy input-mapping crate. Bevy 0.20.0 from crates.io, `no_std` + alloc, `forbid(unsafe_code)`.
+A Bevy input-mapping crate. Bevy main from git, `no_std` + alloc, `forbid(unsafe_code)`.
+
+## Branches
+
+`main` tracks Bevy's `main` branch and is not published; its version is `0.2.0-dev`. `release/0.1`
+stays on Bevy 0.20.0 from crates.io, and every `0.1.x` is published from it, tagged `v0.1.x`.
+
+- **Bevy is named as `git = "https://github.com/bevyengine/bevy.git", branch = "main"`**, with no
+  `rev`. Cargo takes a bare URL, a branch and a rev as three different sources, so a downstream game
+  must name Bevy in exactly this form or it builds two copies. The game's `Cargo.lock` picks the
+  commit; this repository's only governs its own builds.
+- **Each chunk names its branch** in its `###` section. Work that leaves the published crates
+  unchanged starts on `main`. Work that changes them is judged per chunk: it starts on `release/0.1`
+  and merges forward, unless it is disruptive enough to wait for the next minor version.
+- **A fix for a published version lands on `release/0.1` first**, and `release/0.1` is then merged
+  into `main`, so `git log main..release/0.1` lists what has not reached `main`. The merge conflicts
+  on the workspace version each time; keep `main`'s. A fix found on `main` that the release needs
+  too is cherry-picked back with `-x`.
+- **A session on `release/0.1`** works from that branch's own `CLAUDE.md`, which still describes a
+  crates.io pin.
 
 ## Starting a session
 

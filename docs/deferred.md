@@ -22,47 +22,9 @@ group at a time: a Bevy version bump is the first group, and nothing else.
 
 ## 1. Bevy or winit moving past the pin
 
-Each of these waits on an upstream change that 0.20.0 does not carry. On every bump, check each
-against the new version: a release is cut from the release branch, so a PR merged to main before it
-is in it only if it was picked.
-
-### X51 — Clicking in physical pixels, and deleting `driver.locate`
-
-**Gate:** this crate's Bevy pin moving past [bevy#25890][], merged to main on 23 September 2026 and
-not in 0.20.0.
-
-It moves `CursorMoved`'s enrichment from `bevy_winit` to `bevy_window`, and a client writing
-`WindowEvent::CursorMoved` then supplies a `physical_position`. The driver's click writes a logical
-one (DD5.1), so this is not optional: the click breaks at the bump. `UiGlobalTransform` is already
-physical, and `ComputedUiTargetCamera` and `RenderTarget` are reflected, so the client can locate a
-node itself and `driver.locate` goes (DD3.3).
-
-### X52 — Deleting `driver.diagnostics`
-
-**Gate:** this crate's Bevy pin moving past [bevy#25824][], merged to main on 17 September 2026 and
-not in 0.20.0.
-
-It adds `diagnostics.get` to BRP, which reads `frame_count` as `driver.diagnostics` does (DD3.4).
-The client switches to it and the method goes. `FrameTimeDiagnosticsPlugin` is still the driver's to
-add, since it records the count and is not in `DefaultPlugins`.
-
-### X2 — Deleting `acquire_focus_directional`
-
-**Gate:** this crate's Bevy pin moving past [bevy#25675][], merged to main on 24 September 2026 and
-not in 0.20.0.
-
-`examples/common/widget_focus.rs` carries a global `AcquireFocus` observer mirroring
-`acquire_focus_tab_index`, with `AutoDirectionalNavigation` standing in for `TabIndex`:
-`bevy_input_focus`'s `click_to_focus` bubbles an `AcquireFocus` on every pointer press, a screen
-navigating by anything but `TabIndex` intercepts it nowhere, so it reaches the window and clears
-focus — and a widget whose interactive children are separate entities, like a stepper's two
-chevrons, blinks on every press rather than rarely. The PR separates focusability from navigation
-policy behind a `Focusable` component and fixes [bevy#25596][], click-to-focus under directional
-navigation. Read on main, it retires the observer outright, including for a scheme that is neither
-`TabIndex` nor one of upstream's own: `InputFocusPlugin` installs an `acquire_focus` observer that
-stops at the first `Focusable` ancestor whatever the scheme, and `AutoDirectionalNavigation`
-requires `Focusable`. What is left on the bump is the deletion, and the stepper's chevrons as its
-test.
+Each of these waits on an upstream change the pinned Bevy commit does not carry. On every bump,
+check each against the new commit; `release/0.1` stays on 0.20.0, so an entry that fires on `main`
+is still open there.
 
 ### X53 — Deleting `navigate_from`
 
@@ -75,17 +37,6 @@ Friction's popup call it. The issue offers that and two other defaults; whicheve
 the two callers go back to calling the navigator directly, and `pad.py`'s click-on-the-title step is
 the test. If upstream picks a default other than `AutoFocus`, the step's expected landing changes
 with it.
-
-### X3 — Deleting `examples/common/font.rs`
-
-**Gate:** this crate's Bevy pin moving past [bevy#25847][], which answers [bevy#25842][] and merged
-to main on 22 September 2026 and not in 0.20.0.
-
-Until then the plugin overwrites the `default_font` feature's slot at `AssetId::default()` during
-plugin build, which depends on that slot's location and on text layout registering a font id once.
-The answer is a `DefaultFontSource` resource that `FontSource::Default`, now `TextFont`'s default,
-resolves to. Changing it rebuilds the font collection and marks every `TextFont` changed, so it
-reacts to a change and the build-time ordering goes with the file.
 
 ### X61 — Handing an inline icon's `Val` to layout
 
@@ -445,28 +396,6 @@ The driver is `publish = false` (chunk 164), and nothing in `bevy_action_map` ne
 What Bevy declines is the candidate for a standalone crate, and the Python client goes with it, or
 is rewritten, since a script does not ship well inside a published crate.
 
-### X31 — Isolating an app under test from what it has saved
-
-**Gate:** an app whose state a plan cannot reach through its own controls.
-
-A run shares the developer's settings file: Disasteroids saves a confirmed rebind, so chunk 148's
-plan found its own last run's rebinding still there and failed on the second run. It now bookends
-itself with Reset and Confirm (DD9), which is a plan reaching a known state the way a player would —
-the right answer while an app offers one, and it exercises two more paths besides. What it does not
-cover is a plan that fails halfway, which leaves the file dirty for the next run to reset. Deleting
-the file first is the obvious answer and is half of one: it makes a run repeatable without stopping
-it writing the developer's real settings on the way out, which the bookend does handle. Isolation is
-the whole answer. At 0.20.0 it costs a platform branch — `XDG_CONFIG_HOME` on Linux, `LOCALAPPDATA`
-on Windows, and on macOS `HOME` itself, since `preferences_dir` is `home_dir()/Library/Preferences`
-with no narrower lever. [bevy#25902][], merged to main on 24 September 2026 and milestoned for 0.20
-but not in 0.20.0, makes `preferences_dir` honour an absolute `BEVY_SETTINGS_DIR` on all three, so
-past it isolation is one variable in `environment()` in `run.py`. Whichever is built wants a check
-that the throwaway directory was actually written, because a path or variable that is wrong fails
-silently: nothing is deleted, or the redirect does not take, and the plan passes while reading the
-real file. `SettingsPlugin`'s `app_name` is the directory component and is a plain `pub` field, so a
-per-run app id would isolate with no platform code at all — turned down because the example would
-have to read an env var, and a plan drives an example without the example knowing it is under test.
-
 ### X32 — A step of the mapper's own, or a Python helper over `call`
 
 **Gate:** a second plan whose raw `call` steps are unreadable.
@@ -713,14 +642,7 @@ near that range, issues take a letter prefix like every other anchor, and both s
 
 [bevy#9087]: https://github.com/bevyengine/bevy/issues/9087
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
-[bevy#25596]: https://github.com/bevyengine/bevy/issues/25596
-[bevy#25675]: https://github.com/bevyengine/bevy/pull/25675
-[bevy#25842]: https://github.com/bevyengine/bevy/issues/25842
 [bevy#25757]: https://github.com/bevyengine/bevy/discussions/25757
-[bevy#25847]: https://github.com/bevyengine/bevy/pull/25847
-[bevy#25902]: https://github.com/bevyengine/bevy/pull/25902
-[bevy#25824]: https://github.com/bevyengine/bevy/pull/25824
-[bevy#25890]: https://github.com/bevyengine/bevy/pull/25890
 [bevy#25944]: https://github.com/bevyengine/bevy/issues/25944
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678

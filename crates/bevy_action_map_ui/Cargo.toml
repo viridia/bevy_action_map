@@ -14,7 +14,7 @@ workspace = true
 
 [dependencies]
 # Only the glyph types, which every device configuration has.
-bevy_action_map = { path = "../bevy_action_map", version = "0.1.0", default-features = false, features = [
+bevy_action_map = { path = "../bevy_action_map", version = "0.2.0-dev", default-features = false, features = [
   "std",
 ] }
 bevy_asset.workspace = true
