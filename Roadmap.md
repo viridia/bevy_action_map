@@ -241,6 +241,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 161  | Public items nothing outside the crate names, narrowed or tested      |
 | 195  | The first publish to crates.io                                        |
 | 196  | `main` on Bevy main, and a release branch for 0.1                     |
+| 121  | A camera that takes the mouse, and gives it back                      |
 
 ---
 
@@ -254,7 +255,6 @@ its identity rather than its position.
 * 172a: `bevy_action_map_ui`, starting with prompts
 * 172b: The focus bridge joins `bevy_action_map_ui`
 * 115: A timing declared as a tunable
-* 121: A camera that takes the mouse, and gives it back
 * 203: A binding editor with a list per action
 * 129b: A screen that sets a modifier
 * 122: The wheel as a binding source
@@ -286,47 +286,6 @@ keyboard row applies.
   may not either, and the reverse.
 - **Verified by** tests on both paths — a declaration mixing families, and a saved row naming a
   gamepad entry on a keyboard row.
-
-### 121. A camera that takes the mouse, and gives it back · E[3]
-
-R13.4, and the picking half of R22.4: nothing in tree has ever grabbed the cursor, so the one delta
-that must not be invented has never had a camera to snap, and the lever an app pulls to keep picking
-off a captured mouse has never been pulled.
-
-- **A new example, `orbit`, and the first 3D example in tree.** A lit object in a viewport that
-  fills the main pane, and a side panel listing the camera's bindings, read-only. One screen, with
-  no separate settings screen: chunks 203 and 129b turn the panel into an editor.
-- **Keyboard camera actions, continuous.** Orbit, tilt, pan and zoom as `per_second` rates, so a
-  held key moves the camera smoothly.
-- **Bi-modal, and that is the point.** Clicking the viewport captures the cursor, and mouse deltas
-  orbit and tilt; Escape, a reserved control, releases it. Cursor free, picking is alive, the panel
-  is clickable and only keys move the camera; cursor captured, the mouse is this crate's and picking
-  receives none of it. The toggle is the demonstration — D75 drew a boundary between two pipelines,
-  and this is what standing on either side of it looks like.
-- **The camera is arbor_day's turntable, copied and driven by actions**: `TurntableCamera`'s state
-  and its `place_camera` system, and the system that fits a camera's viewport to a UI node. Not its
-  drag and scroll handlers, which are picking's, for the reason below.
-- **The ordering, written down** (R22.4). D75 settled which pipeline owns which signal; no
-  user-facing text says so, and an example demonstrates a boundary rather than documenting it. So
-  this chunk also states the ordering and which suppression lever applies when — cursor grab, a
-  barrier entity covering the screen, deactivating the context.
-- **Frame-rate independence becomes visible** (R13.2). `move_and_jump` already binds `MouseMove`
-  beside a `per_second` stick and explains in a comment why one is multiplied by a frame time and
-  the other is not. With a camera on the end of it, multiplying the delta is a bug you can see
-  rather than a comment you can read.
-- **Not doing: the upstream pan-orbit controller.** `bevy_camera_controller`'s `PanOrbitCamera`
-  ([bevy#19741][]) ships in 0.20.0-rc.1 and is declined on design grounds rather than availability:
-  it is pointer-driven by construction, taking `PointerLocation` and `PointerInteraction`, and its
-  pixel-perfect pan is defined as the world point under the cursor staying under it. That is
-  picking's pipeline, which D75 assigned away from this crate, so driving it from here would be
-  building the thing the decision refused. Its own example calls its input plugin a placeholder for
-  "a first-party input-manager-integrated solution", which is worth watching; an orbit from deltas
-  around a fixed focus is a dozen lines and is the half a mapper can own.
-- **Not doing: zoom on the wheel** (R13.3) — chunk 122, which lands into this example.
-- **Review surface:** alt-tab while captured. Focus loss has to drop the grab and must not deliver
-  whatever the cursor accumulated while away, which is R13.4's rule arriving through R16 rather than
-  through a mode change the player asked for.
-- **Starts on `main`**, since the published crates do not change.
 
 ### 203. A binding editor with a list per action · E[3]
 
@@ -845,5 +804,4 @@ line naming `issues.md`, or one directly after "issue" or "issues". References r
 
 ---
 
-[bevy#19741]: https://github.com/bevyengine/bevy/issues/19741
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592

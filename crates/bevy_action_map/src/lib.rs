@@ -123,6 +123,23 @@
 //! A context's domain is fixed when it is declared, so an action needed at both rates is bound in
 //! two contexts, one per domain.
 //!
+//! ## The mouse, and picking
+//!
+//! This crate reads the mouse's buttons, motion and wheel. Where the pointer is belongs to
+//! `bevy_picking`: hover, clicks and drags on entities are picking's, and the two run side by side
+//! with neither reading the other, so their order in the schedule does not matter. They meet only
+//! at the buttons, where one press is both a click to picking and a bound control here. Decide
+//! which of them has the mouse at any moment, and switch the other off:
+//!
+//! - **While the UI has it**, deactivate the contexts that bind mouse controls, for instance with
+//!   `active_in_state`, so a click on a button does not also fire a binding.
+//! - **While the game has it**, as a mouse-look camera does, grab the cursor with Bevy's
+//!   `CursorOptions` and set `PickingSettings::is_input_enabled` to false. A hidden, locked cursor
+//!   still reports its buttons to picking.
+//!
+//! Give the mouse back when the window loses focus. The crate releases held controls by itself,
+//! but the grab is the app's. The `orbit` example does all three.
+//!
 //! ## Local co-op
 //!
 //! Two players on one machine means two devices, and neither should see the other's input. A

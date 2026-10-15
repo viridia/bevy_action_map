@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 65.**
+**Next: 66.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -77,7 +77,8 @@ highlight a mouse gives, and that the one-shot activation `widget_focus.rs` ship
 already enough, are guesses about other people's UI. The second: open Bevy issues on remote control
 of widget state will change what an orchestrator has to do, so guidance written now would describe a
 shape about to move. Nothing is blocked — a game wanting the highlight has D87's rule and no crate
-change to wait for.
+change to wait for. R22.4's `bevy_input_focus` clause is documented here too; its picking clause
+landed with chunk 121.
 
 ### X46 — Upstreaming L0, then a minimal mapper
 
@@ -165,6 +166,16 @@ of the static fallback, and an honest answer on whether it survives a save — w
 still-deferred binding-definition serialization (R17.6, R22.16) for a fix that only covers controls
 a player has personally rebound. A landed query supersedes it outright, for every physical binding
 rather than only captured ones, so the workaround is not worth building ahead of it.
+
+### X65 — The upstream orbit camera, driven by actions
+
+**Gate:** `bevy_camera_controller` offering a controller fed by actions rather than by the pointer.
+
+Chunk 121's `orbit` example turns its own camera. `PanOrbitCamera`
+([bevy#19741](https://github.com/bevyengine/bevy/issues/19741)) reads `PointerLocation` and
+`PointerInteraction`, and pans by keeping the world point under the cursor under it, which is
+picking's pipeline (D75). Its own example calls its input plugin a placeholder for "a first-party
+input-manager-integrated solution"; when that lands, `orbit` drives it instead.
 
 ## 3. A game or screen in tree that needs it
 

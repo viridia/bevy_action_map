@@ -1828,8 +1828,9 @@ at "extremely low, probably none." This crate's own rebinding screen is wholly p
 reaches none of it through the mapper.
 
 **Accepted cost.** The two systems contend over the mouse buttons, which R13.0 makes bindable and
-picking reads as clicks. Keeping them apart is the app's, by cursor grab, a barrier entity covering
-the screen, or deactivating the context; R22.4 owns documenting it.
+picking reads as clicks. Keeping them apart is the app's: deactivating the context while the UI has
+the mouse, and while the game has it, a cursor grab together with picking's input switched off,
+since a grabbed cursor still reports its buttons to picking. The crate docs say so.
 
 ### D86 — Registering a reflected type is the app's decision
 
