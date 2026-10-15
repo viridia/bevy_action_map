@@ -255,6 +255,8 @@ its identity rather than its position.
 * 172b: The focus bridge joins `bevy_action_map_ui`
 * 115: A timing declared as a tunable
 * 121: A camera that takes the mouse, and gives it back
+* 203: A binding editor with a list per action
+* 129b: A screen that sets a modifier
 * 122: The wheel as a binding source
 * 28: Docs that run
 
@@ -265,41 +267,6 @@ Chunk 179 carries defects. The register of what is known to be wrong is
 
 What a binding can name, and when it counts as firing. Each of these is a gap a game runs into
 rather than a defect in what exists.
-
-### 129b. A screen that sets a modifier · E[3]
-
-129's caller, and the obligation 129 lands short of. Nothing in tree can edit a chord until
-something draws the toggles; what they edit is `BoundSlot::with`, written back through
-`Overrides::bind` (TD9.1).
-
-- **Reset or preserve is this screen's call now.** 129 left it to whoever writes the slot, and
-  Disasteroids' capture preserves, because on a screen with no toggles a reset loses a chord the
-  player can never get back. With the toggles beside the key, Blender's reset becomes affordable;
-  this chunk picks one and says why.
-
-- **It lands on Disasteroids' settings screen, as a modifier row under the keyboard table.** The
-  keyboard `MappingColumn` gets a `below`, the slot the pad column already fills with
-  `pad_presets::remapping()`, so both columns are a binding table and a footer. The row holds one
-  toggle per `ModifierKey` (`Shift`, `Ctrl`, `Alt`, `Super`, the last labelled for the platform),
-  each lit when the cell's slot requires that modifier; pressing one adds or removes it from
-  `BoundSlot::with` and writes the slot back to the working copy. This keeps Blender's point, that
-  the widgets are per *edit* rather than per row so the table stays one page, without growing a row
-  in place.
-- **The row shows only for a bound keyboard cell.** It appears when a keyboard binding cell takes
-  focus and that cell holds a binding, and is absent for an empty cell. The cell it edits is the
-  last binding cell focused, and focus moving into the row keeps it shown, since navigating to a
-  toggle takes focus off the cell. Whether it hides or stays while the cell is capturing, and
-  whether it reserves its height so the column does not jump, are decided here.
-- **The row names the cell it edits**, as a leading label such as "Fire, primary:", redrawn when the
-  target changes. A toggle takes focus, so the cell loses its highlight, and the label stands in for
-  it.
-- **Not done: a second focus visual on the edited cell**, which would be its own mechanism. Toggles
-  beside the cell are out too, since that is a tree-view reorganization of the whole screen.
-- **`steam_examples/disasteroids` builds its own column list**, so it gets the same `below` or says
-  why not.
-- **A row the player can change only in part stops being a thing.** 128 shipped `Ctrl+N` as a fixed
-  row precisely because no screen could edit it; with an editor, a chorded row can be `mappable` and
-  mean it.
 
 ### 135. A chord across two device families · E[2]
 
@@ -326,11 +293,19 @@ R13.4, and the picking half of R22.4: nothing in tree has ever grabbed the curso
 that must not be invented has never had a camera to snap, and the lever an app pulls to keep picking
 off a captured mouse has never been pulled.
 
-- **A 3D orbit demo, and the first 3D example in tree.** A lit object and a camera orbiting a fixed
-  focus point from mouse deltas. Bi-modal, and that is the point: cursor free, where picking is
-  alive, the UI is clickable and the camera holds still; cursor captured, where the mouse is this
-  crate's and picking receives none of it. The toggle is the demonstration — D75 drew a boundary
-  between two pipelines, and this is what standing on either side of it looks like.
+- **A new example, `orbit`, and the first 3D example in tree.** A lit object in a viewport that
+  fills the main pane, and a side panel listing the camera's bindings, read-only. One screen, with
+  no separate settings screen: chunks 203 and 129b turn the panel into an editor.
+- **Keyboard camera actions, continuous.** Orbit, tilt, pan and zoom as `per_second` rates, so a
+  held key moves the camera smoothly.
+- **Bi-modal, and that is the point.** Clicking the viewport captures the cursor, and mouse deltas
+  orbit and tilt; Escape, a reserved control, releases it. Cursor free, picking is alive, the panel
+  is clickable and only keys move the camera; cursor captured, the mouse is this crate's and picking
+  receives none of it. The toggle is the demonstration — D75 drew a boundary between two pipelines,
+  and this is what standing on either side of it looks like.
+- **The camera is arbor_day's turntable, copied and driven by actions**: `TurntableCamera`'s state
+  and its `place_camera` system, and the system that fits a camera's viewport to a UI node. Not its
+  drag and scroll handlers, which are picking's, for the reason below.
 - **The ordering, written down** (R22.4). D75 settled which pipeline owns which signal; no
   user-facing text says so, and an example demonstrates a boundary rather than documenting it. So
   this chunk also states the ordering and which suppression lever applies when — cursor grab, a
@@ -351,6 +326,47 @@ off a captured mouse has never been pulled.
 - **Review surface:** alt-tab while captured. Focus loss has to drop the grab and must not deliver
   whatever the cursor accumulated while away, which is R13.4's rule arriving through R16 rather than
   through a mode change the player asked for.
+- **Starts on `main`**, since the published crates do not change.
+
+### 203. A binding editor with a list per action · E[3]
+
+After chunk 121, in `orbit`'s side panel. Blender's keymap editor gives each action a list of
+bindings that grows and shrinks, and no screen in tree has let a list grow. Since chunk 118a the
+number of slots is the app's to choose, so the crate needs nothing; this is the first screen to use
+that.
+
+- **The panel becomes a scrolling tree**, `bevy_feathers`' `tree_view`, one node per action.
+  Expanding one shows its slots, each with a capture button and a remove button, and an add-slot
+  button after the last.
+- **Removing a slot is the case worth showing.** A slot is addressed by its index (118c), so
+  removing one moves every slot after it; the working copy and the override written back agree on
+  the new addresses. What a capture in progress does when its slot moves is decided here.
+- **Keyboard only.** Capture refuses Escape as it refuses any reserved control.
+- **Persisted through `bevy_settings`**, as chunk 92 does for Disasteroids.
+- **`bevy_feathers` is new to the examples.** Its tree view is checked against Bevy main before the
+  panel is built on it.
+- **Not doing:** modifier toggles, which are chunk 129b; mouse or gamepad rows; the wheel, which is
+  chunk 122.
+- **Verified by** a driver plan for `orbit`: add a slot, capture a key into it, remove a middle
+  slot, restart, and read the bindings back.
+- **Starts on `main`.**
+
+### 129b. A screen that sets a modifier · E[2]
+
+129's caller, and the obligation 129 lands short of. Nothing in tree can edit a chord until
+something draws the toggles; what they edit is `BoundSlot::with`, written back through
+`Overrides::bind` (TD9.1). After chunk 203, in `orbit`'s tree.
+
+- **One toggle per `ModifierKey` on each slot's line** (`Shift`, `Ctrl`, `Alt`, `Super`, the last
+  labelled for the platform), lit when the slot requires that modifier. Pressing one adds or
+  removes it from `BoundSlot::with` and writes the slot back.
+- **Reset or preserve is this screen's call.** 129 left it to whoever writes the slot, and
+  Disasteroids' capture preserves, because on a screen with no toggles a reset loses a chord the
+  player can never get back. With the toggles beside the key, Blender's reset becomes affordable;
+  this chunk picks one for `orbit` and says why. Disasteroids keeps preserving.
+- **Not doing: toggles on Disasteroids' screen.** Its fixed `Ctrl+N` row stays fixed, which is X64.
+- **Verified by** 203's plan, extended to toggle a modifier, restart, and read the chord back.
+- **Starts on `main`.**
 
 ### 122. The wheel as a binding source, and a zoom for the orbit · E[3]
 
@@ -359,6 +375,8 @@ reads Bevy's own message beside the mapper, and loses the rebinding along with i
 
 - **Depends on chunk 121**, which supplies the customer. Zoom on an orbit camera is what the wheel
   is for, and the deferred row this replaces was gated on precisely that.
+- **The wheel zooms `orbit`'s captured camera, and has no row in its editor**, which stays
+  keyboard-only; the binding is declared unlisted.
 - **A channel, not a button.** `MouseScrollUnit::{Line, Pixel}` normalized through a configurable
   factor, high-resolution trackpad scroll not quantized on the way through, a `ChannelShape` of its
   own, and the capture, prompt and serialization surface that follows from having one.

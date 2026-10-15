@@ -13,7 +13,7 @@ it knew goes into the chunk's section.
 **Numbering.** Each entry's number is a permanent identity from a single counter, independent of its
 group, and never reused. A gap in the sequence is an entry that left.
 
-**Next: 64.**
+**Next: 65.**
 
 **How it is grouped.** By the kind of gate, so the question "has anything fired?" is asked of one
 group at a time: a Bevy version bump is the first group, and nothing else.
@@ -167,6 +167,17 @@ a player has personally rebound. A landed query supersedes it outright, for ever
 rather than only captured ones, so the workaround is not worth building ahead of it.
 
 ## 3. A game or screen in tree that needs it
+
+### X64 — Disasteroids' chorded row, made changeable
+
+**Gate:** Disasteroids' controls screen gaining modifier toggles, or a second chorded row there.
+
+Chunk 128 shipped `Ctrl+N` as a fixed row because no screen could edit a chord. Chunk 129b put the
+toggles in the `orbit` example's tree instead, so the row stays fixed. A design for Disasteroids was
+written and set aside: a modifier row under the keyboard table, in the `below` slot the pad column
+fills, shown for the bound keyboard cell last focused and labelled with that cell's name, since a
+toggle takes focus off the cell. Whether it hides during capture, and whether it reserves its
+height, were left open.
 
 ### X63 — Finding a context by path
 
