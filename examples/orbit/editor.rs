@@ -37,7 +37,7 @@ use bevy_action_map::prelude::*;
 use crate::{MouseOwner, Status, owner_text};
 
 /// Reverse-DNS, per `SettingsPlugin`. Names the directory the settings file lives in.
-const APP_ID: &str = "org.bevy.bevy_action_map.orbit";
+const APP_ID: &str = "org.viridia.bevy_action_map.orbit";
 
 /// The mouse's buttons stay with the panel while a capture listens, so the player can click the
 /// capture button again to cancel, or click somewhere else entirely.

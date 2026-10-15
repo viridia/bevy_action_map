@@ -35,7 +35,7 @@ use bevy_action_map::overrides::{
 use crate::settings::{AppliedControls, Controls, resolve_preset, working_copy};
 
 /// Reverse-DNS, per `SettingsPlugin`. Names the directory the settings file lives in.
-const APP_ID: &str = "org.bevy.bevy_action_map.disasteroids";
+const APP_ID: &str = "org.viridia.bevy_action_map.disasteroids";
 
 /// What the controls screen keeps between sessions.
 #[derive(Resource, SettingsGroup, Reflect, Default, Debug)]

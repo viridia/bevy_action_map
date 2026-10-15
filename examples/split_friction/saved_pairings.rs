@@ -48,7 +48,7 @@ use crate::protagonist::{ClaimedDevices, Protagonist, claim_slot};
 use crate::reconnect::KnownDevice;
 
 /// Reverse-DNS, per `SettingsPlugin`. Names the directory the settings file lives in.
-const APP_ID: &str = "org.bevy.bevy_action_map.split_friction";
+const APP_ID: &str = "org.viridia.bevy_action_map.split_friction";
 
 /// What pane 0 keeps between sessions.
 #[derive(Resource, SettingsGroup, Reflect, Default, Debug)]
