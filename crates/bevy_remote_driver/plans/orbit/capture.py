@@ -5,6 +5,7 @@ locks the real one too, so the plan ends with the mouse given back.
 """
 
 EXAMPLE = "orbit"
+FEATURES = ["serialize"]
 
 TEXT = "bevy_ui::widget::text::Text"
 STATUS = "Shell/Status"

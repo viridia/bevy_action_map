@@ -242,6 +242,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 195  | The first publish to crates.io                                        |
 | 196  | `main` on Bevy main, and a release branch for 0.1                     |
 | 121  | A camera that takes the mouse, and gives it back                      |
+| 203  | A binding editor with a list per action                               |
 
 ---
 
@@ -255,7 +256,6 @@ its identity rather than its position.
 * 172a: `bevy_action_map_ui`, starting with prompts
 * 172b: The focus bridge joins `bevy_action_map_ui`
 * 115: A timing declared as a tunable
-* 203: A binding editor with a list per action
 * 129b: A screen that sets a modifier
 * 122: The wheel as a binding source
 * 28: Docs that run
@@ -287,29 +287,6 @@ keyboard row applies.
 - **Verified by** tests on both paths — a declaration mixing families, and a saved row naming a
   gamepad entry on a keyboard row.
 
-### 203. A binding editor with a list per action · E[3]
-
-After chunk 121, in `orbit`'s side panel. Blender's keymap editor gives each action a list of
-bindings that grows and shrinks, and no screen in tree has let a list grow. Since chunk 118a the
-number of slots is the app's to choose, so the crate needs nothing; this is the first screen to use
-that.
-
-- **The panel becomes a scrolling tree**, `bevy_feathers`' `tree_view`, one node per action.
-  Expanding one shows its slots, each with a capture button and a remove button, and an add-slot
-  button after the last.
-- **Removing a slot is the case worth showing.** A slot is addressed by its index (118c), so
-  removing one moves every slot after it; the working copy and the override written back agree on
-  the new addresses. What a capture in progress does when its slot moves is decided here.
-- **Keyboard only.** Capture refuses Escape as it refuses any reserved control.
-- **Persisted through `bevy_settings`**, as chunk 92 does for Disasteroids.
-- **`bevy_feathers` is new to the examples.** Its tree view is checked against Bevy main before the
-  panel is built on it.
-- **Not doing:** modifier toggles, which are chunk 129b; mouse or gamepad rows; the wheel, which is
-  chunk 122.
-- **Verified by** a driver plan for `orbit`: add a slot, capture a key into it, remove a middle
-  slot, restart, and read the bindings back.
-- **Starts on `main`.**
-
 ### 129b. A screen that sets a modifier · E[2]
 
 129's caller, and the obligation 129 lands short of. Nothing in tree can edit a chord until
@@ -324,7 +301,8 @@ something draws the toggles; what they edit is `BoundSlot::with`, written back t
   player can never get back. With the toggles beside the key, Blender's reset becomes affordable;
   this chunk picks one for `orbit` and says why. Disasteroids keeps preserving.
 - **Not doing: toggles on Disasteroids' screen.** Its fixed `Ctrl+N` row stays fixed, which is X64.
-- **Verified by** 203's plan, extended to toggle a modifier, restart, and read the chord back.
+- **Verified by** `orbit/editor.py` and `orbit/saved.py`, extended to toggle a modifier, restart, and
+  read the chord back.
 - **Starts on `main`.**
 
 ### 122. The wheel as a binding source, and a zoom for the orbit · E[3]

@@ -32,6 +32,8 @@ bevy = { workspace = true, features = [
   # feature is what registers `Image`'s serialization, without which a screenshot step panics the
   # app rather than failing the step.
   "bevy_remote",
+  # The `orbit` example's controls panel, which needs a tree view.
+  "bevy_feathers",
 ] }
 bevy_input.workspace = true
 bevy_math.workspace = true
@@ -52,6 +54,11 @@ required-features = ["serialize"]
 [[example]]
 name = "disasteroids"
 path = "examples/disasteroids/main.rs"
+required-features = ["serialize"]
+
+[[example]]
+name = "orbit"
+path = "examples/orbit/main.rs"
 required-features = ["serialize"]
 
 [workspace.package]

@@ -14,18 +14,22 @@
 //! moved this frame. Scale the mouse's value by a frame time as well, and the orbit speeds up and
 //! slows down with the frame rate.
 //!
-//! The panel lists the bindings as the crate reports them, under the context each one lives in.
+//! The panel is where the keys are changed, as Blender's keymap editor changes its own: each row
+//! holds as many keys as the player gives it. See [`editor`].
 
 #![allow(missing_docs)]
 
+mod editor;
+
 use bevy::camera::Viewport;
+use bevy::feathers::theme::ThemeBackgroundColor;
+use bevy::feathers::tokens;
 use bevy::picking::PickingSettings;
 use bevy::picking::events::PointerClick;
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
 use bevy::ui::UiSystems;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow, WindowFocused};
-use bevy_action_map::mapping::{self, ActionMapping};
 use bevy_action_map::prelude::*;
 
 /// How far the camera turns per pixel of mouse motion.
@@ -43,10 +47,7 @@ const MIN_DISTANCE: f32 = 1.5;
 const MAX_DISTANCE: f32 = 30.0;
 
 const PANEL_WIDTH: f32 = 300.0;
-const PANEL_BG: Color = Color::srgb(0.11, 0.12, 0.14);
-const HEADING: Color = Color::srgb(0.95, 0.75, 0.35);
-const LABEL: Color = Color::srgb(0.85, 0.86, 0.88);
-const CONTROL: Color = Color::srgb(0.55, 0.75, 0.95);
+const STATUS: Color = Color::srgb(0.95, 0.75, 0.35);
 
 #[derive(InputAction)]
 #[action(path = "orbit.orbit", output = Vec2, intent = Delta2)]
@@ -101,18 +102,21 @@ fn main() {
         }),
         ActionMapPlugin,
         bevy_remote_driver::RemoteDriverPlugin,
+        editor::plugin,
     ));
     app.init_state::<MouseOwner>();
 
     app.add_context::<View>(|controls| {
         controls
             .bind::<Orbit>(DirectionalButtons::arrow_keys())
-            .per_second(ORBIT_KEY_RATE);
+            .per_second(ORBIT_KEY_RATE)
+            .mappable();
         controls
             .bind::<Pan>(DirectionalButtons::wasd())
-            .per_second(PAN_RATE);
-        controls.bind::<ZoomIn>(KeyCode::KeyE);
-        controls.bind::<ZoomOut>(KeyCode::KeyQ);
+            .per_second(PAN_RATE)
+            .mappable();
+        controls.bind::<ZoomIn>(KeyCode::KeyE).mappable();
+        controls.bind::<ZoomOut>(KeyCode::KeyQ).mappable();
     });
     app.add_context::<Captured>(|controls| {
         // Deactivating the context is what keeps the mouse from orbiting while picking has it.
@@ -122,16 +126,23 @@ fn main() {
         controls.bind::<Release>(KeyCode::Escape).reserved();
     });
 
-    app.add_systems(Startup, (scene.spawn(), spawn_contexts, spawn_ui))
-        .add_systems(
-            Update,
-            (drive_camera, place_camera, release, release_on_focus_loss).chain(),
-        )
-        .add_systems(Update, show_owner.run_if(state_changed::<MouseOwner>))
-        .add_systems(PostUpdate, follow_viewport_slot.after(UiSystems::Layout))
-        .add_systems(OnEnter(MouseOwner::Camera), grab)
-        .add_systems(OnExit(MouseOwner::Camera), let_go)
-        .run();
+    app.add_systems(
+        Startup,
+        (
+            scene.spawn(),
+            spawn_contexts,
+            (editor::load, spawn_ui).chain(),
+        ),
+    )
+    .add_systems(
+        Update,
+        (drive_camera, place_camera, release, release_on_focus_loss).chain(),
+    )
+    .add_systems(Update, show_owner.run_if(state_changed::<MouseOwner>))
+    .add_systems(PostUpdate, follow_viewport_slot.after(UiSystems::Layout))
+    .add_systems(OnEnter(MouseOwner::Camera), grab)
+    .add_systems(OnExit(MouseOwner::Camera), let_go)
+    .run();
 }
 
 /// The camera that draws the 3D view.
@@ -203,9 +214,9 @@ fn spawn_contexts(mut commands: Commands) {
     commands.spawn(Captured);
 }
 
-/// The panel, built from the mapping list, beside the node the 3D view fills.
+/// The controls panel beside the node the 3D view fills.
 fn spawn_ui(world: &mut World) {
-    let rows: Vec<_> = binding_rows(&mapping::mappings(world));
+    let editor = editor::panel(&mappings(world));
     world
         .spawn_scene(bsn! {
             #Shell
@@ -220,22 +231,19 @@ fn spawn_ui(world: &mut World) {
                     width: {px(PANEL_WIDTH)},
                     flex_shrink: 0.0,
                     flex_direction: FlexDirection::Column,
-                    justify_content: JustifyContent::SpaceBetween,
-                    padding: px(12),
+                    min_height: px(0),
+                    padding: px(8),
+                    row_gap: px(8),
                 }
-                BackgroundColor(PANEL_BG)
+                ThemeBackgroundColor(tokens::WINDOW_BG)
                 Children [
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: px(4),
-                    }
-                    Children [ {rows} ]
+                    @{editor}
                     --
                     #Status
                     Status
                     Text({owner_text(MouseOwner::Picking)})
                     TextFont { font_size: 15.0_f32 }
-                    TextColor(HEADING)
+                    TextColor(STATUS)
                 ]
                 --
                 #View
@@ -247,6 +255,7 @@ fn spawn_ui(world: &mut World) {
             ]
         })
         .expect("the shell scene spawns");
+    editor::fill(world);
 }
 
 /// The line at the foot of the panel, saying who has the mouse.
@@ -262,47 +271,6 @@ fn owner_text(owner: MouseOwner) -> String {
 
 fn show_owner(owner: Res<State<MouseOwner>>, mut status: Single<&mut Text, With<Status>>) {
     status.0 = owner_text(**owner);
-}
-
-/// One line per mapping, and a heading wherever the context changes.
-fn binding_rows(mappings: &[ActionMapping]) -> Vec<impl Scene> {
-    let mut rows = Vec::new();
-    let mut context = "";
-    for row in mappings {
-        if row.context != context {
-            context = row.context;
-            rows.push(line(
-                mapping::fallback_label(context),
-                String::new(),
-                HEADING,
-            ));
-        }
-        let controls: Vec<String> = row
-            .controls()
-            .into_iter()
-            .flatten()
-            .map(|control| control.fallback_label().into_owned())
-            .collect();
-        rows.push(line(row.key.fallback_label(), controls.join(", "), LABEL));
-    }
-    rows
-}
-
-fn line(label: String, controls: String, color: Color) -> impl Scene {
-    bsn! {
-        Node {
-            justify_content: JustifyContent::SpaceBetween,
-        }
-        Children [
-            Text({label})
-            TextFont { font_size: 15.0_f32 }
-            TextColor({color})
-            --
-            Text({controls})
-            TextFont { font_size: 15.0_f32 }
-            TextColor(CONTROL)
-        ]
-    }
 }
 
 /// Moves the camera by what the actions report this frame.

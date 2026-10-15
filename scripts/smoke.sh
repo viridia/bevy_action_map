@@ -44,7 +44,7 @@ fi
 # example missing here fails loudly rather than silently.
 features_for() {
     case "$1" in
-        disasteroids | split_friction) echo "--features serialize" ;;
+        disasteroids | orbit | split_friction) echo "--features serialize" ;;
         *) echo "" ;;
     esac
 }
