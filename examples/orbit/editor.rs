@@ -8,11 +8,15 @@
 //! the keys after it move up a place, and `Overrides::bind` is handed the list with its gaps
 //! flattened out. A capture listening on a row that loses a key is cancelled, since the slot it was
 //! going to fill has moved.
+//!
+//! Each key has a toggle per modifier, lit when the key needs that modifier held. Capturing a new
+//! key keeps the modifiers: the key button sets the key and the toggles set the modifiers, so
+//! recapturing changes only what the player pressed.
 
 use bevy::ecs::system::Command;
 use bevy::feathers::FeathersPlugins;
 use bevy::feathers::controls::{
-    FeathersButton, FeathersTreeItem, FeathersTreeItemChildren, FeathersTreeView,
+    ButtonVariant, FeathersButton, FeathersTreeItem, FeathersTreeItemChildren, FeathersTreeView,
 };
 use bevy::feathers::dark_theme::create_dark_theme;
 use bevy::feathers::display::caption;
@@ -30,7 +34,7 @@ use bevy_action_map::overrides::{
 };
 use bevy_action_map::prelude::*;
 
-use crate::Status;
+use crate::{MouseOwner, Status, owner_text};
 
 /// Reverse-DNS, per `SettingsPlugin`. Names the directory the settings file lives in.
 const APP_ID: &str = "org.bevy.bevy_action_map.orbit";
@@ -76,6 +80,28 @@ enum Edit {
     Remove(usize),
     /// Listens for a key to put after the last one.
     Add,
+    /// Adds this modifier to the slot's chord, or takes it out.
+    Toggle(usize, ModifierKey),
+}
+
+const MODIFIERS: [ModifierKey; 4] = [
+    ModifierKey::Ctrl,
+    ModifierKey::Shift,
+    ModifierKey::Alt,
+    ModifierKey::Super,
+];
+
+/// A modifier as this platform's keyboard prints it.
+fn modifier_label(modifier: ModifierKey) -> &'static str {
+    match modifier {
+        ModifierKey::Ctrl => "Ctrl",
+        ModifierKey::Shift => "Shift",
+        ModifierKey::Alt if cfg!(target_os = "macos") => "Opt",
+        ModifierKey::Alt => "Alt",
+        ModifierKey::Super if cfg!(target_os = "macos") => "Cmd",
+        ModifierKey::Super if cfg!(target_os = "windows") => "Win",
+        ModifierKey::Super => "Super",
+    }
 }
 
 pub fn plugin(app: &mut App) {
@@ -214,7 +240,7 @@ fn rebuild(world: &mut World, row: Entity) {
         .expect("a tree row has a container for its children");
     world.entity_mut(container).despawn_related::<Children>();
 
-    let mut lines: Vec<(Edit, String)> = mapping
+    let mut lines: Vec<(usize, String, Option<Vec<ModifierKey>>)> = mapping
         .slots
         .iter()
         .enumerate()
@@ -224,28 +250,57 @@ fn rebuild(world: &mut World, row: Entity) {
                 (false, Some(bound)) => bound.control.fallback_label().into_owned(),
                 (false, None) => "Empty".to_string(),
             };
-            (Edit::Capture(slot), text)
+            let held = bound.as_ref().map(held_modifiers).unwrap_or_default();
+            (slot, text, Some(held))
         })
         .collect();
     let end = mapping.slots.len();
+    // A slot still waiting for its first key has nothing to hold a modifier for.
     if listening == Some(end) {
-        lines.push((Edit::Capture(end), "Press a key".into()));
-    } else {
-        lines.push((Edit::Add, "Add a key".into()));
+        lines.push((end, "Press a key".into(), None));
     }
 
-    for (edit, text) in lines {
-        let mut line = match edit {
-            Edit::Capture(slot) => world.spawn_scene(slot_line(key, slot, text)),
-            _ => world.spawn_scene(add_line(key, text)),
-        }
-        .expect("a slot line spawns");
-        line.insert(ChildOf(container));
+    for (slot, text, held) in lines {
+        world
+            .spawn_scene(slot_line(key, slot, text, held))
+            .expect("a slot line spawns")
+            .insert(ChildOf(container));
+    }
+    if listening != Some(end) {
+        world
+            .spawn_scene(add_line(key, "Add a key".into()))
+            .expect("the add line spawns")
+            .insert(ChildOf(container));
     }
 }
 
-/// One slot: a button showing its key that listens for a new one, and a button that removes it.
-fn slot_line(key: MappingKey, slot: usize, text: String) -> impl Scene {
+fn held_modifiers(bound: &BoundSlot) -> Vec<ModifierKey> {
+    bound
+        .with
+        .iter()
+        .filter_map(|entry| match entry {
+            ControlOrigin::Modifier(modifier) => Some(*modifier),
+            _ => None,
+        })
+        .collect()
+}
+
+/// One slot: a button showing its key that listens for a new one, its modifier toggles, and a
+/// button that removes it.
+fn slot_line(
+    key: MappingKey,
+    slot: usize,
+    text: String,
+    held: Option<Vec<ModifierKey>>,
+) -> impl Scene {
+    let toggles: Vec<_> = held
+        .map(|held| {
+            MODIFIERS
+                .iter()
+                .map(|&modifier| modifier_toggle(key, slot, modifier, held.contains(&modifier)))
+                .collect()
+        })
+        .unwrap_or_default();
     bsn! {
         @FeathersTreeItem {
             @label: bsn_list! {
@@ -256,6 +311,9 @@ fn slot_line(key: MappingKey, slot: usize, text: String) -> impl Scene {
                 Node { flex_grow: 1.0 }
                 Children [ @caption({text}) #label ]
                 --
+                Node { column_gap: px(2) }
+                Children [ {toggles} ]
+                --
                 @FeathersButton
                 ~{SlotButton(key, Edit::Remove(slot))}
                 ~{Name::new(format!("remove {slot}"))}
@@ -263,6 +321,20 @@ fn slot_line(key: MappingKey, slot: usize, text: String) -> impl Scene {
                 Children [ @caption("x") ]
             },
         }
+    }
+}
+
+/// Named by the modifier's own name rather than its label, which differs by platform.
+fn modifier_toggle(key: MappingKey, slot: usize, modifier: ModifierKey, lit: bool) -> impl Scene {
+    let label = modifier_label(modifier);
+    bsn! {
+        @FeathersButton {
+            @variant: {ButtonVariant::selected(lit)},
+        }
+        ~{SlotButton(key, Edit::Toggle(slot, modifier))}
+        ~{Name::new(format!("{modifier:?} {slot}"))}
+        on(edit)
+        Children [ @caption(label) ]
     }
 }
 
@@ -327,6 +399,20 @@ fn apply_edit(world: &mut World, key: MappingKey, edit: Edit) {
             }
             rebuild(world, row);
         }
+        Edit::Toggle(slot, modifier) => {
+            let mut slots = world.resource::<Edits>().0.slots_of(&mapping);
+            if let Some(Some(bound)) = slots.get_mut(slot) {
+                let entry = ControlOrigin::Modifier(modifier);
+                match bound.with.iter().position(|held| *held == entry) {
+                    Some(index) => {
+                        bound.with.remove(index);
+                    }
+                    None => bound.with.push(entry),
+                }
+                write_checked(world, &mapping, slots);
+            }
+            rebuild(world, row);
+        }
     }
 }
 
@@ -374,23 +460,30 @@ fn fill_slot(world: &mut World, row: Entity, control: Control) {
     let Some(mapping) = find(world, key) else {
         return;
     };
+    // A filled slot keeps what it was held with, so the modifiers survive a new key.
     let slots = world
         .resource::<Edits>()
         .0
         .with_cell(&mapping, slot, control);
-    match Rebind::checked(world, &mapping, slots) {
+    write_checked(world, &mapping, slots);
+    rebuild(world, row);
+}
+
+/// Writes a row's new slots and commits them, or says on the status line why the row refused. A
+/// write that succeeds clears the last refusal, which is about an edit the player has moved on from.
+fn write_checked(world: &mut World, mapping: &ActionMapping, slots: Vec<Option<BoundSlot>>) {
+    let message = match Rebind::checked(world, mapping, slots) {
         Ok(rebind) => {
             rebind.write(&mut world.resource_mut::<Edits>().0);
             commit(world);
+            owner_text(**world.resource::<State<MouseOwner>>())
         }
-        Err(problem) => {
-            let mut status = world.query_filtered::<&mut Text, With<Status>>();
-            if let Ok(mut text) = status.single_mut(world) {
-                text.0 = explain(problem);
-            }
-        }
+        Err(problem) => explain(problem),
+    };
+    let mut status = world.query_filtered::<&mut Text, With<Status>>();
+    if let Ok(mut text) = status.single_mut(world) {
+        text.0 = message;
     }
-    rebuild(world, row);
 }
 
 fn reset(_activate: On<Activate>, mut commands: Commands) {

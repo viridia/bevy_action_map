@@ -243,6 +243,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 196  | `main` on Bevy main, and a release branch for 0.1                     |
 | 121  | A camera that takes the mouse, and gives it back                      |
 | 203  | A binding editor with a list per action                               |
+| 129b | A screen that sets a modifier                                         |
 
 ---
 
@@ -256,7 +257,6 @@ its identity rather than its position.
 * 172a: `bevy_action_map_ui`, starting with prompts
 * 172b: The focus bridge joins `bevy_action_map_ui`
 * 115: A timing declared as a tunable
-* 129b: A screen that sets a modifier
 * 122: The wheel as a binding source
 * 28: Docs that run
 
@@ -286,24 +286,6 @@ keyboard row applies.
   may not either, and the reverse.
 - **Verified by** tests on both paths — a declaration mixing families, and a saved row naming a
   gamepad entry on a keyboard row.
-
-### 129b. A screen that sets a modifier · E[2]
-
-129's caller, and the obligation 129 lands short of. Nothing in tree can edit a chord until
-something draws the toggles; what they edit is `BoundSlot::with`, written back through
-`Overrides::bind` (TD9.1). After chunk 203, in `orbit`'s tree.
-
-- **One toggle per `ModifierKey` on each slot's line** (`Shift`, `Ctrl`, `Alt`, `Super`, the last
-  labelled for the platform), lit when the slot requires that modifier. Pressing one adds or
-  removes it from `BoundSlot::with` and writes the slot back.
-- **Reset or preserve is this screen's call.** 129 left it to whoever writes the slot, and
-  Disasteroids' capture preserves, because on a screen with no toggles a reset loses a chord the
-  player can never get back. With the toggles beside the key, Blender's reset becomes affordable;
-  this chunk picks one for `orbit` and says why. Disasteroids keeps preserving.
-- **Not doing: toggles on Disasteroids' screen.** Its fixed `Ctrl+N` row stays fixed, which is X64.
-- **Verified by** `orbit/editor.py` and `orbit/saved.py`, extended to toggle a modifier, restart, and
-  read the chord back.
-- **Starts on `main`.**
 
 ### 122. The wheel as a binding source, and a zoom for the orbit · E[3]
 

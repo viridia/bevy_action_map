@@ -1,14 +1,15 @@
 """The controls panel: a row's list grows, takes keys, refuses a reserved one, and closes up when a
-key in the middle is removed.
+key in the middle is removed; a key takes a modifier, and keeps it when it is recaptured.
 
-Leaves Zoom In bound to E and F, which `saved.py` reads back after a restart and then resets. Run
-this one first.
+Leaves Zoom In bound to E and Ctrl+H, which `saved.py` reads back after a restart and then resets.
+Run this one first.
 """
 
 EXAMPLE = "orbit"
 FEATURES = ["serialize"]
 
 TEXT = "bevy_ui::widget::text::Text"
+VARIANT = "bevy_feathers::controls::button::ButtonVariant"
 ROW = "Editor/orbit.zoom_in"
 
 
@@ -34,7 +35,19 @@ def run(driver):
     driver.expect("Shell/Status", TEXT, "Esc gives the mouse back, so it stays as it is")
     driver.present(f"{ROW}/add")
     driver.absent(f"{ROW}/2")
-    driver.screenshot("refused")
+
+    # A modifier on the second key, which a new key keeps.
+    driver.expect(f"{ROW}/Ctrl 1", VARIANT, "Normal")
+    driver.click(f"{ROW}/Ctrl 1")
+    driver.expect(f"{ROW}/Ctrl 1", VARIANT, "Primary")
+    driver.click(f"{ROW}/1")
+    driver.key("KeyH")
+    driver.expect(f"{ROW}/1/label", TEXT, "H")
+    driver.expect(f"{ROW}/Ctrl 1", VARIANT, "Primary")
+    driver.expect(f"{ROW}/Ctrl 0", VARIANT, "Normal")
+    # The refusal was about an edit the player has moved on from.
+    driver.expect("Shell/Status", TEXT, "Click the view to orbit with the mouse")
+    driver.screenshot("modifier")
 
 
 def add(driver, slot, code, label):

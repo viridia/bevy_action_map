@@ -46,7 +46,7 @@ const MAX_ELEVATION: f32 = 85.0 * std::f32::consts::PI / 180.0;
 const MIN_DISTANCE: f32 = 1.5;
 const MAX_DISTANCE: f32 = 30.0;
 
-const PANEL_WIDTH: f32 = 300.0;
+const PANEL_WIDTH: f32 = 400.0;
 const STATUS: Color = Color::srgb(0.95, 0.75, 0.35);
 
 #[derive(InputAction)]
