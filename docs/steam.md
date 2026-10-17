@@ -188,8 +188,9 @@ inner loop.
 `get_connected_controllers` calls `Vec::shrink_to`, a capacity hint, where it means `truncate`. It
 always returns 16 handles with the tail zeroed, so a caller iterating the result processes fifteen
 phantom controllers. `get_connected_controllers_slice` returns the true count and is the workaround.
-Reported upstream as [steamworks-rs#345](https://github.com/Noxime/steamworks-rs/issues/345), with
-the one-line fix.
+Reported upstream as [steamworks-rs#345](https://github.com/Noxime/steamworks-rs/issues/345) and
+fixed there in `c8ac103`, after 0.13.1. Once a release carries it, `connected` in disasteroids can
+call `get_connected_controllers` directly.
 
 ### S13 — A dotted action name survives into Steam's namespace
 
