@@ -28,18 +28,14 @@ bevy_action_map_ui = { path = "crates/bevy_action_map_ui" }
 bevy = { workspace = true, features = [
   "dynamic_linking",
   "bevy_settings",
-  # For the driver, below. The examples never name `bevy_remote` themselves, but the umbrella's
-  # feature is what registers `Image`'s serialization, without which a screenshot step panics the
-  # app rather than failing the step.
+  # BRP, which `examples/common/remote_driver.rs` enables for `bevy-remote-driver`, and `Image`'s
+  # serialization, without which a screenshot step panics the app rather than failing the step.
   "bevy_remote",
   # The `orbit` example's controls panel, which needs a tree view.
   "bevy_feathers",
 ] }
 bevy_input.workspace = true
 bevy_math.workspace = true
-# Every example adds `RemoteDriverPlugin`, which is inert unless the port variable is set, so a
-# plan can drive any of them without the example knowing it is under test.
-bevy_remote_driver = { path = "crates/bevy_remote_driver" }
 
 [features]
 serialize = ["bevy_action_map/serialize"]
@@ -78,20 +74,14 @@ missing_docs = "warn"
 bevy = { git = "https://github.com/bevyengine/bevy.git", branch = "main" }
 bevy_app = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
 bevy_asset = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
-bevy_camera = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
-bevy_diagnostic = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
 bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
 bevy_input = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
 bevy_math = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
 bevy_platform = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
 bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
-bevy_remote = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
-bevy_scene = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
 bevy_state = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
 bevy_time = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
-bevy_ui = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
 bevy_utils = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
-bevy_window = { git = "https://github.com/bevyengine/bevy.git", branch = "main", default-features = false }
 
 [profile.dev]
 opt-level = 1

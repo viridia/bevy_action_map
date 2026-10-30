@@ -147,6 +147,9 @@ struct Jump;
 #[context(path = "gameplay.on_foot", tick = Render)]
 struct OnFoot;
 
+#[path = "common/remote_driver.rs"]
+mod remote_driver;
+
 fn main() {
     let mut app = App::new();
     app.add_plugins((
@@ -163,7 +166,7 @@ fn main() {
             .disable::<InputDispatchPlugin>(),
         common::font::plugin,
         ActionMapPlugin,
-        bevy_remote_driver::RemoteDriverPlugin,
+        remote_driver::RemoteDriverPlugin,
     ));
     // Every binding here consumes: a chord that fires has to take its key from whatever reads it
     // next, which is the character class for the letters and `Move` for the arrows.

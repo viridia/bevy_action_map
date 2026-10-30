@@ -13,7 +13,7 @@ ROW = "Editor/orbit.zoom_in"
 
 
 def run(driver):
-    driver.present("Shell", ready=True)
+    driver.present("Shell")
     driver.click(f"{ROW}/title")
     driver.expect(f"{ROW}/0/label", TEXT, "E")
     driver.expect(f"{ROW}/1/label", TEXT, "H")

@@ -14,7 +14,7 @@ GRABBED = "Escape gives the mouse back"
 
 
 def run(driver):
-    driver.present("Shell", ready=True)
+    driver.present("Shell")
     driver.expect(STATUS, TEXT, FREE)
     driver.screenshot("start")
 

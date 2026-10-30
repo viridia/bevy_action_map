@@ -21,7 +21,7 @@ THRUST = "Settings/KeyboardMouse/disasteroids.thrust/0"
 def run(driver):
     # North opens the controls screen, whatever the game is doing.
     driver.pad("North")
-    driver.present("Settings", ready=True)
+    driver.present("Settings")
     driver.expect("Settings/Cancel", OUTLINE, RING)
 
     # Right on the left stick. The screen reads a stick as a position rounded to one of four

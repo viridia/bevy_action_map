@@ -43,6 +43,9 @@ use common::{prompt_ui, widget_focus};
 const WIDTH: usize = 64;
 const HEIGHT: usize = 64;
 
+#[path = "../common/remote_driver.rs"]
+mod remote_driver;
+
 fn main() {
     let seed = std::env::args()
         .nth(1)
@@ -64,7 +67,7 @@ fn main() {
             // falling back to on-screen position, so it has to exist even though nothing here ever
             // writes an edge to it.
             bevy::input_focus::directional_navigation::DirectionalNavigationPlugin,
-            bevy_remote_driver::RemoteDriverPlugin,
+            remote_driver::RemoteDriverPlugin,
         ))
         .add_plugins((
             protagonist::plugin,

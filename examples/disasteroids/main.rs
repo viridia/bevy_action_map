@@ -38,6 +38,9 @@ mod common;
 use common::prompt_ui::{self, PromptFamily, PromptSpan};
 use common::widget_focus;
 
+#[path = "../common/remote_driver.rs"]
+mod remote_driver;
+
 fn main() {
     App::new()
         .add_plugins((
@@ -66,7 +69,7 @@ fn main() {
             // navigator consults that graph before falling back to where things are on screen, so
             // it has to exist.
             bevy::input_focus::directional_navigation::DirectionalNavigationPlugin,
-            bevy_remote_driver::RemoteDriverPlugin,
+            remote_driver::RemoteDriverPlugin,
         ))
         .add_plugins((
             actions::plugin,

@@ -530,7 +530,6 @@ dependencies = [
  "bevy_action_map_ui",
  "bevy_input",
  "bevy_math",
- "bevy_remote_driver",
 ]
 
 [[package]]
@@ -1593,26 +1592,6 @@ dependencies = [
  "serde",
  "serde_json",
  "smol-hyper",
-]
-
-[[package]]
-name = "bevy_remote_driver"
-version = "0.2.0-dev"
-dependencies = [
- "bevy",
- "bevy_app",
- "bevy_camera",
- "bevy_diagnostic",
- "bevy_ecs",
- "bevy_math",
- "bevy_reflect",
- "bevy_remote",
- "bevy_scene",
- "bevy_time",
- "bevy_ui",
- "bevy_window",
- "serde",
- "serde_json",
 ]
 
 [[package]]

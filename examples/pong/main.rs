@@ -21,6 +21,9 @@ mod pong;
 #[path = "../common/mod.rs"]
 mod common;
 
+#[path = "../common/remote_driver.rs"]
+mod remote_driver;
+
 fn main() {
     App::new()
         .add_plugins((
@@ -38,7 +41,7 @@ fn main() {
             }),
             common::font::plugin,
             bevy_action_map::ActionMapPlugin,
-            bevy_remote_driver::RemoteDriverPlugin,
+            remote_driver::RemoteDriverPlugin,
         ))
         .add_plugins(pong::plugin)
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.03)))

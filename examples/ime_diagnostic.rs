@@ -26,6 +26,9 @@
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 
+#[path = "common/remote_driver.rs"]
+mod remote_driver;
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -36,7 +39,7 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(bevy_remote_driver::RemoteDriverPlugin)
+        .add_plugins(remote_driver::RemoteDriverPlugin)
         .add_systems(Update, print_keyboard_events)
         .run();
 }

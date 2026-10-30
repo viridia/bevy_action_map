@@ -122,7 +122,8 @@ Ordered by what a real game would miss first.
 
 R11.8 (SHOULD) · no citation anywhere in `crates/bevy_action_map/src/`
 
-An on-screen stick can be a virtual gamepad today, as the remote driver's is (DD5.3): an entity
+An on-screen stick can be a virtual gamepad today, as
+[`bevy-remote-driver`](https://github.com/viridia/bevy_remote_driver)'s `pad` step is: an entity
 announced by Bevy's own messages, which pairing and routing treat like any pad. What it lacks is an
 identity. It reports no vendor or product id, so glyph resolution draws generic pad art where a game
 wants the on-screen control drawn as itself.

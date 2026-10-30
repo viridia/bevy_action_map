@@ -14,12 +14,15 @@ struct OnFoot;
 #[derive(Resource)]
 struct GlobalInput;
 
+#[path = "common/remote_driver.rs"]
+mod remote_driver;
+
 fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins,
             ActionMapPlugin,
-            bevy_remote_driver::RemoteDriverPlugin,
+            remote_driver::RemoteDriverPlugin,
         ))
         .add_context::<OnFoot>(|context| {
             context.bind::<Jump>(KeyCode::Space);

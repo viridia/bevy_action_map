@@ -89,6 +89,9 @@ enum MouseOwner {
     Camera,
 }
 
+#[path = "../common/remote_driver.rs"]
+mod remote_driver;
+
 fn main() {
     let mut app = App::new();
     app.add_plugins((
@@ -101,7 +104,7 @@ fn main() {
             ..default()
         }),
         ActionMapPlugin,
-        bevy_remote_driver::RemoteDriverPlugin,
+        remote_driver::RemoteDriverPlugin,
         editor::plugin,
     ));
     app.init_state::<MouseOwner>();

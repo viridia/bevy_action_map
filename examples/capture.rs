@@ -65,6 +65,9 @@ struct WallJump;
 #[context(path = "capture_demo.playing", tick = Render)]
 struct Playing;
 
+#[path = "common/remote_driver.rs"]
+mod remote_driver;
+
 fn main() {
     let mut app = App::new();
     app.add_plugins((
@@ -77,7 +80,7 @@ fn main() {
             ..default()
         }),
         ActionMapPlugin,
-        bevy_remote_driver::RemoteDriverPlugin,
+        remote_driver::RemoteDriverPlugin,
     ));
 
     app.add_context::<Playing>(|controls| {

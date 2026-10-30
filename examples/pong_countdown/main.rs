@@ -22,6 +22,9 @@ mod common;
 
 mod rally;
 
+#[path = "../common/remote_driver.rs"]
+mod remote_driver;
+
 fn main() {
     App::new()
         .add_plugins((
@@ -39,7 +42,7 @@ fn main() {
             }),
             common::font::plugin,
             bevy_action_map::ActionMapPlugin,
-            bevy_remote_driver::RemoteDriverPlugin,
+            remote_driver::RemoteDriverPlugin,
         ))
         // Every part of Pong except `paddle` and `ball`, which `rally` replaces.
         .add_plugins((

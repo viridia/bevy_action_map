@@ -9,11 +9,10 @@
     scripts/show.py R2.2 D6   several at once
     scripts/show.py --outline TD8
                               only the headings and requirements inside, with line numbers
-    scripts/show.py --toc TD  every heading of one document: R, TD, D, X, G, S, DR, DD, chunks or
-                              issues
+    scripts/show.py --toc TD  every heading of one document: R, TD, D, X, G, S, chunks or issues
 
-Decisions (`D12`), deferred entries (`X5`), guidelines (`G3`), Steam findings (`S7`) and the remote
-driver's `DR` and `DD` anchors work the same way. A section runs to the next heading of the same or
+Decisions (`D12`), deferred entries (`X5`), guidelines (`G3`) and Steam findings (`S7`) work the
+same way. A section runs to the next heading of the same or
 a higher level; a requirement runs to the next requirement or heading. A landed chunk has no
 section, and says so; a lettered part without a section of its own prints its parent's; a retired
 issue is reported as absent. Any unknown anchor exits 1, after the others are printed.
@@ -24,7 +23,6 @@ import sys
 
 from xref import (
     D_DEF,
-    DR_DEF,
     G_DEF,
     H2_NUM,
     H3_NUM,
@@ -44,16 +42,12 @@ HEADING = re.compile(r"^(#+) ")
 OUTLINE_WIDTH = 100
 
 REQ = ROOT / "Requirements.md"
-DRIVER = ROOT / "crates/bevy_remote_driver/docs"
 
 # (anchor form, file, heading patterns, prefix the anchor carries that the heading does not)
 KINDS = [
     (re.compile(r"R\d+\.\d+[a-z]?"), REQ, [R_DEF], ""),
-    (re.compile(r"DR\d+\.\d+[a-z]?"), DRIVER / "requirements.md", [DR_DEF], ""),
     (re.compile(r"R\d+"), REQ, [H2_NUM], "R"),
-    (re.compile(r"DR\d+"), DRIVER / "requirements.md", [H2_NUM], "DR"),
     (re.compile(r"TD\d+(?:\.\d+)?"), ROOT / "docs/design.md", [H2_NUM, H3_NUM], "TD"),
-    (re.compile(r"DD\d+(?:\.\d+)?"), DRIVER / "design.md", [H2_NUM, H3_NUM], "DD"),
     (re.compile(r"D\d+"), ROOT / "docs/decisions.md", [D_DEF], ""),
     (re.compile(r"X\d+"), ROOT / "docs/deferred.md", [X_DEF], ""),
     (re.compile(r"G\d+"), ROOT / "docs/guidelines.md", [G_DEF], ""),
@@ -65,9 +59,7 @@ KINDS = [
 
 TOC = {
     "R": REQ,
-    "DR": DRIVER / "requirements.md",
     "TD": ROOT / "docs/design.md",
-    "DD": DRIVER / "design.md",
     "D": ROOT / "docs/decisions.md",
     "X": ROOT / "docs/deferred.md",
     "G": ROOT / "docs/guidelines.md",
@@ -132,7 +124,7 @@ def outline(path, start, end):
     lines = dict(prose(path))
     for n in range(start, end + 1):
         line = lines.get(n)
-        if line is not None and (level(line) or R_DEF.match(line) or DR_DEF.match(line)):
+        if line is not None and (level(line) or R_DEF.match(line)):
             print(f"{n:>5}  {line.strip()[:OUTLINE_WIDTH]}")
 
 

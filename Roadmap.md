@@ -244,6 +244,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 121  | A camera that takes the mouse, and gives it back                      |
 | 203  | A binding editor with a list per action                               |
 | 129b | A screen that sets a modifier                                         |
+| 204  | Plans on `bevy-remote-driver`, and the driver's copy deleted          |
 
 ---
 
@@ -259,6 +260,7 @@ its identity rather than its position.
 * 115: A timing declared as a tunable
 * 122: The wheel as a binding source
 * 28: Docs that run
+* 205: The orbit editor's saved controls, checked across a restart, after the driver's chunk 33
 
 Chunk 179 carries defects. The register of what is known to be wrong is
 [docs/issues.md](./docs/issues.md), and an entry there that acquires a chunk gets a section here.
@@ -590,20 +592,15 @@ numbered zero so that it moves no other section's anchor.
 
 ## Driving an example from outside
 
-Nothing in tree can run an example, act on it and see the result without a person at the keyboard.
-Live screenshots and window driving have been unreliable, so every check that needs a running window
-has been made by reading instead. What is wanted works the way Playwright does: start the app, find
-an element by a path of names, click it, wait until what it opens exists and has loaded, take a
-screenshot, quit — all over HTTP and JSON.
-
-It is developed here because that is faster, as a workspace member (`crates/bevy_remote_driver/`)
-with its own documents, so what it needs travels with it if it leaves; whether it does is X45's.
-Which of its server methods are proposed upstream to Bevy is a separate question, and DD8's.
+Plans drive the examples with [`bevy-remote-driver`](https://github.com/viridia/bevy_remote_driver),
+which began here and is its own project now; chunks 197, 198, 199 and 202 landed there. What is left
+here is the mapper's side.
 
 ### 149. The mapper's `remote` feature · E[2]
 
-R25 and DD6: `action_map.dump` and `action_map.authority`, and the client's generic `call` step for
-a method it does not know, which is how a plan reaches either.
+R25: `action_map.dump` and `action_map.authority`, server methods behind a `remote` feature, and a
+plan reaching them. `bevy-remote-driver` has no step for an app's own methods yet: its generic
+`call` step is deferred in its ledger, gated on this chunk, which ports it.
 
 `call` polls while the step carries a `value` and invokes once where it does not: the client's
 checks re-run until they pass, which is what a read wants and what a write cannot have. `dump` is
@@ -617,64 +614,17 @@ rebinding is.
 
 - **Not doing:** a step of the mapper's own, or a Python helper over `call`. Deferred as X32.
 - **Not doing:** raw injection, which R25.4 says needs nothing.
-- **Verified by:** a headless test of each handler, and 148's plan reaching one through `call`.
+- **Verified by:** a headless test of each handler, and `disasteroids/rebind.py` reaching one
+  through `call`.
 
-### 197. A click as a server method · E[3]
+### 205. The orbit editor's saved controls, checked across a restart · E[1]
 
-bevy#25894 wants a runner in any language that speaks HTTP and JSON, so whatever a runner builds for
-itself, every runner builds again. A click today is the client writing `WindowEvent` over BRP, which
-is a window backend's message rather than a contract for tests: bevy#25890 reshaped it, and every
-click failed at runtime with nothing in `scripts/verify.sh` noticing. Chunk 196 patched the field;
-this chunk moves the gesture behind a method.
+`plans/orbit/saved.py` reads back what `editor.py` saved, in a second launch, and fails since each
+plan's settings start empty. Once `bevy-remote-driver` can restart the app inside a plan (its chunk
+33), `editor.py` restarts after its edits and checks Zoom In's keys and modifier itself, ending on
+Reset, and `saved.py` goes. On `main`.
 
-- **`driver.click { path }`** resolves the node as `driver.locate` does, and queues `CursorMoved`,
-  the press and the release into a resource the plugin drains one per frame. It returns once queued;
-  the client waits for the frames as it does now. A refusal still comes back from the call.
-- **The events are built from Bevy's types**, so a change to their shape is a compile error.
-- **`driver.locate` stays** for a plan that wants a node's position without clicking it.
-- **DD8's row for clicks moves from the client to the plugin**, and the plan it replaces, deleting
-  `driver.locate` so that each client locates a node itself, is withdrawn.
-  `docs/proposals/remote-driver.md` is the author's to update.
-- **Not doing:** keys and text, which have the same exposure and the same answer, and are chunk 202;
-  gamepads.
-- **Verified by** a headless `App` test that one call yields the three events on three frames, and
-  `disasteroids/rebind.py` and `disasteroids/pad.py` end to end.
-
-### 202. Keys and text as server methods · E[2]
-
-After chunk 197, for the same reason. `driver.py` writes `KeyboardInput` over BRP and derives
-`logical_key` and `text` from the key code itself, for a US layout (DD5.2), so every runner
-re-derives them and breaks when the message changes. `driver.key` and `driver.type` take a key code
-or a string, and the plugin builds the messages from Bevy's types.
-
-- **Not doing:** layouts other than US, which the client does not handle either; gamepads.
-- **Verified by** a headless `App` test of the derived messages, including text, which no plan types
-  yet, and `disasteroids/rebind.py`, which presses keys, end to end.
-
-### 198. Deleting `driver.diagnostics` · E[1]
-
-Past bevy#25824, BRP's own `diagnostics.get` reads `frame_count` as `driver.diagnostics` does
-(DD3.4). The client switches to it and the method goes. `FrameTimeDiagnosticsPlugin` is still the
-driver's to add, since it records the count and is not in `DefaultPlugins`.
-
-- **Verified by** any plan end to end, since every wait reads the frame count.
-
-### 199. A run isolated from what the developer has saved · E[1]
-
-A plan that rebinds writes the developer's real settings file, and one that fails halfway leaves it
-dirty. Isolation was deferred until an app's state was out of a plan's reach, because at 0.20.0 it
-cost a platform branch. Past bevy#25902, `preferences_dir` honours an absolute `BEVY_SETTINGS_DIR`
-on every platform, and bevy#25894 lists the redirect among its goals, so the cost that justified the
-gate is gone. `environment()` in `run.py` sets it to a directory under the run's own output.
-
-- **The run checks the directory was written.** A wrong path or variable fails silently: the
-  redirect does not take, and the plan passes while reading the real file.
-- **The Reset and Confirm bookends stay** (DD9): they are a plan reaching a known state the way a
-  player would, and exercise two more paths.
-- **Not doing:** a per-run `app_name`, which would need the example to read an env var, and a plan
-  drives an example without the example knowing it is under test.
-- **Verified by** `disasteroids/rebind.py` run twice, with the real settings file's modification
-  time unchanged.
+- **Verified by** `orbit/editor.py` end to end.
 
 ## A Steam demo
 

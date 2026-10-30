@@ -39,7 +39,7 @@ def run(driver):
 def open_screen(driver):
     """Opens the controls screen. `Shell` binds F2, so it answers whatever the game is doing."""
     driver.key("F2")
-    driver.present("Settings", ready=True)
+    driver.present("Settings")
 
 
 def confirm(driver):

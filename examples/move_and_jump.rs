@@ -24,12 +24,15 @@ struct OnFoot;
 #[context(path = "gameplay.free_look", tick = Render)]
 struct FreeLook;
 
+#[path = "common/remote_driver.rs"]
+mod remote_driver;
+
 fn main() {
     let mut app = App::new();
     app.add_plugins((
         DefaultPlugins,
         ActionMapPlugin,
-        bevy_remote_driver::RemoteDriverPlugin,
+        remote_driver::RemoteDriverPlugin,
     ));
     app.add_context::<OnFoot>(|context| {
         context.bind::<Move>(DirectionalButtons::wasd());

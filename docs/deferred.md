@@ -388,8 +388,8 @@ value through as the step, so it would need a sign taken first.
 **Gate:** the next change to what Steam Disasteroids shows on screen, where reading the code is the
 only check today.
 
-The build adds `RemoteDriverPlugin` and the umbrella's `bevy_remote`; `run.py` learns a plan naming
-a manifest and a `--bin`, and extends `DYLD_FALLBACK_LIBRARY_PATH` from the build scripts'
+The build includes `examples/common/remote_driver.rs` and enables the umbrella's `bevy_remote`;
+`bevy-remote-driver` learns a plan naming a manifest and a `--bin`, and extends `DYLD_FALLBACK_LIBRARY_PATH` from the build scripts'
 `linked_paths` in Cargo's JSON, which is how `cargo run` finds `libsteam_api.dylib` (S15). No chunk
 149: a keyboard binding is not an authority binding, so `poll` overwriting `AuthorityValues` never
 touches it. Run once with Steam absent and once with Steam, a pad and a bound layout, which is a
@@ -409,16 +409,8 @@ entities too (D93).
 
 ## 5. The remote driver
 
-These leave with the driver, into its own documents, if it moves out of this repository.
-
-### X45 — What the driver becomes
-
-**Gate:** the driver proposal answered, which says which of the driver's methods Bevy takes. It is
-`docs/proposals/remote-driver.md`, posted by the author as a gist on 26 September 2026.
-
-The driver is `publish = false` (chunk 164), and nothing in `bevy_action_map` needs it published.
-What Bevy declines is the candidate for a standalone crate, and the Python client goes with it, or
-is rewritten, since a script does not ship well inside a published crate.
+The mapper's side of driving an example. The driver's own deferrals are in its
+[ledger](https://github.com/viridia/bevy_remote_driver/blob/main/docs/ledger.md).
 
 ### X32 — A step of the mapper's own, or a Python helper over `call`
 
@@ -426,26 +418,8 @@ is rewritten, since a script does not ship well inside a published crate.
 
 Both extension points exist: BRP registration is the Rust one, and the mapper's `remote` feature
 adding `action_map.*` is already a plugin adding methods with no dependency either way; a Python
-plan is a program (DD4.2), so a helper is a module it imports. What is deferred is sugar over those,
-and a step registry would be a third mechanism where two already reach.
-
-### X33 — A virtual pad that says which pad it is
-
-**Gate:** a plan whose subject is brand-specific presentation.
-
-The connection event carries `name`, `vendor_id` and `product_id`, and the client fills all three
-with a pad no vendor table knows, so every machine sees the same fallback rather than whatever is
-plugged in. Exposing them is three optional arguments and no new mechanism; what is missing is a
-plan that would read differently for a pad a game recognizes, which is X7 from the other side.
-
-### X34 — A second virtual pad, and disconnecting one
-
-**Gate:** a plan driving Split Friction, or one whose subject is a pad going away.
-
-The client holds one pad's entity and connects it on first use, so a second is another entity and a
-`pad` step that says which; a disconnect is one more message on the one it already has. Neither is
-hard and neither has a caller: Disasteroids is one player who never unplugs anything, so nothing in
-tree can tell a pad from the pad.
+plan is a program, so a helper is a module it imports. What is deferred is sugar over those, and a
+step registry would be a third mechanism where two already reach.
 
 ## 6. An outside target
 
