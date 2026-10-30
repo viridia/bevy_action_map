@@ -29,6 +29,8 @@ is still open there.
 ### X53 — Deleting `navigate_from`
 
 **Gate:** this crate's Bevy pin moving past a fix for [bevy#25944][], filed 27 September 2026.
+The first fix, [bevy#26256][], was closed under Bevy's AI policy, not on its merits, so the fix
+waits on a PR written by a person.
 
 `AutoDirectionalNavigator::navigate` returns `NoFocus` with nothing focused, so a click on empty
 space leaves a pad with no way back. `examples/common/widget_focus.rs`'s `navigate_from` answers it
@@ -666,5 +668,6 @@ near that range, issues take a letter prefix like every other anchor, and both s
 [bevy#25592]: https://github.com/bevyengine/bevy/issues/25592
 [bevy#25757]: https://github.com/bevyengine/bevy/discussions/25757
 [bevy#25944]: https://github.com/bevyengine/bevy/issues/25944
+[bevy#26256]: https://github.com/bevyengine/bevy/pull/26256
 [winit#4606]: https://github.com/rust-windowing/winit/issues/4606
 [winit#2678]: https://github.com/rust-windowing/winit/issues/2678
