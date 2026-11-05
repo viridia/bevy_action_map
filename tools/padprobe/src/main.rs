@@ -61,7 +61,13 @@ fn main() {
 
     let built = match mode {
         Mode::GilrsDefault => Gilrs::new(),
-        _ => GilrsBuilder::new().with_default_filters(false).build(),
+        // `update` runs by hand, after the filter: a state updated before it never records the
+        // D-pad presses the filter makes from a hat, so the filter never releases them.
+        Mode::Bevy => GilrsBuilder::new()
+            .with_default_filters(false)
+            .set_update_state(false)
+            .build(),
+        Mode::Unfiltered => GilrsBuilder::new().with_default_filters(false).build(),
     };
     let mut gilrs = match built {
         Ok(g) => g,
@@ -78,7 +84,11 @@ fn main() {
     // decides whether a calibration restored on connect lands in time (D21).
     let warmup = Instant::now();
     while warmup.elapsed() < Duration::from_millis(300) {
-        while let Some(Event { id, event, .. }) = gilrs.next_event() {
+        while let Some(ev) = gilrs.next_event() {
+            if mode == Mode::Bevy {
+                gilrs.update(&ev);
+            }
+            let Event { id, event, .. } = ev;
             println!("{:>6}ms [{id}] warmup {event:?}", warmup.elapsed().as_millis());
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -132,9 +142,13 @@ fn main() {
                 Mode::Bevy => ev.filter_ev(&axis_dpad_to_button, &mut gilrs),
                 _ => ev,
             };
-            let Some(Event { id, event, .. }) = ev else {
+            let Some(ev) = ev else {
                 break;
             };
+            if mode == Mode::Bevy {
+                gilrs.update(&ev);
+            }
+            let Event { id, event, .. } = ev;
             print!("{:>6}ms ", warmup.elapsed().as_millis());
             match event {
                 gilrs::EventType::AxisChanged(axis, v, code) => {
@@ -205,7 +219,11 @@ fn main() {
         println!("  (meaningless in this mode — gilrs's default deadzone zeroes them; use --bevy)");
     }
     std::thread::sleep(Duration::from_millis(400));
-    while gilrs.next_event().is_some() {}
+    while let Some(ev) = gilrs.next_event() {
+        if mode == Mode::Bevy {
+            gilrs.update(&ev);
+        }
+    }
     for (id, pad) in gilrs.gamepads() {
         for (a, n) in AXES.iter().take(4) {
             if let Some(d) = pad.axis_data(*a) {
