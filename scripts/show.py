@@ -14,11 +14,12 @@
 Decisions (`D12`), deferred entries (`X5`), guidelines (`G3`) and Steam findings (`S7`) work the
 same way. A section runs to the next heading of the same or
 a higher level; a requirement runs to the next requirement or heading. A landed chunk has no
-section, and says so; a lettered part without a section of its own prints its parent's; a retired
+section, and lists the commits that name it; a lettered part without a section of its own prints its parent's; a retired
 issue is reported as absent. Any unknown anchor exits 1, after the others are printed.
 """
 
 import re
+import subprocess
 import sys
 
 from xref import (
@@ -37,11 +38,13 @@ S_DEF = re.compile(r"^### (S\d+)\b")
 ISSUE_DEF = re.compile(r"^### (\d{4}) ")
 ISSUE = re.compile(r"\d{4}")
 LETTERED = re.compile(r"(\d{1,3})[a-z]")
-LANDED_ROW = re.compile(r"^\| (\d+[a-z]?) +\|")
+LANDED_ROW = re.compile(r"^\| (\d+[a-z]?) +\|(.*)\|$")
+LANDED_SHOWN = 10
 HEADING = re.compile(r"^(#+) ")
 OUTLINE_WIDTH = 100
 
 REQ = ROOT / "Requirements.md"
+LANDED = ROOT / "archive/landed.md"
 
 # (anchor form, file, heading patterns, prefix the anchor carries that the heading does not)
 KINDS = [
@@ -114,10 +117,36 @@ def find(anchor):
     return None
 
 
-def landed(anchor):
-    return any(
-        m and m.group(1) == anchor for _, l in prose(ROOT / "Roadmap.md") for m in [LANDED_ROW.match(l)]
+def archived(anchor):
+    """The title the frozen index gives a chunk landed before the changelog, or None."""
+    for _, line in prose(LANDED):
+        if (m := LANDED_ROW.match(line)) and m.group(1) == anchor:
+            return m.group(2).strip()
+    return None
+
+
+def commits(anchor):
+    """The subjects of the commits naming this chunk, as `(chunk 195)` or `(206)`; empty if none."""
+    result = subprocess.run(
+        ["git", "-C", str(ROOT), "log", "--format=%h %s", "-E", f"--grep=\\((chunk )?{anchor}\\)$"],
+        capture_output=True,
+        text=True,
     )
+    return result.stdout.splitlines() if result.returncode == 0 else []
+
+
+def report_landed(anchor):
+    """Says that a chunk without a section landed, and where to read about it; False if it did not."""
+    title = archived(anchor)
+    named = commits(anchor)
+    if title is None and not named:
+        return False
+    print(f"{anchor}: landed" + (f": {title} ({LANDED.relative_to(ROOT)})" if title else ""), file=sys.stderr)
+    if named:
+        print("\n".join(named[:LANDED_SHOWN]), file=sys.stderr)
+        if len(named) > LANDED_SHOWN:
+            print(f"... and {len(named) - LANDED_SHOWN} more", file=sys.stderr)
+    return True
 
 
 def outline(path, start, end):
@@ -155,8 +184,7 @@ def main():
                 status = 1
             continue
         found = find(anchor)
-        if found is None and landed(anchor):
-            print(f"{anchor}: landed; see git log --grep 'chunk {anchor})'", file=sys.stderr)
+        if found is None and not ISSUE.fullmatch(anchor) and report_landed(anchor):
             status = 1
             continue
         # A sweep unit is lettered as it lands, under its sweep's section.

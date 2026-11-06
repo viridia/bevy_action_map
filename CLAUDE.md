@@ -54,11 +54,13 @@ for when not to.
 | `docs/guidelines.md` | how this project judges scope and shapes code, in entries `G<n>` | you are about to scope a chunk or write code |
 | `docs/deferred.md` | work decided against for now, in entries `X<n>`, each with its gate | a gate may have fired (a Bevy bump is the first group), or you are about to defer something |
 | `docs/steam.md` | what a running Steam client actually does, in entries `S<n>` | a decision rests on how an external backend behaves |
+| `CHANGELOG.md` | what each release changed for a game using the crate | a chunk lands, or a release is cut |
 
 `archive/` holds the retired `Design.md`, `Log.md` and `Log-archive.md`. **Nothing in flight reasons
 from them** — they describe the crate as it was, two of them are longer than anything in `docs/`,
 and their content has been extracted into `docs/design.md` and `docs/decisions.md`. Do not orient
-from them.
+from them. It also holds `landed.md`, the frozen index of chunks landed before the changelog, which
+`scripts/show.py` reads.
 
 There is **one `D`-numbering** in the project, defined in `docs/decisions.md`. `Requirements.md`
 tags requirements with it; it used to carry a rival `D1`–`D9` of its own, and does not any more.
@@ -81,14 +83,17 @@ not positions.
 
 - **The author commits.** Never run `git commit` or `git push`. Produce the commit message as text
   in your reply and stop there.
-- **A landed chunk** gets a row in `Roadmap.md`'s "What has landed" index, and its `###` section
-  deleted from the sequence. What it taught, if durable, becomes an entry in `docs/decisions.md`.
+- **A landed chunk** has its `###` section deleted from the sequence and its number at the end of
+  each commit subject, as `(206)`. If a game using the crate would notice it, it gets a line under
+  `Unreleased` in `CHANGELOG.md` on the branch it lands on; cutting a release renames that section
+  to the version. What it taught, if durable, becomes an entry in `docs/decisions.md`.
 - **Ground rule 5 is the one that bites:** nothing outstanding may be left without a destination. An
   item with no chunk number is an item that will be dropped. "Later" and "its own decision" are not
   destinations — an entry in `docs/deferred.md` with a stated gate is.
 - **A new chunk gets a `###` section**, with its effort level (G19), and nothing else. A chunk split
   into lettered parts gives each part its own `###` section; a sweep's units are the exception,
-  lettered as they land under the sweep's section. The "Next" list is the author's shortlist.
+  lettered as they land under the sweep's section. The "Next" list is the author's shortlist. Its
+  number is the next after the highest in `Roadmap.md`, `archive/landed.md` and `git log`.
 - **A structural idiom is proposed before it is built.** A new kind of function, module dependency
   or wrapper arrives as options with a recommendation, not in a diff.
 - **A plan opens with what changes**, in sentences that assume nothing, and answers a question about
