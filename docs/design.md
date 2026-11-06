@@ -333,7 +333,8 @@ player the other will not do.
 ### 5.2 Consumption
 
 A binding declared `consume` records its controls in `ConsumedControls` while its conditions report
-`Building` or `Satisfied`, and contexts evaluating later see those controls as untouched.
+`Building` or `Satisfied`, and contexts evaluating later see those controls as untouched. A
+consuming class binding has no conditions, and holds its claim while its control is down (TD5.4).
 `ConsumedControls::claimant` names the context that took one. A stick is recorded as its two axes,
 whether a context's binding or a capture claimed it, so a stick binding reads zero on each axis that
 was taken and keeps the other.
@@ -406,6 +407,14 @@ The plan carries both kinds as a second, separate list. Evaluation consults it o
 a control no plain binding in that context indexes. What is dispatched is the original `RawEvent`,
 not a combined value — there is no lifecycle to combine it into — as a `ClassFired<A>` event on the
 context entity.
+
+A class binding declared `consume` claims the control in the tick it fires, even if the release
+arrives in the same tick, and the instance claims it again at the close of every tick after while it
+is down. It is forgotten on release and when the context goes inactive. Only a fire starts a claim:
+a key held since before the context could see it, or pressed while a higher context had it, is never
+claimed, so the instance remembers which controls it fired on rather than deriving them from held
+state. Below, the control reads `ClaimedWhileDown` for the whole hold, as under a plain consuming
+binding (TD5.2).
 
 ### 5.5 Combining several bindings into one action
 

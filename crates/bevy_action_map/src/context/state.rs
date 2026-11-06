@@ -77,6 +77,11 @@ pub struct InputContextState<C> {
     // Whether other contexts had claimed anything from this instance last tick, so that a claim
     // lifting refreshes the readings as surely as one arriving does.
     pub(crate) claimed_last_tick: bool,
+    // The controls this instance's consuming class bindings fired on and that are still held. A
+    // plain binding renews its claim each tick from its conditions; a class binding fires on a
+    // press, and only remembering the press can tell a key it took from one held since before it
+    // could see it, or from one a higher context had at the time (TD5.4).
+    pub(crate) class_claims: Vec<crate::binding::Control>,
     // Parallel to `actions`: a binding of this action reached rest because its control went away
     // while held, since the action last committed (D94).
     pub(crate) interrupted: FixedBitSet,
@@ -111,6 +116,7 @@ impl<C: InputContext> InputContextState<C> {
             readings_stale: true,
             readings_moved: false,
             claimed_last_tick: false,
+            class_claims: Vec::new(),
             interrupted: FixedBitSet::with_capacity(slots),
             affected_bindings: Vec::new(),
             _marker: PhantomData,
@@ -514,6 +520,7 @@ impl<C: InputContext> InputContextState<C> {
             return;
         }
         self.active = false;
+        self.class_claims.clear();
         self.cancel_in_flight();
     }
 
@@ -1547,6 +1554,144 @@ mod tests {
             seen.screenshot,
             "but f12 was never claimed, so it still works"
         );
+    }
+
+    struct AnyPress;
+
+    impl crate::event::ClassBinding for AnyPress {
+        const PATH: &'static str = "tests.any_press";
+    }
+
+    /// A focused text field claiming every button by class, above a camera bound by `camera`. Spawns
+    /// both and returns the text field.
+    #[cfg(feature = "keyboard")]
+    fn text_field_over_camera(
+        app: &mut App,
+        camera: impl FnOnce(&mut crate::binding::InputContextBuilder<Camera>),
+    ) -> bevy_ecs::entity::Entity {
+        app.add_plugins((InputPlugin, ActionMapPlugin));
+        app.add_context::<TextField>(|context| {
+            context
+                .bind_class::<AnyPress>(crate::capture::ControlClass::AnyButton)
+                .consume();
+        });
+        app.add_context::<Camera>(camera);
+        app.world_mut().spawn(Camera);
+        app.world_mut().spawn(TextField).id()
+    }
+
+    #[derive(InputContext)]
+    #[context(path = "tests.text_field", tick = Render, priority = 10)]
+    struct TextField;
+
+    #[derive(InputContext)]
+    #[context(path = "tests.camera", tick = Render, priority = 0)]
+    struct Camera;
+
+    /// A class binding fires on the press, but what it consumed stays taken for as long as the key
+    /// is held, as a plain consuming binding's control does.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_class_binding_holds_its_claim_while_the_key_is_down() {
+        #[derive(InputAction)]
+        #[action(path = "tests.turn", output = f32, intent = Analog1)]
+        struct Turn;
+
+        #[derive(Resource, Default)]
+        struct TurnProbe(f32);
+
+        let mut app = App::new();
+        let field = text_field_over_camera(&mut app, |context| {
+            context.bind::<Turn>(AxisButtons::ad());
+        });
+        app.init_resource::<TurnProbe>();
+        app.add_systems(
+            Update,
+            |camera: ContextActions<Camera>, mut probe: bevy_ecs::system::ResMut<'_, TurnProbe>| {
+                probe.0 = camera.value::<Turn>();
+            },
+        );
+        let d = |state| press(KeyCode::KeyD, Key::Character("d".into()), state);
+
+        app.world_mut().write_message(d(ButtonState::Pressed));
+        for tick in 0..4 {
+            app.update();
+            assert_eq!(
+                app.world().resource::<TurnProbe>().0,
+                0.0,
+                "the text field still has d on tick {tick}"
+            );
+        }
+
+        app.world_mut().write_message(d(ButtonState::Released));
+        app.update();
+        app.world_mut()
+            .get_mut::<InputContextState<TextField>>(field)
+            .unwrap()
+            .deactivate();
+        app.world_mut().write_message(d(ButtonState::Pressed));
+        app.update();
+        assert_eq!(
+            app.world().resource::<TurnProbe>().0,
+            1.0,
+            "with the field gone, d turns the camera"
+        );
+    }
+
+    /// When a class binding's claim lifts off a key still held, a button below waits for a release,
+    /// as it does after any claim.
+    #[cfg(feature = "keyboard")]
+    #[test]
+    fn a_button_below_a_class_claim_waits_for_a_release() {
+        #[derive(Resource, Default)]
+        struct Jumped(bool, Option<ActionObstacle>);
+
+        let mut app = App::new();
+        let field = text_field_over_camera(&mut app, |context| {
+            context.bind::<Jump>(KeyCode::Space);
+        });
+        app.init_resource::<Jumped>();
+        app.add_systems(
+            Update,
+            |camera: ContextActions<Camera>, mut jumped: bevy_ecs::system::ResMut<'_, Jumped>| {
+                jumped.0 = camera.value::<Jump>();
+                jumped.1 = Some(camera.why_not::<Jump>());
+            },
+        );
+        let space = |state| press(KeyCode::Space, Key::Space, state);
+
+        app.world_mut().write_message(space(ButtonState::Pressed));
+        for tick in 0..3 {
+            app.update();
+            let jumped = app.world().resource::<Jumped>();
+            assert!(!jumped.0);
+            // Require-reset alone would keep the jump quiet; the claim is what names the taker.
+            assert_eq!(
+                jumped.1,
+                Some(ActionObstacle::Consumed {
+                    control: crate::binding::Control::PhysicalKey(KeyCode::Space),
+                    by: "tests.text_field",
+                }),
+                "the text field still has space on tick {tick}"
+            );
+        }
+
+        app.world_mut()
+            .get_mut::<InputContextState<TextField>>(field)
+            .unwrap()
+            .deactivate();
+        app.update();
+        app.update();
+        assert!(
+            !app.world().resource::<Jumped>().0,
+            "the claim has lifted, but space was never let go"
+        );
+
+        app.world_mut().write_message(space(ButtonState::Released));
+        app.update();
+        app.world_mut().write_message(space(ButtonState::Pressed));
+        app.update();
+        assert!(app.world().resource::<Jumped>().0, "pressed afresh, it jumps");
     }
 
     /// An exclusive context shadows every lower-priority one exactly as `deactivate` would —

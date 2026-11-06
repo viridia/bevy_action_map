@@ -85,6 +85,8 @@ impl<C: InputContext> InputContextState<C> {
             }
             self.held.end_tick();
             self.readings_stale = true;
+            // Shadowing deactivates without passing through `deactivate`.
+            self.class_claims.clear();
             return;
         }
 
@@ -110,6 +112,7 @@ impl<C: InputContext> InputContextState<C> {
             self.class_dispatch(&event.event, consumed, claims, devices);
         }
         self.close_tick(&plan, threshold, delta, consumed, claims, devices);
+        self.renew_class_claims(claims);
         self.readings_moved |= self.held.end_tick();
     }
 
@@ -410,7 +413,23 @@ impl<C: InputContext> InputContextState<C> {
             event: event.clone(),
         });
         if self.plan.class_bindings()[binding_index].consume {
+            // Claimed now even if released later in the tick, so a tap is not also a tap below.
             claims.push(control);
+            if !self.class_claims.contains(&control) {
+                self.class_claims.push(control);
+            }
+        }
+    }
+
+    /// Claims again, for this tick, every control a consuming class binding fired on and the player
+    /// is still holding, and forgets the ones let go.
+    fn renew_class_claims(&mut self, claims: &mut Vec<Control>) {
+        let held = &self.held;
+        self.class_claims.retain(|&control| held.is_down(control));
+        for &control in &self.class_claims {
+            if !claims.contains(&control) {
+                claims.push(control);
+            }
         }
     }
 }

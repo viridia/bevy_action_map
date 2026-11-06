@@ -245,6 +245,7 @@ code comments, so the sequence stays recoverable; what each chunk delivered is i
 | 203  | A binding editor with a list per action                               |
 | 129b | A screen that sets a modifier                                         |
 | 204  | Plans on `bevy-remote-driver`, and the driver's copy deleted          |
+| 206  | A class binding's claim lasts while the control is held               |
 
 ---
 

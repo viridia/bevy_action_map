@@ -155,6 +155,10 @@ impl<C> ClassBindingBuilder<'_, C> {
     /// The generalization of a plain binding's [`consume`](BindingBuilder::consume) from one
     /// control to every member of the class this binding watches — a focused text field claiming
     /// character-producing keys away from gameplay is the motivating case.
+    ///
+    /// A control is taken when the binding fires on its press and stays taken until it is released,
+    /// so a key held in a text field never starts moving the camera below it. A control already
+    /// down when the binding first saw it is left alone.
     pub fn consume(self) -> Self {
         self.builder.class_bindings[self.index].consume = true;
         self
