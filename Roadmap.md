@@ -39,6 +39,7 @@ its identity rather than its position.
 
 ## Next
 
+* 208: A key binding that fires on the OS's key repeats, which Panoply waits on
 * 191: Accept and back, by the pad's maker
 * 172a: `bevy_action_map_ui`, starting with prompts
 * 172b: The focus bridge joins `bevy_action_map_ui`
@@ -54,6 +55,35 @@ Chunk 179 carries defects. The register of what is known to be wrong is
 
 What a binding can name, and when it counts as firing. Each of these is a gap a game runs into
 rather than a defect in what exists.
+
+### 208. A key binding that fires on the OS's key repeats · E[2]
+
+R12.5's second half: OS key repeats are kept out of press edges, which holds by construction, but
+they are not "available for navigation repeat". A repeat moves no held state, so no binding's
+reading changes and nothing runs. Panoply met it: its Go To dialog binds Up and Down in a filter box
+as `Button` actions, which step the list once per press, while the caret in the same box repeats at
+the OS's rate. `.pulse()` repeats on a clock of the crate's own, with one number for delay and rate
+(X17), so a slow tap steps twice or the repeat feels slow.
+
+- **The shape:** `.key_repeat()` on a binding's builder, a condition that is satisfied on the press
+  and on each repeat event of the binding's key, and building between them while held. Observers
+  then see what a pulse gives them, a fire per step with no release between, and `fired` is true on
+  each step.
+- **The mechanism:** a repeat event names its key, so `evaluate_event` can find the bindings on that
+  key with the condition and run each one's pipeline even though its reading did not move, with the
+  reading marked as a repeat for the condition to see. How the mark reaches the condition (a field
+  on `BindingReading`, or an argument to `combine`) is the review surface.
+- **Keyboard only, physical and logical keys.** A binding on anything else with `.key_repeat()` is a
+  plan-build diagnostic. Pads have no OS repeat; they keep `.on_change().pulse()`, and X17 stays
+  theirs.
+- **The requirement gets a note that it is met**, R12.5, and the design's list of conditions gains
+  this one.
+- **Branch:** `release/0.1` first, as an addition to the published API, then merged into `main`.
+  Panoply's lock bump follows the merge, with `.key_repeat()` on its nav-point list's Up and Down.
+- **Not text entry.** A text field takes repeats already, through a class binding's raw event.
+- **Verified by:** a headless `App` test holding a key with three repeat events across several
+  ticks, which fires four times and reads building between; a second checking that a binding without
+  the condition still fires once; and the diagnostic's test.
 
 ### 135. A chord across two device families · E[2]
 

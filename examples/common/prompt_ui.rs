@@ -546,7 +546,10 @@ fn swap_in_icons(
         let font_size = font.font_size.eval(viewport, rem);
         let size = size.copied().unwrap_or_default().0;
         let height = size
-            .resolve(1.0, font_size, viewport, EmSize(font_size), rem)
+            .resolve(
+                &ValContext::new(1.0, viewport, EmSize(font_size), rem),
+                font_size,
+            )
             .ok();
         let mut span = commands.entity(entity);
         span.remove::<PendingIcons>().despawn_related::<Children>();
